@@ -17,6 +17,10 @@ import { SkeletonBlock } from '@/common/Skeleton';
 import { SkeletonVariant } from '@/enums/skeleton';
 import { CertificationStatus } from '@/enums/certification';
 import { SearchObjectType } from '@/enums/search';
+// The Tags screen's own URL, from the module that owns it rather than spelled
+// again here — it is a leaf of plain constants, so importing it pulls in no
+// page.
+import { tagPath } from '@/app/settings/tags/tags-path';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { searchTokens, synonymWordTokens } from '@/lib/searchTokens';
 import type { GlobalSearchItem } from '@/types/search';
@@ -58,6 +62,8 @@ export const hrefForGlobalSearchItem = (item: GlobalSearchItem): string => {
 		case SearchObjectType.View:
 		case SearchObjectType.Column:
 			return catalogPathFromFocusId(catalogFocusId(item));
+		case SearchObjectType.Tag:
+			return tagPath(item.id);
 		default:
 			return '/data';
 	}
@@ -151,6 +157,18 @@ const HighlightedWholeWords = ({ text, query }: { text: string; query: string })
 type GlobalSearchResultsProps = {
 	items: GlobalSearchItem[];
 	query: string;
+	/**
+	 * Whether the search that produced these hits matched descriptions.
+	 *
+	 * A highlight is a claim about why a row is here, so with the filter off
+	 * the description is shown plain however much of the query it happens to
+	 * contain: the hit came from the name, and marking the prose green would
+	 * name a cause the search did not use.
+	 *
+	 * Required rather than defaulted to `true`, because the wrong answer is
+	 * invisible — the page renders, it just lies about itself.
+	 */
+	descriptionSearched: boolean;
 	onNavigate: () => void;
 };
 
@@ -187,7 +205,12 @@ export const GlobalSearchResultsSkeleton = () => (
 	</ul>
 );
 
-export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchResultsProps) => (
+export const GlobalSearchResults = ({
+	items,
+	query,
+	descriptionSearched,
+	onNavigate,
+}: GlobalSearchResultsProps) => (
 	<ul className="flex flex-col gap-2 p-3">
 		{items.map((item) => {
 			const status = certificationStatus(item.certified);
@@ -238,10 +261,19 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 						) : null}
 						{item.description ? (
 							<p className="line-clamp-2 min-w-0 overflow-hidden pl-6 text-xs leading-5 text-secondary dark:text-zinc-500">
-								<HighlightedText
-									text={descriptionWithVisibleMatch(item.description, query)}
-									query={query}
-								/>
+								{descriptionSearched ? (
+									<HighlightedText
+										text={descriptionWithVisibleMatch(item.description, query)}
+										query={query}
+									/>
+								) : (
+									// Shown from its start, not wound forward to a
+									// match: the eliding only earns its "..." by
+									// revealing why the row is here, and here it
+									// would skip the opening line to land on a word
+									// nothing was looking for.
+									item.description
+								)}
 							</p>
 						) : null}
 						{path !== '' && (

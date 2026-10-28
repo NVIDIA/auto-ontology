@@ -10,7 +10,6 @@ import { Icon, IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
-import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
 import { PropertyRow } from '@/common/PropertyRow';
 import { Text } from '@/common/Text';
@@ -30,7 +29,7 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 		name: table.name,
 		description: table.description ?? null,
 		layer: ExplorationLayer.Data,
-		nodeType: getTableType(table.table_type) as TableType,
+		nodeType: getTableType(table.table_type),
 		relationshipCount: table.relationship_count ?? 0,
 		databaseId: table.database_id,
 		databaseName: table.database_name,

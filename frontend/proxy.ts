@@ -10,7 +10,7 @@ import { getSessionCookie } from 'better-auth/cookies';
 // `/.well-known` carries the OAuth discovery document an MCP client reads
 // before it can sign anyone in, so gating it would deadlock login. `/oauth`
 // is the consent and callback-handoff UI for MCP sign-in, same class as /login.
-const PUBLIC_PATHS = ['/login', '/.well-known', '/oauth'];
+const PUBLIC_PATHS = ['/login', '/invite', '/.well-known', '/oauth'];
 
 const isPublicPath = (pathname: string): boolean =>
 	PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));

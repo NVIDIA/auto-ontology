@@ -10,6 +10,7 @@ entity's raw hits, and stores typed results in path_state.
 
 Responsibilities:
 - Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
+- Search ColumnAttributes with the complete evidence text when evidence is present.
 - Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
 - Search the semantic VDB for one Term hit using path_state["subject"].
 - Filter each entity's hits by intent using the LLM (full question, not entity).
@@ -87,6 +88,7 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
     """
     best: dict[str, dict] = {}
     entities_by_id: dict[str, set[str]] = {}
+    evidence_by_id: dict[str, str] = {}
     for hit in hits:
         hid = hit.get("id")
         if hid is None:
@@ -95,6 +97,9 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         qe = hit.get("query_entity")
         if qe:
             entities_by_id.setdefault(key, set()).add(str(qe))
+        evidence_query = hit.get("query_evidence")
+        if evidence_query:
+            evidence_by_id[key] = str(evidence_query)
         prev = best.get(key)
         if prev is None or float(hit.get("score") or float("inf")) < float(
             prev.get("score") or float("inf")
@@ -106,6 +111,8 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         ents = entities_by_id.get(key)
         if ents:
             out["query_entities"] = sorted(ents)
+        if key in evidence_by_id:
+            out["query_evidence"] = evidence_by_id[key]
         result.append(out)
     return sorted(
         result,
@@ -420,6 +427,8 @@ class CandidateRetrievalAgent(BaseAgent):
     """Retrieve ColumnAttribute, CustomAnalysis, SqlAttribute, and subject Term candidates.
 
     - ColumnAttributes: searched per entity from the semantic VDB.
+    - Evidence: the complete evidence text performs one additional
+      ColumnAttribute search, and those hits are merged with entity hits.
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute: searched once with the full question from the semantic VDB.
     - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit)
@@ -462,6 +471,12 @@ class CandidateRetrievalAgent(BaseAgent):
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
+        raw_evidence = state.get("evidence")
+        evidence = (
+            raw_evidence.strip()
+            if isinstance(raw_evidence, str) and raw_evidence.strip()
+            else ""
+        )
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -505,6 +520,22 @@ class CandidateRetrievalAgent(BaseAgent):
                         target_db,
                     ),
                 ),
+                *(
+                    [
+                        (
+                            "evidence_col_attr",
+                            (
+                                semantic_retriever,
+                                evidence,
+                                LABEL_COLUMN_ATTRIBUTE,
+                                3,
+                                target_db,
+                            ),
+                        )
+                    ]
+                    if evidence
+                    else []
+                ),
                 *[
                     (
                         f"col_attr:{entity}",
@@ -547,6 +578,11 @@ class CandidateRetrievalAgent(BaseAgent):
                         all_sql_attr_hits = result
                     elif key == "subject_term":
                         subject_term_hits = result
+                    elif key == "evidence_col_attr":
+                        for hit in result:
+                            tagged = dict(hit)
+                            tagged["query_evidence"] = evidence
+                            all_col_attr_hits.append(tagged)
                     else:
                         # key is "col_attr:{entity}" — tag each hit for coverage.
                         entity = key.split(":", 1)[1]

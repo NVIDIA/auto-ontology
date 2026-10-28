@@ -1,12 +1,12 @@
 ---
 name: nvidia-ontology-setup
-version: "0.3.0"
 description: >-
   Set up or troubleshoot the Auto Ontology runtime. Use for Helm (the official
   install), Docker Compose, developer setup, and MCP connection to an existing
   deployment.
 license: Apache-2.0
 metadata:
+  version: "0.3.1"
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
@@ -67,12 +67,12 @@ in command arguments. Have the user write them into a values file or `.env`.
 Releases are published to the public NGC `nvidia` org (chart and images). Follow
 `DEPLOYMENT.md` with the version the user named:
 
-The user creates a values file for the secrets in an editor (not on the
-command line, so they stay out of shell history and process arguments),
-`chmod 600`, and out of git:
+The user creates a values file in an editor (not on the command line, so
+values stay out of shell history and process arguments), readable only by
+them, and out of git:
 
 ```yaml
-# auto-ontology-secrets.yaml
+# auto-ontology-values.yaml
 defaultModelsApiKey: <API-KEY>
 postgresPassword: <POSTGRES-PASSWORD>
 adminEmail: <ADMIN-EMAIL>
@@ -82,7 +82,7 @@ connectionStrings: <CONNECTION-STRINGS>   # optional; or add connections in the 
 
 ```bash
 helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-<VERSION>.tgz
-helm install auto-ontology auto-ontology-<VERSION>.tgz -f auto-ontology-secrets.yaml
+helm install auto-ontology auto-ontology-<VERSION>.tgz -f auto-ontology-values.yaml
 kubectl port-forward svc/frontend 3000:3000
 ```
 
@@ -99,12 +99,12 @@ This skill does not cover Astra GitOps.
 
 ## Local: Docker Compose
 
-For running the whole stack on one machine. From the repository root:
+For running the whole stack on one machine. In the repository root, the user
+copies `.env.example` to `.env` and fills in `AUTH_SECRET`, `APP_URL`,
+`AUTO_ONTOLOGY_ADMIN_EMAIL`, and `AUTO_ONTOLOGY_ADMIN_PASSWORD` (all required).
+Then:
 
 ```bash
-cp .env.example .env
-# edit .env — AUTH_SECRET, APP_URL, AUTO_ONTOLOGY_ADMIN_EMAIL and
-# AUTO_ONTOLOGY_ADMIN_PASSWORD are required
 docker compose up -d --build
 ```
 

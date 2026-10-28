@@ -22,20 +22,39 @@ router = APIRouter()
 class GlobalSearchFilters(BaseModel):
     """What a query is matched against, and which kinds of object it may hit.
 
-    The two text flags widen the match beyond an object's name: ``description``
-    adds its description, ``synonyms`` adds a Term's aliases.
+    Two flags widen the match beyond an object's name: ``description`` adds
+    its description and ``synonyms`` adds a Term's aliases.
 
     Their defaults differ, which is deliberate rather than an oversight.
     ``description`` is off because matching prose is the narrower, more
-    surprising behaviour to opt into. ``synonyms`` is on because alias matching
-    is what this endpoint did for its whole life before the flag existed, and
-    defaulting it off would quietly take Terms away from every caller that does
-    not send the flag.
+    surprising behaviour to opt into. ``synonyms`` is on because alias
+    matching is what this endpoint did for its whole life before the flag
+    existed, and defaulting it off would quietly take Terms away from every
+    caller that does not send the flag.
+
+    ``objects``, ``tags`` and ``data`` all narrow rather than widen, and
+    ``None`` for any of them means no narrowing -- an empty list would
+    otherwise have to mean "nothing", which is not a search anyone asks for.
+
+    ``tags`` holds tag ids, and may hold ``UNTAGGED_FILTER_VALUE`` beside them
+    for the objects carrying no tag at all. Any one of the entries is enough
+    for a hit, so ticking two tags widens the selection within the narrowing.
+    Only five kinds can carry a tag, so a search narrowed to a tag returns no
+    Database, Schema or analysis -- they come back only when the untagged
+    sentinel is present, since a kind that cannot be tagged is untagged.
+
+    ``data`` holds database ids and schema ids together, and narrows to what
+    lives under them: a row matches if its own schema, or that schema's
+    database, is among them. Only Table, View and Column live anywhere, so
+    this one narrows the result to those three outright -- a Term picked out
+    by an alias is dropped along with the rest.
     """
 
     description: bool = False
     synonyms: bool = True
     objects: list[str] | None = None
+    tags: list[str] | None = None
+    data: list[str] | None = None
 
 
 class GlobalSearchRequest(BaseModel):
@@ -56,6 +75,8 @@ def _run(
             "objects": payload.filters.objects,
             "include_description": payload.filters.description,
             "include_synonyms": payload.filters.synonyms,
+            "tags": payload.filters.tags,
+            "data": payload.filters.data,
         }
         if count:
             return search_service.global_search_count(**kwargs)
@@ -75,6 +96,13 @@ def post_global_search(payload: GlobalSearchRequest) -> dict:
     ``filters.synonyms`` turns that alias matching off, which drops the Terms
     reached only by one and empties the ``synonyms`` reported on every hit --
     with it off, no alias caused a hit, so there is none to name.
+
+    ``filters.tags`` narrows to the objects carrying one of those tags, or --
+    for the untagged sentinel among them -- carrying none. Labels a rule
+    applied count the same as labels applied by hand.
+
+    ``filters.data`` narrows to what lives under the given databases and
+    schemas, which leaves Tables, Views and Columns and nothing else.
     """
     return _run(payload, count=False)
 

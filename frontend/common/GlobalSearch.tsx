@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { rulesApi } from '@/api/rules';
+import { useRouter } from 'next/navigation';
 import {
 	globalSearchCountsFromResponse,
 	globalSearchItemsFromResponse,
@@ -13,7 +13,8 @@ import {
 } from '@/api/search';
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
-import { isTaggableSearchHit, searchObjectTypeFromHit } from '@/common/globalSearchMeta';
+import { searchObjectTypeFromHit } from '@/common/globalSearchMeta';
+import { Icon, IconName } from '@/common/icons';
 import { GlobalSearchResults, GlobalSearchResultsSkeleton } from '@/common/GlobalSearchResults';
 import {
 	GlobalSearchTabs,
@@ -22,7 +23,6 @@ import {
 	totalGlobalSearchCount,
 } from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
-import { RuleTagPopover } from '@/common/RuleTagPopover';
 import { SearchInput } from '@/common/SearchInput';
 import {
 	GLOBAL_SEARCH_ALL_TAB,
@@ -32,8 +32,6 @@ import {
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TextMatchOption } from '@/enums/search';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { notifyRulesChanged } from '@/hooks/useRulesChanged';
-import type { RuleTagDraft } from '@/types/rules';
 import type { GlobalSearchItem, GlobalSearchRequest } from '@/types/search';
 
 // Widened past names on both counts, and not yet a choice on screen: the panel
@@ -43,11 +41,6 @@ const DEFAULT_SEARCH_FILTERS = { description: true, synonyms: true } as const;
 
 /**
  * The search behind one tab of results.
- *
- * Shared by the list read and by the rule a person saves from it, so a rule
- * always stores the request its results actually came from — the two drifting
- * apart is exactly how a rule ends up tagging a different set than the one it
- * was created over.
  *
  * A tab other than All narrows to its own kind; All narrows to none, which is
  * `undefined` rather than every kind listed out.
@@ -118,7 +111,15 @@ const GlobalSearchBody = ({
 	<div className="min-h-0 flex-1 overflow-y-auto" aria-busy={showSkeleton}>
 		{showSkeleton ? <GlobalSearchResultsSkeleton /> : null}
 		{items.length > 0 ? (
-			<GlobalSearchResults items={items} query={query} onNavigate={onNavigate} />
+			<GlobalSearchResults
+				items={items}
+				query={query}
+				// Constant, because this dialog offers no filters: it always
+				// searches descriptions, so a match in one is always a reason
+				// the row is here.
+				descriptionSearched={DEFAULT_SEARCH_FILTERS.description}
+				onNavigate={onNavigate}
+			/>
 		) : null}
 		{error !== null ? (
 			<EmptyState
@@ -147,11 +148,15 @@ export type GlobalSearchModalProps = {
 /**
  * The search dialog on its own, opened by whoever owns `open`.
  *
- * Split from the top bar's trigger so a page can offer its own entry point —
- * the Rules settings screen sends people here to build a rule — without a
- * second search state or a second copy of the trigger.
+ * Split from the top bar's trigger so a page can offer its own entry point
+ * without a second search state or a second copy of the trigger.
+ *
+ * It searches and navigates, and does nothing else with what it finds: rules
+ * are built on the Discovery page, over a search whose filters are on screen
+ * and part of what gets stored.
  */
 export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => {
+	const router = useRouter();
 	const [query, setQuery] = useState('');
 	const [selectedTab, setSelectedTab] = useState(GLOBAL_SEARCH_ALL_TAB);
 	const [items, setItems] = useState<GlobalSearchItem[]>([]);
@@ -160,7 +165,6 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 	const [countsKey, setCountsKey] = useState('');
 	const [listError, setListError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
-	const [ruleOpen, setRuleOpen] = useState(false);
 	const debouncedQuery = useDebouncedValue(query, 1000);
 	const trimmedQuery = debouncedQuery.trim();
 	const liveQuery = query.trim();
@@ -224,48 +228,55 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		setAttempt((value) => value + 1);
 	};
 
+	// Results are not cleared when the field drops below the minimum length.
+	// Nothing needs hiding: `queryActive` already keeps them off screen. And
+	// clearing them is what stranded the dialog on its skeleton — deleting the
+	// term and typing it again inside the debounce leaves the debounced value
+	// unchanged, so no request is sent, while the cleared key still reads as
+	// "not answered" for ever.
 	const handleQueryChange = (value: string) => {
 		setQuery(value);
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
-		if (value.trim().length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) resetResults();
-	};
-
-	/**
-	 * Save the rule the panel built, over the search it was built from.
-	 *
-	 * Owned here rather than in the panel because this is where the search lives:
-	 * the panel holds the name and the tags, and the request being saved is the
-	 * one these results came from.
-	 *
-	 * The search stays open afterwards, so the results a rule was just made over
-	 * are still there to make another one from. Failures come back as a message
-	 * for the panel to show rather than being handled here — the form is the only
-	 * copy of what was typed, so it is the form that has to survive them.
-	 *
-	 * A save is announced because this dialog opens from the top bar too, over
-	 * the Rules settings screen among others: the list behind it has no other
-	 * way to learn that it is now a rule short of what is stored.
-	 */
-	const handleCreateRule = async (draft: RuleTagDraft): Promise<string | null> => {
-		const response = await rulesApi.create({
-			...globalSearchRequest(trimmedQuery, selectedTab),
-			name: draft.name,
-			tags: draft.tags,
-		});
-		if (response.error) return response.message ?? 'Failed to save the rule.';
-		notifyRulesChanged();
-		return null;
 	};
 
 	const handleClose = () => {
 		setQuery('');
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
-		// The panel goes with the dialog, and it cannot report that itself: it is
-		// unmounted rather than closed, so without this the next open would come
-		// up with the search still dimmed.
-		setRuleOpen(false);
 		resetResults();
 		onClose();
+	};
+
+	/**
+	 * Leave for Discovery, carrying the term across.
+	 *
+	 * The term as typed rather than the debounced one: the dialog is being left,
+	 * so there is nothing left to wait for — a person who presses this mid-word
+	 * means the word they typed, not the one the debounce still holds.
+	 *
+	 * Discovery re-runs it rather than only prefilling the field, and lands on
+	 * the same results: its default filters search descriptions and synonyms,
+	 * which is what this dialog searches. So the page opens where the dialog
+	 * left off and the filters are there to narrow from, which is the whole
+	 * reason to walk through this door.
+	 *
+	 * A term too short to search is dropped instead of sent, since Discovery
+	 * would refuse to run it and the field would then hold something the
+	 * results do not answer.
+	 *
+	 * Every press carries a fresh `n`. Without it, pressing this for the term
+	 * Discovery is already showing yields the very same URL, so the page sees
+	 * no navigation at all and keeps the filters and results of whatever
+	 * search was narrowed in the meantime. `n` is never read as a search — it
+	 * only makes each hand-over a different URL.
+	 */
+	const handleAdvancedSearch = () => {
+		const term = query.trim();
+		handleClose();
+		router.push(
+			term.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH
+				? `/discovery?q=${encodeURIComponent(term)}&n=${Date.now()}`
+				: '/discovery',
+		);
 	};
 
 	const queryActive = liveQuery.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH;
@@ -292,23 +303,6 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		visibleItems.length > 0 &&
 		(visibleItems.length >= GLOBAL_SEARCH_LIST_LIMIT ||
 			(countsReady && tabTotal > GLOBAL_SEARCH_LIST_LIMIT));
-	// Appearance only. What actually holds these subtrees still is `inert`
-	// below, which the class cannot do and must not contradict.
-	const dimmedClassName = ruleOpen ? 'opacity-60' : '';
-	// What the search matched, and what a rule built from it would actually
-	// label. Two things separate them: the count behind the tabs is uncapped on
-	// purpose — a badge has to report the real total — while the list stops at
-	// `GLOBAL_SEARCH_LIST_LIMIT`, and of what the list holds only some kinds can
-	// carry a tag at all (see `isTaggableSearchHit`). Offering the matched count
-	// would have the panel promise 1,500 labels over a search that writes 160.
-	//
-	// Counted from the rows in hand rather than derived from the total, which
-	// makes it exact instead of an estimate: `items` came from
-	// `globalSearchRequest(trimmedQuery, selectedTab)`, the same request
-	// `handleCreateRule` saves, so this *is* the list the rule replays —
-	// ranking, cap and all — and these are the targets it will process.
-	const matchedCount = countsReady && tabTotal > 0 ? tabTotal : visibleItems.length;
-	const taggableCount = visibleItems.filter(isTaggableSearchHit).length;
 
 	return (
 		<Modal
@@ -319,43 +313,18 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 			className="flex h-[min(40rem,80vh)] w-full flex-col overflow-hidden"
 		>
 			<div className="flex shrink-0 items-center gap-2 p-2">
-				<div className={`min-w-0 flex-1 ${dimmedClassName}`} inert={ruleOpen}>
+				<div className="min-w-0 flex-1">
 					<SearchInput
 						value={query}
 						onChange={handleQueryChange}
 						placeholder="Search…"
 						aria-label="Search Auto Ontology"
 						autoFocus
-						// `h-9` is `Size.REGULAR`'s height: the field's own padding
-						// would make it 2px taller than the button standing next to it.
 						className="h-9 w-full"
 					/>
 				</div>
-				{/* A rule tags whatever the current search matches, so it can only be
-				    offered once the search has matched something. */}
-				{visibleItems.length > 0 ? (
-					<RuleTagPopover
-						itemsCount={taggableCount}
-						matchedCount={matchedCount}
-						onSubmit={handleCreateRule}
-						onNavigate={handleClose}
-						onOpenChange={setRuleOpen}
-					/>
-				) : null}
 			</div>
-			{/* Everything the rule panel is built from holds still while it is open:
-			    the results are the rule's subject, so re-searching or opening one
-			    from under the panel would pull the ground out from under it. An
-			    outside click still closes the panel — the dismissal listens on the
-			    document, not on what is under the pointer.
-
-			    `inert` rather than `aria-hidden` beside `pointer-events-none`,
-			    which is what this was: those two stop a pointer and hide the
-			    subtree from a screen reader, and leave the search field, its clear
-			    button and every result link in the tab order — so the one way left
-			    to move the ground under the panel was the keyboard, and it moved
-			    focus into content nothing was announcing. */}
-			<div className={`flex min-h-0 flex-1 flex-col ${dimmedClassName}`} inert={ruleOpen}>
+			<div className="flex min-h-0 flex-1 flex-col">
 				<GlobalSearchTabsBar
 					showTabs={showTabs}
 					showSkeleton={showTabSkeleton}
@@ -374,6 +343,20 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 					onNavigate={handleClose}
 				/>
 			</div>
+			{/* Outside the scrolling list rather than the last row of it: this is
+			    the way on from a search the dialog cannot narrow, and a way on
+			    that scrolls off the end of two hundred results is one nobody
+			    finds. Shown whether or not anything was typed — Discovery is
+			    also where a search starts from its filters rather than from a
+			    term. */}
+			<button
+				type="button"
+				onClick={handleAdvancedSearch}
+				className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-zinc-200 px-4 py-2.5 text-sm text-blue-600 transition-colors hover:bg-zinc-50 hover:text-blue-700 dark:border-zinc-800 dark:text-blue-400 dark:hover:bg-zinc-900/60 dark:hover:text-blue-300"
+			>
+				<Icon name={IconName.Filter} className="h-4 w-4 shrink-0" />
+				Advanced Search
+			</button>
 		</Modal>
 	);
 };

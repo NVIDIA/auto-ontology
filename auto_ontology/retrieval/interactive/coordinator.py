@@ -223,6 +223,28 @@ def _apply_follow_up_seed(
 # ── SQL generation ──────────────────────────────────────────────────────────
 
 
+def _format_user_clarifications(session: InteractiveSessionState) -> str:
+    """Render usable clarification Q&A verbatim for the SQL evidence payload."""
+    clarifications: list[str] = []
+    for turn in session.clarify_history:
+        question = str(turn.get("q") or "").strip()
+        answer = str(turn.get("a") or "").strip()
+        if not answer or any(phrase in answer.lower() for phrase in _STUCK_PHRASES):
+            continue
+        number = len(clarifications) + 1
+        clarifications.append(
+            f"Clarification {number}:\nQuestion: {question}\nAnswer: {answer}"
+        )
+
+    if not clarifications:
+        return ""
+    return (
+        "## User Clarifications (verbatim — authoritative)\n"
+        + "\n\n".join(clarifications)
+        + "\n\n"
+    )
+
+
 def _run_sql_generation(session: InteractiveSessionState) -> str:
     """Call Auto Ontology and persist the returned path_state back to session."""
     from auto_ontology.retrieval.text_to_sql.main import get_agent_response_with_state
@@ -299,6 +321,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             "## Phase 1 SQL Reference (use exact column names, thresholds, and "
             f"formulas from this SQL where applicable)\n{p1_sql}\n\n"
         )
+    user_clarifications_note = _format_user_clarifications(session)
 
     resolved_terms_section = build_grounded_terms_hint(session)
     evidence = generate_evidence(
@@ -339,10 +362,16 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             logger.info(
                 "[%s] SQL gen — injected conditional output hint", session.task_id
             )
-    if expanded_question_note or phase1_sql_reference_note:
-        evidence = expanded_question_note + phase1_sql_reference_note + evidence
+    if expanded_question_note or user_clarifications_note or phase1_sql_reference_note:
+        evidence = (
+            expanded_question_note
+            + user_clarifications_note
+            + phase1_sql_reference_note
+            + evidence
+        )
         logger.info(
-            "[%s] SQL gen — prepended expanded question/Phase 1 SQL reference to evidence",
+            "[%s] SQL gen — prepended expanded question/user clarifications/"
+            "Phase 1 SQL reference to evidence",
             session.task_id,
         )
     if evidence:
@@ -366,6 +395,10 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         ),  # copy so Auto Ontology doesn't mutate in place
         "acronyms": [],
         "custom_prompts": combined_knowledge,  # full union as low-priority fallback
+        "calculation_only": True,
+        "shorten_answer": True,
+        "validate_sql_values": True,
+        "skip_evidence_refinement": session.skip_evidence_refinement,
     }
     result = get_agent_response_with_state(payload)
 
@@ -421,6 +454,7 @@ def create_session(
     connectors: list,
     max_clarify_turns: int = 5,
     external_kb_children_map: dict | None = None,
+    skip_evidence_refinement: bool = False,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -432,6 +466,7 @@ def create_session(
         working_question=question,
         max_clarify_turns=max_clarify_turns,
         external_kb_children_map=external_kb_children_map or {},
+        skip_evidence_refinement=skip_evidence_refinement,
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,

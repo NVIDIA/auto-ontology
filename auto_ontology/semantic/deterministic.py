@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from auto_ontology.semantic.date_format import is_date_type
 from auto_ontology.semantic.models import ColumnAttributeSpec, ColumnDescriptionResult
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 
@@ -140,7 +140,7 @@ def _describe_column_batch(
 
     try:
         result = invoke_with_structured_output(
-            get_non_reasoning_llm_client(temperature=0.0),
+            get_llm_client(temperature=0.0),
             [
                 SystemMessage(content=_DESCRIPTION_SYSTEM),
                 HumanMessage(content=prompt),

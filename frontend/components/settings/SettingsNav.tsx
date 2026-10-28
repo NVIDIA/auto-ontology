@@ -13,6 +13,10 @@ const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/c
 const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
 const TAGS_NAV_ITEM: NavItem = { label: 'Tags', href: '/settings/tags' };
 const RULES_NAV_ITEM: NavItem = { label: 'Rules', href: '/settings/rules' };
+const PII_SETTINGS_NAV_ITEM: NavItem = {
+	label: 'PII Settings',
+	href: '/settings/pii',
+};
 const SEMANTIC_INPUT_NAV_ITEM: NavItem = {
 	label: 'Semantic Input',
 	href: '/settings/semantic-input',
@@ -61,6 +65,7 @@ export const SettingsNav = ({ connectionsEnvManaged }: SettingsNavProps) => {
 		ZONES_NAV_ITEM,
 		TAGS_NAV_ITEM,
 		RULES_NAV_ITEM,
+		PII_SETTINGS_NAV_ITEM,
 		SEMANTIC_INPUT_NAV_ITEM,
 		USERS_NAV_ITEM,
 		SSO_NAV_ITEM,

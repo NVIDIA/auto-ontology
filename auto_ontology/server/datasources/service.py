@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import pandas as pd
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.utils.embedding_rows import (
     CatalogEmbeddingRowsOp,
@@ -166,13 +165,9 @@ def _get_node_ids_for_embedding_update(
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from auto_ontology.utils import get_embed_params
-    from auto_ontology.utils.embedding import _embed_with_retry
+    from auto_ontology.utils.embedding import embed_rows
     from auto_ontology.vdb import get_data_vdb
-    from nemo_retriever.models.inference.main_text_embed import (
-        TextEmbeddingConfig,
-        create_text_embeddings_for_df,
-    )
-    from nemo_retriever.operators.vdb import IngestVdbOperator
+    from auto_ontology.vdb.records import write_embedded_rows
 
     unique_ids = set(dict.fromkeys(node_ids))
 
@@ -202,42 +197,13 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     if not records:
         return
 
-    embed_params = get_embed_params()
-
-    # Through the same retry the catalog embeds use. The library catches per
-    # frame, so one refused request zeroes every row it was given, and a
-    # transient 5xx here aborts a semantic compile that has already paid for
-    # its descriptions.
-    def _embed(part: "pd.DataFrame") -> "pd.DataFrame | None":
-        frame, _ = create_text_embeddings_for_df(
-            part,
-            task_config={
-                "api_key": embed_params.api_key,
-                "endpoint_url": embed_params.embed_invoke_url,
-                "model_name": embed_params.model_name,
-            },
-            transform_config=TextEmbeddingConfig(
-                embed_modality=embed_params.embed_modality,
-            ),
-        )
-        return frame
-
-    frame = pd.DataFrame(records)
-    embedded = _embed_with_retry(_embed, frame, label=f"catalog {database_name}")
-    rows = [
-        row
-        for row in (embedded.to_dict(orient="records") if embedded is not None else [])
-        if (row.get("metadata") or {}).get("embedding")
-    ]
-    if not rows:
-        raise RuntimeError(
-            f"Embedding step produced 0/{len(frame)} tabular rows with embeddings."
-        )
+    # Embedded before anything is deleted, so a failed embed leaves the old rows.
+    rows = embed_rows(records, get_embed_params(), what="tabular")
 
     vdb = get_data_vdb()
     for nid in unique_ids:
         vdb.delete_by_id(nid)
-    IngestVdbOperator(vdb=vdb)(rows)
+    write_embedded_rows(vdb, rows)
 
 
 def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:

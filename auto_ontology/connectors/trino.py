@@ -48,13 +48,14 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 if TYPE_CHECKING:
     from trino.dbapi import Connection
@@ -70,6 +71,9 @@ _TLS_PORTS = frozenset({443, 8443})
 
 # Trino's own metadata schema, present in every catalog and never worth ingesting.
 _SYSTEM_SCHEMA = "information_schema"
+
+# Session property capping a query's wall clock, queueing included.
+_RUN_TIME_PROPERTY = "query_max_run_time"
 
 _TABLE_SCHEMA = ["table_schema", "table_name", "table_type"]
 
@@ -192,6 +196,19 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
     }
 
 
+def _run(cursor: Any, sql: str, parameters: Optional[list]) -> pd.DataFrame:
+    """Execute *sql* on *cursor* and collect the result as a DataFrame."""
+    if parameters:
+        cursor.execute(sql, parameters)
+    else:
+        cursor.execute(sql)
+    rows = cursor.fetchall()
+    if cursor.description is None:
+        return pd.DataFrame()
+    columns = [str(desc[0]) for desc in cursor.description]
+    return pd.DataFrame(rows, columns=columns)
+
+
 class TrinoDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by Trino over its HTTP protocol.
 
@@ -205,6 +222,8 @@ class TrinoDatabase(SQLDatabase):
         the same allowlist, so a connection pinned to one schema needs no
         separate filter.
     """
+
+    supports_statement_timeout = True
 
     def __init__(
         self,
@@ -231,6 +250,8 @@ class TrinoDatabase(SQLDatabase):
 
         self._lock = threading.RLock()
         self._connection: "Connection | None" = None
+        # Cleared the first time the cluster refuses _RUN_TIME_PROPERTY.
+        self._run_time_property_allowed = True
 
     # ------------------------------------------------------------------
     # Transport
@@ -341,22 +362,71 @@ class TrinoDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
         """Run *sql* and return the result as a DataFrame.
 
         A statement that returns no rows (DDL, ``SET SESSION``) yields an empty
         frame rather than raising.
+
+        With *timeout_s*, the coordinator fails the query once it has run that
+        long, queueing included (``query_max_run_time``). The property rides on
+        this one request's session header rather than a ``SET SESSION``, so it
+        costs no extra round trip and cannot outlive the statement. A cluster
+        whose access control refuses the property gets the statement uncapped,
+        as before the cap existed, instead of failing every query.
         """
-        with self._cursor() as cursor:
-            if parameters:
-                cursor.execute(sql, parameters)
-            else:
-                cursor.execute(sql)
-            rows = cursor.fetchall()
-            if cursor.description is None:
-                return pd.DataFrame()
-            columns = [str(desc[0]) for desc in cursor.description]
-            return pd.DataFrame(rows, columns=columns)
+        with self._lock:
+            if timeout_s is None or not self._run_time_property_allowed:
+                with self._cursor() as cursor:
+                    return _run(cursor, sql, parameters)
+            started = time.monotonic()
+            try:
+                with self._session_property(
+                    _RUN_TIME_PROPERTY, f"{max(1, int(timeout_s))}s"
+                ):
+                    with self._cursor() as cursor:
+                        return _run(cursor, sql, parameters)
+            except Exception as exc:
+                # ``TrinoQueryError.error_name``; read by attribute so the
+                # driver stays a lazy import.
+                error_name = getattr(exc, "error_name", None)
+                if error_name == "EXCEEDED_TIME_LIMIT":
+                    raise StatementTimeout.since(timeout_s, started) from exc
+                if error_name == "PERMISSION_DENIED" and _RUN_TIME_PROPERTY in str(exc):
+                    logger.warning(
+                        "Trino denies setting %s on %s; statements run uncapped",
+                        _RUN_TIME_PROPERTY,
+                        self._catalog,
+                    )
+                    self._run_time_property_allowed = False
+                    with self._cursor() as cursor:
+                        return _run(cursor, sql, parameters)
+                raise
+
+    @contextmanager
+    def _session_property(self, name: str, value: str) -> Iterator[None]:
+        """Send *name*=*value* as a session property on requests made inside.
+
+        The driver builds each request's ``X-Trino-Session`` header from the
+        connection's client session, and :attr:`_lock` serialises every request
+        on that connection, so nothing outside this block ever carries it.
+        """
+        with self._lock:
+            if self._connection is None:
+                self._connection = self._open()
+            session = self._connection._client_session  # noqa: SLF001 - see above
+            previous = session.properties
+            session.properties = {**previous, name: value}
+            try:
+                yield
+            finally:
+                session.properties = previous
 
     # ------------------------------------------------------------------
     # Schema introspection

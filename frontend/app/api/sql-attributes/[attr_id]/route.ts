@@ -4,16 +4,27 @@
 
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
+import { withTagAuthors } from '@/lib/tagAuthors';
 
-// sqlAttributesApi.get — fetch one SqlAttribute node.
-export const GET = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));
+// sqlAttributesApi.get — fetch one SqlAttribute node, with the account behind
+// created_by / modified_by so the side panel can name them.
+export const GET = withPermission({ catalog: ['read'] })(async (req) =>
+	withTagAuthors(await proxyToBackend(req)),
+);
 
-// Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.
-export const PUT = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+// Replace a SqlAttribute's SQL. The page shows the term's owner. The account
+// role authorizes the write, the same way a column attribute edit does.
+export const PUT = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
 
-// Patching name/description does not touch SQL expression.
-export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+// Patch name, description, or certification. The account role authorizes the
+// write. The term owner shown beside the attribute does not grant it.
+export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
 
-// Deleting a SqlAttribute mutates catalog data and the backend handles graph
-// cleanup plus VDB embedding deletion.
-export const DELETE = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+// Delete a SqlAttribute. The account role authorizes the delete.
+export const DELETE = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);

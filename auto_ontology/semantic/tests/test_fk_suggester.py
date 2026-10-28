@@ -16,7 +16,7 @@ from auto_ontology.semantic.models import FkAndPkResult
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(
@@ -61,7 +61,7 @@ def test_wide_declared_fk_table_is_classified_without_suggestion_candidates(
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(
@@ -96,7 +96,7 @@ def test_satellite_classification_stays_false_and_prompt_is_conservative(
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(
@@ -140,7 +140,7 @@ def test_non_unique_uuid_columns_suggested(
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(
@@ -168,7 +168,7 @@ def test_non_unique_uuid_cannot_be_inferred_as_primary_key(
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(
@@ -205,7 +205,7 @@ def test_format_sample_values_handles_legacy_json_string_and_native_list() -> No
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(
@@ -243,7 +243,7 @@ def test_candidate_column_samples_included_regardless_of_stored_shape(
 
 
 @patch(
-    "auto_ontology.semantic.fk_suggester.get_non_reasoning_llm_client",
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
     return_value=MagicMock(),
 )
 @patch(

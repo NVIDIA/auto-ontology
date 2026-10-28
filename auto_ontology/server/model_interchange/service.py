@@ -6,16 +6,19 @@
 
 from __future__ import annotations
 
+import io
 import logging
+import zipfile
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
 import yaml
-from ossie_nvidia_gsf import (
-    GSFConversionError,
-    convert_gsf_to_ossie,
-    convert_ossie_to_gsf,
+from ossie_nvidia_auto_ontology import (
+    AutoOntologyConversionError,
+    convert_auto_ontology_to_ossie,
+    convert_auto_ontology_to_ossie_ontology,
+    convert_ossie_to_auto_ontology,
 )
 
 from auto_ontology.connectors import get_connectors
@@ -33,11 +36,31 @@ from auto_ontology.server.model_interchange.schemas import (
 
 logger = logging.getLogger(__name__)
 
+_AUTO_ONTOLOGY_ROOT_KEYS = frozenset(AutoOntologyModelDocument.model_fields)
+# The files of an Ossie export with its ontology. The mapping references the
+# other two by these names, relative to itself.
+OSSIE_EXPORT_FILES = ("semantic_model.yaml", "ontology.yaml", "mapping.yaml")
+
 
 def _dialect_by_database_name() -> dict[str, str]:
-    """Resolve SQL dialect strings keyed by catalog database name."""
+    """Resolve SQL dialect strings keyed by catalog database name.
+
+    Live connectors give the most precise dialect, but building them connects
+    to every database, and one that cannot be reached would otherwise fail the
+    whole export. The dialect is informational in an export, so when that
+    happens the saved connection settings are used for every database instead.
+    """
     dialects: dict[str, str] = {}
-    for connector in get_connectors():
+    try:
+        connectors = get_connectors()
+    except Exception as exc:
+        logger.warning(
+            "Could not connect to every configured database (%s); exporting "
+            "dialects from the saved connection settings instead",
+            exc,
+        )
+        connectors = []
+    for connector in connectors:
         database_name = getattr(connector, "database_name", None)
         dialect = getattr(connector, "dialect", None)
         if database_name and dialect:
@@ -60,12 +83,14 @@ def _dialect_by_database_name() -> dict[str, str]:
 def detect_model_format(payload: Mapping[str, Any]) -> ModelFormat:
     """Tell an Apache Ossie document apart from a native Auto Ontology one.
 
-    The two vocabularies do not overlap at the root: Ossie holds its models
-    under ``semantic_model``, Auto Ontology under ``data_layer``/``semantic_layer``.
+    Only a root holding Auto Ontology's own keys is read as native. Anything
+    else goes to the Ossie converter, which rejects what it cannot read; read
+    as native, it would validate as an empty document, and an import with
+    ``replace`` would then wipe the catalog.
     """
-    return (
-        ModelFormat.OSSIE if "semantic_model" in payload else ModelFormat.AUTO_ONTOLOGY
-    )
+    if _AUTO_ONTOLOGY_ROOT_KEYS.intersection(payload):
+        return ModelFormat.AUTO_ONTOLOGY
+    return ModelFormat.OSSIE
 
 
 def _table_id_by_column_id(document: AutoOntologyModelDocument) -> dict[str, str]:
@@ -146,26 +171,58 @@ def _validate_ossie_metric_names(document: AutoOntologyModelDocument) -> None:
         f"{name!r} ({count})" for name, count in counts.items() if name and count > 1
     ]
     if duplicates:
-        raise GSFConversionError(
+        raise AutoOntologyConversionError(
             "Cannot export custom analyses with duplicate names as Apache Ossie "
             f"metrics: {', '.join(duplicates)}"
         )
 
 
-def export_model(request: ExportRequest) -> str:
-    """Export the scoped model document as a YAML string in *request.format*."""
+def _export_document(request: ExportRequest) -> AutoOntologyModelDocument:
+    """Assemble the native model document for the databases *request* scopes."""
     database_ids = request.databases
     dal.validate_database_ids(database_ids)
     rows = dal.fetch_export_rows(database_ids)
-    document = dal.assemble_export_document(
+    return dal.assemble_export_document(
         rows,
         dialect_by_db_name=_dialect_by_database_name(),
         sql_column_resolver=dal.make_cached_sql_column_resolver(),
     )
+
+
+def _ossie_source(document: AutoOntologyModelDocument) -> str:
+    """Return the native YAML the Ossie converter reads for *document*."""
+    _validate_ossie_metric_names(document)
+    return _dump_yaml(_project_terms_onto_one_table(document))
+
+
+def export_model(request: ExportRequest) -> str:
+    """Export the scoped model document as a YAML string in *request.format*."""
+    document = _export_document(request)
     if request.format is ModelFormat.OSSIE:
-        _validate_ossie_metric_names(document)
-        return convert_gsf_to_ossie(_dump_yaml(_project_terms_onto_one_table(document)))
+        return convert_auto_ontology_to_ossie(_ossie_source(document))
     return _dump_yaml(document)
+
+
+def export_ossie_documents(request: ExportRequest) -> bytes:
+    """Export the scoped model as a zip of three Apache Ossie documents.
+
+    The semantic model is the one ``export_model`` returns in the Ossie format.
+    The ontology holds the terms as concepts, and the mapping populates it from
+    the semantic model, referencing both by their names in the zip.
+    """
+    source = _ossie_source(_export_document(request))
+    semantic_model_file, ontology_file, mapping_file = OSSIE_EXPORT_FILES
+    ontology, mapping = convert_auto_ontology_to_ossie_ontology(
+        source,
+        semantic_model_iri=f"./{semantic_model_file}",
+        ontology_iri=f"./{ontology_file}",
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(semantic_model_file, convert_auto_ontology_to_ossie(source))
+        archive.writestr(ontology_file, ontology)
+        archive.writestr(mapping_file, mapping)
+    return buffer.getvalue()
 
 
 def import_model(
@@ -180,7 +237,7 @@ def import_model(
         raise ValueError("YAML document must deserialize to a mapping")
     source_format = detect_model_format(payload)
     if source_format is ModelFormat.OSSIE:
-        payload = yaml.safe_load(convert_ossie_to_gsf(yaml_text))
+        payload = yaml.safe_load(convert_ossie_to_auto_ontology(yaml_text))
     document = AutoOntologyModelDocument.model_validate(payload)
     embed_buffer = ImportEmbedBuffer() if embed else None
     summary = dal.apply_import_model(

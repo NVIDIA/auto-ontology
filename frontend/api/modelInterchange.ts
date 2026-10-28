@@ -13,12 +13,21 @@ export type ImportModelOptions = {
 };
 
 export const modelInterchangeApi = {
-	/** Export the scoped model (catalog + semantic layer) as a YAML file blob in `format`. */
+	/**
+	 * Export the scoped model (catalog + semantic layer) as a YAML file blob in `format`.
+	 * With `includeOntology` (Apache Ossie only) the blob is a zip that also holds the
+	 * terms as an Ossie ontology and its mapping onto the semantic model.
+	 */
 	exportModel: (
 		databaseIds: string[],
 		format: ModelFormat,
+		includeOntology = false,
 	): Promise<ResponseWithError<{ blob: Blob }>> =>
-		requests.postBlob('model/export', { databases: databaseIds, format }),
+		requests.postBlob('model/export', {
+			databases: databaseIds,
+			format,
+			include_ontology: includeOntology,
+		}),
 
 	/**
 	 * Import a native Auto Ontology or Apache Ossie model YAML file, applying it and

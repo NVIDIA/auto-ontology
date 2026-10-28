@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -510,7 +510,10 @@ def _strip_default_tools(llm: BaseChatModel) -> None:
         logger.debug("Could not disable the general-purpose subagent: %s", exc)
 
     profile = HarnessProfileConfig(**config_kwargs)
-    for key in (f"{provider}:{identifier}" if provider and identifier else None, provider):
+    for key in (
+        f"{provider}:{identifier}" if provider and identifier else None,
+        provider,
+    ):
         if key:
             try:
                 register_harness_profile(key, profile)
@@ -669,13 +672,14 @@ def run_deep_sql_agent(
     toolbox: SQLAgentToolbox,
     state: Any,
 ) -> SQLAgentOutcome:
-    """Construct SQL with the deep agent, gating the answer before accepting it.
+    """Construct one SQL candidate with the deep agent, then gate it.
 
     The gate is the loop's own, applied here to the structured answer rather
     than to a ``submit_sql`` call. It earned its place: over 866 questions it
     bounced a quarter of the submissions it later passed, and the checks it
     runs are the ones that catch scoring errors the model declines to look for
-    itself. A bounce costs one more invocation, capped like the loop's.
+    itself. Findings are recorded for observability, but do not trigger another
+    generation: the deep-agent path produces exactly one final SQL candidate.
     """
     agent = _build_agent(llm, build_tools(toolbox, state))
 
@@ -690,7 +694,7 @@ def run_deep_sql_agent(
     answer: Optional[SQLGenerationModel] = None
     stop_reason = "answered"
 
-    for attempt in range(config.max_submission_bounces() + 1):
+    for attempt in range(1):
         if time.monotonic() > deadline:
             stop_reason = "deadline"
             break
@@ -731,19 +735,13 @@ def run_deep_sql_agent(
             stop_reason = "no_answer"
             break
 
-        findings = _gate_submission(
-            answer.sql_code, toolbox, first_pass=(attempt == 0)
-        )
+        findings = _gate_submission(answer.sql_code, toolbox, first_pass=(attempt == 0))
         if not findings:
             break
 
         trajectory[-1]["gate"] = findings
-        if attempt == config.max_submission_bounces():
-            stop_reason = "gate_exhausted"
-            break
-        conversation = list(result.get("messages") or conversation) + [
-            HumanMessage(content=findings)
-        ]
+        stop_reason = "gate_exhausted"
+        break
 
     # After the gate, not before it: the gate's findings are the author's to
     # act on with its remaining turns, and a query still being revised is not

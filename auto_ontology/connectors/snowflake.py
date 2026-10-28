@@ -2,13 +2,14 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Snowflake connector implementing the NeMo-Retriever SQLDatabase ABC."""
+"""Snowflake connector implementing the :class:`~auto_ontology.connectors.base.SQLDatabase` ABC."""
 
 from __future__ import annotations
 
 import base64
 import binascii
 import logging
+import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -16,9 +17,13 @@ import pandas as pd
 import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
+
+# 000630: "Statement reached its statement or warehouse timeout ... and was
+# canceled" -- the STATEMENT_TIMEOUT_IN_SECONDS cap firing.
+_STATEMENT_TIMEOUT_ERRNO = 630
 
 
 def _quoted_identifier(name: str) -> str:
@@ -169,6 +174,8 @@ class SnowflakeDatabase(SQLDatabase):
         ``snowflake://user:password@account?warehouse=COMPUTE_WH&database=MY_DB``
     """
 
+    supports_statement_timeout = True
+
     def __init__(
         self,
         connection_string: str,
@@ -226,8 +233,44 @@ class SnowflakeDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        with snowflake.connector.connect(**self._connect_kwargs) as conn:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*; with *timeout_s*, Snowflake cancels it after that long.
+
+        The cap is the ``STATEMENT_TIMEOUT_IN_SECONDS`` session parameter on the
+        per-call connection, so it never outlives the statement.
+        """
+        connect_kwargs = self._connect_kwargs
+        if timeout_s is not None:
+            connect_kwargs = {
+                **connect_kwargs,
+                "session_parameters": {
+                    **connect_kwargs.get("session_parameters", {}),
+                    "STATEMENT_TIMEOUT_IN_SECONDS": max(1, int(timeout_s)),
+                },
+            }
+        started = time.monotonic()
+        try:
+            return self._execute(connect_kwargs, sql, parameters)
+        except snowflake.connector.errors.Error as exc:
+            # 630 also fires for a lower warehouse/account timeout; ``since``
+            # tells the two apart by how long the statement actually ran.
+            if timeout_s is not None and exc.errno == _STATEMENT_TIMEOUT_ERRNO:
+                raise StatementTimeout.since(timeout_s, started) from exc
+            raise
+
+    def _execute(
+        self,
+        connect_kwargs: dict[str, Any],
+        sql: str,
+        parameters: Optional[list],
+    ) -> pd.DataFrame:
+        with snowflake.connector.connect(**connect_kwargs) as conn:
             with conn.cursor() as cur:
                 cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
                 if parameters:
@@ -275,12 +318,22 @@ class SnowflakeDatabase(SQLDatabase):
         )
 
     def get_columns(self) -> pd.DataFrame:
+        # DATA_TYPE is plain NUMBER for every fixed-point column, whole numbers
+        # and amounts alike; the scale that tells them apart is a separate
+        # column. Spell it out as NUMBER(38,0) or NUMBER(12,2), the way
+        # Snowflake's own DDL does.
         df = self.execute("""
             SELECT
                 TABLE_SCHEMA     AS "table_schema",
                 TABLE_NAME       AS "table_name",
                 COLUMN_NAME      AS "column_name",
-                DATA_TYPE        AS "data_type",
+                CASE
+                    WHEN DATA_TYPE = 'NUMBER'
+                        AND NUMERIC_PRECISION IS NOT NULL
+                        AND NUMERIC_SCALE IS NOT NULL
+                    THEN 'NUMBER(' || NUMERIC_PRECISION || ',' || NUMERIC_SCALE || ')'
+                    ELSE DATA_TYPE
+                END              AS "data_type",
                 IS_NULLABLE = 'YES' AS "is_nullable",
                 ORDINAL_POSITION AS "ordinal_position"
             FROM INFORMATION_SCHEMA.COLUMNS

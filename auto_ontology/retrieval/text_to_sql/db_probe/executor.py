@@ -38,10 +38,7 @@ from auto_ontology.retrieval.text_to_sql.db_probe.config import (
     DB_PROBE_MAX_ROWS,
 )
 
-from auto_ontology.retrieval.text_to_sql.chat_sql import (
-    CHAT_STATEMENT_TIMEOUT_S,
-    execute_chat_sql,
-)
+from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 
 logger = logging.getLogger(__name__)
 
@@ -208,9 +205,7 @@ class ProbeExecutor:
                 bounded_sql,
                 kind="probe SQL",
                 timeout_s=(
-                    CHAT_STATEMENT_TIMEOUT_S
-                    if self.timeout_s is None
-                    else max(1, int(self.timeout_s))
+                    None if self.timeout_s is None else max(1, int(self.timeout_s))
                 ),
             )
         except Exception as exc:  # noqa: BLE001 — probes must never break the pipeline

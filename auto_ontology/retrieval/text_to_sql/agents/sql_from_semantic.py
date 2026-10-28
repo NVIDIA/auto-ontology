@@ -139,6 +139,9 @@ class SQLFromCandidatesAgent(BaseAgent):
             get_original_question(state), sanitized_question
         )
         evidence = state.get("evidence", "")
+        authoritative_evidence_section = format_authoritative_evidence(
+            evidence, evidence_first_sql=True
+        )
         sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
         value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
         calculation_template_section = format_calculation_sql_template(path_state)
@@ -164,7 +167,9 @@ class SQLFromCandidatesAgent(BaseAgent):
         relevance_reasoning = path_state.get("table_relevance_reasoning", "")
         observation_block = ""
         if relevance_reasoning:
-            observation_block += f"\nTable selection reasoning:\n{relevance_reasoning}\n"
+            observation_block += (
+                f"\nTable selection reasoning:\n{relevance_reasoning}\n"
+            )
         observation_block += (
             f"\nlist of important semantic entities with sql snippets:\n"
             f"{custom_analyses_str}\n"
@@ -182,6 +187,8 @@ class SQLFromCandidatesAgent(BaseAgent):
         glossary_section = format_glossary_section(state.get("glossary") or [])
         if glossary_section:
             observation_block += f"\n{glossary_section}"
+        if authoritative_evidence_section:
+            observation_block += f"\n{authoritative_evidence_section}\n"
         # Build custom analyses section for user prompt
         ca_section = format_custom_analyses_section(custom_analyses)
 
@@ -266,10 +273,8 @@ class SQLFromCandidatesAgent(BaseAgent):
         )
 
         messages = state["messages"] + [SystemMessage(content=system_prompt)]
-        if evidence:
-            messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
-            )
+        if authoritative_evidence_section:
+            messages.append(SystemMessage(content=authoritative_evidence_section))
         if calculation_template_section:
             messages.append(SystemMessage(content=calculation_template_section))
         # Before the query patterns: anchors state what this database

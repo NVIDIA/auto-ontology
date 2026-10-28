@@ -4,17 +4,17 @@
 
 """Global search across the catalog and semantic tables.
 
-One query term, nine tables, one ranked list. Three decisions shape the rest:
+One query term, ten tables, one ranked list. Three decisions shape the rest:
 
 * **It is a substring match, and only that.** ``contains`` is the sole
   ``text_match_option`` the API offers, so typing ``mount`` must find
   ``total_amount``. That is why the indexes behind this are ``pg_trgm`` GIN
   rather than ``tsvector``: full-text search reaches the front of a token and no
   further, so it would silently stop finding the word it sits inside of.
-* **Name and description are matched separately, not together.** A hit needs
-  *every* token in its name, or *every* token in its description -- never some
-  of each. Splitting a search across two fields is how "revenue report" starts
-  matching a column named ``revenue`` on a table described as a report.
+* **Each field is matched separately, not together.** A hit needs *every*
+  token in its name, or *every* token in its description; never some of each.
+  Splitting a search across two fields is how "revenue report" starts matching
+  a column named ``revenue`` on a table described as a report.
 * **Synonyms match whole words instead.** ``unit`` finds the Term whose synonym
   is ``Business Unit``; ``uni`` does not. Substring-matching an alias list
   produces noise the user cannot see the cause of, because the alias that
@@ -76,6 +76,17 @@ LIST_LIMIT = 200
 #: lets the UI tab tables and views apart while both come from one table.
 SEARCH_TYPE_VIEW = "View"
 
+#: A tag as a hit in its own right, tabbed beside the objects it labels.
+#:
+#: Declared here rather than in ``catalog`` or ``semantic`` constants because a
+#: tag belongs to neither: it is an application object somebody created on the
+#: settings page, and search is the only thing that needs a label for it.
+#:
+#: Do not read this as the tag *filter*, which is about the objects a tag is
+#: on; this one is the tag itself, matched on its own name and opening onto
+#: its own page.
+LABEL_TAG = "Tag"
+
 #: Every label that maps to a table of its own, in the order the UI tabs them.
 _SEARCH_LABELS = (
     Labels.DB,
@@ -87,6 +98,7 @@ _SEARCH_LABELS = (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
     LABEL_PQL_ANALYSIS,
+    LABEL_TAG,
 )
 
 SEARCH_OBJECT_TYPES = (*_SEARCH_LABELS, SEARCH_TYPE_VIEW)
@@ -103,9 +115,60 @@ SEARCH_TABLES = {
     LABEL_COLUMN_ATTRIBUTE: s.column_attribute,
     LABEL_SQL_ATTRIBUTE: s.sql_attribute,
     LABEL_PQL_ANALYSIS: s.pql_analysis,
+    LABEL_TAG: s.tag,
 }
 
+#: Labels whose table has no ``description`` column, so there is nothing for
+#: ``include_description`` to widen into and nothing for a hit to carry.
+#:
+#: Only ``tag``, which is a name and its authorship and no prose at all. Held
+#: as a set rather than as a branch because two places have to agree about it
+#: -- what is matched and what is selected -- and they are in different
+#: functions.
+_LABELS_WITHOUT_DESCRIPTION = frozenset({LABEL_TAG})
+
 _VIEW_TYPES = (TableTypes.VIEW, TableTypes.MATERIALIZED_VIEW)
+
+#: The one ``tag_target`` column each label's labels live in.
+#:
+#: Absent for Database, Schema, the two analysis kinds and Tag itself, which is
+#: not an omission: ``tag_target`` has a column per taggable kind and those
+#: five have none, so nothing can carry a tag. :func:`_tag_where` reads the
+#: absence as "always untagged" rather than as a missing case -- see the note
+#: there.
+#:
+#: ``View`` is absent for the reason given on :data:`SEARCH_TYPE_VIEW`: it is a
+#: ``catalog_table`` row, so a tag on one is a tag on a Table and it shares
+#: ``Labels.TABLE``'s column.
+_TAG_TARGET_COLUMNS = {
+    LABEL_TERM: s.tag_target.c.term_id,
+    Labels.TABLE: s.tag_target.c.table_id,
+    Labels.COLUMN: s.tag_target.c.column_id,
+    LABEL_COLUMN_ATTRIBUTE: s.tag_target.c.column_attribute_id,
+    LABEL_SQL_ATTRIBUTE: s.tag_target.c.sql_attribute_id,
+}
+
+#: The labels the data filter can reach, and how each one gets to its schema.
+#:
+#: ``None`` for Table, which holds ``schema_id`` itself; Column has to go
+#: through its table to find one. Everything else is absent, which is what
+#: :func:`_data_filter_rules_out` reads as "this kind does not live under a
+#: schema": a Term or an analysis is not part of any database, so a search
+#: narrowed to one has no business returning it.
+#:
+#: Database and Schema are absent too, and that is the less obvious call. A
+#: schema *is* the thing being filtered on rather than something sitting under
+#: it, so returning the very schema somebody just ticked tells them nothing
+#: they did not already know. The reference implementation takes the same
+#: line: its condition admits the ``schema`` label, and then the object-type
+#: narrowing beside it drops Schema and Database from the results anyway.
+#:
+#: ``View`` is absent for the reason given on :data:`SEARCH_TYPE_VIEW`: it is
+#: a ``catalog_table`` row and shares ``Labels.TABLE``'s route.
+_DATA_SCHEMA_ROUTES = {
+    Labels.TABLE: None,
+    Labels.COLUMN: s.catalog_table,
+}
 
 #: The ``PROPERTY_OF`` link each attribute reaches its Term through.
 #:
@@ -265,6 +328,28 @@ def _text_match(table, tokens: list[str], include_description: bool):
     return or_(match, _contains_all(table.c.description, tokens))
 
 
+def _match_where(label: str, tokens: list[str], *, include_description: bool):
+    """Everything the query text is matched against, for one label.
+
+    The single definition of "this row matched", which is what the three read
+    paths and the alias branch's negation all have to agree on -- a match
+    applied to the list but not to the count puts a number on a tab that the
+    page beneath it cannot produce.
+
+    Takes a label rather than a table because every caller has the label in
+    hand, and because the one thing this decides -- whether there is a
+    description to search -- is a property of the label rather than of the
+    text.
+
+    ``include_description`` is dropped for a label with no description column
+    rather than raising: a caller asking to search descriptions is asking of
+    the whole search, and the one kind that has none is not a reason to refuse
+    it -- see :data:`_LABELS_WITHOUT_DESCRIPTION`.
+    """
+    described = include_description and label not in _LABELS_WITHOUT_DESCRIPTION
+    return _text_match(SEARCH_TABLES[label], tokens, described)
+
+
 def _certified_text():
     """A Term's three-state certification, as the UI badges it."""
     both = and_(s.term.c.name_certified, s.term.c.description_certified)
@@ -283,6 +368,160 @@ def _is_view():
     )
 
 
+def _all_of(*clauses):
+    """``and_`` of the clauses that are not ``None``.
+
+    The tag filter is absent from most searches, and every branch below has to
+    combine it with its own text match. Spelling that as a conditional append
+    at each call site is what this replaces.
+
+    At least one clause has to be real: ``and_()`` over nothing is deprecated
+    in SQLAlchemy and every caller here leads with a text match, so the
+    optional clauses are the ones that follow.
+    """
+    return and_(*(clause for clause in clauses if clause is not None))
+
+
+def _tagged_exists(label: str, tag_ids: list[str] | None):
+    """EXISTS a label on this entity -- any label, or one of *tag_ids*.
+
+    ``None`` for *tag_ids* asks whether the entity carries any tag at all,
+    which negated is what "untagged" means. One function for both so the
+    correlation and the column lookup have a single definition.
+
+    Labels applied by hand and labels applied by a rule are the same rows here:
+    a rule's labels are materialised into ``tag_target`` with ``rule_id`` set
+    (see :func:`auto_ontology.dal.tags.apply_labels_now_matched`), so nothing
+    has to consult the rules to know what an object carries.
+    """
+    table = SEARCH_TABLES[label]
+    column = _TAG_TARGET_COLUMNS[label]
+    narrow = () if tag_ids is None else (s.tag_target.c.tag_id.in_(tag_ids),)
+    return (
+        select(literal(1))
+        .select_from(s.tag_target)
+        .where(column == table.c.id, *narrow)
+        .correlate(table)
+        .exists()
+    )
+
+
+def _tag_where(label: str, tag_ids: list[str], *, include_untagged: bool):
+    """This label's rows that pass the tag filter, or ``None`` for no filter.
+
+    *tag_ids* is satisfied by **any** one of them rather than all: a person
+    ticking two tags is widening the search, which is also how the count has to
+    read it for the tabs to add up.
+
+    *include_untagged* is the ``(blanks)`` option beside the tags, and it is
+    unioned onto them rather than replacing them -- "tagged PII, or tagged
+    nothing at all" is one selection in the panel and has to be one condition
+    here.
+
+    An untaggable label needs no condition when untagged objects are wanted and
+    cannot satisfy one otherwise, which is :func:`_tag_filter_rules_out` rather
+    than a ``false`` returned from here: a branch that can produce nothing is
+    better left out of the union than joined to it and filtered away.
+    """
+    if not tag_ids and not include_untagged:
+        return None
+    if label not in _TAG_TARGET_COLUMNS:
+        return None
+    clauses = []
+    if tag_ids:
+        clauses.append(_tagged_exists(label, tag_ids))
+    if include_untagged:
+        clauses.append(not_(_tagged_exists(label, None)))
+    return or_(*clauses) if len(clauses) > 1 else clauses[0]
+
+
+def _tag_filter_rules_out(
+    label: str, tag_ids: list[str], *, include_untagged: bool
+) -> bool:
+    """Whether the tag filter leaves this label nothing to match.
+
+    True only for a label with no ``tag_target`` column when the filter asks
+    for tagged objects: Database, Schema, the two analysis kinds and Tag carry
+    no labels at all, so a search narrowed to a tag has no business scanning
+    them.
+    They come back as soon as ``(blanks)`` is asked for, since an object that
+    cannot be tagged is untagged -- which is the same answer the reference
+    implementation gives, where the tags come from an ``optional match`` that
+    leaves those kinds with an empty list.
+    """
+    if not tag_ids and not include_untagged:
+        return False
+    return label not in _TAG_TARGET_COLUMNS and not include_untagged
+
+
+def _data_where(label: str, data_ids: list[str]):
+    """This label's rows living under one of *data_ids*, or ``None``.
+
+    *data_ids* mixes database ids and schema ids in one list, because the tree
+    they are ticked in mixes the two: somebody selects a whole database, or
+    picks schemas out of it, and both are the same question -- "is this row
+    somewhere below what I chose". Keeping them in one list is also what lets a
+    ticked database stay one id rather than being expanded client-side into
+    however many schemas it has today, which would go stale the moment one was
+    added.
+
+    The two are told apart here rather than by the caller: an id matches if it
+    is the row's own schema, or that schema's database. Nothing distinguishes a
+    database id from a schema id in the request, and nothing needs to -- the ids
+    are unique across both tables, so an id that is neither simply matches
+    nothing.
+
+    A Column reaches its schema through its table (see
+    :data:`_DATA_SCHEMA_ROUTES`), which is why this is an ``EXISTS`` over a join
+    rather than a column test: the filter is about where a row *lives*, and only
+    Table knows that about itself.
+    """
+    if not data_ids or label not in _DATA_SCHEMA_ROUTES:
+        return None
+    table = SEARCH_TABLES[label]
+    through = _DATA_SCHEMA_ROUTES[label]
+
+    source = s.catalog_schema
+    if through is None:
+        anchor = s.catalog_schema.c.id == table.c.schema_id
+    else:
+        source = through.join(
+            s.catalog_schema, s.catalog_schema.c.id == through.c.schema_id
+        )
+        anchor = through.c.id == table.c.table_id
+
+    return (
+        select(literal(1))
+        .select_from(source)
+        .where(
+            anchor,
+            or_(
+                s.catalog_schema.c.id.in_(data_ids),
+                s.catalog_schema.c.database_id.in_(data_ids),
+            ),
+        )
+        .correlate(table)
+        .exists()
+    )
+
+
+def _data_filter_rules_out(label: str, data_ids: list[str]) -> bool:
+    """Whether the data filter leaves this label nothing to match.
+
+    True for every kind that does not live under a schema, which is every kind
+    but Table, View and Column. The reference implementation spells this as a
+    separate narrowing of the requested object types; here it is the same
+    ``continue`` the tag filter uses, for the same reason given on
+    :func:`_tag_filter_rules_out` -- a branch that can produce nothing is better
+    left out of the union than joined to it and filtered away.
+
+    Note what this does *not* do: it never widens. A caller that asked only for
+    Terms and also picked a database gets nothing, rather than silently being
+    given the tables under it.
+    """
+    return bool(data_ids) and label not in _DATA_SCHEMA_ROUTES
+
+
 def _hit_select(
     table,
     label: str,
@@ -295,14 +534,19 @@ def _hit_select(
 ):
     """One branch of the union: id, name, description and six common columns.
 
-    Every entity supplies the first three; the rest differ by label and default
-    to a typed NULL, so the branches stay union-compatible without each one
-    restating the columns it has nothing to say about.
+    Every entity supplies an id and a name; the rest differ by label and
+    default to a typed NULL, so the branches stay union-compatible without each
+    one restating the columns it has nothing to say about.
+
+    ``description`` is nearly in the first group and not quite: a tag has no
+    such column, so it takes the same typed NULL as the rest rather than being
+    read off the table. See :data:`_LABELS_WITHOUT_DESCRIPTION`.
     """
+    described = label not in _LABELS_WITHOUT_DESCRIPTION
     return select(
         table.c.id.label("id"),
         table.c.name.label("name"),
-        table.c.description.label("description"),
+        (table.c.description if described else _NULL_TEXT).label("description"),
         cast(literal(label), Text).label("label"),
         (_NULL_TEXT if table_type is None else table_type).label("table_type"),
         (_NULL_TEXT if certified is None else certified).label("certified"),
@@ -416,6 +660,9 @@ def _synonym_term_select(
     *,
     tokens: list[str],
     include_description: bool,
+    tag_ids: list[str],
+    include_untagged: bool,
+    data_ids: list[str],
 ):
     """Visible Terms reached *only* by their synonyms, or ``None``.
 
@@ -423,8 +670,10 @@ def _synonym_term_select(
     whose *name* looks nothing like the query is exactly the hit a user typing
     an alias is looking for, and it must not be sliced away by 200 name matches.
 
-    "Only" is the negated text match, which makes this branch disjoint from the
-    Term branch of :func:`_hit_selects` instead of overlapping it. Two things
+    "Only" is the negated :func:`_match_where` -- the *same* match the main
+    branch was given, or the two stop being disjoint the moment one of them
+    is widened. That disjointness is what makes this branch, rather than an
+    overlapping copy of the Term branch of :func:`_hit_selects`. Two things
     follow. The count's ``UNION`` stops depending on both branches building a
     byte-identical row for the ``DISTINCT`` to collapse, and the list's cap in
     :func:`fetch_global_search` gets spent on Terms that are not already in the
@@ -434,21 +683,44 @@ def _synonym_term_select(
     an unmatched name over a NULL description leaves :func:`_text_match` NULL
     rather than false -- and ``NOT NULL`` is NULL, which a WHERE clause drops.
     Without it, every alias-only Term that has no description disappears.
+
+    The tag filter applies here too, and has to: this branch is a second route
+    to a Term, not an exemption from the narrowing -- a search for the tag PII
+    that returned untagged Terms because an alias matched would be reporting
+    hits its own count does not include.
+
+    The data filter ends the branch outright rather than narrowing it, for the
+    same reason it ends the Term branch of :func:`_hit_selects`: a Term does
+    not live under a schema, so a search confined to one cannot return Terms
+    however they were reached.
     """
     if LABEL_TERM not in object_types or not synonym_tokens:
         return None
-    return _term_select(synonym_tokens).where(
+    if _data_filter_rules_out(LABEL_TERM, data_ids):
+        return None
+    aliased = _term_select(synonym_tokens).where(
         _term_is_visible(),
         _synonym_exists(synonym_tokens),
-        not_(func.coalesce(_text_match(s.term, tokens, include_description), False)),
+        not_(
+            func.coalesce(
+                _match_where(
+                    LABEL_TERM, tokens, include_description=include_description
+                ),
+                False,
+            )
+        ),
     )
+    tagged = _tag_where(LABEL_TERM, tag_ids, include_untagged=include_untagged)
+    return aliased if tagged is None else aliased.where(tagged)
 
 
-def _table_where(tokens: list[str], object_types: set[str], include_description: bool):
+def _table_where(
+    tokens: list[str], object_types: set[str], *, include_description: bool
+):
     """The ``catalog_table`` filter, which serves two tabs from one table."""
     wants_table = Labels.TABLE in object_types
     wants_view = SEARCH_TYPE_VIEW in object_types
-    match = _text_match(s.catalog_table, tokens, include_description)
+    match = _match_where(Labels.TABLE, tokens, include_description=include_description)
     if wants_table and wants_view:
         return match
     return and_(match, _is_view() if wants_view else ~_is_view())
@@ -460,6 +732,9 @@ def _hit_selects(
     *,
     include_description: bool,
     synonym_tokens: list[str],
+    tag_ids: list[str],
+    include_untagged: bool,
+    data_ids: list[str],
 ) -> list[Any]:
     """One select per requested entity, ready to be unioned."""
     selects: list[Any] = []
@@ -474,11 +749,21 @@ def _hit_selects(
         if label not in object_types:
             continue
 
+        if _tag_filter_rules_out(label, tag_ids, include_untagged=include_untagged):
+            continue
+
+        if _data_filter_rules_out(label, data_ids):
+            continue
+
+        tagged = _tag_where(label, tag_ids, include_untagged=include_untagged)
+        located = _data_where(label, data_ids)
+        match = _match_where(label, tokens, include_description=include_description)
+
         if label == LABEL_TERM:
             selects.append(
                 _term_select(synonym_tokens).where(
                     _term_is_visible(),
-                    _text_match(s.term, tokens, include_description),
+                    _all_of(match, tagged, located),
                 )
             )
             continue
@@ -487,16 +772,12 @@ def _hit_selects(
             selects.append(
                 _hit_select(table, label, certified_flag=table.c.certified).where(
                     _attribute_is_visible(label),
-                    _text_match(table, tokens, include_description),
+                    _all_of(match, tagged, located),
                 )
             )
             continue
 
-        selects.append(
-            _hit_select(table, label).where(
-                _text_match(table, tokens, include_description)
-            )
-        )
+        selects.append(_hit_select(table, label).where(_all_of(match, tagged, located)))
 
     if Labels.TABLE in object_types or SEARCH_TYPE_VIEW in object_types:
         selects.append(
@@ -504,7 +785,17 @@ def _hit_selects(
                 s.catalog_table,
                 Labels.TABLE,
                 table_type=s.catalog_table.c.table_type,
-            ).where(_table_where(tokens, object_types, include_description))
+            ).where(
+                _all_of(
+                    _table_where(
+                        tokens, object_types, include_description=include_description
+                    ),
+                    _tag_where(
+                        Labels.TABLE, tag_ids, include_untagged=include_untagged
+                    ),
+                    _data_where(Labels.TABLE, data_ids),
+                )
+            )
         )
 
     return selects
@@ -698,6 +989,9 @@ def fetch_global_search(
     *,
     include_description: bool,
     synonym_tokens: list[str] | None = None,
+    tag_ids: list[str] | None = None,
+    include_untagged: bool = False,
+    data_ids: list[str] | None = None,
     limit: int = LIST_LIMIT,
     synonym_limit: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -714,7 +1008,7 @@ def fetch_global_search(
     that unordered ``LIMIT`` allowed: Postgres now reads the whole match set to
     sort it, and for a two-character query (see ``MIN_SEARCH_LENGTH``, which
     documents why those are not indexable) that is a sequential scan of all
-    nine tables. The trade is deliberate -- a correct page for a slower worst
+    ten tables. The trade is deliberate -- a correct page for a slower worst
     case.
 
     *synonym_limit* caps the alias branch, which is otherwise as long as the
@@ -730,6 +1024,9 @@ def fetch_global_search(
         object_types,
         include_description=include_description,
         synonym_tokens=synonym_tokens or [],
+        tag_ids=tag_ids or [],
+        include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     # ``union_all``: each branch reads a different table, so no row can appear
     # in two of them, and paying for a DISTINCT over 200 rows with an array
@@ -750,6 +1047,9 @@ def fetch_global_search(
         object_types,
         tokens=tokens,
         include_description=include_description,
+        tag_ids=tag_ids or [],
+        include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     if synonym_select is not None:
         if synonym_limit is not None:
@@ -780,6 +1080,9 @@ def count_global_search(
     *,
     include_description: bool,
     synonym_tokens: list[str] | None = None,
+    tag_ids: list[str] | None = None,
+    include_untagged: bool = False,
+    data_ids: list[str] | None = None,
 ) -> dict[str, int]:
     """Hit counts by object type, uncapped.
 
@@ -798,12 +1101,18 @@ def count_global_search(
         object_types,
         include_description=include_description,
         synonym_tokens=synonym_tokens or [],
+        tag_ids=tag_ids or [],
+        include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     synonym_select = _synonym_term_select(
         synonym_tokens or [],
         object_types,
         tokens=tokens,
         include_description=include_description,
+        tag_ids=tag_ids or [],
+        include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     if synonym_select is not None:
         selects.append(synonym_select)
@@ -832,6 +1141,9 @@ def matching_id_selects(
     *,
     include_description: bool,
     synonym_tokens: list[str] | None = None,
+    tag_ids: list[str] | None = None,
+    include_untagged: bool = False,
+    data_ids: list[str] | None = None,
 ) -> dict[str, Select]:
     """The same match as the list, as one ``SELECT id`` per label — unexecuted.
 
@@ -881,6 +1193,8 @@ def matching_id_selects(
         return {}
 
     aliases = synonym_tokens or []
+    tags = tag_ids or []
+    data = data_ids or []
     selects: dict[str, Select] = {}
 
     for label in _SEARCH_LABELS:
@@ -889,24 +1203,38 @@ def matching_id_selects(
             continue
         if label not in object_types:
             continue
+        if _tag_filter_rules_out(label, tags, include_untagged=include_untagged):
+            continue
+        if _data_filter_rules_out(label, data):
+            continue
 
         table = SEARCH_TABLES[label]
-        match = _text_match(table, tokens, include_description)
+        match = _match_where(label, tokens, include_description=include_description)
+        tagged = _tag_where(label, tags, include_untagged=include_untagged)
+        located = _data_where(label, data)
 
         if label == LABEL_TERM:
             if aliases:
                 match = or_(match, _synonym_exists(aliases))
-            selects[label] = select(table.c.id).where(_term_is_visible(), match)
+            selects[label] = select(table.c.id).where(
+                _term_is_visible(), _all_of(match, tagged, located)
+            )
         elif label in _ATTRIBUTE_TERM_LINKS:
             selects[label] = select(table.c.id).where(
-                _attribute_is_visible(label), match
+                _attribute_is_visible(label), _all_of(match, tagged, located)
             )
         else:
-            selects[label] = select(table.c.id).where(match)
+            selects[label] = select(table.c.id).where(_all_of(match, tagged, located))
 
     if Labels.TABLE in object_types or SEARCH_TYPE_VIEW in object_types:
         selects[Labels.TABLE] = select(s.catalog_table.c.id).where(
-            _table_where(tokens, object_types, include_description)
+            _all_of(
+                _table_where(
+                    tokens, object_types, include_description=include_description
+                ),
+                _tag_where(Labels.TABLE, tags, include_untagged=include_untagged),
+                _data_where(Labels.TABLE, data),
+            )
         )
 
     return selects

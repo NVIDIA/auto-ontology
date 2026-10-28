@@ -4,7 +4,7 @@
 
 [project]
 name = "auto-ontology-server"
-version = "1.0.0"
+version = "1.1.0"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "duckdb>=1.5.5",
@@ -12,12 +12,12 @@ dependencies = [
     "httpx>=0.28.1",
     "hvac>=2.4.0",
     "deepagents>=0.7.21",
-    "langchain-openai>=1.6.0",
+    # Capped at 1.3.4, the last release that accepts openai<2.45.0; see the openai pin.
+    "langchain-openai>=1.3.0,<1.3.5",
     "langgraph>=1.2.11",
-    "nemo-retriever>=26.8.1",
     "pydantic>=2.13.5",
-    # Capped by nemo-retriever, not by us: 26.8.1 requires `pandas>=2.0,<3`,
-    # so pandas 3 is unresolvable until it moves.
+    # Kept below 3 until the code is tested against pandas 3; the cap used to be
+    # forced by nemo-retriever.
     "pandas>=2.3.3,<3",
     "psycopg-pool>=3.3.1",
     "psycopg[binary]>=3.3.4",
@@ -31,13 +31,14 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "snowflake-connector-python>=4.7.2",
     "uvicorn[standard]>=0.52.4",
-    "nvidia-sdfm[kumorfm]>=0.2.1",
-    "databricks-sql-connector>=4.4.0",
+    # The pyarrow extra turns on Arrow result sets and cloud fetch; without it
+    # large Databricks reads fall back to slow row-by-row Thrift fetches.
+    "databricks-sql-connector[pyarrow]>=4.4.0",
     "mysql-connector-python>=26.7.0",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.52",
     "alembic>=1.19.1",
-    "apache-ossie-nvidia-gsf",
+    "apache-ossie-nvidia-auto-ontology @ git+https://github.com/apache/ossie.git@ef91cb61092c60f4b918016a81cfdbe483e113bc#subdirectory=converters/nvidia",
     "langchain-postgres>=0.0.17",
     "pyhive[hive-pure-sasl]>=0.7.0",
     "thrift>=0.24.0",
@@ -45,7 +46,28 @@ dependencies = [
     "pure-sasl>=0.6.2",
     "pyjks>=20.0.0",
     "trino>=0.339.0",
+    # The embedding client (auto_ontology/utils/embedding.py). Pinned to the
+    # version nemo-gym 0.6.0 declares, so this matches the ontology-sql-eval
+    # harness.
+    "openai==2.44.0",
+    # Imported directly but previously only installed transitively. Declared so
+    # dropping whatever carried them cannot break an import the way pyheavydb's
+    # importlib-metadata did; langchain-nvidia-ai-endpoints arrived solely via
+    # nemo-retriever.
+    "langchain-nvidia-ai-endpoints>=1.4.3",
+    "langchain-core>=1.6.1",
+    "sqlglot>=30.17.0",
+    "numpy>=2.5.2",
+    "requests>=2.34.2",
+    "tqdm>=4.70.0",
+    "cryptography>=50.0.1",
+    # Not imported, but FastAPI refuses to register the model-import upload
+    # route without it.
+    "python-multipart>=0.0.32",
 ]
+
+[project.optional-dependencies]
+kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]
 
 [build-system]
 requires = ["hatchling"]
@@ -54,37 +76,31 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["auto_ontology"]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.uv]
 package = true
-# Patched versions of transitive dependencies flagged by nSpect.
-# PyJWT is a constraint, so its dependents' upper bounds still apply. urllib3
-# is an override because nemo-retriever pins urllib3==2.7.0 exactly; an
-# override replaces every other range, so it keeps the <3 bound requests and
-# botocore declare.
+# Patched versions of transitive dependencies flagged by nSpect. Constraints,
+# so their dependents' upper bounds still apply.
 constraint-dependencies = [
-    "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors, mcp)
-    "virtualenv>=21.14.2",  # CVE-2026-102930 (via ray)
-]
-override-dependencies = [
-    "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore, nemo-retriever)
+    "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors)
+    "urllib3>=2.8.0",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore)
 ]
 
 [[tool.uv.index]]
-name = "vendored-sdfm"
+name = "vendored-engine"
 url = "vendor/wheels"
 format = "flat"
-
-[tool.uv.sources]
-# Upstream moved this from `converters/gsf` to `converters/nvidia` and renamed
-# the distribution and its import package (`ossie_gsf` -> `ossie_nvidia_gsf`).
-# The three names Auto Ontology imports are unchanged.
-apache-ossie-nvidia-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia" }
-# apache-ossie-nvidia-gsf = { path = "../ossie/converters/nvidia", editable = true }
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.5",
+]
+release = [
+    "ngcsdk>=4.37.0",
+    "pyyaml>=6.0.3",
 ]
 
 # Stated, not inherited. With no `select` at all, the rule set is whatever the

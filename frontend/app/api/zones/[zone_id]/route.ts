@@ -8,6 +8,8 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 // zonesApi.getById — fetch one zone (viewable by all).
 export const GET = withPermission({ zone: ['read'] })((req) => proxyToBackend(req));
 // zonesApi.update — edit a zone (admin only).
-export const PATCH = withPermission({ zone: ['manage'] })((req) => proxyToBackend(req));
+export const PATCH = withPermission({ zone: ['manage'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
 // zonesApi.delete — remove a zone (admin only).
 export const DELETE = withPermission({ zone: ['manage'] })((req) => proxyToBackend(req));

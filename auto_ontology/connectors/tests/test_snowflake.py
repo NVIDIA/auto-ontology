@@ -179,3 +179,22 @@ def test_query_history_excludes_blank_query_text(monkeypatch: MonkeyPatch) -> No
     database.get_queries()
 
     assert "NULLIF(TRIM(QUERY_TEXT), '') IS NOT NULL" in captured_sql
+
+
+def test_columns_spell_out_the_scale_of_a_number(monkeypatch: MonkeyPatch) -> None:
+    """DATA_TYPE alone says NUMBER for a key and an amount alike."""
+    database = SnowflakeDatabase(_connection_string())
+    captured_sql = ""
+
+    def execute(sql: str) -> pd.DataFrame:
+        nonlocal captured_sql
+        captured_sql = sql
+        return pd.DataFrame()
+
+    monkeypatch.setattr(database, "execute", execute)
+
+    database.get_columns()
+
+    assert (
+        "'NUMBER(' || NUMERIC_PRECISION || ',' || NUMERIC_SCALE || ')'" in captured_sql
+    )

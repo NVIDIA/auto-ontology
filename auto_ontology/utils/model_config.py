@@ -32,7 +32,7 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "REASONING_MODEL": "aws/anthropic/bedrock-claude-opus-4-8",
         "NON_REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
-        "NON_REASONING_MODEL": "aws/anthropic/bedrock-claude-opus-4-8",
+        "NON_REASONING_MODEL": "aws/anthropic/bedrock-claude-sonnet-5-5",
         "EMBED_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "EMBED_MODEL": "nvidia/nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": "https://inference-api.nvidia.com/v1/rerank",

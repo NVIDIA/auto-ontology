@@ -165,13 +165,13 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
-      - name: Setup Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
+      # Only the `release` group: the release script needs ngcsdk and pyyaml,
+      # not the backend's runtime closure.
       - name: Install Python dependencies
-        run: pip install ngcsdk pyyaml
+        run: uv sync --locked --only-group release
 
       - name: Lint Helm chart
         run: helm lint "${HELM_CHART_DIR}"
@@ -182,7 +182,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          python dev_tools/release_helm_chart.py \
+          uv run --no-sync python dev_tools/release_helm_chart.py \
             --org "$ORG" \
             --team "$TEAM" \
             --name "$CHART_NAME" \

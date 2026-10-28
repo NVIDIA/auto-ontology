@@ -36,11 +36,12 @@ const EXPLORATION_GRAPH_NODE_LIMIT = 500;
 export const explorationApi = {
 	getEdges: () => requests.get<ResponseWithCount<DataGraphEdgeDto[]>>('exploration/edges'),
 
-	/** Full data-layer Exploration graph ({nodes, links}) in a single request. */
-	getDataExplorationGraph: () =>
-		requests.get<ExplorationGraphResponse<DataExplorationGraph>>('exploration/graph', {
-			limit: EXPLORATION_GRAPH_NODE_LIMIT,
-		}),
+	/** Data-layer Exploration graph ({nodes, links}) in a single request. */
+	getDataExplorationGraph: (databaseId?: string) =>
+		requests.get<ExplorationGraphResponse<DataExplorationGraph>>(
+			'exploration/graph',
+			databaseId ? { database_id: databaseId } : { limit: EXPLORATION_GRAPH_NODE_LIMIT },
+		),
 
 	getTableExplorationDetails: (tableId: string, params?: PageParams) =>
 		requests.get<{ data: TableExplorationDetails }>(
@@ -133,14 +134,10 @@ export const explorationApi = {
 
 	getTableZonesMap: () => requests.get<{ data: ExplorationZonesMap }>('exploration/tables/zones'),
 
-	/** Full semantic-layer Exploration graph ({nodes, links}) in a single request. */
-	getSemanticExplorationGraph: (): Promise<
-		ResponseWithError<ExplorationGraphResponse<SemanticExplorationGraph>>
-	> =>
+	/** Semantic-layer Exploration graph ({nodes, links}) in a single request. */
+	getSemanticExplorationGraph: (databaseId?: string) =>
 		requests.get<ExplorationGraphResponse<SemanticExplorationGraph>>(
 			'exploration/semantic-graph',
-			{
-				limit: EXPLORATION_GRAPH_NODE_LIMIT,
-			},
+			databaseId ? { database_id: databaseId } : { limit: EXPLORATION_GRAPH_NODE_LIMIT },
 		),
 };

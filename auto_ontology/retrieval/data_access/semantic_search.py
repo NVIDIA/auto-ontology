@@ -6,7 +6,7 @@
 
 The functions here build ``where`` predicates for the per-query metadata
 filter, run per-label vector queries through the injected
-:class:`~nemo_retriever.retriever.Retriever`, and shape the raw hits into a
+:class:`~auto_ontology.utils.retriever.Retriever`, and shape the raw hits into a
 common ``{text, id, label, score}`` candidate dict consumed by the rest of
 the retrieval data-access modules.
 
@@ -14,7 +14,7 @@ The filter shape is chosen by the VDB the caller plugged in (read off
 ``retriever.vdb_kwargs["vdb"].metadata_filter_format``):
 
 * ``"sql"`` (default) — SQL ``LIKE`` predicate over the JSON ``metadata``
-  column, fed to LanceDB's ``.where()`` API.
+  column, for a store that filters with a SQL ``WHERE`` string.
 * ``"dict"`` — flat ``{column: value | [values]}`` mapping, fed straight
   into the backend's native dict-filter API (e.g.
   ``PGVector.similarity_search_with_score_by_vector(..., filter=)``). The
@@ -36,7 +36,7 @@ from auto_ontology.catalog.constants import Labels
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 
 if TYPE_CHECKING:
-    from nemo_retriever.graph.retriever import Retriever
+    from auto_ontology.utils.retriever import Retriever
 
 MetadataFilterFormat = Literal["sql", "dict"]
 
@@ -74,6 +74,19 @@ _EMBED_QUERY_RETRYABLE_TOKENS = (
 )
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Whether *exc* is an endpoint blip rather than a problem with the query."""
+    from openai import APIConnectionError, APIStatusError
+
+    # APIConnectionError covers timeouts too, whose message ("Request timed
+    # out.") none of the tokens below would match.
+    if isinstance(exc, APIConnectionError):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in (408, 429) or exc.status_code >= 500
+    return any(tok in str(exc) for tok in _EMBED_QUERY_RETRYABLE_TOKENS)
+
+
 def _query_with_retry(
     retriever: "Retriever", entity: str, top_k: int, vdb_kwargs: dict | None
 ) -> list[dict]:
@@ -90,8 +103,7 @@ def _query_with_retry(
             return retriever.query(entity, top_k=top_k, vdb_kwargs=vdb_kwargs)
         except Exception as e:
             last_exc = e
-            is_retryable = any(tok in str(e) for tok in _EMBED_QUERY_RETRYABLE_TOKENS)
-            if is_retryable and attempt < _EMBED_QUERY_RETRY_MAX_ATTEMPTS - 1:
+            if _is_retryable(e) and attempt < _EMBED_QUERY_RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
                     "Retryable embedding error on attempt %d/%d — retrying in "
@@ -186,7 +198,7 @@ def _build_metadata_where_clause(
     The output shape is selected by *fmt*:
 
     * ``"sql"`` (default) — SQL ``LIKE`` predicate against the JSON
-      ``metadata`` column, suitable for LanceDB's ``.where()`` API. Uses
+      ``metadata`` column, for a store that filters with a SQL string. Uses
       compact-JSON ``"key":"value"`` substring matching; values are
       escaped via :func:`_escape_like` and the predicate declares
       ``ESCAPE '\\'`` so ``%`` / ``_`` / ``\\`` in inputs are treated
@@ -236,11 +248,9 @@ def _build_metadata_where_clause(
 def _metadata_filter_format(retriever: "Retriever") -> MetadataFilterFormat:
     """Read the per-VDB filter format off the retriever's plugged-in VDB.
 
-    Tabular callers construct the VDB themselves and pass it as
-    ``Retriever(vdb_kwargs={"vdb": instance})``, so the instance is reachable
-    through ``retriever.vdb_kwargs["vdb"]``. Falls back to ``"sql"`` when no
-    instance is exposed (e.g. the reference :class:`LanceDB` reached via
-    ``vdb_op="lancedb"``), preserving historical behavior.
+    :class:`~auto_ontology.utils.retriever.Retriever` exposes its store as
+    ``retriever.vdb_kwargs["vdb"]``. Falls back to ``"sql"`` when no instance
+    is exposed, preserving historical behavior.
     """
     vdb = (getattr(retriever, "vdb_kwargs", None) or {}).get("vdb")
     fmt = getattr(vdb, "metadata_filter_format", "sql")
@@ -298,7 +308,7 @@ def search_semantic_index(
     database_name: str | None = None,
     schema_name: str | None = None,
 ) -> list[dict]:
-    """Vector search via the injected :class:`~nemo_retriever.retriever.Retriever`.
+    """Vector search via the injected :class:`~auto_ontology.utils.retriever.Retriever`.
 
     Runs one query **per label** with a server-side metadata filter on
     ``label`` + ``database_name`` + ``schema_name``, requesting exactly the

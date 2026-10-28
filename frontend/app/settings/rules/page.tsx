@@ -5,13 +5,13 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { rulesApi } from '@/api/rules';
 import { Placeholders } from '@/assets/images/placeholders';
 import { Button } from '@/common/Button';
 import { formatDate } from '@/common/date';
 import { EmptyState } from '@/common/EmptyState';
-import { GlobalSearchModal } from '@/common/GlobalSearch';
 import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -63,10 +63,10 @@ const DELETE_OPTIONS = [
 ];
 
 /**
- * Rules are not authored here: they are built from a global search, over the
- * items the search returns. So this screen only lists them, and the search is
- * offered from the empty state alone — a create button on a page with results
- * of its own would have nothing to create a rule over.
+ * Rules are not authored here: they are built on the Discovery page, over the
+ * items a search there returns. So this screen only lists them, and it points
+ * at Discovery from the empty state alone — a create button on a page with
+ * results of its own would have nothing to create a rule over.
  *
  * A card per rule, and deliberately not a link. A rule has no page of its own
  * to open: what it applies is already on the card, and the rest of it — the
@@ -90,7 +90,7 @@ const DELETE_OPTIONS = [
  * goes to the backend and starts the paging over.
  */
 export default function RulesSettingsPage() {
-	const [searchOpen, setSearchOpen] = useState(false);
+	const router = useRouter();
 	const [information, setInformation] = useState<Rule | null>(null);
 	const [renaming, setRenaming] = useState<Rule | null>(null);
 	const [name, setName] = useState('');
@@ -255,14 +255,14 @@ export default function RulesSettingsPage() {
 							description={
 								debouncedQuery
 									? undefined
-									: 'Rules are created from the global search. Search for the items you would like to tag, then create a new rule from the results.'
+									: 'Rules are created on the Discovery page. Search for the items you would like to tag, then create a new rule from the results.'
 							}
 							action={
 								debouncedQuery
 									? undefined
 									: {
-											label: 'Open Global Search',
-											onClick: () => setSearchOpen(true),
+											label: 'Go to Discovery',
+											onClick: () => router.push('/discovery'),
 										}
 							}
 						/>
@@ -476,8 +476,6 @@ export default function RulesSettingsPage() {
 				confirming={deleting}
 				error={deleteError}
 			/>
-
-			<GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
 		</main>
 	);
 }

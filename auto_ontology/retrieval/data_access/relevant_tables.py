@@ -26,7 +26,7 @@ from auto_ontology.retrieval.data_access.semantic_search import (
 )
 
 if TYPE_CHECKING:
-    from nemo_retriever.graph.retriever import Retriever
+    from auto_ontology.utils.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,15 @@ def _parse_table_text(text: str) -> dict:
         columns_match = re.search(r"columns:\s*(.+)$", text)
         if columns_match:
             columns_str = columns_match.group(1).strip()
-            column_pattern = r"\{name:\s*([^,}]+)(?:,\s*data_type:\s*([^,}]+))?(?:,\s*description:\s*([^}]+))?\}"
+            # A type runs to the description or the closing brace. It may hold
+            # commas in nested brackets of any kind (Tuple(Decimal(12,2), String),
+            # map<string,int>), and no SQL type holds a brace. It may also be
+            # empty: the table text writes "data_type: " for a column without one.
+            # The description is found by the exact ", description: " the table
+            # text writes, since a struct may have a field of that name and
+            # connectors spell struct types without spaces
+            # (struct<a:int,description:string>).
+            column_pattern = r"\{name:\s*([^,}]+)(?:,\s*data_type:\s*(.*?))?(?:, description: ([^}]+))?\}"
             columns = []
             for match in re.finditer(column_pattern, columns_str):
                 column = {

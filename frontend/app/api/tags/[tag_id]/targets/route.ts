@@ -23,14 +23,13 @@ export const GET = withPermission({ tag: ['manage'] })(async (req) =>
 
 // tagsApi.attach — label an object with an existing tag.
 //
-// `catalog: ['edit']` rather than `tag: ['manage']`, which is what guards the
-// tag list itself: curating the vocabulary is an admin's job, but applying a
-// tag that already exists is an edit of the object, no different from editing
-// its description. Viewers hold that permission and edit terms with it.
+// The backend checks edit permission against the target's account role or
+// owner group. Catalog read admits an authenticated owner-group viewer to that
+// check without granting writes to targets owned by another user or group.
 //
 // The identity goes down for the backend's `tagged_by`, which the tag's page
 // shows in its "Tagged By" column — the one thing distinguishing a label a
 // person applied from one a rule matched.
-export const POST = withPermission({ catalog: ['edit'] })(async (req, { user }) =>
+export const POST = withPermission({ catalog: ['read'] })(async (req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );

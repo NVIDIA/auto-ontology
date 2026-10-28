@@ -35,6 +35,7 @@ export type SinglePageViewProps = {
 		rowId: string,
 		certified: boolean,
 	) => void | Promise<void>;
+	canCertifyDataTableRow?: (sectionId: string, rowId: string, ownerId: string | null) => boolean;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 	headerActions?: ReactNode;
@@ -54,6 +55,7 @@ export const SinglePageView = ({
 	onSuggestDescription,
 	onCertificationChange,
 	onDataTableCertificationChange,
+	canCertifyDataTableRow,
 	inlineSaveSectionId,
 	hideEditToolbar,
 	headerActions,
@@ -133,6 +135,7 @@ export const SinglePageView = ({
 				onSuggestDescription={onSuggestDescription}
 				onCertificationChange={onCertificationChange}
 				onDataTableCertificationChange={onDataTableCertificationChange}
+				canCertifyDataTableRow={canCertifyDataTableRow}
 				inlineSaveSectionId={inlineSaveSectionId}
 				hideEditToolbar={hideEditToolbar}
 				headerActions={headerActions}

@@ -109,10 +109,24 @@ def test_no_capture_raised() -> None:
 #: still fails. Anything added needs a DECISIONS.md record first — see B10.
 OPTIONAL_KEYS: dict[str, frozenset[str]] = {
     "datasources.fetch_item_by_id": frozenset(
-        {"created", "description", "description_certified", "imported_id", "schema_id"}
+        {
+            "created",
+            "description",
+            "description_certified",
+            "imported_id",
+            "owner_id",
+            "schema_id",
+        }
     ),
     "datasources.fetch_node_properties_by_id": frozenset(
-        {"created", "description", "description_certified", "imported_id", "schema_id"}
+        {
+            "created",
+            "description",
+            "description_certified",
+            "imported_id",
+            "owner_id",
+            "schema_id",
+        }
     ),
 }
 
