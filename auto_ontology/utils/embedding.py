@@ -10,6 +10,10 @@ embedding models are asymmetric, so a stored row must be embedded as a
 ``passage`` and a search string as a ``query``. Mixing them up raises no error
 -- it just makes every search worse.
 
+Some deployments ignore ``input_type`` (see ``_TEXT_PREFIXED_MODELS``); for
+those the type is written into the text as a ``query: `` / ``passage: ``
+prefix, the instruction the model was trained with.
+
 Ingest and query MUST use the same model; a mismatch produces garbage results
 or a dimension error from pgvector.
 """
@@ -39,6 +43,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 InputType = Literal["passage", "query"]
+
+# Model ids (matched as substrings) whose endpoint drops ``input_type`` and
+# needs the prefix in the text instead. Without it every vector shares one
+# dominant direction and similarity ranking is close to random; models that do
+# honour ``input_type`` get slightly worse with the prefix added on top.
+_TEXT_PREFIXED_MODELS = ("nemotron-3.5-embed",)
 
 # Each field falls back to DEFAULT_MODELS_<field>.
 _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
@@ -137,6 +147,12 @@ def _client(params: EmbedParams) -> OpenAI:
         return client
 
 
+def _text_prefix(model_name: str, input_type: InputType) -> str:
+    if any(model in model_name for model in _TEXT_PREFIXED_MODELS):
+        return f"{input_type}: "
+    return ""
+
+
 def embed_texts(
     texts: list[str],
     params: EmbedParams,
@@ -164,11 +180,12 @@ def embed_texts(
     if retries is not None:
         client = client.with_options(max_retries=retries)
     batches = list(itertools.batched(to_send, max(1, params.inference_batch_size)))
+    prefix = _text_prefix(params.model_name, input_type)
 
     def _embed_batch(indices: tuple[int, ...]) -> None:
         response = client.embeddings.create(
             model=params.model_name,
-            input=[stripped[i] for i in indices],
+            input=[prefix + stripped[i] for i in indices],
             encoding_format="float",
             extra_body={
                 "input_type": input_type,
