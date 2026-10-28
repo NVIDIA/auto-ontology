@@ -81,6 +81,28 @@ def test_hosted_pdf_needs_pillow_as_well_as_pdfium(
     assert ingest.required_extra("report.pdf") == "unstructured-hosted"
 
 
+def test_long_text_files_are_split_under_the_row_limit(tmp_path: Path) -> None:
+    from unstructured_ao.text_extract import MAX_CHUNK_CHARS
+
+    paragraphs = [f"Paragraph {i}. " + "word " * 300 for i in range(20)]
+    path = tmp_path / "long.txt"
+    path.write_text("\n\n".join(paragraphs), encoding="utf-8")
+
+    rows = extract_chunks(str(path))
+
+    assert len(rows) > 1
+    assert all(len(row["text"]) <= MAX_CHUNK_CHARS for row in rows)
+    assert "Paragraph 0." in rows[0]["text"]
+    assert "Paragraph 19." in rows[-1]["text"]
+
+
+def test_split_text_slices_a_run_with_no_breaks() -> None:
+    from unstructured_ao.text_extract import split_text
+
+    assert split_text("x" * 25, 10) == ["x" * 10, "x" * 10, "x" * 5]
+    assert split_text("   ", 10) == []
+
+
 class _FakeConnection:
     @contextmanager
     def begin(self) -> Iterator[object]:

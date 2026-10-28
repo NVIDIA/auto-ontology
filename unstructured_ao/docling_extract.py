@@ -161,7 +161,13 @@ def _page_rows(document: Any, source_id: str) -> list[dict[str, Any]]:
 
 
 def _section_rows(items: list[tuple[Any, int]], source_id: str) -> list[dict[str, Any]]:
-    """One row per heading-delimited section, with ancestor headings included."""
+    """One row per heading-delimited section, with ancestor headings included.
+
+    A section longer than :data:`MAX_CHUNK_CHARS` becomes several rows, each
+    carrying the same headings so it still says where it came from.
+    """
+    from unstructured_ao.text_extract import MAX_CHUNK_CHARS, split_text
+
     rows: list[dict[str, Any]] = []
     headings: dict[int, str] = {}
     body: list[str] = []
@@ -169,15 +175,17 @@ def _section_rows(items: list[tuple[Any, int]], source_id: str) -> list[dict[str
     def flush() -> None:
         if not body:
             return
-        parts = [headings[level] for level in sorted(headings)] + body
-        rows.append(
-            {
-                "text": "\n".join(parts),
-                "source_id": source_id,
-                "element_type": "text",
-                "page_number": None,
-            }
-        )
+        prefix = "\n".join(headings[level] for level in sorted(headings))
+        budget = max(MAX_CHUNK_CHARS - len(prefix) - 1, MAX_CHUNK_CHARS // 2)
+        for piece in split_text("\n".join(body), budget):
+            rows.append(
+                {
+                    "text": f"{prefix}\n{piece}" if prefix else piece,
+                    "source_id": source_id,
+                    "element_type": "text",
+                    "page_number": None,
+                }
+            )
         body.clear()
 
     for item, level in items:

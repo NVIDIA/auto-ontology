@@ -167,6 +167,24 @@ def test_page_rows_split_unpaged_text_by_section_with_heading_context() -> None:
     ]
 
 
+def test_a_long_section_is_split_and_each_piece_keeps_its_headings() -> None:
+    from unstructured_ao.text_extract import MAX_CHUNK_CHARS
+
+    paragraph = "word " * (MAX_CHUNK_CHARS // 10)
+    doc = FakeDoc(
+        items=[
+            FakeItem("Handbook", "title", None, 1),
+            *[FakeItem(paragraph, "text", None, 2) for _ in range(5)],
+        ]
+    )
+
+    rows = _page_rows(doc, "x")
+
+    assert len(rows) > 1
+    assert all(len(row["text"]) <= MAX_CHUNK_CHARS for row in rows)
+    assert all(row["text"].startswith("Handbook\n") for row in rows)
+
+
 def test_table_rows_use_markdown() -> None:
     doc = FakeDoc(tables=[FakeTable(markdown="| a | b |\n| - | - |", page=4)])
     rows = _table_rows(doc, "x")
