@@ -185,6 +185,24 @@ def test_a_long_section_is_split_and_each_piece_keeps_its_headings() -> None:
     assert all(row["text"].startswith("Handbook\n") for row in rows)
 
 
+def test_an_oversized_heading_prefix_still_fits_the_row_limit() -> None:
+    from unstructured_ao.text_extract import MAX_CHUNK_CHARS
+
+    doc = FakeDoc(
+        items=[
+            FakeItem("H" * MAX_CHUNK_CHARS, "title", None, 1),
+            FakeItem("Deepest heading", "section_header", None, 2),
+            FakeItem("word " * (MAX_CHUNK_CHARS // 4), "text", None, 3),
+        ]
+    )
+
+    rows = _page_rows(doc, "x")
+
+    assert rows
+    assert all(len(row["text"]) <= MAX_CHUNK_CHARS for row in rows)
+    assert all("Deepest heading\n" in row["text"] for row in rows)
+
+
 def test_table_rows_use_markdown() -> None:
     doc = FakeDoc(tables=[FakeTable(markdown="| a | b |\n| - | - |", page=4)])
     rows = _table_rows(doc, "x")

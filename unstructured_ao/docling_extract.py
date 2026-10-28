@@ -176,7 +176,10 @@ def _section_rows(items: list[tuple[Any, int]], source_id: str) -> list[dict[str
         if not body:
             return
         prefix = "\n".join(headings[level] for level in sorted(headings))
-        budget = max(MAX_CHUNK_CHARS - len(prefix) - 1, MAX_CHUNK_CHARS // 2)
+        # At most half a row, keeping the end: the deepest heading names the
+        # section, and the body keeps room to say something.
+        prefix = prefix[-(MAX_CHUNK_CHARS // 2) :].lstrip()
+        budget = MAX_CHUNK_CHARS - len(prefix) - 1
         for piece in split_text("\n".join(body), budget):
             rows.append(
                 {
