@@ -23,7 +23,23 @@ import type { Prisma } from '@/generated/prisma/client';
 /** `format` alone, without zod's very long uuid/date-time validation patterns. */
 const uuid = () => z.string().meta({ format: 'uuid' });
 const timestamp = () => z.string().meta({ format: 'date-time' });
-const jsonValueSchema: z.ZodType<Prisma.JsonValue> = z.json();
+/**
+ * Recursive, so it is named: the generator publishes it as a component schema.
+ * Not `z.json()`, whose recursion points at an unnamed inner schema.
+ */
+export const jsonValueSchema: z.ZodType<Prisma.JsonValue> = z
+	.union([
+		z.string(),
+		z.number(),
+		z.boolean(),
+		z.null(),
+		z.array(z.lazy(() => jsonValueSchema)),
+		z.record(
+			z.string(),
+			z.lazy(() => jsonValueSchema),
+		),
+	])
+	.meta({ id: 'JsonValue' });
 
 /** `NextResponse.json({ error }, { status })`, the shape every handler uses. */
 export const errorSchema = z.object({ error: z.string() });

@@ -1727,6 +1727,23 @@
               }
             }
           },
+          "400": {
+            "description": "The body is not JSON, or `enabled` is not a boolean.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "401": {
             "description": "No authenticated caller could be resolved"
           },
@@ -2516,7 +2533,7 @@
                           "metadata": {
                             "anyOf": [
                               {
-                                "$ref": "#/$defs/__schema0"
+                                "$ref": "#/components/schemas/JsonValue"
                               },
                               {
                                 "type": "null"
@@ -2551,40 +2568,7 @@
                     "updated_at",
                     "messages"
                   ],
-                  "additionalProperties": false,
-                  "$defs": {
-                    "__schema0": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/$defs/__schema0"
-                          }
-                        },
-                        {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "additionalProperties": {
-                            "$ref": "#/$defs/__schema0"
-                          }
-                        }
-                      ]
-                    }
-                  }
+                  "additionalProperties": false
                 }
               }
             }
@@ -2776,7 +2760,7 @@
                   "metadata": {
                     "anyOf": [
                       {
-                        "$ref": "#/$defs/__schema0"
+                        "$ref": "#/components/schemas/JsonValue"
                       },
                       {
                         "type": "null"
@@ -2784,40 +2768,7 @@
                     ]
                   }
                 },
-                "required": ["role"],
-                "$defs": {
-                  "__schema0": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "array",
-                        "items": {
-                          "$ref": "#/$defs/__schema0"
-                        }
-                      },
-                      {
-                        "type": "object",
-                        "propertyNames": {
-                          "type": "string"
-                        },
-                        "additionalProperties": {
-                          "$ref": "#/$defs/__schema0"
-                        }
-                      }
-                    ]
-                  }
-                }
+                "required": ["role"]
               }
             }
           }
@@ -2881,7 +2832,7 @@
                     "metadata": {
                       "anyOf": [
                         {
-                          "$ref": "#/$defs/__schema0"
+                          "$ref": "#/components/schemas/JsonValue"
                         },
                         {
                           "type": "null"
@@ -2904,40 +2855,7 @@
                     "metadata",
                     "created_at"
                   ],
-                  "additionalProperties": false,
-                  "$defs": {
-                    "__schema0": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/$defs/__schema0"
-                          }
-                        },
-                        {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "additionalProperties": {
-                            "$ref": "#/$defs/__schema0"
-                          }
-                        }
-                      ]
-                    }
-                  }
+                  "additionalProperties": false
                 }
               }
             }
@@ -11330,6 +11248,37 @@
         "required": ["id"],
         "title": "IdRef",
         "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JsonValue"
+            }
+          },
+          {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            }
+          }
+        ]
       },
       "ListResponse_DatabaseSummary_": {
         "additionalProperties": true,

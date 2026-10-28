@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
-import { enabledFlagSchema } from '@/lib/openapiSchemas';
+import { enabledFlagSchema, errorSchema } from '@/lib/openapiSchemas';
 import type { OpenApiRoute } from '@/types/openapi';
 
 export const unstructuredFlowBody = z.object({ enabled: z.boolean() });
@@ -24,6 +24,10 @@ export const openapi: OpenApiRoute = {
 		},
 		responses: {
 			200: { description: 'The stored flag.', schema: enabledFlagSchema },
+			400: {
+				description: 'The body is not JSON, or `enabled` is not a boolean.',
+				schema: errorSchema,
+			},
 		},
 	},
 };
