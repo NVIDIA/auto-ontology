@@ -266,3 +266,15 @@ def test_important_columns_include_full_details_and_ignore_structural_paths() ->
     assert "Semantic match: District Name" in rendered
     assert "Removed Table Value" not in rendered
     assert "structural bridge" not in rendered
+
+
+def test_the_sql_tool_description_does_not_ask_for_the_models_reasoning() -> None:
+    # The docstring is the tool description the model reads. Claude Opus 5.5
+    # refused every SQL-generation call while it said ``thought`` was there
+    # "to drain reasoning".
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    description = convert_to_openai_tool(SQLGenerationModel)["function"]["description"]
+
+    assert "reasoning" not in description.lower()
+    assert "drain" not in description.lower()
