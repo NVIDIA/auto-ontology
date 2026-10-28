@@ -521,6 +521,8 @@ def test_first_submit_aligns_mixed_decimal_and_float_columns():
     sql = "SELECT a, b FROM aliens"
     sess.path_state["result_numeric_kinds"] = ["decimal", "float"]
     sess.path_state["result_numeric_kinds_sql"] = sql
+    # Not this result's digest, so the table swap is rejected and the float
+    # column is still aligned to numeric.
     sess.path_state["result_values_digest"] = "digest"
     sess.path_state["relevant_tables"] = []
 
@@ -697,3 +699,186 @@ def test_first_submit_kind_follows_a_stabilized_numeric_average():
     assert "DOUBLE PRECISION" not in action.sql.upper()
     assert sess.first_submit_numeric_kind == "decimal"
     assert sess.first_submit_values_digest == "pre-stabilize"
+
+
+def _step_follow_up(sess: InteractiveSessionState, sql: str) -> SubmitSQLAction:
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        action = step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+    assert isinstance(action, SubmitSQLAction)
+    return action
+
+
+class _TableConnector:
+    dialect = "postgres"
+    database_name = "alien"
+
+    def __init__(self, frame: object, *, fail: bool = False) -> None:
+        self.frame = frame
+        self.fail = fail
+        self.executed: list[str] = []
+
+    def execute(self, sql: str, **_: object) -> object:
+        self.executed.append(sql)
+        if self.fail:
+            raise RuntimeError("boom")
+        return self.frame
+
+
+def _table_session(
+    connector: _TableConnector,
+    sql: str,
+    kinds: list,
+    *,
+    digest: str | None,
+    rows: int = 1,
+) -> InteractiveSessionState:
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
+    sess.path_state["result_numeric_kinds"] = kinds
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = digest
+    sess.path_state["result_row_count"] = rows
+    sess.path_state["relevant_tables"] = []
+    return sess
+
+
+def test_table_first_submit_swaps_decimal_and_float_columns() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    original = pd.DataFrame({"a": [Decimal("1.50")], "b": [1.25], "name": ["n"]})
+    swapped = pd.DataFrame({"a": [1.5], "b": [Decimal("1.25")], "name": ["n"]})
+    connector = _TableConnector(swapped)
+    sql = "SELECT a, b, name FROM aliens"
+    sess = _table_session(
+        connector,
+        sql,
+        ["decimal", "float", None],
+        digest=result_values_digest(original),
+    )
+
+    action = _step_follow_up(sess, sql)
+
+    assert (
+        action.sql
+        == "SELECT CAST(a AS DOUBLE PRECISION), CAST(b AS DECIMAL), name FROM aliens"
+    )
+    assert connector.executed == [action.sql]
+    assert sess.first_submit_numeric_kind == "decimal"
+    assert sess.path_state["result_numeric_kinds"] == ["float", "decimal", None]
+
+
+def test_single_column_table_swaps_decimal_to_double() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    original = pd.DataFrame({"v": [Decimal("1.50"), Decimal("2.25")]})
+    connector = _TableConnector(pd.DataFrame({"v": [1.5, 2.25]}))
+    sql = "SELECT v FROM aliens"
+    sess = _table_session(
+        connector,
+        sql,
+        ["decimal"],
+        digest=result_values_digest(original),
+        rows=2,
+    )
+
+    action = _step_follow_up(sess, sql)
+
+    assert action.sql == "SELECT CAST(v AS DOUBLE PRECISION) FROM aliens"
+    assert sess.first_submit_numeric_kind == "float"
+
+
+def test_scalar_first_submit_does_not_swap_numeric_type() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    frame = pd.DataFrame({"v": [Decimal("1.50")]})
+    connector = _TableConnector(frame)
+    sql = "SELECT AVG(x) AS v FROM aliens"
+    sess = _table_session(
+        connector, sql, ["decimal"], digest=result_values_digest(frame), rows=1
+    )
+
+    action = _step_follow_up(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
+    assert sess.first_submit_numeric_kind == "decimal"
+
+
+def test_table_without_fractional_numbers_is_not_swapped() -> None:
+    import pandas as pd
+
+    connector = _TableConnector(pd.DataFrame({"id": [1], "name": ["n"]}))
+    sql = "SELECT id, name FROM aliens"
+    sess = _table_session(connector, sql, [None, None], digest="rows")
+
+    action = _step_follow_up(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
+
+
+def test_table_swap_that_changes_values_keeps_the_generated_sql() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    original = pd.DataFrame({"v": [Decimal("1.50"), Decimal("2.25")]})
+    connector = _TableConnector(pd.DataFrame({"v": [Decimal("9.99"), Decimal("2.25")]}))
+    sql = "SELECT v FROM aliens"
+    sess = _table_session(
+        connector,
+        sql,
+        ["decimal"],
+        digest=result_values_digest(original),
+        rows=2,
+    )
+
+    action = _step_follow_up(sess, sql)
+
+    assert action.sql == sql
+    assert sess.first_submit_numeric_kind == "decimal"
+
+
+def test_table_swap_that_does_not_run_keeps_the_generated_sql() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    frame = pd.DataFrame({"a": [Decimal("1.50")], "b": [1.25]})
+    connector = _TableConnector(frame, fail=True)
+    sql = "SELECT a, b FROM aliens"
+    sess = _table_session(
+        connector,
+        sql,
+        ["decimal", "float"],
+        digest=result_values_digest(frame),
+    )
+
+    action = _step_follow_up(sess, sql)
+
+    assert action.sql == sql
+    assert sess.first_submit_numeric_kind == "decimal"

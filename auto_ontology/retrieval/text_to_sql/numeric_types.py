@@ -21,6 +21,10 @@ this module offers deterministic, SQL-level levers:
 * :func:`flip_numeric_output_types` moves the numeric output columns of a
   top-level ``SELECT`` to the *other* type, for the one retry a benchmark
   allows after a wrong answer.
+* :func:`swap_numeric_output_types` does both directions at once: ``decimal``
+  columns become ``double precision`` and ``float`` columns become ``numeric``.
+  The interactive coordinator uses it on a non-debug submit whose result is a
+  table.
 * :func:`order_string_aggregates` adds ``ORDER BY`` to a ``STRING_AGG`` that
   has none. The grader compares the concatenated text exactly, and an
   unordered aggregate is not a stable string.
@@ -432,6 +436,30 @@ def flip_numeric_output_types(
     return tree.sql(dialect="postgres") if converted else None
 
 
+def swap_numeric_output_types(
+    sql: str,
+    dialect: Optional[str],
+    kinds: Sequence[Optional[NumericKind]],
+) -> Optional[str]:
+    """Cast every fractional output column to the other numeric type.
+
+    ``decimal`` columns become ``double precision`` and ``float`` columns
+    become ``numeric``, in one statement. *kinds* are the types of the
+    original projections; both rewrites read that list, so a column wrapped
+    by the first pass is not wrapped again. Returns ``None`` when no column
+    can be converted. The same shapes :func:`flip_numeric_output_types`
+    refuses (not Postgres, not a plain ``SELECT``, a ``*``) are refused here.
+    """
+    swapped = sql
+    changed = False
+    for target in ("double", "numeric"):
+        step = flip_numeric_output_types(swapped, dialect, kinds, target)
+        if step:
+            swapped = step
+            changed = True
+    return swapped if changed else None
+
+
 def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
     """Give every unordered ``STRING_AGG`` an ``ORDER BY`` on its own value.
 
@@ -811,4 +839,5 @@ __all__ = [
     "order_string_aggregates",
     "result_values_digest",
     "sum_decimal_casts_to_integer",
+    "swap_numeric_output_types",
 ]

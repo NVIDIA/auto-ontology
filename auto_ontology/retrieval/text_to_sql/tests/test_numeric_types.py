@@ -27,6 +27,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     order_string_aggregates,
     result_values_digest,
     sum_decimal_casts_to_integer,
+    swap_numeric_output_types,
 )
 
 
@@ -236,6 +237,36 @@ def test_only_columns_that_need_converting_are_wrapped() -> None:
     assert flipped == "SELECT a, CAST(b AS DECIMAL) FROM t"
 
 
+def test_swap_moves_decimal_to_double_and_float_to_numeric() -> None:
+    swapped = swap_numeric_output_types(
+        "SELECT a, b, name FROM t",
+        "postgres",
+        ["decimal", "float", None],
+    )
+    assert (
+        swapped == "SELECT CAST(a AS DOUBLE PRECISION), CAST(b AS DECIMAL), name FROM t"
+    )
+
+
+def test_swap_of_one_kind_only_converts_that_kind() -> None:
+    assert (
+        swap_numeric_output_types("SELECT a FROM t", "postgres", ["decimal"])
+        == "SELECT CAST(a AS DOUBLE PRECISION) FROM t"
+    )
+    assert (
+        swap_numeric_output_types("SELECT a AS v FROM t", "postgres", ["float"])
+        == "SELECT CAST(a AS DECIMAL) AS v FROM t"
+    )
+
+
+def test_swap_leaves_a_non_numeric_table_alone() -> None:
+    assert (
+        swap_numeric_output_types("SELECT a, b FROM t", "postgres", [None, None])
+        is None
+    )
+    assert swap_numeric_output_types("SELECT * FROM t", "postgres", ["float"]) is None
+
+
 def test_cte_queries_are_flipped_at_the_top_level_only() -> None:
     flipped = flip_numeric_output_types(
         "WITH c AS (SELECT AVG(x) AS v FROM t) SELECT v FROM c",
@@ -306,6 +337,7 @@ def test_execution_records_the_kinds_and_the_sql_they_belong_to(monkeypatch) -> 
     assert path_state["result_numeric_kinds"] == ["decimal"]
     assert path_state["result_numeric_kinds_sql"] == "SELECT v FROM t"
     assert path_state["result_values_digest"] == result_values_digest(frame)
+    assert path_state["result_row_count"] == 1
 
 
 def test_execution_leaves_other_callers_untouched(monkeypatch) -> None:
@@ -326,6 +358,7 @@ def test_execution_leaves_other_callers_untouched(monkeypatch) -> None:
     assert "result_numeric_kinds" not in update["path_state"]
     assert "result_numeric_kinds_sql" not in update["path_state"]
     assert "result_values_digest" not in update["path_state"]
+    assert "result_row_count" not in update["path_state"]
 
 
 def test_jsonb_numeric_text_is_reported_for_reconstruction(monkeypatch) -> None:

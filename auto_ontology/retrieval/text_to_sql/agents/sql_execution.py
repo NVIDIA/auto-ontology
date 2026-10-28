@@ -66,6 +66,7 @@ class QueryResponse:
         statement: Optional[str] = None,
         numeric_kinds: Optional[list] = None,
         values_digest: Optional[str] = None,
+        row_count: Optional[int] = None,
         sql_correction: Optional[str] = None,
     ):
         # Per output column ``"float"`` / ``"decimal"`` / ``None``; lets a caller
@@ -73,6 +74,9 @@ class QueryResponse:
         self.numeric_kinds = numeric_kinds or []
         # Type-blind digest of the result values (see ``result_values_digest``).
         self.values_digest = values_digest
+        # How many rows came back. One cell is a scalar; more than one row or
+        # more than one column is a table for numeric-type alignment.
+        self.row_count = row_count
         self.result = result
         self.sliced = sliced
         self.error = error
@@ -154,6 +158,7 @@ def _run_sql(
         statement=sql,
         numeric_kinds=numeric_column_kinds(df) if record_numeric_kinds else [],
         values_digest=result_values_digest(df) if record_numeric_kinds else None,
+        row_count=int(df.shape[0]) if record_numeric_kinds else None,
         sql_correction=sql_correction,
     )
 
@@ -278,4 +283,5 @@ class SQLExecutionAgent(BaseAgent):
             updated_path_state["result_numeric_kinds"] = response_from_db.numeric_kinds
             updated_path_state["result_numeric_kinds_sql"] = executed_sql
             updated_path_state["result_values_digest"] = response_from_db.values_digest
+            updated_path_state["result_row_count"] = response_from_db.row_count
         return {"decision": "valid_sql", "path_state": updated_path_state}

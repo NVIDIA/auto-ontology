@@ -119,6 +119,7 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "result_numeric_kinds",
         "result_numeric_kinds_sql",
         "result_values_digest",
+        "result_row_count",
         "sql_columns",
         "sql_tables",
         "custom_analyses_used",

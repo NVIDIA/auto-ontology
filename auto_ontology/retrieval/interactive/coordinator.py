@@ -54,6 +54,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     order_periods_chronologically,
     result_values_digest,
     sum_decimal_casts_to_integer,
+    swap_numeric_output_types,
 )
 
 logger = logging.getLogger(__name__)
@@ -476,6 +477,32 @@ def _values_digest_for(session: InteractiveSessionState, sql: str) -> str | None
     return path_state.get("result_values_digest")
 
 
+def _result_row_count_for(session: InteractiveSessionState, sql: str) -> int | None:
+    """Row count recorded for *sql*, or None when it belongs to other SQL."""
+    path_state = session.path_state
+    if (path_state.get("result_numeric_kinds_sql") or "") != (sql or "").strip():
+        return None
+    count = path_state.get("result_row_count")
+    if isinstance(count, bool) or not isinstance(count, int):
+        return None
+    return count
+
+
+def _result_is_table(session: InteractiveSessionState, sql: str) -> bool:
+    """Whether *sql*'s result is a table rather than a single cell.
+
+    One row of one column is the scalar case the debug retry already flips.
+    Several columns, or several rows of one column, are a table.
+    """
+    kinds = _numeric_kinds_for(session, sql)
+    if not kinds:
+        return False
+    if len(kinds) > 1:
+        return True
+    rows = _result_row_count_for(session, sql)
+    return rows is not None and rows > 1
+
+
 def _align_mixed_numeric_types(session: InteractiveSessionState, sql: str) -> str:
     """When a query returns a mix of ``decimal`` and ``float`` columns, align the
     ``float`` columns to ``numeric``.
@@ -522,6 +549,56 @@ def _align_mixed_numeric_types(session: InteractiveSessionState, sql: str) -> st
         session.task_id,
     )
     return aligned
+
+
+def _swap_table_numeric_types(session: InteractiveSessionState, sql: str) -> str:
+    """On a non-debug submit, move a table's numeric columns to the other type.
+
+    A table the grader rejected for type never gets a useful second chance when
+    the debug turn rewrites the query. Decimal columns become ``double
+    precision`` and float columns become ``numeric``, and only when the table
+    actually holds fractional numbers. The rewritten statement is kept only
+    when it runs and its rounded values match: a cast that changes the answer
+    is dropped, and mixed columns then fall back to numeric alignment.
+    """
+    kinds = _numeric_kinds_for(session, sql)
+    if not kinds or not ({"decimal", "float"} & set(kinds)):
+        return sql
+    original_digest = _values_digest_for(session, sql)
+    if not original_digest:
+        return sql
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    swapped = swap_numeric_output_types(sql, getattr(connector, "dialect", None), kinds)
+    if not swapped:
+        return sql
+    try:
+        frame = execute_chat_sql(connector, swapped, kind="table numeric type swap")
+    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
+        logger.warning(
+            "[%s] Table numeric type swap did not run (%s); keeping the generated SQL",
+            session.task_id,
+            exc,
+        )
+        return sql
+    if result_values_digest(frame) != original_digest:
+        logger.warning(
+            "[%s] Table numeric type swap changed the result values; keeping the generated SQL",
+            session.task_id,
+        )
+        return sql
+    session.path_state["result_numeric_kinds"] = numeric_column_kinds(frame)
+    session.path_state["result_numeric_kinds_sql"] = swapped.strip()
+    session.path_state["result_values_digest"] = result_values_digest(frame)
+    session.path_state["result_row_count"] = int(getattr(frame, "shape", (0, 0))[0])
+    logger.info(
+        "[%s] Table submit: numeric columns moved to the opposite type",
+        session.task_id,
+    )
+    return swapped
 
 
 def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) -> str:
@@ -842,7 +919,18 @@ def step(
         if turn_type == TurnType.DEBUG and debug_error is None:
             sql = _flip_numeric_types_for_retry(session, sql)
         elif turn_type != TurnType.DEBUG:
-            sql = _align_mixed_numeric_types(session, sql)
+            # A table is swapped before it is submitted. A swap that does not
+            # run, or that changes the values, leaves the SQL in place so mixed
+            # columns can still be unified to numeric. A scalar is not swapped
+            # here; its one retry is the debug turn.
+            if _result_is_table(session, sql):
+                swapped = _swap_table_numeric_types(session, sql)
+                if swapped != sql:
+                    sql = swapped
+                else:
+                    sql = _align_mixed_numeric_types(session, sql)
+            else:
+                sql = _align_mixed_numeric_types(session, sql)
             # Digest stays pre-stabilization. The debug turn compares it with
             # the debug SQL before that SQL is stabilized, so a later rewrite
             # must not replace it.
