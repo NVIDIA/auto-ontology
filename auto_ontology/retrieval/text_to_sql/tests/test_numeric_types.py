@@ -22,7 +22,6 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     numeric_column_kinds,
     opposite_target,
     order_by_leading_aggregate,
-    order_desc_limit_nulls_last,
     order_groups_by_identifier,
     order_periods_chronologically,
     order_string_aggregates,
@@ -568,35 +567,6 @@ def test_debug_order_leaves_the_leading_aggregate_byte_for_byte() -> None:
         "FROM core GROUP BY series_id ORDER BY show_count DESC, series_id"
     )
     assert order_by_leading_aggregate(sql, "postgres") == sql
-
-
-def test_desc_limit_sorts_nulls_last() -> None:
-    sql = "SELECT id, score FROM t ORDER BY score DESC LIMIT 5"
-    assert (
-        order_desc_limit_nulls_last(sql, "postgres")
-        == "SELECT id, score FROM t ORDER BY score DESC NULLS LAST LIMIT 5"
-    )
-
-
-def test_desc_limit_leaves_an_explicit_nulls_last_untouched() -> None:
-    sql = "SELECT id, score FROM t ORDER BY score DESC NULLS LAST LIMIT 5"
-    assert order_desc_limit_nulls_last(sql, "postgres") == sql
-
-
-def test_desc_limit_nulls_last_skips_shapes_that_must_keep_their_order() -> None:
-    unlimited = "SELECT id, score FROM t ORDER BY score DESC"
-    ascending = "SELECT id, score FROM t ORDER BY score ASC LIMIT 5"
-    assert order_desc_limit_nulls_last(unlimited, "postgres") == unlimited
-    assert order_desc_limit_nulls_last(ascending, "postgres") == ascending
-    assert order_desc_limit_nulls_last(unlimited, "sqlite") == unlimited
-
-
-def test_desc_limit_nulls_last_keeps_an_ascending_tie_break() -> None:
-    sql = "SELECT id, score FROM t ORDER BY score DESC, id ASC LIMIT 5"
-    rewritten = order_desc_limit_nulls_last(sql, "postgres")
-    assert "score DESC NULLS LAST" in rewritten
-    assert "id ASC" in rewritten
-    assert "id ASC NULLS" not in rewritten
 
 
 def test_debug_order_leaves_a_rank_and_a_limited_query_alone() -> None:

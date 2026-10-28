@@ -50,7 +50,6 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     numeric_column_kinds,
     opposite_target,
     order_by_leading_aggregate,
-    order_desc_limit_nulls_last,
     order_groups_by_identifier,
     order_periods_chronologically,
     result_values_digest,
@@ -1183,10 +1182,6 @@ def _stabilize_submitted_order(
     _apply(
         float_json_arithmetic(sql, dialect, _real_column_names(session, sql)),
         "float arithmetic for a real column mixed with JSON metrics",
-    )
-    _apply(
-        order_desc_limit_nulls_last(sql, dialect),
-        "nulls last on a descending limit",
     )
     return sql, kinds
 

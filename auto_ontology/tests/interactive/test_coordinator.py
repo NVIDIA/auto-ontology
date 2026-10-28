@@ -354,33 +354,6 @@ def test_mixed_debug_drops_the_float_cast_when_values_change() -> None:
     assert connector.executed  # the cast was probed, then rejected
 
 
-def test_desc_limit_puts_nulls_last_before_submit() -> None:
-    connector = _Connector()
-    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
-    sess.path_state["relevant_tables"] = []
-    sql = "SELECT id, score FROM aliens ORDER BY score DESC LIMIT 5"
-
-    action = _step_follow_up(sess, sql)
-
-    assert (
-        action.sql
-        == "SELECT id, score FROM aliens ORDER BY score DESC NULLS LAST LIMIT 5"
-    )
-    assert connector.executed == [action.sql]
-
-
-def test_desc_limit_nulls_last_is_off_without_alignment() -> None:
-    connector = _Connector()
-    sess = _make_session(connectors=[connector])
-    sess.path_state["relevant_tables"] = []
-    sql = "SELECT id, score FROM aliens ORDER BY score DESC LIMIT 5"
-
-    action = _step_follow_up(sess, sql)
-
-    assert action.sql == sql
-    assert connector.executed == []
-
-
 def test_decimal_first_submit_retries_as_double_precision():
     connector = _Connector()
     sess, sql = _debug_session(connector, first_kind="decimal", kinds=("decimal",))

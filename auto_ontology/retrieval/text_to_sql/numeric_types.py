@@ -34,9 +34,6 @@ this module offers deterministic, SQL-level levers:
 * :func:`order_by_leading_aggregate` is the debug-turn analogue of the type
   flip for sort keys: when the outermost ``ORDER BY`` leads with a later
   aggregate, retry the first aggregate and drop extra tie-break keys.
-* :func:`order_desc_limit_nulls_last` puts ``NULLS LAST`` on a ``DESC`` sort
-  that also has ``LIMIT``. Postgres otherwise returns the null rows first, and
-  the limit never reaches the real top rows.
 * :func:`sum_decimal_casts_to_integer` keeps ``SUM`` of a whole-number cast as
   an integer. ``SUM(int)`` is ``bigint``; ``SUM(numeric)`` is ``numeric``, and
   the grader treats those as different values. A fractional ``numeric`` or
@@ -713,37 +710,6 @@ def order_by_leading_aggregate(sql: str, dialect: Optional[str]) -> str:
     return tree.sql(dialect="postgres")
 
 
-def order_desc_limit_nulls_last(sql: str, dialect: Optional[str]) -> str:
-    """Put nulls after the real rows on a ``DESC`` sort that also has ``LIMIT``.
-
-    Postgres sorts ``ORDER BY expr DESC`` with nulls first, so ``LIMIT``
-    returns those null rows and the non-null top rows never appear. A key
-    that already says ``NULLS LAST`` is left alone. Without a ``LIMIT``,
-    moving nulls reorders the whole result, so that shape is left alone too.
-
-    ``DESC NULLS FIRST`` parses the same as a bare ``DESC`` (nulls first is
-    the Postgres default), so an explicit ``NULLS FIRST`` is rewritten as
-    well. Returns *sql* unchanged when there is nothing to add, so the
-    statement is not re-serialised.
-    """
-    if not _is_postgres(dialect) or not sql.strip():
-        return sql
-    tree = _parse(sql)
-    if tree is None:
-        return sql
-    select = _outermost_select(tree)
-    if select is None or not select.args.get("order") or not select.args.get("limit"):
-        return sql
-    changed = False
-    for ordered in select.args["order"].expressions:
-        if not isinstance(ordered, exp.Ordered):
-            continue
-        if ordered.args.get("desc") and ordered.args.get("nulls_first") is not False:
-            ordered.set("nulls_first", False)
-            changed = True
-    return tree.sql(dialect="postgres") if changed else sql
-
-
 def _is_decimal_cast(cast: exp.Expression) -> bool:
     target = cast.args.get("to")
     return isinstance(target, exp.DataType) and target.this == exp.DataType.Type.DECIMAL
@@ -868,7 +834,6 @@ __all__ = [
     "numeric_column_kinds",
     "opposite_target",
     "order_by_leading_aggregate",
-    "order_desc_limit_nulls_last",
     "order_groups_by_identifier",
     "order_periods_chronologically",
     "order_string_aggregates",
