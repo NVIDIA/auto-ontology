@@ -164,6 +164,9 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
     assert messages[1].content.endswith(evidence)
     assert "MUST follow every instruction" in messages[1].content
     assert "Evidence compliance is strict, not lenient" in messages[2].content
+    assert "Arithmetic that comes from the evidence is correct as written" in (
+        messages[2].content
+    )
 
 
 @patch(

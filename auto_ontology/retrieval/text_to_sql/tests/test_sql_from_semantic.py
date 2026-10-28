@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
@@ -59,6 +61,14 @@ def test_prompt_omits_format_when_absent() -> None:
         ]
     )
     assert "format:" not in rendered
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+def test_prompt_forbids_joins_outside_paths_and_foreign_keys(dialect: str) -> None:
+    system_prompt = create_sql_from_candidates_prompt(dialect=dialect)
+
+    assert "NEVER invent a join" in system_prompt
+    assert "foreign key reference in AVAILABLE TABLES" in system_prompt
 
 
 def test_prompt_does_not_prefer_fewer_joins() -> None:

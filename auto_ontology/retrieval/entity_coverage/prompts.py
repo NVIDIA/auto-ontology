@@ -125,6 +125,11 @@ Guidelines for what to include in required_entity_name:
   AND, if the question contains a qualifying descriptor, include it twice: once alone
   and once combined with the resolved type.
   Example: "who are the active assignees" → ["assignee", "active assignee"]
+- Person rule: "who", "whom" and "whose" ask for a person. Resolve them to the kind of
+  person that fits the question's context (customer, employee, patient, owner, ...),
+  never to the account, order, transaction or other record the question mentions.
+  Example: "who placed the largest order" → ["order", "customer"], not ["order"]
+  Example: "whose account was opened first" → ["account", "account holder"]
 
 Guidelines for what to exclude from required_entity_name:
 - Bare action verbs ("submitted", "approved", "closed", "assigned")

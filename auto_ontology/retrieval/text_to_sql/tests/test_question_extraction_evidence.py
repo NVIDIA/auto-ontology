@@ -52,6 +52,15 @@ def test_prompt_omits_evidence_section_when_not_provided(
     assert "## Evidence for sanitization" not in prompt
 
 
+def test_prompt_resolves_who_to_a_person() -> None:
+    prompt = create_question_extraction_prompt(
+        "Who placed the largest order?", include_subject=False
+    )
+
+    assert '"who", "whom" and "whose" ask for a person' in prompt
+    assert "never to the account, order, transaction or other record" in prompt
+
+
 def test_agent_forwards_state_evidence_without_changing_original_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

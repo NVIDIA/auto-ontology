@@ -443,6 +443,9 @@ ORDER BY total_sales DESC;"""
   Follow hops in order when the path spans more than one table. Once you choose
   a path, every intermediate/bridge table and every listed hop is mandatory.
   Never shorten the path or join its endpoints directly.
+- NEVER invent a join. Every join condition must come from the JOIN PATHS or
+  from a column's foreign key reference in AVAILABLE TABLES. If the tables you
+  need cannot be connected that way, do not join them.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
   trimming only what does not apply. Do NOT copy its aliases.
@@ -990,7 +993,10 @@ def create_intent_validation_prompt(
         "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "
         "exactly? Evidence compliance is strict, not lenient. Flag any missing or "
         "substituted evidence-defined value, column/table mapping, filter, operator, "
-        "or formula as a critical evidence issue."
+        "or formula as a critical evidence issue. Arithmetic that comes from the "
+        "evidence is correct as written: accept its operands, operators and order of "
+        "operations (e.g. `SUM(x) * 100 / COUNT(y)`) and never flag it, even when "
+        "another order looks more conventional or is mathematically equivalent."
         if has_evidence
         else ""
     )
