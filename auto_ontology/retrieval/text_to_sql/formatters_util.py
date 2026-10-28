@@ -80,6 +80,9 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
         line += " | is_nullable: false"
     else:
         line += " | is_nullable: unknown"
+    semantic_fk = column.get("semantic_fk")
+    if semantic_fk:
+        line += f" | foreign_key: {_plain_cell(semantic_fk)}"
     return line
 
 
@@ -301,6 +304,7 @@ _COLUMN_HEADERS = [
     "column",
     "type",
     "is_nullable",
+    "foreign key",
     "description",
     "sample values",
     "format",
@@ -329,6 +333,7 @@ def _column_row(column: Any) -> dict[str, str]:
         "column": _plain_cell(column.get("name", "UNKNOWN")),
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
         "is_nullable": nullable,
+        "foreign key": _plain_cell(column.get("semantic_fk")),
         "description": description,
         "sample values": _plain_cell(
             _format_sample_values(column.get("sample_values"))

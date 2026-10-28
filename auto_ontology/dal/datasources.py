@@ -974,9 +974,52 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     restored so the back-fill isn't a no-op again. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
+    ``semantic_fk`` resolves the referenced attribute back to its owning column
+    and returns that target as ``schema.table.column`` for SQL prompts.
     """
     if not table_ids:
         return []
+    semantic_owner = s.column__has_attribute.alias("semantic_fk_owner")
+    semantic_target = s.catalog_column.alias("semantic_fk_target")
+    semantic_table = s.catalog_table.alias("semantic_fk_table")
+    semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
+    semantic_fk_target = (
+        select(
+            func.concat_ws(
+                ".",
+                semantic_schema.c.name,
+                semantic_table.c.name,
+                semantic_target.c.name,
+            )
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                semantic_owner,
+                semantic_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                semantic_target,
+                semantic_target.c.id == semantic_owner.c.column_id,
+            )
+            .join(
+                semantic_table,
+                semantic_table.c.id == semantic_target.c.table_id,
+            )
+            .join(
+                semantic_schema,
+                semantic_schema.c.id == semantic_table.c.schema_id,
+            )
+        )
+        .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+        .correlate(s.catalog_column)
+        .order_by(
+            semantic_schema.c.name,
+            semantic_table.c.name,
+            semantic_target.c.name,
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
     try:
         rows = store().query_read(
             select(
@@ -992,6 +1035,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
+                semantic_fk_target.label("semantic_fk"),
             )
             .select_from(
                 _table_join().join(
@@ -1036,6 +1080,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
+                    "semantic_fk": row["semantic_fk"],
                 }
             )
     return list(tables.values())

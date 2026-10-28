@@ -203,7 +203,7 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
-    """Whether a relevant table lacks samples or nullability metadata."""
+    """Whether a relevant table lacks samples, nullability, or semantic-FK metadata."""
     columns = table.get("columns") or []
     has_samples = any(
         isinstance(column, dict) and column.get("sample_values") for column in columns
@@ -211,7 +211,12 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
     has_complete_nullability = bool(columns) and all(
         isinstance(column, dict) and "is_nullable" in column for column in columns
     )
-    return not has_samples or not has_complete_nullability
+    has_complete_semantic_fks = bool(columns) and all(
+        isinstance(column, dict) and "semantic_fk" in column for column in columns
+    )
+    return (
+        not has_samples or not has_complete_nullability or not has_complete_semantic_fks
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -501,26 +506,7 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
-        # --- 4a. Back-fill rich per-column metadata when it is incomplete ---
-        # Tables retrieved from the vector index carry only name/data_type/description;
-        # sample_values and is_nullable live in the store's row for that table.
-        # Fetch rich rows whenever either signal is missing, then merge per-column
-        # so nothing already present is overwritten.
-        metadata_incomplete_ids = [
-            str(t["id"])
-            for t in relevant_tables
-            if t.get("id") and _needs_column_metadata_backfill(t)
-        ]
-        if metadata_incomplete_ids:
-            enriched = fetch_tables_by_ids(metadata_incomplete_ids)
-            relevant_tables = _merge_tables(relevant_tables, enriched)
-            self.logger.info(
-                "Back-filled column metadata for %d/%d table(s)",
-                len(enriched),
-                len(metadata_incomplete_ids),
-            )
-
-        # --- 4b. Add tables referenced by custom analyses via the store ---
+        # --- 4a. Add tables referenced by custom analyses via the store ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
@@ -532,7 +518,7 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in ca_linked_tables],
             )
 
-        # --- 4c. Enrich SqlAttributes with SQL + term from the store ---
+        # --- 4b. Enrich SqlAttributes with SQL + term from the store ---
         sql_attributes: list[dict] = []
         if sql_attributes_raw:
             sa_ids = [
@@ -555,7 +541,7 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in sa_linked_tables],
             )
 
-        # --- 4d. Add tables linked to the subject Term ---
+        # --- 4c. Add tables linked to the subject Term ---
         subject_term = path_state.get("retrieved_subject_term")
         subject_term_id = (
             str(subject_term.get("id") or "") if isinstance(subject_term, dict) else ""
@@ -582,7 +568,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
-        # --- 4e. Add the tables value anchors point at ---
+        # --- 4d. Add the tables value anchors point at ---
         # An anchor reports the table its value was matched in, and retrieval
         # reaches that table by its own route or not at all — §6 below can only
         # discard anchors, never act on one. Added here rather than beside §5c's
@@ -621,6 +607,25 @@ class CandidatePreparationAgent(BaseAgent):
                 for table in relevant_tables
                 if table.get("database_name") == target_db
             ]
+
+        # --- 4e. Back-fill rich per-column metadata after every table source ---
+        # Tables retrieved from the vector index, custom analyses, or SQL
+        # attributes may carry only name/data_type/description. Fetch rich rows
+        # whenever samples, nullability, or semantic-FK targets are incomplete,
+        # then merge per-column before the relevance filter reads the summaries.
+        metadata_incomplete_ids = [
+            str(table["id"])
+            for table in relevant_tables
+            if table.get("id") and _needs_column_metadata_backfill(table)
+        ]
+        if metadata_incomplete_ids:
+            enriched = fetch_tables_by_ids(metadata_incomplete_ids)
+            relevant_tables = _merge_tables(relevant_tables, enriched)
+            self.logger.info(
+                "Back-filled column metadata for %d/%d table(s)",
+                len(enriched),
+                len(metadata_incomplete_ids),
+            )
 
         # Snapshot the candidate pool BEFORE the relevance filter runs. §5c's
         # bridge reconciliation must only ever restore a table that was
