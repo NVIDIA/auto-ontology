@@ -166,20 +166,22 @@ def link_document_attributes(
         attribute_id = attr["id"]
         query_text = f"{attr['name']}: {attr['description'] or ''}"
 
-        if relink:
-            _clear_existing_links(conn, attribute_id)
-
         try:
             hits = _search_with_retry(vdb, query_text, top_k, document_id)
         except Exception:
             logger.exception(
-                "Vector search failed for attribute %s (%r) — skipping.",
+                "Vector search failed for attribute %s (%r) — skipping, its "
+                "existing links kept.",
                 attribute_id,
                 attr["name"],
             )
             results[attribute_id] = []
             unsearchable.append(attr["name"])
             continue
+
+        # Only once the search has answered, so a failed one keeps the old links.
+        if relink:
+            _clear_existing_links(conn, attribute_id)
 
         linked: list[dict[str, Any]] = []
         for doc, score in hits:
