@@ -16,6 +16,7 @@
 // regardless of whether any browser tab stuck around to watch.
 
 import { stringifySqlResponse } from '@/lib/sqlResponse';
+import type { AnswerSource, DocumentSource } from '@/types/chat';
 
 export const GENERIC_ANSWER_ERROR =
 	'Something went wrong. Please try again, and if the issue persists, contact our support';
@@ -26,6 +27,8 @@ export type AgentAnswer = {
 	sql_code?: string | null;
 	sql_response_from_db?: unknown;
 	thoughts?: string | null;
+	answer_source?: AnswerSource;
+	sources?: DocumentSource[];
 };
 
 export type AnswerMessage = {
@@ -33,6 +36,8 @@ export type AnswerMessage = {
 	sql?: string;
 	sqlResponse?: string;
 	thoughts?: string;
+	answerSource?: AnswerSource;
+	sources?: DocumentSource[];
 };
 
 const hasChartFence = (content: string): boolean =>
@@ -54,16 +59,26 @@ export const isResultMessage = (message: {
 	role: string;
 	content: string;
 	sqlResponse?: string | null;
+	answerSource?: AnswerSource;
 }): boolean =>
-	message.role === 'assistant' && (message.sqlResponse != null || hasChartFence(message.content));
+	message.role === 'assistant' &&
+	(message.answerSource === 'documents' ||
+		message.sqlResponse != null ||
+		hasChartFence(message.content));
 
 /** Message 1 — prose + SQL, ready the moment the agent's answer lands. */
 export const buildSqlAnswerMessage = (answer: AgentAnswer): AnswerMessage | null => {
-	const { response, sql_code: sqlCode, thoughts } = answer;
+	const { response, sql_code: sqlCode, thoughts, answer_source: answerSource, sources } = answer;
 	const prose = stripChartFences(response ?? '');
 
 	if (prose || sqlCode) {
-		return { content: prose, sql: sqlCode ?? undefined, thoughts: thoughts ?? undefined };
+		return {
+			content: prose,
+			sql: sqlCode ?? undefined,
+			thoughts: thoughts ?? undefined,
+			answerSource,
+			sources,
+		};
 	}
 
 	// Nothing to say and no executed result for Message 2 to fall back on —

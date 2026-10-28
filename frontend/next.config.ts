@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
 	output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
 	outputFileTracingRoot: path.resolve(__dirname, '..'),
 	transpilePackages: ['@nvidia/foundations-react-core'],
+	experimental: {
+		// `proxy.ts` runs on /api/*, so Next buffers every request body there and
+		// silently truncates past this size. Default 10MB; a document upload is
+		// allowed 200MB of file plus its multipart framing.
+		proxyClientMaxBodySize: '201mb',
+	},
 	turbopack: {
 		rules: {
 			'*.svg': {

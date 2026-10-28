@@ -38,6 +38,7 @@ model Message {
   content         String       @default("")
   sql_code        String?      @map("sql_code")
   sql_response    String?      @map("sql_response")
+  metadata        Json?
   created_at      DateTime     @default(now()) @map("created_at") @db.Timestamptz
   conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
 
@@ -62,6 +63,8 @@ model Prompt {
 //   visualization_enabled        — "true"/"false", Settings > Agent Settings
 //                                  (auto-generate visualizations for SQL results;
 //                                   a missing row means enabled)
+//   unstructured_flow_enabled    — "true"/"false", Settings > Documents
+//                                  (answer from uploaded documents; missing means disabled)
 //   pii_detection_enabled        — "true"/"false", Settings > PII Settings
 //                                  (classify catalog columns as PII during ingest;
 //                                   a missing row means disabled)

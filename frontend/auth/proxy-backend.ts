@@ -53,8 +53,10 @@ export async function proxyToBackend(
 	if (contentType) headers['Content-Type'] = contentType;
 	if (userId) Object.assign(headers, buildInternalIdentityHeaders(userId));
 
+	// Forwarded as bytes for the same reason the answer is below: a multipart
+	// upload of a PDF or DOCX would not survive a round trip through text.
 	const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-	const body = hasBody ? await req.text() : undefined;
+	const body = hasBody ? await req.arrayBuffer() : undefined;
 
 	const upstream = await fetch(target, { method: req.method, headers, body });
 

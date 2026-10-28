@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
-import { errorSchema, messageSchema } from '@/lib/openapiSchemas';
+import { errorSchema, jsonValueSchema, messageSchema } from '@/lib/openapiSchemas';
 import type { OpenApiRoute } from '@/types/openapi';
 
 const pathParams = z.object({
@@ -22,6 +22,7 @@ export const openapi: OpenApiRoute = {
 				content: z.string().optional(),
 				sql_code: z.string().nullish(),
 				sql_response: z.string().nullish(),
+				metadata: jsonValueSchema.nullish(),
 			}),
 		},
 		responses: {

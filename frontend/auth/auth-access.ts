@@ -25,6 +25,7 @@ const applicationStatements = {
 	zone: ['read', 'manage'],
 	group: ['read', 'manage'],
 	tag: ['read', 'manage'],
+	document: ['read', 'manage'],
 	semanticCompilation: ['read', 'manage'],
 	visualization: ['read', 'manage'],
 	pii: ['read', 'manage'],

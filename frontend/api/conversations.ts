@@ -2,7 +2,13 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Conversation, ChatMessage } from '@/types/chat';
+import type {
+	AnswerSource,
+	ChatMessage,
+	Conversation,
+	DocumentSource,
+	MessageMetadata,
+} from '@/types/chat';
 
 export type ConversationSummary = {
 	id: string;
@@ -19,6 +25,7 @@ export type ConversationDetail = ConversationSummary & {
 		content: string;
 		sql_code: string | null;
 		sql_response: string | null;
+		metadata: unknown | null;
 		created_at: string;
 	}>;
 };
@@ -57,6 +64,7 @@ export const conversationsApi = {
 			content: string;
 			sqlCode?: string | null;
 			sqlResponse?: string | null;
+			metadata?: MessageMetadata | null;
 		},
 	) =>
 		json<{ id: string }>(`/api/conversations/${conversationId}/messages`, {
@@ -70,8 +78,34 @@ export const conversationsApi = {
 				content: msg.content,
 				sql_code: msg.sqlCode ?? null,
 				sql_response: msg.sqlResponse ?? null,
+				metadata: msg.metadata ?? null,
 			}),
 		}),
+};
+
+const parseMessageMetadata = (value: unknown): MessageMetadata | undefined => {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+	const raw = value as Record<string, unknown>;
+	const answerSource: AnswerSource | undefined =
+		raw.answer_source === 'documents' || raw.answer_source === 'database'
+			? raw.answer_source
+			: undefined;
+	const sources: DocumentSource[] | undefined = Array.isArray(raw.sources)
+		? raw.sources.flatMap((item) => {
+				if (typeof item !== 'object' || item === null || Array.isArray(item)) return [];
+				const source = item as Record<string, unknown>;
+				return [
+					{
+						document_id:
+							typeof source.document_id === 'string' ? source.document_id : undefined,
+						chunk_id: typeof source.chunk_id === 'string' ? source.chunk_id : undefined,
+						document: typeof source.document === 'string' ? source.document : undefined,
+						page: typeof source.page === 'number' ? source.page : undefined,
+					},
+				];
+			})
+		: undefined;
+	return answerSource || sources ? { answer_source: answerSource, sources } : undefined;
 };
 
 export function toConversation(detail: ConversationDetail): Conversation {
@@ -84,12 +118,15 @@ export function toConversation(detail: ConversationDetail): Conversation {
 }
 
 export function toMessage(msg: ConversationDetail['messages'][number]): ChatMessage {
+	const metadata = parseMessageMetadata(msg.metadata);
 	return {
 		id: msg.id,
 		role: msg.role,
 		content: msg.content,
 		sql: msg.sql_code ?? undefined,
 		sqlResponse: msg.sql_response ?? undefined,
+		answerSource: metadata?.answer_source,
+		sources: metadata?.sources,
 		timestamp: new Date(msg.created_at).getTime(),
 	};
 }

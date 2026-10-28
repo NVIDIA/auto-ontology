@@ -389,6 +389,37 @@ class Tag(ApiModel):
     modified_by: str | None = None
 
 
+class DocumentStatus(StrEnum):
+    """Where an unstructured document is in ingestion.
+
+    An upload answers before it is ingested, so its row is ``processing`` until
+    the background task writes its chunks, ``extracting`` while it extracts the
+    term and attributes, then ``ready`` — or ``failed`` at either stage, with
+    the reason in ``error``.
+    """
+
+    PROCESSING = "processing"
+    EXTRACTING = "extracting"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class Document(ApiModel):
+    """An unstructured document, as the settings list shows it.
+
+    ``description`` is the user's own, edited from that list. ``ingested_at``
+    is when the file was added, which for an upload precedes its chunks.
+    """
+
+    id: str
+    name: str
+    description: str | None = None
+    file_type: str
+    status: DocumentStatus
+    error: str | None = None
+    ingested_at: datetime
+
+
 class TagTargetType(StrEnum):
     """Which of the five things a tag points at.
 

@@ -16,6 +16,7 @@ from auto_ontology.infra.feature_flags import (
     get_sql_query_timeout_seconds,
     is_distinct_value_probing_enabled,
     is_pii_detection_enabled,
+    is_unstructured_flow_enabled,
     read_configuration_flag,
     read_configuration_int,
 )
@@ -171,6 +172,21 @@ def test_pii_detection_honours_an_explicit_false(
 def test_pii_detection_survives_a_junk_row(monkeypatch: pytest.MonkeyPatch) -> None:
     with _patched(monkeypatch, ("",)):
         assert is_pii_detection_enabled() is False
+
+
+def test_unstructured_flow_defaults_to_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _patched(monkeypatch, None) as cursor:
+        assert is_unstructured_flow_enabled() is False
+    assert cursor.executed[0][1] == ("unstructured_flow_enabled",)
+
+
+def test_unstructured_flow_honours_an_explicit_true(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _patched(monkeypatch, ("true",)):
+        assert is_unstructured_flow_enabled() is True
 
 
 @pytest.mark.parametrize(

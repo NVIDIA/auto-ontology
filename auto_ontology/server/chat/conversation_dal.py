@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from auto_ontology.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
 
@@ -164,6 +166,7 @@ def persist_assistant_result(
     analytics_id: str,
     response: str,
     sql_code: str | None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Persist one final assistant turn and complete its analytics row."""
 
@@ -179,10 +182,16 @@ def persist_assistant_result(
             cur.execute(
                 f"""
                 INSERT INTO {FRONTEND_SCHEMA}.messages
-                    (id, conversation_id, role, content, sql_code, created_at)
-                VALUES (%s, %s, 'assistant', %s, %s, NOW())
+                    (id, conversation_id, role, content, sql_code, metadata, created_at)
+                VALUES (%s, %s, 'assistant', %s, %s, %s, NOW())
                 """,
-                (str(uuid.uuid4()), conversation_str, response, sql_code),
+                (
+                    str(uuid.uuid4()),
+                    conversation_str,
+                    response,
+                    sql_code,
+                    Jsonb(metadata) if metadata is not None else None,
+                ),
             )
             cur.execute(
                 f"""

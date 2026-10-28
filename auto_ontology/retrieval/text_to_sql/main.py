@@ -68,7 +68,12 @@ app = graph.compile()
 # change would leave the two disagreeing about which node is the last gate
 # before execution. See ``_sql_about_to_run``.
 _COMBINED_PRECHECK_IN_GRAPH = "precheck_combined" in graph.nodes
-_TRANSPARENT_NODES = frozenset({"_entry_router"})
+_TRANSPARENT_NODES = frozenset(
+    {
+        "_entry_router",
+        "decide_document_relevance",
+    }
+)
 _MAX_FULL_PIPELINE_ATTEMPTS = 2
 _UNCONSTRUCTABLE_NODE = "unconstructable_sql_response"
 
@@ -82,6 +87,13 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "question_type",
         "calculation_subtype",
         "sql_template",
+        "document_candidates",
+        "document_relation_note",
+        "document_retrieval_error",
+        "document_route_reason",
+        "selected_document_chunks",
+        "document_sources",
+        "use_documents",
         "extracted_evidence",
         "entities",
         "subject",

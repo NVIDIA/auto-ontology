@@ -136,3 +136,38 @@ def test_no_sql_event_leaves_the_turn_unchanged(
     _run_pump([{"type": "error", "message": "boom"}])
 
     assert persisted[0]["sql_code"] is None
+
+
+def test_document_answer_persists_citation_metadata_without_charts(
+    persisted: list[dict[str, Any]],
+) -> None:
+    sources = [
+        {
+            "document_id": "doc-1",
+            "chunk_id": "chunk-1",
+            "document": "policy.pdf",
+            "page": 4,
+        }
+    ]
+
+    slot = _run_pump(
+        [
+            {
+                "type": "result",
+                "answer": {
+                    "response": "Employees receive twenty days.",
+                    "sql_code": "",
+                    "sql_response_from_db": None,
+                    "answer_source": "documents",
+                    "sources": sources,
+                },
+            }
+        ]
+    )
+
+    assert persisted[0]["sql_code"] is None
+    assert persisted[0]["metadata"] == {
+        "answer_source": "documents",
+        "sources": sources,
+    }
+    assert [event["type"] for event in slot.buffer] == ["result"]

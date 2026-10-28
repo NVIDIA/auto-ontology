@@ -18,6 +18,28 @@ spec:
       targetPort: 3001
   selector:
     {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "backend") | nindent 4 }}
+{{- $documents := .Values.backend.documents.persistence }}
+{{- $rwo := and $documents.enabled (eq $documents.accessMode "ReadWriteOnce") }}
+{{- if and $rwo (gt (int .Values.backend.replicas) 1) }}
+{{- fail "backend.replicas > 1 needs backend.documents.persistence.accessMode ReadWriteMany" }}
+{{- end }}
+{{- if $documents.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "auto-ontology.fullname" . }}-documents
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend") | nindent 4 }}
+spec:
+  accessModes: [{{ $documents.accessMode | quote }}]
+  {{- with $documents.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $documents.size }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -27,6 +49,12 @@ metadata:
     {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend") | nindent 4 }}
 spec:
   replicas: {{ .Values.backend.replicas }}
+  {{- if $rwo }}
+  # A ReadWriteOnce volume cannot attach to a new Pod on another node while the
+  # old one still holds it, so a rolling update could hang.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "backend") | nindent 6 }}
@@ -40,6 +68,11 @@ spec:
       {{- end }}
     spec:
       {{- include "auto-ontology.imagePullSecrets" . | nindent 6 }}
+      {{- if $documents.enabled }}
+      # The image runs as uid/gid 1000; a fresh volume is root-owned.
+      securityContext:
+        fsGroup: 1000
+      {{- end }}
       initContainers:
         {{- include "auto-ontology.waitForDeps" . | nindent 8 }}
         {{- include "auto-ontology.waitForCatalogSchema" . | nindent 8 }}
@@ -77,3 +110,12 @@ spec:
             periodSeconds: 15
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+          {{- if $documents.enabled }}
+          volumeMounts:
+            - name: documents
+              mountPath: /data/documents
+      volumes:
+        - name: documents
+          persistentVolumeClaim:
+            claimName: {{ include "auto-ontology.fullname" . }}-documents
+          {{- end }}

@@ -56,6 +56,12 @@ npm-debug.log*
 # Evaluation tooling (local dev-only)
 dev_tools/evaluation/
 
+# ViDoRe v3 HR benchmark corpus: ~51MB of third-party EU publications plus their
+# queries and qrels. Nothing here is ours to redistribute, and the SPDX scan
+# exempts .pdf and .csv, so without this rule `git add .` commits the lot with
+# every check still green.
+unstructured_ao/vidore_v3_hr/
+
 # Local OpenMetadata evaluation environment (Docker volume + rendered configs
 # with secrets); local scratch state, never commit.
 openmetadata-eval/

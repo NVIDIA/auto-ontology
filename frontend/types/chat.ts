@@ -9,7 +9,23 @@ export type ChatMessage = {
 	sql?: string;
 	sqlResponse?: string;
 	thoughts?: string;
+	answerSource?: AnswerSource;
+	sources?: DocumentSource[];
 	timestamp: number;
+};
+
+export type AnswerSource = 'documents' | 'database';
+
+export type DocumentSource = {
+	document_id?: string | null;
+	chunk_id?: string | null;
+	document?: string | null;
+	page?: number | null;
+};
+
+export type MessageMetadata = {
+	answer_source?: AnswerSource;
+	sources?: DocumentSource[];
 };
 
 export type ChatRequest = {
@@ -64,6 +80,8 @@ export type ResultEvent = {
 		sql_code?: string;
 		sql_response_from_db?: SqlResult;
 		thoughts?: string;
+		answer_source?: AnswerSource;
+		sources?: DocumentSource[];
 	};
 };
 

@@ -8,7 +8,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelChat, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
 import { GENERIC_ANSWER_ERROR, buildSqlAnswerMessage, isResultMessage } from '@/lib/answerMessages';
-import type { ChartsEvent, ChatMessage, GraphStep, ResultEvent, StepEvent } from '@/types/chat';
+import type {
+	AnswerSource,
+	ChartsEvent,
+	ChatMessage,
+	DocumentSource,
+	GraphStep,
+	ResultEvent,
+	StepEvent,
+} from '@/types/chat';
 
 let nextId = 0;
 const uid = () => `msg-${Date.now()}-${nextId++}`;
@@ -101,7 +109,16 @@ export const useChat = () => {
 	// stays correct even if this component unmounts mid-stream), so there is
 	// no DB write to do here.
 	const appendAssistantMessage = useCallback(
-		(content: string, extras?: { sql?: string; sqlResponse?: string; thoughts?: string }) => {
+		(
+			content: string,
+			extras?: {
+				sql?: string;
+				sqlResponse?: string;
+				thoughts?: string;
+				answerSource?: AnswerSource;
+				sources?: DocumentSource[];
+			},
+		) => {
 			const assistantMsg: ChatMessage = {
 				id: uid(),
 				role: 'assistant',
@@ -109,6 +126,8 @@ export const useChat = () => {
 				sql: extras?.sql,
 				sqlResponse: extras?.sqlResponse,
 				thoughts: extras?.thoughts,
+				answerSource: extras?.answerSource,
+				sources: extras?.sources,
 				timestamp: Date.now(),
 			};
 			setMessages((prev) => [...prev, assistantMsg]);
@@ -122,7 +141,13 @@ export const useChat = () => {
 	const appendSqlAnswerMessage = useCallback(
 		(answer: ResultEvent['answer']) => {
 			const msg = buildSqlAnswerMessage(answer);
-			if (msg) appendAssistantMessage(msg.content, { sql: msg.sql, thoughts: msg.thoughts });
+			if (msg)
+				appendAssistantMessage(msg.content, {
+					sql: msg.sql,
+					thoughts: msg.thoughts,
+					answerSource: msg.answerSource,
+					sources: msg.sources,
+				});
 		},
 		[appendAssistantMessage],
 	);

@@ -341,7 +341,12 @@ const loadDeclarations = async (): Promise<Map<string, OpenApiRoute>> => {
  * `$schema` is dropped throughout: zod declares the dialect on every schema it
  * emits, which is meaningless inside an OpenAPI document (the document's own
  * `openapi` version fixes the dialect) and noise in generated clients.
+ *
+ * `$defs` are moved into {@link zodComponents}: a `#/$defs/…` ref resolves
+ * against the document root, where an inline `$defs` block is not.
  */
+const zodComponents: Json = {};
+
 const toJsonSchema = (schema: ZodType, io: 'input' | 'output'): Json => {
 	const strip = (value: unknown): unknown => {
 		if (Array.isArray(value)) return value.map(strip);
@@ -349,10 +354,28 @@ const toJsonSchema = (schema: ZodType, io: 'input' | 'output'): Json => {
 		return Object.fromEntries(
 			Object.entries(value as Json)
 				.filter(([key]) => key !== '$schema')
-				.map(([key, child]) => [key, strip(child)]),
+				.map(([key, child]) => [
+					key,
+					key === '$ref' && typeof child === 'string'
+						? child.replace(/^#\/\$defs\//, '#/components/schemas/')
+						: strip(child),
+				]),
 		);
 	};
-	return strip(z.toJSONSchema(schema, { io, unrepresentable: 'any' })) as Json;
+	const { $defs, ...rest } = strip(
+		z.toJSONSchema(schema, { io, unrepresentable: 'any' }),
+	) as Json;
+	Object.entries(($defs ?? {}) as Json).forEach(([name, definition]) => {
+		if (name.startsWith('__schema')) {
+			throw new Error(`Recursive zod schema without an id; add .meta({ id }) (${name})`);
+		}
+		const known = zodComponents[name];
+		if (known && JSON.stringify(known) !== JSON.stringify(definition)) {
+			throw new Error(`Two different zod schemas share the id ${name}`);
+		}
+		zodComponents[name] = definition;
+	});
+	return rest;
 };
 
 const declaredResponse = (response: OpenApiResponse): Json => {
@@ -615,6 +638,12 @@ const build = async (): Promise<{
 
 	assertPathParametersDeclared(paths);
 
+	const backendSchemas = backend.components?.schemas ?? {};
+	const clashing = Object.keys(zodComponents).filter((name) => name in backendSchemas);
+	if (clashing.length) {
+		throw new Error(`zod schema ids clash with backend.json schemas: ${clashing.join(', ')}`);
+	}
+
 	const spec: Json = {
 		openapi: '3.1.0',
 		info: {
@@ -627,7 +656,7 @@ const build = async (): Promise<{
 		security: [{ ApiToken: [] }],
 		paths: Object.fromEntries(Object.entries(paths).sort(([a], [b]) => a.localeCompare(b))),
 		components: {
-			schemas: reachableSchemas(paths, backend.components?.schemas ?? {}),
+			schemas: reachableSchemas(paths, { ...backendSchemas, ...zodComponents }),
 			securitySchemes: SECURITY_SCHEMES,
 		},
 	};

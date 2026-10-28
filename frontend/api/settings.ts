@@ -118,6 +118,15 @@ export const visualizationApi = {
 		requests.put('configurations/visualization', { enabled }),
 };
 
+// Instance-wide document-aware chat toggle (Settings > Documents).
+export const unstructuredFlowApi = {
+	get: (): Promise<ResponseWithError<{ enabled: boolean }>> =>
+		requests.get('configurations/unstructured-flow'),
+
+	setEnabled: (enabled: boolean): Promise<ResponseWithError<{ enabled: boolean }>> =>
+		requests.put('configurations/unstructured-flow', { enabled }),
+};
+
 // Instance-wide timeout for SQL the text-to-SQL agent runs (Settings > Agent Settings).
 export const sqlQueryTimeoutApi = {
 	get: (): Promise<ResponseWithError<{ seconds: number }>> =>

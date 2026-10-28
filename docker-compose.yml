@@ -52,6 +52,11 @@ services:
       # In-network port; POSTGRES_PORT in .env is the host-side mapping.
       POSTGRES_PORT: "5432"
       INGESTION_SERVICE_URL: http://ingestion-service:3002
+      # Pinned here so a host path in .env cannot move uploads off the volume.
+      UNSTRUCTURED_UPLOAD_DIR: /data/documents
+    volumes:
+      # Keeps uploads across rebuilds.
+      - documents_data:/data/documents
     depends_on:
       postgres:
         condition: service_started
@@ -175,3 +180,4 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  documents_data:
