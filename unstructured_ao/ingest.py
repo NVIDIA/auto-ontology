@@ -535,9 +535,20 @@ def ingest_directory(
     if conn is not None:
         return _run(conn)
 
+    # A transaction per file, so one that fails rolls back alone rather than
+    # every file committed before it.
     engine = get_engine()
-    with engine.begin() as c:
-        return _run(c)
+    doc_ids: list[str] = []
+    for f in files:
+        try:
+            with engine.begin() as c:
+                doc_id = ingest_file(f, c)
+        except Exception:
+            logger.exception("Ingesting %s failed — skipping.", f)
+            continue
+        if doc_id:
+            doc_ids.append(doc_id)
+    return doc_ids
 
 
 def main() -> None:

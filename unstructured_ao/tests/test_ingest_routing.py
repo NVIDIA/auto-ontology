@@ -335,3 +335,36 @@ def test_background_ingest_records_an_empty_extraction_as_failed(
     document_id, status, error = statuses[0]
     assert (document_id, status) == ("doc-1", "failed")
     assert "No content" in error
+
+
+def test_a_failed_file_rolls_back_alone_in_a_directory_ingest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import auto_ontology.dal.session as session
+
+    outcomes: list[str] = []
+
+    class _Engine:
+        @contextmanager
+        def begin(self) -> Iterator[object]:
+            try:
+                yield object()
+            except Exception:
+                outcomes.append("rollback")
+                raise
+            outcomes.append("commit")
+
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text("x")
+
+    def ingest_file(path: Path, _conn: object) -> str:
+        if path.name == "b.txt":
+            raise RuntimeError("Embed stage returned no embeddings")
+        return f"doc-{path.stem}"
+
+    monkeypatch.setattr(config, "EXTRACTOR", "auto")
+    monkeypatch.setattr(session, "get_engine", lambda: _Engine())
+    monkeypatch.setattr(ingest, "ingest_file", ingest_file)
+
+    assert ingest.ingest_directory(tmp_path) == ["doc-a", "doc-c"]
+    assert outcomes == ["commit", "rollback", "commit"]
