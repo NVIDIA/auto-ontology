@@ -155,13 +155,18 @@ def test_extract_renders_in_batches_and_closes_everything(
     )
     transcript = "Bar chart of employment by sector, 2019 to 2024, EU27."
 
+    vision_batches: list[int] = []
+
     class Vision:
         def describe_images(self, _prompt: str, crops: list[str]) -> list[str]:
+            vision_batches.append(len(crops))
             return [transcript] * len(crops)
 
     rows = hosted_extract.extract_chunks("report.pdf", client=Vision())
 
     assert batch_sizes == [2, 2, 1]
+    # Figures are read per batch, so crops never accumulate across the document.
+    assert vision_batches == [2, 2, 1]
     figure_pages = [r["page_number"] for r in rows if r["element_type"] == "chart"]
     assert figure_pages == [1, 2, 3, 4, 5]
     assert closed[-1] == "document"

@@ -15,7 +15,7 @@ so it is pinned to CPU. The hosted route avoids that local model.
 
 Here the PDF is read with ``pypdfium2`` (text layer and page rasterisation, no
 model), layout comes from NVIDIA's hosted page-elements model at ~0.8s per page,
-and figures are read by the gateway's vision model. No torch, no cluster, and
+and figures are read by the ``UNSTRUCTURED_VISION_*`` model. No torch, no cluster, and
 the only local work is parsing and cropping.
 
 What it gives up
@@ -104,12 +104,13 @@ def _read_pages(document: Any, start: int, stop: int) -> tuple[list[str], list[A
 
     The image is copied out of PDFium's bitmap so the PDFium objects can be
     closed here, under the lock, rather than by the garbage collector on
-    whichever thread it next runs.
+    whichever thread it next runs. The lock is taken per page, so another
+    upload's extraction can run between this one's pages.
     """
     texts: list[str] = []
     images: list[Any] = []
-    with _PDFIUM_LOCK:
-        for index in range(start, stop):
+    for index in range(start, stop):
+        with _PDFIUM_LOCK:
             page = document[index]
             try:
                 texts.append(_page_text(page))
@@ -147,7 +148,7 @@ def _collect_crops(
     """Every figure crop on *images*, with the page and label it came from.
 
     *first_page* is the page number of ``images[0]``. Crops are gathered across
-    the whole document before any is sent, because the vision calls are
+    a whole batch of pages before any is sent, because the vision calls are
     latency-bound: eight in flight measured 5.4x faster than one at a time on
     identical output.
     """
@@ -207,8 +208,8 @@ def extract_chunks(file_path: str, client: Any | None = None) -> list[dict[str, 
         document = pypdfium2.PdfDocument(file_path)
         page_count = len(document)
     page_texts: list[str] = []
-    crops: list[str] = []
-    meta: list[tuple[int, str]] = []
+    figure_rows: list[dict[str, Any]] = []
+    figures = 0
     try:
         for start in range(0, page_count, _PAGE_BATCH):
             texts, images = _read_pages(
@@ -216,25 +217,22 @@ def extract_chunks(file_path: str, client: Any | None = None) -> list[dict[str, 
             )
             page_texts += texts
             detections = detector.detect([_png_b64(image) for image in images])
-            batch_crops, batch_meta = _collect_crops(
-                images, detections, first_page=start + 1
-            )
-            crops += batch_crops
-            meta += batch_meta
+            crops, meta = _collect_crops(images, detections, first_page=start + 1)
+            # Read now, so a batch's crops are released before the next renders.
+            transcripts = client.describe_images(_FIGURE_PROMPT, crops)
+            figure_rows += _figure_rows(meta, transcripts, source_id)
+            figures += len(crops)
     finally:
         with _PDFIUM_LOCK:
             document.close()
 
-    transcripts = client.describe_images(_FIGURE_PROMPT, crops)
-
-    rows = _text_rows(page_texts, source_id)
-    rows += _figure_rows(meta, transcripts, source_id)
+    rows = _text_rows(page_texts, source_id) + figure_rows
     rows.sort(key=lambda row: row["page_number"] or 0)
     logger.info(
         "Hosted extraction: %d row(s) from %s — %d page(s), %d figure(s) read.",
         len(rows),
         Path(file_path).name,
         page_count,
-        len(crops),
+        figures,
     )
     return rows
