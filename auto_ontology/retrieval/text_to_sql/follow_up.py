@@ -10,8 +10,8 @@ import logging
 from collections.abc import Mapping, Sequence
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
 
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.models import FollowUpResolutionModel
 from auto_ontology.retrieval.text_to_sql.prompts import (
     create_follow_up_resolution_prompt,
@@ -53,7 +53,15 @@ def resolve_follow_up(
     )
     try:
         result = invoke_with_structured_output(
-            llm, [HumanMessage(content=prompt)], FollowUpResolutionModel
+            llm,
+            single_turn_messages(
+                system_parts=[
+                    "You resolve conversational follow-up questions without "
+                    "answering them."
+                ],
+                user_parts=[prompt],
+            ),
+            FollowUpResolutionModel,
         )
     except Exception:  # noqa: BLE001 — context is optional; chat must still run
         logger.exception("Follow-up resolution failed; using original question")

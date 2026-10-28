@@ -9,6 +9,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     INTENT_VALIDATION_SKIPPED_AFTER,
     IntentValidationModel,
@@ -161,9 +163,12 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
 
     assert result["decision"] == "valid_sql"
     messages = mock_invoke.call_args.args[1]
-    assert messages[1].content.endswith(evidence)
-    assert "MUST follow every instruction" in messages[1].content
-    assert "Evidence compliance is strict, not lenient" in messages[2].content
+    assert len(messages) == 2
+    assert isinstance(messages[0], SystemMessage)
+    assert isinstance(messages[1], HumanMessage)
+    assert messages[0].content.endswith(evidence)
+    assert "MUST follow every instruction" in messages[0].content
+    assert "Evidence compliance is strict, not lenient" in messages[1].content
 
 
 @patch(

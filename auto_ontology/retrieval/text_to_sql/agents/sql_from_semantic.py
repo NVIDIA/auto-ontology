@@ -41,6 +41,10 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
     format_tables_for_prompt,
 )
+from auto_ontology.retrieval.text_to_sql.message_utils import (
+    message_contents,
+    single_turn_messages,
+)
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -318,34 +322,33 @@ class SQLFromCandidatesAgent(BaseAgent):
                 has_sql_examples=bool(sql_examples_section),
             )
 
-            messages = state["messages"] + [SystemMessage(content=system_prompt)]
-            if authoritative_evidence_section:
-                messages.append(SystemMessage(content=authoritative_evidence_section))
-            if calculation_template_section:
-                messages.append(SystemMessage(content=calculation_template_section))
-            # Before the query patterns: anchors state what this database
-            # contains, which constrains the SQL more tightly than precedent
-            # from another database does.
-            if value_anchors_section:
-                messages.append(SystemMessage(content=value_anchors_section))
-            # After evidence, so that on any conflict the authoritative block is
-            # the one the model read first and the advisory one qualifies it.
-            if sql_examples_section:
-                messages.append(SystemMessage(content=sql_examples_section))
-            messages.append(HumanMessage(content=user_prompt))
-
-            # Add calendar time window reminder if needed
+            calendar_reminder = ""
             if any(
                 phrase in sanitized_question.lower()
                 for phrase in ["last week", "last month", "last year"]
             ):
-                messages.append(
-                    SystemMessage(
-                        content="Apply only calendar time windows. DO NOT apply rolling time windows."
-                    )
+                calendar_reminder = (
+                    "Apply only calendar time windows. DO NOT apply rolling time "
+                    "windows."
                 )
 
-            return messages
+            return single_turn_messages(
+                system_parts=[
+                    *message_contents(state["messages"], SystemMessage),
+                    system_prompt,
+                    authoritative_evidence_section,
+                    calculation_template_section,
+                    # Anchors precede query patterns because database facts
+                    # constrain SQL more tightly than advisory precedent.
+                    value_anchors_section,
+                    sql_examples_section,
+                    calendar_reminder,
+                ],
+                user_parts=[
+                    *message_contents(state["messages"], HumanMessage),
+                    user_prompt,
+                ],
+            )
 
         # Choose schema based on context
         # Use SQLGenerationModel for new flow (without formatting)
