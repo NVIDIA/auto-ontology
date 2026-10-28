@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Union
 
 # NOTE: get_agent_response_with_state and TextToSQLPayload are imported lazily
@@ -61,6 +62,178 @@ logger = logging.getLogger(__name__)
 
 # ── Seeds ───────────────────────────────────────────────────────────────────
 
+_MS_COLUMN_RE = re.compile(r"\b\w+_ms\b", re.IGNORECASE)
+_SECONDS_WORD_RE = re.compile(r"\b(seconds?|secs?)\b", re.IGNORECASE)
+_MS_WORD_RE = re.compile(r"\b(milliseconds?|ms)\b", re.IGNORECASE)
+_THOUSAND_DIV_OR_MUL_RE = re.compile(
+    r"(/\s*1000(?:\.0+)?|\*\s*1000(?:\.0+)?|\b\d+000\b)"
+)
+_JSON_KEY_RE = re.compile(r"->>\s*'([^']+)'|->\s*'([^']+)'")
+_CLARIFY_IDENTIFIER_RE = re.compile(r"\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b")
+_SQL_KEYWORDS_WITH_UNDERSCORE = frozenset(
+    {
+        "current_date",
+        "current_time",
+        "current_timestamp",
+        "row_number",
+        "dense_rank",
+        "percent_rank",
+        "cume_dist",
+        "percentile_cont",
+        "percentile_disc",
+        "string_agg",
+        "array_agg",
+        "jsonb_object_keys",
+        "jsonb_typeof",
+        "jsonb_array_elements",
+        "date_trunc",
+        "date_part",
+        "to_char",
+        "to_date",
+        "to_timestamp",
+        "nulls_last",
+        "nulls_first",
+        "information_schema",
+        "table_schema",
+        "column_name",
+        "data_type",
+    }
+)
+
+
+def _is_degenerate_first_submit_result(session: InteractiveSessionState) -> bool:
+    """True when the first submit returned 0 rows, or a single row whose values
+    are all 0 / NULL (e.g. ``COUNT(*) = 0`` or ``SUM(...) = NULL``).
+
+    Returns False whenever execution result metadata is absent (so sessions that
+    never recorded execution results keep the default conservative prompt).
+    """
+    row_count = session.path_state.get("result_row_count")
+    if (
+        isinstance(row_count, int)
+        and not isinstance(row_count, bool)
+        and row_count == 0
+    ):
+        return True
+
+    db_result = session.path_state.get("sql_response_from_db")
+    if db_result is None:
+        return False
+
+    from auto_ontology.retrieval.text_to_sql.agents.empty_like_result_check import (
+        _is_empty_db_result,
+        _parse_db_rows,
+    )
+
+    if _is_empty_db_result(db_result):
+        return True
+
+    rows = _parse_db_rows(db_result)
+    if len(rows) != 1:
+        return False
+
+    values = list(rows[0].values())
+    if not values:
+        return True
+
+    def _is_zero_or_null(v: Any) -> bool:
+        if v is None:
+            return True
+        if isinstance(v, bool):
+            return False
+        if isinstance(v, (int, float)):
+            return float(v) == 0.0
+        s = str(v).strip().lower()
+        if s in ("", "null", "none", "nan"):
+            return True
+        try:
+            return float(s) == 0.0
+        except ValueError:
+            return False
+
+    return all(_is_zero_or_null(v) for v in values)
+
+
+def _detect_evidence_sql_mismatches(session: InteractiveSessionState) -> list[str]:
+    """Detect objective discrepancies between explicit clarifications/KB evidence
+    and the first-submit SQL (Evidence 2 for _apply_debug_seed).
+
+    Returns a list of specific, actionable discrepancy notes. Empty list when no
+    objective mismatch is found (preserving the strict 'Do NOT modify...' rule).
+    """
+    sql = (session.path_state.get("sql_code") or "").strip()
+    if not sql:
+        llm_res = session.path_state.get("sql_generation_result")
+        sql = (getattr(llm_res, "sql_code", "") or "").strip()
+    if not sql:
+        return []
+
+    sql_lower = sql.lower()
+    usable_answers = [
+        str(turn.get("a") or "").strip()
+        for turn in session.clarify_history
+        if str(turn.get("a") or "").strip()
+        and not any(p in str(turn.get("a") or "").lower() for p in _STUCK_PHRASES)
+    ]
+    kb_text = "\n".join(
+        filter(
+            None,
+            [
+                session.prior_round_grounded_knowledge,
+                session.cumulative_grounded_knowledge,
+                session._grounded_knowledge or "",
+            ],
+        )
+    )
+    authoritative_text = "\n".join(
+        filter(None, [session.working_question, *usable_answers, kb_text])
+    )
+    if not authoritative_text:
+        return []
+
+    notes: list[str] = []
+
+    # 1. Explicit snake_case column/JSON-key identifiers named in user clarifications
+    #    or KB definitions that are completely absent from the generated SQL.
+    clarify_and_kb = "\n".join(filter(None, [*usable_answers, kb_text]))
+    explicit_identifiers: list[str] = []
+    for match in _CLARIFY_IDENTIFIER_RE.finditer(clarify_and_kb.lower()):
+        ident = match.group(1)
+        if ident in _SQL_KEYWORDS_WITH_UNDERSCORE or len(ident) < 4:
+            continue
+        if ident not in sql_lower and ident not in explicit_identifiers:
+            explicit_identifiers.append(ident)
+    for match in _JSON_KEY_RE.finditer(clarify_and_kb):
+        key = (match.group(1) or match.group(2) or "").strip()
+        if key and key.lower() not in sql_lower and key not in explicit_identifiers:
+            explicit_identifiers.append(key)
+
+    if explicit_identifiers:
+        joined = ", ".join(f"`{i}`" for i in explicit_identifiers[:6])
+        notes.append(
+            f"Explicit field/key identifier(s) mentioned in clarifications or knowledge "
+            f"are missing from your SQL: {joined}. Verify whether your formula or filter "
+            f"substituted a neighboring column/key instead of using these exact fields."
+        )
+
+    # 2. Millisecond column (`*_ms`) used when question/clarifications specify seconds
+    #    without a `/ 1000` or `* 1000` conversion.
+    ms_cols = sorted({m.group(0) for m in _MS_COLUMN_RE.finditer(sql)})
+    if (
+        ms_cols
+        and _SECONDS_WORD_RE.search(authoritative_text)
+        and not _MS_WORD_RE.search(session.original_question or "")
+        and not _THOUSAND_DIV_OR_MUL_RE.search(sql)
+    ):
+        cols_str = ", ".join(f"`{c}`" for c in ms_cols)
+        notes.append(
+            f"Unit conversion mismatch: your SQL uses millisecond column(s) {cols_str} "
+            f"while the question or clarifications specify seconds, with no `/ 1000.0` "
+            f"(or `* 1000` threshold) conversion present."
+        )
+
+    return notes
+
 
 def _apply_debug_seed(
     session: InteractiveSessionState,
@@ -81,12 +254,55 @@ def _apply_debug_seed(
         logger.info("Debug seed: execution error → %s", debug_error[:200])
     else:
         # SQL ran but results didn't match — no execution error detail available.
-        # Inject targeted hints based on observed failure patterns.
+        # Keep the strict "Do NOT modify formula..." guard by default so valid
+        # formulas aren't destroyed on retry, and relax it ONLY when objective
+        # evidence shows the first submit returned a degenerate (0/NULL/empty)
+        # result or missed explicit fields/units from clarifications/KB.
+        degenerate_result = _is_degenerate_first_submit_result(session)
+        mismatch_notes = _detect_evidence_sql_mismatches(session)
+
+        if degenerate_result or mismatch_notes:
+            evidence_bullets: list[str] = []
+            if degenerate_result:
+                evidence_bullets.append(
+                    "- DEGENERATE RESULT (0 rows, 0 count, or NULL aggregate): Your previous "
+                    "SQL matched no qualifying data or collapsed to 0/NULL. Re-check whether "
+                    "a filter condition or formula referenced the wrong sibling column or JSON "
+                    "key (e.g. `final_position` vs `ranking_order`, `margin_ratio_pct` vs "
+                    "`initial_margin_pct`), or compared a threshold in the wrong unit/scale "
+                    "(e.g. seconds vs milliseconds, fraction 0..1 vs percentage 0..100). You MAY "
+                    "replace the mismatched column, JSON key, or scale factor to match the "
+                    "evidence and schema."
+                )
+            for note in mismatch_notes:
+                evidence_bullets.append(f"- EVIDENCE / CLARIFICATION MISMATCH: {note}")
+            override_section = (
+                "0. FORMULA / COLUMN / UNIT OVERRIDE (triggered by specific evidence below):\n"
+                + "\n".join(evidence_bullets)
+                + "\nOnly modify the specific column, JSON key, unit conversion, or formula "
+                "component implicated above; keep all other validated parts of the query intact.\n\n"
+            )
+            header = (
+                "The SQL produced incorrect results. "
+                "Address whichever of the following applies, starting with item 0:\n\n"
+                + override_section
+            )
+            logger.info(
+                "Debug seed: wrong results with evidence override (degenerate=%s, mismatches=%d)",
+                degenerate_result,
+                len(mismatch_notes),
+            )
+        else:
+            header = (
+                "The SQL produced incorrect results. "
+                "Do NOT modify formula coefficients, formula structure or column and field names."
+                "Address whichever of the following applies, or fix a different issue you identify:\n\n"
+            )
+            logger.info("Debug seed: wrong results — injecting targeted hints")
+
         session.path_state["error"] = (
-            "The SQL produced incorrect results. "
-            "Do NOT modify formula coefficients, formula structure or column and field names."
-            "Address whichever of the following applies, or fix a different issue you identify:\n\n"
-            "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
+            header
+            + "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
             "every condition they imply, not just the primary one. Common drops: an "
             "entity/category/type filter stated in the original question (e.g. a specific "
             "visa class, organ, facility, or group), an IS NOT NULL guard on a column "
@@ -122,7 +338,6 @@ def _apply_debug_seed(
             "solely by SQL numeric type differences, which are retried automatically "
             "when the result values stay unchanged)."
         )
-        logger.info("Debug seed: wrong results — injecting targeted hints")
     # Preserve round 1's reconstruction lineage as read-only prompt context
     # before wiping "failed_attempts" below — see sql_reconstruction.py's
     # history_section, which renders "prior_round_failed_attempts" alongside

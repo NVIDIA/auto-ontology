@@ -51,10 +51,18 @@ Your task — produce a FRESH updated list:
      e.g. "adjusted by X", "modified with Y", "compensated for Z" where different \
      placements of the adjustment (inside a fraction vs. outside, numerator vs. denominator) \
      produce different values; include the user's exact phrase in the description
+   - A metric or calculated quantity where the user was asked how to define or compute it, \
+     and the user's answer only supplied a filter/threshold condition (e.g. "degradation > 0.7") \
+     naming a different column than the VDB-resolved column for that metric, without giving \
+     the calculation formula for the metric value itself — flag the metric's calculation formula \
+     as still missing (do NOT consider the VDB-resolved column to have resolved the formula when \
+     the user's answer defines the concept in terms of a different column)
  
 Do NOT flag:
 - Business context or motivation that does not affect SQL structure
 - Terms fully defined by an explicit formula in the answer or KB
+- Terms where a filter condition IS the entire definition (e.g. a category/cohort label like \
+  "active users" or "qualifying panels" where no separate numeric formula is requested)
 - Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
   handling, boundary operators)
 

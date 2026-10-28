@@ -69,6 +69,63 @@ def test_debug_seed_no_error_injects_wrong_result_hint():
     sess = _make_session()
     _apply_debug_seed(sess, debug_error=None)
     assert "SQL produced incorrect results" in sess.path_state["error"]
+    assert "Do NOT modify formula coefficients" in sess.path_state["error"]
+
+
+def test_debug_seed_non_degenerate_result_keeps_do_not_modify_guard():
+    """Zero-regression guard: a normal non-zero result with no evidence mismatch
+    must preserve the exact 'Do NOT modify formula coefficients...' instruction."""
+    sess = _make_session(
+        original_question="What is the average score?",
+        working_question="What is the average score?",
+    )
+    sess.path_state["sql_code"] = "SELECT AVG(score) AS avg_score FROM aliens"
+    sess.path_state["sql_response_from_db"] = ['[{"avg_score": 42.5}]']
+    _apply_debug_seed(sess, debug_error=None)
+    assert "Do NOT modify formula coefficients" in sess.path_state["error"]
+    assert "FORMULA / COLUMN / UNIT OVERRIDE" not in sess.path_state["error"]
+
+
+def test_debug_seed_degenerate_zero_result_relaxes_formula_guard():
+    """Evidence 1: when the first submit returned 0 or NULL (e.g. COUNT = 0 due
+    to filtering on final_position instead of ranking_order), _apply_debug_seed
+    must allow replacing the sibling column or scale factor."""
+    sess = _make_session()
+    sess.path_state["sql_code"] = (
+        "SELECT COUNT(*) AS cnt FROM races WHERE final_position = 1"
+    )
+    sess.path_state["sql_response_from_db"] = ['[{"cnt": 0}]']
+    _apply_debug_seed(sess, debug_error=None)
+    assert "Do NOT modify formula coefficients" not in sess.path_state["error"]
+    assert "DEGENERATE RESULT" in sess.path_state["error"]
+    assert "ranking_order" in sess.path_state["error"]
+
+
+def test_debug_seed_evidence_mismatch_injects_field_and_unit_override():
+    """Evidence 2: when user clarifications name an explicit column identifier
+    (`initial_margin_pct`) or seconds unit while the SQL used `margin_ratio_pct`
+    or raw `duration_ms`, _apply_debug_seed surfaces the exact discrepancy."""
+    sess = _make_session(
+        original_question="What is the average pit stop duration in seconds?",
+        working_question="What is the average pit stop duration in seconds?",
+    )
+    sess.clarify_history = [
+        {
+            "q": "How is margin danger defined?",
+            "a": "Use initial_margin_pct divided by available_balance > 0.8.",
+        }
+    ]
+    sess.path_state["sql_code"] = (
+        "SELECT AVG(duration_ms) FROM stops WHERE margin_ratio_pct > 80"
+    )
+    sess.path_state["sql_response_from_db"] = ['[{"avg": 83399.0}]']
+    _apply_debug_seed(sess, debug_error=None)
+    err = sess.path_state["error"]
+    assert "Do NOT modify formula coefficients" not in err
+    assert "initial_margin_pct" in err
+    assert "available_balance" in err
+    assert "duration_ms" in err
+    assert "seconds" in err
 
 
 def test_step_routes_exec_error_through_debug_path():
