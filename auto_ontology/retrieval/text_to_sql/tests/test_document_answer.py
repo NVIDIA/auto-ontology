@@ -4,6 +4,7 @@
 
 from typing import Any
 
+from auto_ontology.retrieval.text_to_sql import text_to_sql_graph
 from auto_ontology.retrieval.text_to_sql.agents import document_answer
 from auto_ontology.retrieval.text_to_sql.agents.document_answer import (
     AnswerFromDocumentsAgent,
@@ -14,6 +15,7 @@ from auto_ontology.retrieval.text_to_sql.agents.document_answer import (
 from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
     route_document_candidates,
     route_document_relevance,
+    route_unstructured_flow,
 )
 from unstructured_ao.search import ChunkOntology, Passage
 
@@ -25,6 +27,16 @@ def _state(path_state: dict[str, Any] | None = None) -> dict[str, Any]:
         "path_state": path_state or {},
         "llm": object(),
     }
+
+
+def test_disabled_unstructured_flow_routes_directly_to_structured_data(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        text_to_sql_graph, "is_unstructured_flow_enabled", lambda: False
+    )
+
+    assert route_unstructured_flow(_state()) == "structured"
 
 
 def test_retrieve_candidates_keeps_stable_source_ids(monkeypatch: Any) -> None:

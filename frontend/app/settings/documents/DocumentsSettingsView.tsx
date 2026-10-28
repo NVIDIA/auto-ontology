@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { documentsApi } from '@/api/documents';
+import { unstructuredFlowApi } from '@/api/settings';
 import { Button } from '@/common/Button';
 import { formatDate } from '@/common/date';
 import { EmptyState } from '@/common/EmptyState';
@@ -84,6 +85,9 @@ const StatusBadge = ({ document }: { document: DocumentItem }) => {
 
 export const DocumentsSettingsView = () => {
 	const [uploadOpen, setUploadOpen] = useState(false);
+	const [unstructuredFlowEnabled, setUnstructuredFlowEnabled] = useState(false);
+	const [savingUnstructuredFlow, setSavingUnstructuredFlow] = useState(false);
+	const [unstructuredFlowError, setUnstructuredFlowError] = useState<string | null>(null);
 
 	const [editing, setEditing] = useState<DocumentItem | null>(null);
 	const [name, setName] = useState('');
@@ -125,6 +129,33 @@ export const DocumentsSettingsView = () => {
 		reload,
 		setItems,
 	} = useInfiniteList(fetchDocumentsPage, { itemKey: (document) => document.id });
+
+	useEffect(() => {
+		let cancelled = false;
+		unstructuredFlowApi.get().then((response) => {
+			if (cancelled || response.error) return;
+			setUnstructuredFlowEnabled(response.enabled);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const handleUnstructuredFlowToggle = async () => {
+		if (savingUnstructuredFlow) return;
+		const next = !unstructuredFlowEnabled;
+		setSavingUnstructuredFlow(true);
+		setUnstructuredFlowError(null);
+		setUnstructuredFlowEnabled(next);
+		if (!next) setUploadOpen(false);
+
+		const response = await unstructuredFlowApi.setEnabled(next);
+		setSavingUnstructuredFlow(false);
+		if (response.error) {
+			setUnstructuredFlowEnabled(!next);
+			setUnstructuredFlowError(response.message ?? 'Failed to update document answering.');
+		}
+	};
 
 	// Ingestion runs after the upload has answered, so a processing row only
 	// learns it finished by asking again. The loaded window is re-read and its
@@ -345,6 +376,7 @@ export const DocumentsSettingsView = () => {
 								size={Size.REGULAR}
 								type="button"
 								onClick={() => setUploadOpen(true)}
+								disabled={!unstructuredFlowEnabled}
 								iconPosition="left"
 								shadow
 							>
@@ -354,66 +386,130 @@ export const DocumentsSettingsView = () => {
 						</div>
 					</div>
 
-					{hasLoaded && (documents.length > 0 || searching) ? (
-						<SearchInput
-							value={query}
-							onChange={setQuery}
-							placeholder="Search Documents…"
-							aria-label="Search documents"
-							className="w-full"
-						/>
-					) : null}
-
-					{!loading && error != null && documents.length === 0 ? (
-						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-							{error}
+					<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-4 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+						<div className="flex items-center justify-between gap-4">
+							<div className="min-w-0">
+								<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+									Answer Questions from Documents
+								</h2>
+								<p className="mt-1 text-xs text-secondary dark:text-zinc-400">
+									Allow chat to search uploaded documents before using structured
+									data.
+								</p>
+							</div>
+							<button
+								type="button"
+								role="switch"
+								aria-checked={unstructuredFlowEnabled}
+								aria-label="Answer Questions from Documents"
+								disabled={savingUnstructuredFlow}
+								onClick={() => {
+									void handleUnstructuredFlowToggle();
+								}}
+								className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+									unstructuredFlowEnabled
+										? 'bg-[#76b900]'
+										: 'bg-zinc-300 dark:bg-zinc-600'
+								}`}
+							>
+								<span
+									className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+										unstructuredFlowEnabled
+											? 'translate-x-5'
+											: 'translate-x-0.5'
+									}`}
+								/>
+							</button>
 						</div>
-					) : null}
+						{unstructuredFlowError ? (
+							<p className="mt-2 text-xs text-red-700 dark:text-red-300">
+								{unstructuredFlowError}
+							</p>
+						) : null}
+					</div>
 
-					{retryError != null ? (
-						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-							{retryError}
+					{!unstructuredFlowEnabled ? (
+						<div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-6 py-12 text-center dark:border-zinc-600 dark:bg-zinc-900/30">
+							<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800">
+								<Icon
+									name={IconName.Upload}
+									className="h-7 w-7 text-zinc-400 dark:text-zinc-500"
+								/>
+							</div>
+							<h2 className="mt-4 text-sm font-semibold text-heading dark:text-zinc-100">
+								Document Features Are Off
+							</h2>
+							<p className="mt-1 max-w-md text-xs text-secondary dark:text-zinc-400">
+								Turn on “Answer Questions from Documents” to view, upload, and
+								manage documents.
+							</p>
 						</div>
-					) : null}
+					) : (
+						<>
+							{hasLoaded && (documents.length > 0 || searching) ? (
+								<SearchInput
+									value={query}
+									onChange={setQuery}
+									placeholder="Search Documents…"
+									aria-label="Search documents"
+									className="w-full"
+								/>
+							) : null}
 
-					{loading ? (
-						<div className="py-2" role="status" aria-label="Loading documents">
-							<SkeletonRows rows={4} />
-						</div>
-					) : documents.length > 0 ? (
-						<Table
-							columns={columns}
-							rows={documents}
-							rowKey={(document) => document.id}
-							containerClassName="overflow-hidden rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
-							bodyClassName="divide-y divide-zinc-200/90 dark:divide-zinc-700/90"
-						/>
-					) : null}
+							{!loading && error != null && documents.length === 0 ? (
+								<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+									{error}
+								</div>
+							) : null}
 
-					{!loading && error == null && documents.length === 0 ? (
-						<EmptyState
-							variant={EmptyStateVariant.Inline}
-							icon={IconName.Upload}
-							title={
-								searching ? 'No Documents Match Your Search' : 'No Documents Yet'
-							}
-							description={
-								searching
-									? undefined
-									: 'Upload PDF, Word, PowerPoint, HTML or text files to ingest them.'
-							}
-							action={
-								searching
-									? undefined
-									: {
-											label: 'Upload Files',
-											icon: IconName.Upload,
-											onClick: () => setUploadOpen(true),
-										}
-							}
-							className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
-						/>
-					) : null}
+							{retryError != null ? (
+								<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+									{retryError}
+								</div>
+							) : null}
+
+							{loading ? (
+								<div className="py-2" role="status" aria-label="Loading documents">
+									<SkeletonRows rows={4} />
+								</div>
+							) : documents.length > 0 ? (
+								<Table
+									columns={columns}
+									rows={documents}
+									rowKey={(document) => document.id}
+									containerClassName="overflow-hidden rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+									bodyClassName="divide-y divide-zinc-200/90 dark:divide-zinc-700/90"
+								/>
+							) : null}
+
+							{!loading && error == null && documents.length === 0 ? (
+								<EmptyState
+									variant={EmptyStateVariant.Inline}
+									icon={IconName.Upload}
+									title={
+										searching
+											? 'No Documents Match Your Search'
+											: 'No Documents Yet'
+									}
+									description={
+										searching
+											? undefined
+											: 'Upload PDF, Word, PowerPoint, HTML or text files to ingest them.'
+									}
+									action={
+										searching
+											? undefined
+											: {
+													label: 'Upload Files',
+													icon: IconName.Upload,
+													onClick: () => setUploadOpen(true),
+												}
+									}
+									className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+								/>
+							) : null}
+						</>
+					)}
 				</div>
 			</InfiniteScroll>
 

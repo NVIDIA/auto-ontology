@@ -34,6 +34,10 @@ DISTINCT_VALUE_PROBING_ENABLED_KEY = "distinct_value_probing_enabled"
 # until an admin turns the toggle on.
 PII_DETECTION_ENABLED_KEY = "pii_detection_enabled"
 
+# Written by Settings > Documents. Opt-in: document retrieval stays disabled
+# until an admin explicitly enables the flow.
+UNSTRUCTURED_FLOW_ENABLED_KEY = "unstructured_flow_enabled"
+
 # Written by the SQL Query Timeout field on Settings > Agent Settings: how long
 # a statement the text-to-SQL agent issues may run before it is cancelled. An
 # instance without the frontend never writes the row and gets the default.
@@ -113,6 +117,16 @@ def is_pii_detection_enabled() -> bool:
     without a restart.
     """
     return read_configuration_flag(PII_DETECTION_ENABLED_KEY, default=False)
+
+
+def is_unstructured_flow_enabled() -> bool:
+    """Whether chat may retrieve and answer from uploaded documents.
+
+    Opt-in so a missing or unreadable setting does not search uploaded
+    documents. Read for each question, so changes apply without restarting
+    the chat service.
+    """
+    return read_configuration_flag(UNSTRUCTURED_FLOW_ENABLED_KEY, default=False)
 
 
 def read_configuration_int(

@@ -1649,6 +1649,103 @@
         "x-auto-ontology-proxied": false
       }
     },
+    "/api/configurations/unstructured-flow": {
+      "get": {
+        "tags": ["configurations"],
+        "operationId": "get_api_configurations_unstructured_flow",
+        "responses": {
+          "200": {
+            "description": "Whether chat may answer from uploaded documents. Off when unset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/configurations/unstructured-flow/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["read"]
+        },
+        "x-auto-ontology-proxied": false
+      },
+      "put": {
+        "tags": ["configurations"],
+        "operationId": "put_api_configurations_unstructured_flow",
+        "requestBody": {
+          "required": true,
+          "description": "Enable or disable document-aware chat.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["enabled"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored flag.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/configurations/unstructured-flow/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["manage"]
+        },
+        "x-auto-ontology-proxied": false
+      }
+    },
     "/api/configurations/visualization": {
       "get": {
         "tags": ["configurations"],

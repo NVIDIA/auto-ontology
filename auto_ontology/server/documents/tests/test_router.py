@@ -53,6 +53,7 @@ def _row(document_id: str = "doc-1", **overrides: Any) -> dict[str, Any]:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
     monkeypatch.setattr(documents, "get_engine", lambda: FakeEngine())
+    monkeypatch.setattr(documents, "is_unstructured_flow_enabled", lambda: True)
     monkeypatch.setattr(documents.config, "UPLOAD_DIR", str(tmp_path))
     monkeypatch.setattr(documents.ingest, "missing_dependency", lambda _path: None)
     app = FastAPI()
@@ -88,6 +89,19 @@ def test_an_unsupported_extension_is_refused(client: TestClient) -> None:
     )
     assert response.status_code == 400
     assert ".exe" in response.json()["detail"]
+
+
+def test_upload_is_refused_when_unstructured_flow_is_disabled(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(documents, "is_unstructured_flow_enabled", lambda: False)
+
+    response = client.post(
+        "/api/documents", files={"file": ("notes.txt", b"hello", "text/plain")}
+    )
+
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"]
 
 
 def test_a_missing_extractor_is_a_503(

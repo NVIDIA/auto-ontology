@@ -63,6 +63,8 @@ model Prompt {
 //   visualization_enabled        — "true"/"false", Settings > Agent Settings
 //                                  (auto-generate visualizations for SQL results;
 //                                   a missing row means enabled)
+//   unstructured_flow_enabled    — "true"/"false", Settings > Documents
+//                                  (answer from uploaded documents; missing means disabled)
 //   pii_detection_enabled        — "true"/"false", Settings > PII Settings
 //                                  (classify catalog columns as PII during ingest;
 //                                   a missing row means disabled)

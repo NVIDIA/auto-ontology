@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict
 
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
+from auto_ontology.infra.feature_flags import is_unstructured_flow_enabled
 from auto_ontology.retrieval.text_to_sql.state import (
     TextToSQLPayload,
     AgentState,
@@ -275,6 +276,11 @@ def route_document_relevance(state: AgentState) -> str:
     return "structured"
 
 
+def route_unstructured_flow(_state: AgentState) -> str:
+    """Skip every document node when document-aware chat is disabled."""
+    return "documents" if is_unstructured_flow_enabled() else "structured"
+
+
 def route_document_candidates(state: AgentState) -> str:
     """Skip the relevance LLM when document retrieval produced no excerpts."""
     if state.get("path_state", {}).get("document_candidates"):
@@ -498,7 +504,14 @@ def create_graph():
 
     # Minimal flow using only the defined nodes.
     graph.add_edge("question_intent", "question_extraction")
-    graph.add_edge("question_extraction", "retrieve_document_candidates")
+    graph.add_conditional_edges(
+        "question_extraction",
+        route_unstructured_flow,
+        {
+            "documents": "retrieve_document_candidates",
+            "structured": "retrieve_candidates",
+        },
+    )
     graph.add_conditional_edges(
         "retrieve_document_candidates",
         route_document_candidates,

@@ -20,6 +20,9 @@ export const DISTINCT_VALUE_PROBING_ENABLED_KEY = 'distinct_value_probing_enable
 /** Key written by the PII Detection toggle on Settings > PII Settings. */
 export const PII_DETECTION_ENABLED_KEY = 'pii_detection_enabled';
 
+/** Key written by the document-answering toggle on Settings > Documents. */
+export const UNSTRUCTURED_FLOW_ENABLED_KEY = 'unstructured_flow_enabled';
+
 /**
  * Read an opt-out flag the way `auto_ontology/infra/feature_flags.py` does.
  *
@@ -64,6 +67,14 @@ export async function isVisualizationEnabled(): Promise<boolean> {
 export async function isPiiDetectionEnabled(): Promise<boolean> {
 	const row = await getPrisma().configuration.findUnique({
 		where: { key: PII_DETECTION_ENABLED_KEY },
+	});
+	return readOptInFlag(row?.value);
+}
+
+/** Global document-answering flag. Missing means disabled. */
+export async function isUnstructuredFlowEnabled(): Promise<boolean> {
+	const row = await getPrisma().configuration.findUnique({
+		where: { key: UNSTRUCTURED_FLOW_ENABLED_KEY },
 	});
 	return readOptInFlag(row?.value);
 }

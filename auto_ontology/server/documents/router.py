@@ -21,6 +21,7 @@ from fastapi import (
 from pydantic import BaseModel
 
 from auto_ontology.dal.session import get_engine
+from auto_ontology.infra.feature_flags import is_unstructured_flow_enabled
 from auto_ontology.server.models import Document
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.responses import (
@@ -98,11 +99,17 @@ def upload_document(
     ``report.pdf`` and ``report (1).pdf``. One file per request: the settings
     page sends a batch as a request each, so one bad file fails alone.
 
-    400 for an extension the configured extractor does not read, 413 for a
-    file over the size limit, and 503 when the extractor this file needs is not
-    installed -- refused here rather than accepted and failed in the
-    background.
+    400 for an extension the configured extractor does not read, 409 when
+    document-aware chat is disabled, 413 for a file over the size limit, and
+    503 when the extractor this file needs is not installed -- refused here
+    rather than accepted and failed in the background.
     """
+    if not is_unstructured_flow_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="Document uploads are disabled.",
+        )
+
     name = Path(file.filename or "").name
     extension = Path(name).suffix.lower()
     supported = ingest.supported_extensions()
