@@ -272,12 +272,14 @@ kumo = [
 ]
 unstructured = [
     { name = "docling" },
+    { name = "pillow" },
     { name = "pypdfium2" },
 ]
 unstructured-docling = [
     { name = "docling" },
 ]
 unstructured-hosted = [
+    { name = "pillow" },
     { name = "pypdfium2" },
 ]
 
@@ -314,6 +316,8 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "openai", specifier = "==2.44.0" },
     { name = "pandas", specifier = ">=2.3.3,<3" },
+    { name = "pillow", marker = "extra == 'unstructured'", specifier = ">=12.3.0" },
+    { name = "pillow", marker = "extra == 'unstructured-hosted'", specifier = ">=12.3.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "psycopg-pool", specifier = ">=3.3.1" },
     { name = "pure-sasl", specifier = ">=0.6.2" },

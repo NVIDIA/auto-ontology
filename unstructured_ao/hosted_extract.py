@@ -36,10 +36,19 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+#: PDFium is not thread-safe, and uploads are extracted on a thread pool. Every
+#: call into ``pypdfium2`` — open, text, render, close — happens under this.
+_PDFIUM_LOCK = threading.Lock()
+
+#: Pages rendered at once. A page at :data:`_SCALE` is about 6 MB in memory,
+#: so holding a whole document's pages would grow without bound.
+_PAGE_BATCH = 24
 
 #: Detected label → the ``element_type`` to report, matching the vocabulary
 #: ``_CONTENT_TYPE_MAP`` in :mod:`unstructured_ao.ingest` already resolves.
@@ -80,10 +89,38 @@ def _page_text(page: Any) -> str:
     Twenty pages of the evaluation corpus come back empty here.
     """
     try:
-        return (page.get_textpage().get_text_bounded() or "").strip()
+        textpage = page.get_textpage()
+        try:
+            return (textpage.get_text_bounded() or "").strip()
+        finally:
+            textpage.close()
     except Exception:
         logger.exception("Text extraction failed for a page.")
         return ""
+
+
+def _read_pages(document: Any, start: int, stop: int) -> tuple[list[str], list[Any]]:
+    """Text and a rendered image for pages ``start`` to ``stop - 1``.
+
+    The image is copied out of PDFium's bitmap so the PDFium objects can be
+    closed here, under the lock, rather than by the garbage collector on
+    whichever thread it next runs.
+    """
+    texts: list[str] = []
+    images: list[Any] = []
+    with _PDFIUM_LOCK:
+        for index in range(start, stop):
+            page = document[index]
+            try:
+                texts.append(_page_text(page))
+                bitmap = page.render(scale=_SCALE)
+                try:
+                    images.append(bitmap.to_pil().copy())
+                finally:
+                    bitmap.close()
+            finally:
+                page.close()
+    return texts, images
 
 
 def _text_rows(page_texts: list[str], source_id: str) -> list[dict[str, Any]]:
@@ -105,11 +142,12 @@ def _text_rows(page_texts: list[str], source_id: str) -> list[dict[str, Any]]:
 
 
 def _collect_crops(
-    images: list[Any], detections: list[list[Any]]
+    images: list[Any], detections: list[list[Any]], *, first_page: int = 1
 ) -> tuple[list[str], list[tuple[int, str]]]:
-    """Every figure crop in the document, with the page and label it came from.
+    """Every figure crop on *images*, with the page and label it came from.
 
-    Gathered across all pages before any is sent, because the vision calls are
+    *first_page* is the page number of ``images[0]``. Crops are gathered across
+    the whole document before any is sent, because the vision calls are
     latency-bound: eight in flight measured 5.4x faster than one at a time on
     identical output.
     """
@@ -126,7 +164,7 @@ def _collect_crops(
             if right - left < _MIN_CROP_PIXELS or bottom - top < _MIN_CROP_PIXELS:
                 continue
             crops.append(_png_b64(image.crop((left, top, right, bottom))))
-            meta.append((index + 1, box.label))
+            meta.append((first_page + index, box.label))
     return crops, meta
 
 
@@ -162,17 +200,31 @@ def extract_chunks(file_path: str, client: Any | None = None) -> list[dict[str, 
     from unstructured_ao.page_elements import get_page_element_client
 
     client = client or get_embed_client()
+    detector = get_page_element_client()
     source_id = str(Path(file_path).resolve())
 
-    document = pypdfium2.PdfDocument(file_path)
-    images: list[Any] = []
+    with _PDFIUM_LOCK:
+        document = pypdfium2.PdfDocument(file_path)
+        page_count = len(document)
     page_texts: list[str] = []
-    for page in document:
-        page_texts.append(_page_text(page))
-        images.append(page.render(scale=_SCALE).to_pil())
+    crops: list[str] = []
+    meta: list[tuple[int, str]] = []
+    try:
+        for start in range(0, page_count, _PAGE_BATCH):
+            texts, images = _read_pages(
+                document, start, min(start + _PAGE_BATCH, page_count)
+            )
+            page_texts += texts
+            detections = detector.detect([_png_b64(image) for image in images])
+            batch_crops, batch_meta = _collect_crops(
+                images, detections, first_page=start + 1
+            )
+            crops += batch_crops
+            meta += batch_meta
+    finally:
+        with _PDFIUM_LOCK:
+            document.close()
 
-    detections = get_page_element_client().detect([_png_b64(image) for image in images])
-    crops, meta = _collect_crops(images, detections)
     transcripts = client.describe_images(_FIGURE_PROMPT, crops)
 
     rows = _text_rows(page_texts, source_id)
@@ -182,7 +234,7 @@ def extract_chunks(file_path: str, client: Any | None = None) -> list[dict[str, 
         "Hosted extraction: %d row(s) from %s — %d page(s), %d figure(s) read.",
         len(rows),
         Path(file_path).name,
-        len(images),
+        page_count,
         len(crops),
     )
     return rows

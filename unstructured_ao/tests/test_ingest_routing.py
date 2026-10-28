@@ -68,6 +68,19 @@ def test_missing_dependency_names_the_extractor_package(
     assert ingest.missing_dependency("notes.txt") is None
 
 
+def test_hosted_pdf_needs_pillow_as_well_as_pdfium(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.util
+
+    monkeypatch.setattr(config, "EXTRACTOR", "auto")
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name: None if name == "PIL" else object()
+    )
+    assert ingest.missing_dependency("report.pdf") == "PIL"
+    assert ingest.required_extra("report.pdf") == "unstructured-hosted"
+
+
 class _FakeConnection:
     @contextmanager
     def begin(self) -> Iterator[object]:

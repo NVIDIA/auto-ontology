@@ -71,6 +71,7 @@ kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]
 # PDF, Docling for DOCX/PPTX/HTML, and the built-in reader for TXT.
 unstructured = [
     "docling>=2.140.0",
+    "pillow>=12.3.0",
     "pypdfium2>=4.30.0",
 ]
 # Install this smaller extra when only explicit Docling mode is needed.
@@ -79,6 +80,7 @@ unstructured-docling = [
 ]
 # Hosted PDF extraction only; what the backend image installs.
 unstructured-hosted = [
+    "pillow>=12.3.0",
     "pypdfium2>=4.30.0",
 ]
 

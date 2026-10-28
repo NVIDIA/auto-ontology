@@ -12,9 +12,14 @@ only a real document shows those.
 
 from __future__ import annotations
 
+import sys
+import types
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
+from unstructured_ao import hosted_extract
 from unstructured_ao.hosted_extract import (
     _MIN_FIGURE_CHARS,
     _collect_crops,
@@ -75,6 +80,93 @@ def test_collect_crops_tags_each_crop_with_its_page() -> None:
     detections = [[_box("chart")], [], [_box("table"), _box("chart")]]
     _, meta = _collect_crops([FakeImage(), FakeImage(), FakeImage()], detections)
     assert meta == [(1, "chart"), (3, "table"), (3, "chart")]
+
+
+def test_collect_crops_number_pages_from_the_batch_start() -> None:
+    detections = [[_box("chart")], [_box("table")]]
+    _, meta = _collect_crops([FakeImage(), FakeImage()], detections, first_page=25)
+    assert meta == [(25, "chart"), (26, "table")]
+
+
+class _FakePdf:
+    """A ``pypdfium2.PdfDocument`` stand-in that records what was closed."""
+
+    def __init__(self, pages: int, closed: list[str]) -> None:
+        self._pages = pages
+        self._closed = closed
+
+    def __len__(self) -> int:
+        return self._pages
+
+    def __getitem__(self, index: int) -> Any:
+        closed = self._closed
+
+        class Bitmap:
+            def to_pil(self) -> Any:
+                return types.SimpleNamespace(copy=FakeImage)
+
+            def close(self) -> None:
+                closed.append(f"bitmap {index}")
+
+        class TextPage:
+            def get_text_bounded(self) -> str:
+                return f"page {index + 1}"
+
+            def close(self) -> None:
+                closed.append(f"textpage {index}")
+
+        class Page:
+            def get_textpage(self) -> TextPage:
+                return TextPage()
+
+            def render(self, scale: float) -> Bitmap:
+                return Bitmap()
+
+            def close(self) -> None:
+                closed.append(f"page {index}")
+
+        return Page()
+
+    def close(self) -> None:
+        self._closed.append("document")
+
+
+def test_extract_renders_in_batches_and_closes_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pages are rendered a batch at a time, so memory stays bounded."""
+    closed: list[str] = []
+    pages = 5
+    monkeypatch.setattr(hosted_extract, "_PAGE_BATCH", 2)
+    monkeypatch.setitem(
+        sys.modules,
+        "pypdfium2",
+        types.SimpleNamespace(PdfDocument=lambda _path: _FakePdf(pages, closed)),
+    )
+    batch_sizes: list[int] = []
+
+    class Detector:
+        def detect(self, images_b64: list[str]) -> list[list[Box]]:
+            batch_sizes.append(len(images_b64))
+            return [[_box("chart")] for _ in images_b64]
+
+    monkeypatch.setattr(
+        "unstructured_ao.page_elements.get_page_element_client", lambda: Detector()
+    )
+    transcript = "Bar chart of employment by sector, 2019 to 2024, EU27."
+
+    class Vision:
+        def describe_images(self, _prompt: str, crops: list[str]) -> list[str]:
+            return [transcript] * len(crops)
+
+    rows = hosted_extract.extract_chunks("report.pdf", client=Vision())
+
+    assert batch_sizes == [2, 2, 1]
+    figure_pages = [r["page_number"] for r in rows if r["element_type"] == "chart"]
+    assert figure_pages == [1, 2, 3, 4, 5]
+    assert closed[-1] == "document"
+    assert sum(entry.startswith("page ") for entry in closed) == pages
+    assert sum(entry.startswith("bitmap ") for entry in closed) == pages
 
 
 def test_collect_crops_drop_slivers() -> None:

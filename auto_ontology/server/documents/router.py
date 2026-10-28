@@ -127,7 +127,7 @@ def upload_document(
             status_code=503,
             detail=(
                 f"Ingesting {extension} files needs the {missing!r} package; "
-                "install the 'unstructured' extra"
+                f"install the {ingest.required_extra(name)!r} extra"
             ),
         )
 
@@ -206,7 +206,7 @@ def retry_document(document_id: str, background_tasks: BackgroundTasks) -> dict:
                 status_code=503,
                 detail=(
                     f"Ingesting {path.suffix.lower()} files needs the {missing!r} "
-                    "package; install the 'unstructured' extra"
+                    f"package; install the {ingest.required_extra(path.name)!r} extra"
                 ),
             )
 

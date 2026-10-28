@@ -96,12 +96,12 @@ _EXTRACTOR_EXTENSIONS: dict[str, frozenset[str]] = {
 }
 
 
-#: The optional package each extractor imports, from the ``unstructured``
-#: extra.  The text reader needs none.
-_EXTRACTOR_REQUIREMENTS: dict[str, str | None] = {
-    "docling": "docling",
-    "hosted": "pypdfium2",
-    "text": None,
+#: The optional modules each extractor imports, and the smallest extra that
+#: provides them.  The text reader needs none.
+_EXTRACTOR_REQUIREMENTS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "docling": ("unstructured-docling", ("docling",)),
+    "hosted": ("unstructured-hosted", ("pypdfium2", "PIL")),
+    "text": ("", ()),
 }
 
 
@@ -118,10 +118,13 @@ def missing_dependency(file_path: str | Path) -> str | None:
     """
     from importlib.util import find_spec
 
-    required = _EXTRACTOR_REQUIREMENTS.get(_extractor_for_file(file_path))
-    if required is None or find_spec(required) is not None:
-        return None
-    return required
+    _, modules = _EXTRACTOR_REQUIREMENTS[_extractor_for_file(file_path)]
+    return next((module for module in modules if find_spec(module) is None), None)
+
+
+def required_extra(file_path: str | Path) -> str:
+    """The package extra that provides *file_path*'s extractor, for an error."""
+    return _EXTRACTOR_REQUIREMENTS[_extractor_for_file(file_path)][0]
 
 
 def _extractor_for_file(file_path: str | Path) -> str:
