@@ -82,7 +82,7 @@ def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
     for expected in (
         "[orders] Sampling column values (2 columns)…",
         "[orders] Detecting foreign keys…",
-        "[orders] Generating terms and descriptions (1 columns)…",
+        "[orders] Generating terms (1 columns)…",
         "[orders] Writing 1 term(s) to the graph…",
         "[orders] Embedding 1 term(s)…",
     ):
@@ -106,7 +106,7 @@ def test_steps_are_logged_in_pipeline_order(
     order = [
         "Sampling column values (2 columns)",
         "Detecting foreign keys",
-        "Generating terms and descriptions (1 columns)",
+        "Generating terms (1 columns)",
         "Writing 1 term(s) to the graph",
         "Embedding 1 term(s)",
     ]

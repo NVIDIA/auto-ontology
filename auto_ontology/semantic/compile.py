@@ -10,8 +10,10 @@ import logging
 import os
 import time
 
+from auto_ontology.dal.datasources import fetch_all_tables_without_term
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
+from auto_ontology.semantic.description_enrichment import enrich_descriptions
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
@@ -37,6 +39,9 @@ def run_semantic_compilation(
 ) -> int:
     """Compile semantic taxonomy, embed all nodes into the VDB, then resolve FK edges.
 
+    Finishes by rewriting the descriptions of the tables this run compiled,
+    once every join they take part in is known.
+
     Returns the number of tables processed.
     """
     with limit_inflight(SEMANTIC_LLM_MAX_INFLIGHT):
@@ -61,24 +66,29 @@ def _run_semantic_compilation(
     )
     logger.info("=" * 60)
 
+    # Read once and shared with description enrichment: this pass gives the
+    # tables their Terms, so the same query afterwards would return nearly none.
+    tables = fetch_all_tables_without_term(database_name)
     count = compile_semantic_layer(
         database_name,
         domain_summary=summary,
         embedder=embedder,
+        tables=tables,
     )
 
     logger.info("=" * 60)
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
 
-    # The three stages below are the long tail — FK resolution alone has run
+    # The stages below are the long tail — FK resolution alone has run
     # past 300s on one database — and none of them is required for the Terms
     # just written to be usable. A cancelled pass skips straight to the summary
     # rather than spending minutes on work nobody is waiting for.
     if is_cancelled():
         logger.info(
             "Semantic compilation cancelled (database=%r) — skipping the FK, "
-            "SqlAttribute and bridge-table stages; %d table(s) compiled in %.1fs",
+            "SqlAttribute, bridge-table and description stages; %d table(s) "
+            "compiled in %.1fs",
             database_name,
             count,
             time.monotonic() - started,
@@ -105,21 +115,36 @@ def _run_semantic_compilation(
     bridge_table_count = build_bridge_tables_sql_attributes(database_name)
     logger.info("Bridge tables built: %d", bridge_table_count)
 
+    enriched_count = 0
+    if is_cancelled():
+        logger.info("Semantic compilation cancelled — skipping description enrichment")
+    else:
+        logger.info("=" * 60)
+        logger.info("Improving table and column descriptions…")
+        logger.info("=" * 60)
+        enriched_count = enrich_descriptions(
+            database_name,
+            [str(table["id"]) for table in tables],
+            embedder=embedder,
+        )
+        logger.info("Tables with improved descriptions: %d", enriched_count)
+
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all four stages completed.
+    # exceptions, so reaching this means all five stages completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s) in %.1fs",
+        "%d bridge table(s), %d enriched table(s) in %.1fs",
         database_name,
         count,
         fk_count,
         attr_count,
         bridge_table_count,
+        enriched_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)

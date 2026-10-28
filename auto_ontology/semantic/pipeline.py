@@ -10,6 +10,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import TracebackType
+from typing import Any
 
 from auto_ontology.dal.datasources import (
     fetch_all_tables_without_term,
@@ -128,6 +129,7 @@ def compile_semantic_layer(
     *,
     domain_summary: DomainSummary | None = None,
     embedder: SemanticEmbedder | None = None,
+    tables: list[dict[str, Any]] | None = None,
 ) -> int:
     """Run full taxonomy compilation over every table in the store.
 
@@ -135,13 +137,17 @@ def compile_semantic_layer(
     extraction run concurrently). Term commits run in canonical table order,
     making ownership of an unqualified colliding name deterministic while
     leaving the expensive LLM work parallel.
+
+    *tables* is the work list, defaulting to every table without a Term. A
+    caller passes it when it needs the same list after this pass has given
+    those tables their Terms.
     """
     # A warehouse that was unreachable during an earlier run in this worker
     # must not stay un-sampled for this one.
     reset_sampling_breaker(database_name)
     summary = domain_summary or load_domain_summary(database_name)
     tables = sorted(
-        fetch_all_tables_without_term(database_name),
+        fetch_all_tables_without_term(database_name) if tables is None else tables,
         key=lambda table: _table_commit_key(database_name, table),
     )
     commit_queue = _OrderedCommitQueue()

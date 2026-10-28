@@ -88,7 +88,7 @@ def update_node_properties(
         properties=properties,
     )
     if reembed_ids:
-        _refresh_vdb_embeddings(reembed_ids)
+        refresh_vdb_embeddings(reembed_ids)
 
     if patched["label"] == Labels.COLUMN and "sample_values" in properties:
         try:
@@ -162,7 +162,7 @@ def _get_node_ids_for_embedding_update(
     return []
 
 
-def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
+def refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from auto_ontology.utils import get_embed_params
     from auto_ontology.utils.embedding import embed_rows

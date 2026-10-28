@@ -849,7 +849,7 @@ def process_table(
         return ProcessTableResult()
 
     # --- LLM: propose Term(s) and display names ---
-    with _step(table_name, f"Generating terms and descriptions ({len(specs)} columns)"):
+    with _step(table_name, f"Generating terms ({len(specs)} columns)"):
         term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
     spec_by_column = {spec.source_column: spec for spec in specs}

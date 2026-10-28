@@ -19,7 +19,7 @@ def _patched_column(**props: object) -> dict[str, object]:
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "_refresh_vdb_embeddings")
+@patch.object(service, "refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_sample_values_reach_a_text_column(
@@ -40,7 +40,7 @@ def test_sample_values_reach_a_text_column(
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "_refresh_vdb_embeddings")
+@patch.object(service, "refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_patched_sample_values_come_back_as_text(
@@ -74,7 +74,7 @@ def test_sample_values_are_refused_on_a_non_text_column(
 
 
 @patch.object(service, "fetch_parent_table_id_for_column", return_value="tbl-1")
-@patch.object(service, "_refresh_vdb_embeddings")
+@patch.object(service, "refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_other_properties_of_a_non_text_column_stay_editable(
@@ -94,7 +94,7 @@ def test_other_properties_of_a_non_text_column_stay_editable(
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "_refresh_vdb_embeddings")
+@patch.object(service, "refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_sample_values_on_a_node_that_is_no_column_are_left_alone(
