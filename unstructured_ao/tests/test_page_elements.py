@@ -154,6 +154,30 @@ def test_detect_is_empty_for_no_pages() -> None:
     assert _client(batches).detect([]) == []
 
 
+def test_results_without_an_index_keep_their_position() -> None:
+    """Defaulting a missing index to 0 put every page's boxes on page one."""
+    import types
+
+    box = {"x_min": 0, "y_min": 0, "x_max": 1, "y_max": 1, "confidence": 0.9}
+    client = object.__new__(PageElementClient)
+    client._url = "https://gateway/page-elements"
+    client._api_key = "k"
+    client._http = types.SimpleNamespace(
+        post=lambda *_a, **_k: types.SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "data": [
+                    {"bounding_boxes": {"chart": [box]}},
+                    {"bounding_boxes": {"table": [box]}},
+                ]
+            },
+        )
+    )
+
+    pages = client._detect_batch(["a", "b"])
+    assert [[b.label for b in page] for page in pages] == [["chart"], ["table"]]
+
+
 def test_figure_labels_exclude_prose() -> None:
     """Paragraph and title text already comes from the PDF's text layer."""
     assert "chart" in FIGURE_LABELS

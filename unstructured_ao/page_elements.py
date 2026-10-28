@@ -110,7 +110,10 @@ class PageElementClient:
                 for b64 in images_b64
             ]
         }
-        response = self._http.post(
+        from unstructured_ao.embed_client import post_with_retry
+
+        data = post_with_retry(
+            self._http,
             self._url,
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -118,11 +121,10 @@ class PageElementClient:
             },
             json=payload,
         )
-        response.raise_for_status()
         # Results carry their own ``index``; trust it rather than arrival order.
         found: list[list[Box]] = [[] for _ in images_b64]
-        for item in response.json().get("data", []):
-            index = item.get("index", 0)
+        for position, item in enumerate(data.get("data", [])):
+            index = item.get("index", position)
             if not 0 <= index < len(found):
                 continue
             found[index] = _boxes_of(item.get("bounding_boxes") or {})

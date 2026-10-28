@@ -40,6 +40,72 @@ _VISION_WORKERS = 8
 _TIMEOUT = 300.0
 
 
+#: Longest ``Retry-After`` honoured, in seconds, so one header cannot park a
+#: worker thread indefinitely.
+_MAX_RETRY_AFTER = 60.0
+
+
+def _retryable(exc: Exception) -> bool:
+    """Whether *exc* is safe to retry without paying for the call twice.
+
+    A read timeout is not: the server most likely did the work, and with
+    :data:`_TIMEOUT` each repeat can cost another five minutes.
+    """
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    return isinstance(
+        exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+    )
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """The server's requested wait in seconds, when it sent one as a number."""
+    response = getattr(exc, "response", None)
+    value = response.headers.get("Retry-After") if response is not None else None
+    try:
+        return min(max(float(value), 0.0), _MAX_RETRY_AFTER) if value else None
+    except ValueError:
+        return None
+
+
+def post_with_retry(http: Any, url: str, **kwargs: Any) -> dict[str, Any]:
+    """POST *url* and return its JSON, backing off on 429, 5xx and failed connects.
+
+    A single rate-limited request would otherwise fail a whole document after
+    every paid call before it had already run.
+    """
+    import random
+    import time
+
+    from auto_ontology.utils.llm_invoke import RETRY_MAX_ATTEMPTS
+
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            response = http.post(url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            if not _retryable(exc) or attempt == RETRY_MAX_ATTEMPTS - 1:
+                raise
+            wait = _retry_after(exc)
+            if wait is None:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+            logger.warning(
+                "Retryable error from %s on attempt %d/%d — retrying in %.1fs: %s",
+                url,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+                wait,
+                str(exc)[:120],
+            )
+            time.sleep(wait)
+
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 def _resolved() -> tuple[str, str, str]:
     """``(endpoint, api_key, model)`` from the shared ``EMBED_*`` triplet."""
     from auto_ontology.utils.model_config import resolve
@@ -61,13 +127,12 @@ class EmbedClient:
         self._http = httpx.Client(timeout=_TIMEOUT)
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self._http.post(
+        return post_with_retry(
+            self._http,
             f"{self._endpoint}/{path}",
             headers={"Authorization": f"Bearer {self._api_key}"},
             json=payload,
         )
-        response.raise_for_status()
-        return response.json()
 
     def embed(
         self,
@@ -142,7 +207,8 @@ class EmbedClient:
         """
         from auto_ontology.utils.model_config import resolve
 
-        response = self._http.post(
+        data = post_with_retry(
+            self._http,
             f"{resolve('NON_REASONING', 'ENDPOINT').rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {resolve('NON_REASONING', 'API_KEY')}"},
             json={
@@ -164,8 +230,7 @@ class EmbedClient:
                 ],
             },
         )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"] or ""
+        return data["choices"][0]["message"]["content"] or ""
 
     def describe_images(
         self, prompt: str, images_b64: list[str], *, workers: int = _VISION_WORKERS
@@ -191,7 +256,15 @@ class EmbedClient:
                 return ""
 
         with ThreadPoolExecutor(max_workers=min(workers, len(images_b64))) as pool:
-            return list(pool.map(one, images_b64))
+            transcripts = list(pool.map(one, images_b64))
+        empty = sum(1 for text in transcripts if not text)
+        if empty:
+            logger.warning(
+                "%d of %d figure(s) came back unread; their rows are dropped.",
+                empty,
+                len(transcripts),
+            )
+        return transcripts
 
 
 _client: EmbedClient | None = None

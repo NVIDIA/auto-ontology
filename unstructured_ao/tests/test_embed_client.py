@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
-from unstructured_ao.embed_client import EmbedClient
+from unstructured_ao.embed_client import EmbedClient, post_with_retry
 
 
 def _client(captured: list[dict[str, Any]], vectors: list[list[float]]) -> EmbedClient:
@@ -144,3 +145,94 @@ def test_one_unreadable_crop_costs_only_its_own_row() -> None:
 def test_no_crops_sends_no_request() -> None:
     client = _vision_client({})
     assert client.describe_images("read this", []) == []
+
+
+class _Http:
+    """An ``httpx.Client`` stand-in answering with one status code per call."""
+
+    def __init__(
+        self,
+        statuses: list[int | Exception],
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self._statuses = statuses
+        self._headers = headers or {}
+        self.calls = 0
+
+    def post(self, url: str, **_kwargs: Any) -> httpx.Response:
+        status = self._statuses[self.calls]
+        self.calls += 1
+        if isinstance(status, Exception):
+            raise status
+        return httpx.Response(
+            status,
+            json={"ok": status},
+            headers=self._headers,
+            request=httpx.Request("POST", url),
+        )
+
+
+@pytest.fixture
+def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    import time
+
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    return slept
+
+
+@pytest.mark.usefixtures("no_sleep")
+@pytest.mark.parametrize("status", [429, 500, 502, 503])
+def test_transient_failures_are_retried(status: int) -> None:
+    http = _Http([status, 200])
+    assert post_with_retry(http, "https://g/v1/embeddings") == {"ok": 200}
+    assert http.calls == 2
+
+
+@pytest.mark.usefixtures("no_sleep")
+def test_a_rejected_request_is_not_retried() -> None:
+    http = _Http([400, 200])
+    with pytest.raises(httpx.HTTPStatusError):
+        post_with_retry(http, "https://g/v1/embeddings")
+    assert http.calls == 1
+
+
+@pytest.mark.usefixtures("no_sleep")
+def test_retries_give_up_and_raise() -> None:
+    from auto_ontology.utils.llm_invoke import RETRY_MAX_ATTEMPTS
+
+    http = _Http([429] * RETRY_MAX_ATTEMPTS)
+    with pytest.raises(httpx.HTTPStatusError):
+        post_with_retry(http, "https://g/v1/embeddings")
+    assert http.calls == RETRY_MAX_ATTEMPTS
+
+
+@pytest.mark.usefixtures("no_sleep")
+def test_a_failed_connect_is_retried() -> None:
+    http = _Http([httpx.ConnectError("refused"), 200])
+    assert post_with_retry(http, "https://g/v1/embeddings") == {"ok": 200}
+    assert http.calls == 2
+
+
+@pytest.mark.usefixtures("no_sleep")
+def test_a_read_timeout_is_not_retried() -> None:
+    """The server likely did the work; a repeat pays for it twice."""
+    http = _Http([httpx.ReadTimeout("timed out"), 200])
+    with pytest.raises(httpx.ReadTimeout):
+        post_with_retry(http, "https://g/v1/embeddings")
+    assert http.calls == 1
+
+
+@pytest.mark.parametrize(("header", "expected"), [("7", 7.0), ("3600", 60.0)])
+def test_retry_after_is_honoured_and_capped(
+    no_sleep: list[float], header: str, expected: float
+) -> None:
+    http = _Http([429, 200], headers={"Retry-After": header})
+    post_with_retry(http, "https://g/v1/embeddings")
+    assert no_sleep == [expected]
+
+
+def test_a_dated_retry_after_falls_back_to_backoff(no_sleep: list[float]) -> None:
+    http = _Http([429, 200], headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
+    post_with_retry(http, "https://g/v1/embeddings")
+    assert len(no_sleep) == 1 and 2.0 <= no_sleep[0] < 3.0
