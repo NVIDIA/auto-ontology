@@ -954,6 +954,79 @@ def fetch_columns_for_table(
     return table
 
 
+def with_sibling_note(description: str | None, note: str | None) -> str:
+    """A table's description followed by its sibling note, for SQL prompts.
+
+    The note says how the table differs from near-duplicate tables (see
+    ``auto_ontology.semantic.sibling_tables``). Table selection and SQL
+    generation both read ``description``, so the note rides in it.
+    """
+    description = (description or "").strip()
+    note = (note or "").strip()
+    if not note:
+        return description
+    note = f"Versus similar tables: {note}"
+    return f"{description} {note}" if description else note
+
+
+def fetch_tables_for_sibling_notes(database_name: str) -> list[dict[str, Any]]:
+    """Every table of one database with its columns' names and types.
+
+    What ``semantic.sibling_tables`` compares to find near-duplicate tables.
+    The description is the table's own, else its Term's, for the note prompt.
+    """
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_schema.c.name.label("schema_name"),
+            table_description_expr().label("description"),
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.data_type,
+        )
+        .select_from(_catalog_join())
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+    )
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            row["id"],
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "schema_name": row["schema_name"] or "",
+                "description": row["description"] or "",
+                "columns": [],
+            },
+        )
+        table["columns"].append(
+            {"name": row["column_name"], "data_type": row["data_type"]}
+        )
+    return list(tables.values())
+
+
+def store_table_sibling_notes(notes: dict[str, str | None]) -> None:
+    """Set each listed table's sibling note in one statement; ``None`` clears it."""
+    if not notes:
+        return
+    target = s.catalog_table.c.sibling_note
+    store().query_write(
+        update(s.catalog_table)
+        .where(s.catalog_table.c.id.in_(list(notes)))
+        .values(
+            sibling_note=case(
+                {
+                    table_id: literal(note, target.type)
+                    for table_id, note in notes.items()
+                },
+                value=s.catalog_table.c.id,
+                else_=target,
+            )
+        )
+    )
+
+
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     """Tables with a name/type/description/sample_values summary of each column.
 
@@ -1025,7 +1098,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
             select(
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
-                s.catalog_table.c.description,
+                table_description_expr().label("description"),
+                s.catalog_table.c.sibling_note,
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
@@ -1057,7 +1131,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
             {
                 "id": row["id"],
                 "name": row["name"] or "",
-                "description": row["description"] or "",
+                "description": with_sibling_note(
+                    row["description"], row["sibling_note"]
+                ),
                 "database_name": row["database_name"] or "",
                 "schema_name": row["schema_name"] or "",
                 "label": "Table",

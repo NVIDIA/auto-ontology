@@ -15,6 +15,7 @@ from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
+from auto_ontology.semantic.sibling_tables import write_sibling_table_notes
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
@@ -105,21 +106,28 @@ def _run_semantic_compilation(
     bridge_table_count = build_bridge_tables_sql_attributes(database_name)
     logger.info("Bridge tables built: %d", bridge_table_count)
 
+    logger.info("=" * 60)
+    logger.info("Writing notes that tell similar tables apart")
+    logger.info("=" * 60)
+    sibling_note_count = write_sibling_table_notes(database_name)
+    logger.info("Sibling notes written: %d", sibling_note_count)
+
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all four stages completed.
+    # exceptions, so reaching this means all five stages completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s) in %.1fs",
+        "%d bridge table(s), %d sibling note(s) in %.1fs",
         database_name,
         count,
         fk_count,
         attr_count,
         bridge_table_count,
+        sibling_note_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)

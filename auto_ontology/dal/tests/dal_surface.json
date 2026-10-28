@@ -69,6 +69,7 @@
     "fetch_tables_and_columns_by_node_ids": "(node_ids: 'list[str]') -> 'tuple[pd.DataFrame, pd.DataFrame, str]'",
     "fetch_tables_by_ids": "(table_ids: 'list[str]') -> 'list[dict[str, Any]]'",
     "fetch_tables_for_schema": "(schema_id: 'str', *, database_name: 'str | None' = None, zone_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
+    "fetch_tables_for_sibling_notes": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_column_id_by_table_and_name": "(table_name: 'str', column_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
     "find_table_id_by_name": "(table_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
     "find_table_key_columns": "(table_name: 'str', database_name: 'str | None' = None) -> 'dict[str, list[str]]'",
@@ -76,7 +77,9 @@
     "patch_catalog_node": "(node_id: 'str', properties: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "store_column_date_formats": "(table_id: 'str', date_formats: 'dict[str, str]') -> 'None'",
     "store_column_sample_values": "(table_id: 'str', samples: 'dict[str, list]') -> 'None'",
-    "store_column_uniqueness": "(table_id: 'str', uniqueness: 'dict[str, bool]') -> 'None'"
+    "store_column_uniqueness": "(table_id: 'str', uniqueness: 'dict[str, bool]') -> 'None'",
+    "store_table_sibling_notes": "(notes: 'dict[str, str | None]') -> 'None'",
+    "with_sibling_note": "(description: 'str | None', note: 'str | None') -> 'str'"
   },
   "exploration": {
     "fetch_column_attribute_exploration_details": "(attr_id: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'",
@@ -210,7 +213,7 @@
   "sql_fragments": {
     "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('pii_processed', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
     "name_contains": "(column: 'ColumnElement', search: 'str') -> 'ColumnElement'",
-    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('owner_id', Text(), table=<catalog_table>), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
+    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('owner_id', Text(), table=<catalog_table>), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('sibling_note', Text(), table=<catalog_table>), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
     "apply_labels_now_matched": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'dict[str, Select]') -> 'int'",

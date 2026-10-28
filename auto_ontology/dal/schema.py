@@ -245,6 +245,11 @@ catalog_table = Table(
     # association between entity roles. Compilation deliberately never clears
     # the flag: a later uncertain LLM response must not erase prior evidence.
     Column("is_junction_table", Boolean, nullable=False, server_default=text("false")),
+    # How this table differs from near-duplicate tables in its database, written
+    # by semantic compilation (semantic.sibling_tables). Kept apart from
+    # ``description``, which belongs to users and the ingest, and rewritten on
+    # every compile so a comparison never outlives the tables it compares.
+    Column("sibling_note", Text, nullable=True),
     _imported_id(),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
 )

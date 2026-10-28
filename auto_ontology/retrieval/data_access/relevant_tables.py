@@ -50,7 +50,11 @@ def _parse_table_text(text: str) -> dict:
         if table_match:
             parsed["table_name"] = table_match.group(1).strip()
 
-        desc_match = re.search(r"table_description:\s*([^,]+)", text)
+        # A description holds commas; it ends where the table text starts its
+        # columns (utils.embedding_rows.build_table_text), not at the first one.
+        desc_match = re.search(
+            r"table_description:\s*(.*?)(?:, columns: |$)", text, re.S
+        )
         if desc_match:
             parsed["description"] = desc_match.group(1).strip()
 

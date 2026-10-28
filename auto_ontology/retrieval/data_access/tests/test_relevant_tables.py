@@ -231,3 +231,20 @@ def test_every_column_the_table_text_writes_is_read_back() -> None:
         },
         {"name": "note"},
     ]
+
+
+def test_a_table_description_with_commas_is_read_whole() -> None:
+    text = build_table_text(
+        table_name="terms",
+        table_description="Academic terms, one row per term, back to 1951",
+        columns=[{"column_name": "term_code", "data_type": "varchar"}],
+        schema_name="s",
+        database_name="db",
+    )
+
+    normalized = relevant_tables._normalize_table_to_relevant_shape(
+        {"id": "table-1", "label": Labels.TABLE, "text": text}
+    )
+
+    assert normalized["description"] == "Academic terms, one row per term, back to 1951"
+    assert normalized["columns"] == [{"name": "term_code", "data_type": "varchar"}]

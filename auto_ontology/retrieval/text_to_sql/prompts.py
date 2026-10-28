@@ -83,7 +83,11 @@ create_sql_user_prompt = (
     "{observation_block}\n\n"
     "## Available Schema\n"
     "Use ONLY the tables and columns listed below. "
-    "Do NOT invent tables, schemas, or columns.\n\n"
+    "Do NOT invent tables, schemas, or columns.\n"
+    "Some tables are near-duplicates. When a table's description compares it "
+    "with similar tables, choose by that comparison: the period each covers, "
+    "its level of detail, and the columns only it has. Never pick a table whose "
+    "covered period excludes the one the question asks about.\n\n"
     "{tables}\n\n"
     "## Semantically Important Columns\n"
     "The columns below were matched directly to entities extracted from the "
@@ -1136,6 +1140,11 @@ Rules:
   you deem relevant.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
+- Some candidates are near-duplicates of each other, and their descriptions
+  say how they differ. A near-duplicate that cannot hold what the question
+  asks for (the question's period is outside the one it covers, or it lacks
+  the columns needed) supplies nothing the answer needs: remove it, and keep
+  the sibling that does hold it.
 - When in doubt, do NOT remove — it is safer to include an extra table
   than to remove a necessary one.
 
