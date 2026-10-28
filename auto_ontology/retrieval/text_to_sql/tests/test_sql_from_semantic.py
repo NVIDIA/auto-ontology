@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
-from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
+from auto_ontology.retrieval.text_to_sql.agents import (
+    sql_candidate_selection,
+    sql_from_semantic,
+)
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
     format_calculation_sql_template,
@@ -16,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    SCHEMA_ONLY_SQL_SYSTEM_PROMPT,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_dialect_rules,
@@ -145,59 +149,70 @@ def test_calculation_sql_template_is_structural_guidance() -> None:
     assert format_calculation_sql_template({}) == ""
 
 
+def _generation(sql: str, description: str, response: str) -> SQLGenerationModel:
+    return SQLGenerationModel(
+        thought="No assumptions.",
+        sql_code=sql,
+        description=description,
+        response=response,
+    )
+
+
+def _is_schema_only(messages: list) -> bool:
+    return messages[-1].content.startswith("### Question")
+
+
 def test_sql_description_is_a_user_question_separate_from_response() -> None:
+    fields = list(SQLGenerationModel.model_fields)
     description = SQLGenerationModel.model_fields["description"].description or ""
     response = SQLGenerationModel.model_fields["response"].description or ""
 
-    assert "After writing sql_code" in description
-    assert "one concise natural-language question" in description
-    for forbidden_detail in ("tables", "columns", "joins", "clauses", "aliases"):
+    assert fields.index("sql_code") < fields.index("description")
+    assert fields.index("description") < fields.index("response")
+    assert "phrased the way a user would ask" in description
+    assert "not the question you were given" in description
+    for forbidden_detail in ("tables", "columns", "joins", "sources"):
         assert forbidden_detail in description
     assert "2-4 sentences" in response
+    assert SCHEMA_ONLY_SQL_SYSTEM_PROMPT.startswith("Please reason step by step")
+    assert "Return exactly the requested output fields and NO others." in (
+        SCHEMA_ONLY_SQL_SYSTEM_PROMPT
+    )
 
 
 def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     non_reasoning_llm = object()
     reasoning_llm = object()
     invoked_with: list[object] = []
-    invocations: list[list] = []
+    invocations: dict[str, list] = {}
 
-    def fake_invoke(llm, messages, _schema):
+    def fake_invoke(llm, messages, schema):
+        assert schema is SQLGenerationModel
         invoked_with.append(llm)
-        invocations.append(messages)
-        is_schema_only = messages[-1].content.startswith("### Question")
-        return SQLGenerationModel(
-            thought="No assumptions.",
-            sql_code=(
-                "SELECT COUNT(*) FROM accounts"
-                if not is_schema_only
-                else "SELECT COUNT(id) FROM accounts"
-            ),
-            description=(
-                "How many accounts are there?"
-                if not is_schema_only
-                else "How many accounts have an identifier?"
-            ),
-            response=(
-                "Counts every row in the accounts table."
-                if not is_schema_only
-                else "Counts every non-null account identifier."
-            ),
+        if _is_schema_only(messages):
+            invocations["schema-only"] = messages
+            return _generation(
+                "SELECT COUNT(id) FROM accounts",
+                "How many accounts have an identifier?",
+                "Counts every non-null account identifier.",
+            )
+        invocations["semantic"] = messages
+        return _generation(
+            "SELECT COUNT(*) FROM accounts",
+            "How many accounts are there?",
+            "Counts every row in the accounts table.",
         )
+
+    judged_with: list[object] = []
+
+    def fake_judge(ctx, first, _second):
+        judged_with.append(ctx.llm)
+        return "semantic"
 
     monkeypatch.setattr(
         sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
     )
-    monkeypatch.setattr(
-        sql_from_semantic,
-        "rerank_hits",
-        lambda query, hits, **kwargs: [
-            {
-                "_rerank_score": 1.0,
-                **next(hit for hit in hits if hit["id"] == "semantic"),
-            }
-        ],
-    )
+    monkeypatch.setattr(sql_candidate_selection, "_judge_once", fake_judge)
 
     result = SQLFromCandidatesAgent().execute(
         {
@@ -217,9 +232,11 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
 
     assert result["decision"] == "constructable"
     assert invoked_with == [reasoning_llm, reasoning_llm]
-    assert len(invocations) == 2
+    assert judged_with == [reasoning_llm, reasoning_llm]
+    assert result["path_state"]["sql_candidate_selection"]["stage"] == "judge"
     evidence = "Active means accounts.status = 'active'."
-    semantic_messages, schema_messages = invocations
+    semantic_messages = invocations["semantic"]
+    schema_messages = invocations["schema-only"]
     assert sum(evidence in message.content for message in semantic_messages) == 2
     assert evidence in semantic_messages[-1].content
     assert "## Authoritative Evidence" in semantic_messages[-1].content
@@ -239,43 +256,33 @@ def test_sql_generation_reranks_descriptions_without_sending_sql(monkeypatch) ->
     seen: dict = {}
 
     def fake_invoke(_llm, messages, _schema):
-        schema_only = messages[-1].content.startswith("### Question")
-        if schema_only:
-            seen["schema_prompt"] = messages[-1].content
-        return SQLGenerationModel(
-            thought="No assumptions.",
-            sql_code=(
-                "SELECT account_id FROM accounts"
-                if not schema_only
-                else "SELECT name FROM accounts"
-            ),
-            description=(
-                "What are the account identifiers?"
-                if not schema_only
-                else "What are the account names?"
-            ),
-            response=(
-                "Semantic candidate user response."
-                if not schema_only
-                else "Schema-only candidate user response."
-            ),
+        if _is_schema_only(messages):
+            seen["schema_messages"] = messages
+            return _generation(
+                "SELECT name FROM accounts",
+                "What are the account names?",
+                "Schema-only candidate user response.",
+            )
+        return _generation(
+            "SELECT account_id FROM accounts",
+            "What are the account identifiers?",
+            "Semantic candidate user response.",
         )
 
     def fake_rerank(query, hits, **kwargs):
         seen.update(query=query, hits=hits, kwargs=kwargs)
         return [
-            {
-                "_rerank_score": 0.9,
-                **next(hit for hit in hits if hit["id"] == "schema-only"),
-            }
+            {"_rerank_score": 0.9, **hits[1]},
+            {"_rerank_score": 0.2, **hits[0]},
         ]
 
     monkeypatch.setattr(
         sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
     )
-    monkeypatch.setattr(sql_from_semantic, "rerank_hits", fake_rerank)
+    monkeypatch.setattr(sql_candidate_selection, "_judge_once", lambda *_args: None)
+    monkeypatch.setattr(sql_candidate_selection, "rerank_hits", fake_rerank)
     monkeypatch.setattr(
-        sql_from_semantic,
+        sql_candidate_selection,
         "get_rerank_kwargs",
         lambda: {
             "rerank_invoke_url": "https://rerank.example/rerank",
@@ -317,41 +324,59 @@ def test_sql_generation_reranks_descriptions_without_sending_sql(monkeypatch) ->
             "text": "What are the account names?",
         },
     ]
-    assert seen["kwargs"]["top_n"] == 1
+    assert "top_n" not in seen["kwargs"]
     assert all("SELECT" not in hit["text"] for hit in seen["hits"])
-    assert "table\naccounts" in seen["schema_prompt"]
-    assert "column | type | is_nullable" in seen["schema_prompt"]
-    assert "list of important semantic entities" not in seen["schema_prompt"]
+    system_prompt, schema_prompt = (m.content for m in seen["schema_messages"])
+    assert system_prompt == SCHEMA_ONLY_SQL_SYSTEM_PROMPT
+    assert "table\naccounts" in schema_prompt
+    assert "column | type | is_nullable" in schema_prompt
+    assert "table view that describes the database" in schema_prompt
+    assert "list of important semantic entities" not in schema_prompt
     winner = result["path_state"]["sql_generation_result"]
     assert winner.sql_code == "SELECT name FROM accounts"
     assert winner.description == "What are the account names?"
     assert winner.response == "Schema-only candidate user response."
+    assert result["path_state"]["sql_candidate_selected"] == "schema-only"
+    assert result["path_state"]["sql_candidate_selection"]["stage"] == "rerank"
+    common = {"static_issue": None, "execution": None, "judge_votes": []}
+    assert result["path_state"]["sql_candidates"] == [
+        {
+            "source": "semantic",
+            "sql_code": "SELECT account_id FROM accounts",
+            "description": "What are the account identifiers?",
+            "rerank_score": 0.2,
+            **common,
+        },
+        {
+            "source": "schema-only",
+            "sql_code": "SELECT name FROM accounts",
+            "description": "What are the account names?",
+            "rerank_score": 0.9,
+            **common,
+        },
+    ]
 
 
 def test_sql_generation_rerank_failure_falls_back_to_semantic(monkeypatch) -> None:
-    responses = iter(
-        [
-            SQLGenerationModel(
-                thought="Semantic.",
-                sql_code="SELECT semantic_value FROM facts",
-                description="What is the semantic value?",
-                response="Returns the semantic value.",
-            ),
-            SQLGenerationModel(
-                thought="Schema only.",
-                sql_code="SELECT schema_value FROM facts",
-                description="What is the schema-only value?",
-                response="Returns the schema-only value.",
-            ),
-        ]
-    )
+    def fake_invoke(_llm, messages, _schema):
+        if _is_schema_only(messages):
+            return _generation(
+                "SELECT schema_value FROM facts",
+                "What is the schema-only value?",
+                "Returns the schema-only value.",
+            )
+        return _generation(
+            "SELECT semantic_value FROM facts",
+            "What is the semantic value?",
+            "Returns the semantic value.",
+        )
+
     monkeypatch.setattr(
-        sql_from_semantic,
-        "safe_invoke_with_structured_output",
-        lambda *_args, **_kwargs: next(responses),
+        sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
     )
+    monkeypatch.setattr(sql_candidate_selection, "_judge_once", lambda *_args: None)
     monkeypatch.setattr(
-        sql_from_semantic,
+        sql_candidate_selection,
         "rerank_hits",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
     )
@@ -378,24 +403,34 @@ def test_sql_generation_rerank_failure_falls_back_to_semantic(monkeypatch) -> No
 
 
 def test_sql_generation_uses_only_successful_candidate(monkeypatch) -> None:
+    schema_only_calls = 0
+
     def fake_invoke(_llm, messages, _schema):
-        if messages[-1].content.startswith("### Question"):
+        nonlocal schema_only_calls
+        if _is_schema_only(messages):
+            schema_only_calls += 1
             return None
-        return SQLGenerationModel(
-            thought="No assumptions.",
-            sql_code="SELECT COUNT(*) FROM accounts",
-            description="How many accounts are there?",
-            response="Counts all account rows.",
+        return _generation(
+            "SELECT COUNT(*) FROM accounts",
+            "How many accounts are there?",
+            "Counts all account rows.",
         )
 
     monkeypatch.setattr(
         sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
     )
     monkeypatch.setattr(
-        sql_from_semantic,
+        sql_candidate_selection,
         "rerank_hits",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("rerank must not run for one candidate")
+        ),
+    )
+    monkeypatch.setattr(
+        sql_candidate_selection,
+        "_judge",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("judge must not run for one candidate")
         ),
     )
 
@@ -415,20 +450,22 @@ def test_sql_generation_uses_only_successful_candidate(monkeypatch) -> None:
     )
 
     assert result["decision"] == "constructable"
+    assert schema_only_calls == 3
     assert (
         result["path_state"]["sql_generation_result"].sql_code
         == "SELECT COUNT(*) FROM accounts"
     )
+    assert result["path_state"]["sql_candidate_selected"] == "semantic"
+    assert len(result["path_state"]["sql_candidates"]) == 1
 
 
 def test_sql_generation_is_unconstructable_when_both_candidates_fail(
     monkeypatch,
 ) -> None:
-    calls = 0
+    calls: list[None] = []
 
     def fail_invoke(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
+        calls.append(None)
         return None
 
     monkeypatch.setattr(
@@ -450,7 +487,7 @@ def test_sql_generation_is_unconstructable_when_both_candidates_fail(
         }
     )
 
-    assert calls == 6
+    assert len(calls) == 6
     assert result["decision"] == "unconstructable"
     assert result["path_state"]["unconstructable_explanation"] == (
         "LLM failed to produce a response."

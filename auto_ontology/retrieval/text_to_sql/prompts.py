@@ -265,11 +265,11 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
   denominator), and ties (what breaks a tie in a ranking/superlative
   query).
 - sql_code: the complete SQL, no comments or delimiters.
-- description: after sql_code is complete, express the request that the SQL
-  answers as one concise natural-language question in the same style as a user
-  question. Capture the requested result and business conditions, but do not
-  mention SQL, tables, columns, joins, clauses, aliases, implementation details,
-  reasoning, or assumptions.
+- description: written after sql_code. One question, phrased the way a user
+  would ask it, that sql_code answers exactly as written. Describe what the SQL
+  actually returns, including its conditions, grouping, ordering and limit, not
+  the question you were given. No tables, columns, joins, sources, SQL or other
+  technical terms, and no explanation.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
   windows applied, and the GROUPING/ORDERING.
@@ -279,11 +279,8 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
 - All fields are required."""
 
 
-SCHEMA_ONLY_SQL_SYSTEM_PROMPT = f"""Reason step by step, then write one complete
-SQL query that answers the request using only the supplied schema. Return exactly
-the requested output fields and no others.
-
-{_SQL_GENERATION_OUTPUT_SPEC}"""
+SCHEMA_ONLY_SQL_SYSTEM_PROMPT = """Please reason step by step in thought, and put your final answer in sql_code.
+Return exactly the requested output fields and NO others."""
 
 
 SCHEMA_ONLY_SQL_USER_PROMPT = """### Question
@@ -294,8 +291,48 @@ SCHEMA_ONLY_SQL_USER_PROMPT = """### Question
 
 Write a single {dialect} query that answers the question.
 
-The following table view describes the database and the tables in it.
+The following is a table view that describes the database and the tables in it.
 {tables}
+"""
+
+
+SQL_JUDGE_SYSTEM_PROMPT = """You review two SQL queries written for the same question and decide which one answers it correctly.
+
+Check, in this order:
+1. Every condition in the question and the evidence is applied, on the right columns and with the right values.
+2. The joins connect the right rows, without duplicating or dropping rows the answer depends on.
+3. Aggregation, grouping, ordering and LIMIT match what the question asks.
+4. The returned columns are exactly the ones the question asks for, no more and no less.
+5. The result values are plausible for the question. An error, an empty result, or only NULLs is strong evidence that a query is wrong.
+
+The evidence is authoritative wherever it defines a term, a value or a formula.
+Do not prefer a query because it is longer, shorter or more elaborate, or because of the order in which the candidates are shown."""
+
+
+SQL_JUDGE_USER_PROMPT = """### Question
+{question}
+
+### Evidence
+{evidence}
+
+### Schema
+{tables}
+
+### Candidate A
+```sql
+{sql_a}
+```
+Result:
+{result_a}
+
+### Candidate B
+```sql
+{sql_b}
+```
+Result:
+{result_b}
+
+Which candidate answers the question correctly, A or B?
 """
 
 
@@ -476,8 +513,8 @@ sql_code:
 {example_sql}
 
 description:
-What is the total sales revenue for each country during the most recently
-completed calendar quarter, ordered from highest to lowest?
+What was the total sales revenue for each country in the last completed calendar
+quarter, from highest to lowest?
 
 response:
 This calculates total sales revenue per country for the most recently completed

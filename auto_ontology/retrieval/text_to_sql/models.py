@@ -239,11 +239,11 @@ class SQLGenerationModel(StrictModel):
     description: NonEmptyStr = Field(
         ...,
         description=(
-            "After writing sql_code, express the request that this SQL answers as one "
-            "concise natural-language question in the same style as a user question. "
-            "Capture the requested result and business conditions, but do not mention "
-            "SQL, tables, columns, joins, clauses, aliases, implementation details, "
-            "reasoning, or assumptions."
+            "Written after sql_code: one question, phrased the way a user would ask "
+            "it, that sql_code answers exactly as written. Describe what the SQL "
+            "actually returns, including its conditions, grouping, ordering and "
+            "limit, not the question you were given. No tables, columns, joins, "
+            "sources, SQL or other technical terms, and no explanation."
         ),
     )
     response: NonEmptyStr = Field(
@@ -273,3 +273,21 @@ class SQLGenerationModel(StrictModel):
                 "response must be real text."
             )
         return v
+
+
+class SQLJudgeModel(StrictModel):
+    """Pairwise verdict on which of two SQL candidates answers the question."""
+
+    thought: str = Field(
+        ...,
+        description=(
+            "Compare the two candidates against the question, the evidence and the "
+            "schema: conditions and values, joins, aggregation and grouping, "
+            "ordering and limit, returned columns, and the plausibility of each "
+            "result. Name the concrete difference that decides the verdict."
+        ),
+    )
+    winner: Literal["A", "B"] = Field(
+        ...,
+        description="The candidate that answers the question correctly: A or B.",
+    )
