@@ -51,7 +51,7 @@ class SemanticEmbedder:
 
         ``term`` entries: ``{"name", "description", "id"}``.
         ``attrs`` entries include ``name``, ``term_name``, ``source_column``,
-        ``description``, ``id``, and the owning table metadata.
+        ``column_description``, ``id``, and the owning table metadata.
         ``id`` is the catalog ``id`` (UUID) and, when present, lands
         in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
@@ -243,9 +243,13 @@ def _build_rows(
             continue
         owner = a.get("term_name") or term_name or ""
         sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
+        # The catalog column's description, not the attribute's: the attribute
+        # text is the semantic layer's generated gloss, shown to the SQL
+        # generator once retrieval has matched the attribute, while matching
+        # itself runs on what the source says the column is.
         text = (
             f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
-            f"{a.get('description') or ''}"
+            f"{a.get('column_description') or ''}"
             f"{sample_block}"
         ).strip()
         path = (

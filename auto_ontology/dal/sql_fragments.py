@@ -87,6 +87,25 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     )
 
 
+def catalog_description_expr(column=s.catalog_column) -> ColumnElement:
+    """A column's own description, falling back only for FK columns.
+
+    What the SQL generator reads for every column semantic retrieval did not
+    match. Unlike :func:`column_description_expr` it never borrows the column's
+    own ``HAS_ATTRIBUTE`` description: that is the semantic layer's generated
+    text, shown only where an attribute was retrieved. An FK column has no
+    attribute of its own, so a blank one still borrows the description of the
+    attribute it references through ``SEMANTIC_FK``.
+
+    Takes the table or alias, for the same reason as
+    :func:`column_description_expr`.
+    """
+    return func.coalesce(
+        _non_blank(column.c.description),
+        _attribute_description(column.c.id, s.column__semantic_fk),
+    )
+
+
 def table_description_expr(table=s.catalog_table) -> ColumnElement:
     """A table's description, falling back to the Term it represents.
 

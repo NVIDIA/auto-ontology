@@ -14,7 +14,7 @@ import pytest
 
 from auto_ontology.semantic import compile as compile_module
 from auto_ontology.semantic import description_enrichment as de
-from auto_ontology.semantic.models import ColumnDescription, TableDescriptionsResult
+from auto_ontology.semantic.models import ColumnDescription, ColumnDescriptionsResult
 
 
 def _column(
@@ -31,7 +31,6 @@ def _column(
         "data_type": data_type,
         "sample_values": json.dumps(samples) if samples is not None else None,
         "attribute_id": attribute_id,
-        "source_description": extra.pop("source_description", ""),
         **extra,
     }
 
@@ -41,7 +40,7 @@ def _orders() -> tuple[dict, list[dict], dict]:
         "id": "t-orders",
         "name": "orders",
         "schema_name": "main",
-        "source_description": "",
+        "description": "",
         "columns": [
             _column("StoreKey", ["10020030004567", "10020030004589"]),
             _column("Store Code", ["0004567", "0004589"], attribute_id="a-sc"),
@@ -98,6 +97,18 @@ def test_hint_flags_a_code_that_is_not_the_join_key() -> None:
     assert "stores.StoreKey is 14 digits stored as text" in hint
 
 
+@pytest.mark.parametrize("name", ["Express Store Number", "storeVisitsId"])
+def test_no_hint_when_the_name_says_more_than_the_joined_table(name: str) -> None:
+    table, links, neighbours = _orders()
+    column = _column(name, ["0728", "0729"], attribute_id="a-x")
+    assert de.collision_hints([column], table, links, neighbours) == []
+
+
+def test_prompt_forbids_talking_about_its_own_inputs() -> None:
+    assert "Never refer" in de._SYSTEM_PROMPT
+    assert "the existing descriptions, the samples, the hints" in de._SYSTEM_PROMPT
+
+
 def test_no_hint_for_the_join_column_itself() -> None:
     table, links, neighbours = _orders()
     assert de.collision_hints(table["columns"][:1], table, links, neighbours) == []
@@ -115,8 +126,7 @@ def test_context_lists_joins_and_neighbour_columns() -> None:
 
 
 def test_resolve_column_names_accepts_echoed_annotation() -> None:
-    result = TableDescriptionsResult(
-        table_description="",
+    result = ColumnDescriptionsResult(
         columns=[
             ColumnDescription(column_name="Store Code (TEXT)", description="A."),
             ColumnDescription(column_name="unknown", description="B."),
@@ -138,16 +148,13 @@ def _patch_reads(table: dict, links: list[dict], neighbours: dict):
 
 def test_enrich_writes_only_columns_with_an_attribute() -> None:
     table, links, neighbours = _orders()
-    table["columns"][1]["format"] = "NNNNNNN"
-    result = TableDescriptionsResult(
-        table_description="One row per store and month.",
+    result = ColumnDescriptionsResult(
         columns=[
             ColumnDescription(column_name="Store Code", description="Local code."),
             ColumnDescription(column_name="Store Name", description="Name."),
             ColumnDescription(column_name="StoreKey", description="Should be ignored."),
         ],
     )
-    written = {"table": True, "columns": ["col-Store Code"], "attributes": []}
     reads = _patch_reads(table, links, neighbours)
     with (
         reads[0],
@@ -155,23 +162,19 @@ def test_enrich_writes_only_columns_with_an_attribute() -> None:
         reads[2],
         patch.object(de, "invoke_with_structured_output", return_value=result),
         patch.object(de, "get_llm_client"),
-        patch.object(de, "write_enriched_descriptions", return_value=written) as write,
-        patch.object(de, "_reembed") as reembed,
+        patch.object(
+            de, "write_attribute_descriptions", return_value=["a-sc"]
+        ) as write,
     ):
         assert de.enrich_table_descriptions("t-orders") is True
 
-    write.assert_called_once_with(
-        "t-orders",
-        "One row per store and month.",
-        {"col-Store Code": "Local code.", "col-Store Name": "Name."},
-        {"a-sc": "Local code. — format: NNNNNNN", "a-sn": "Name."},
-    )
-    reembed.assert_called_once_with("t-orders", written, None)
+    write.assert_called_once_with({"a-sc": "Local code.", "a-sn": "Name."})
 
 
-def test_prompt_carries_existing_description_and_hint() -> None:
+def test_prompt_carries_existing_descriptions_and_hint() -> None:
     table, links, neighbours = _orders()
-    table["columns"][1]["source_description"] = "Store Code, 1 = x"
+    table["columns"][1]["description"] = "Store Code"
+    table["columns"][1]["value_description"] = "1 = x"
     reads = _patch_reads(table, links, neighbours)
     with (
         reads[0],
@@ -179,12 +182,12 @@ def test_prompt_carries_existing_description_and_hint() -> None:
         reads[2],
         patch.object(de, "invoke_with_structured_output", return_value=None) as llm,
         patch.object(de, "get_llm_client"),
-        patch.object(de, "write_enriched_descriptions") as write,
+        patch.object(de, "write_attribute_descriptions") as write,
     ):
         assert de.enrich_table_descriptions("t-orders") is False
 
     prompt = llm.call_args.args[1][1].content
-    assert "existing description: Store Code, 1 = x" in prompt
+    assert "existing description: Store Code | value description: 1 = x" in prompt
     assert "Hints:\n- Store Code names table stores" in prompt
     write.assert_not_called()
 
@@ -251,4 +254,4 @@ def test_compile_enriches_the_tables_it_started_with(cancelled: bool) -> None:
     if cancelled:
         enrich.assert_not_called()
     else:
-        enrich.assert_called_once_with("db", ["t1", "t2"], embedder=None)
+        enrich.assert_called_once_with("db", ["t1", "t2"])

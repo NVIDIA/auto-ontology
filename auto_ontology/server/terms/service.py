@@ -166,6 +166,7 @@ def update_column_attribute(
             "id": row["id"],
             "name": row["name"],
             "description": row.get("description"),
+            "column_description": row.get("column_description"),
             "term_name": row.get("term_name"),
             "source_column": row.get("source_column"),
             "sample_values": row.get("sample_values"),

@@ -30,7 +30,7 @@ from sqlalchemy import literal, select
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
-from auto_ontology.dal.sql_fragments import column_description_expr
+from auto_ontology.dal.sql_fragments import catalog_description_expr
 from auto_ontology.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
             s.catalog_column.c.data_type,
             s.catalog_column.c.sample_values,
             s.catalog_column.c.format,
-            column_description_expr().label("description"),
+            catalog_description_expr().label("description"),
         )
         .where(s.catalog_column.c.table_id.in_(table_ids))
         .order_by(s.catalog_column.c.table_id, s.catalog_column.c.ordinal_position)

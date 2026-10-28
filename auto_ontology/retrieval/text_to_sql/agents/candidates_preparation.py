@@ -178,6 +178,37 @@ def _build_relevance_tables_summary(tables: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _describe_matched_columns(
+    tables: list[dict[str, Any]], attr_contexts: dict[str, dict]
+) -> list[dict[str, Any]]:
+    """Describe each retrieved attribute's column with the attribute's text.
+
+    Every other column keeps its catalog description. A matched column also
+    gets its value description, which is held back elsewhere to keep the
+    prompt short.
+    """
+    matched: dict[tuple[str, str], dict] = {}
+    for ctx in attr_contexts.values():
+        if ctx.get("table_id") and ctx.get("col_name"):
+            matched.setdefault((ctx["table_id"], ctx["col_name"]), ctx)
+    if not matched:
+        return tables
+
+    described = []
+    for table in tables:
+        columns = []
+        for column in table.get("columns") or []:
+            ctx = matched.get((table.get("id"), column.get("name")))
+            if ctx is not None:
+                text = ctx.get("attr_description") or column.get("description") or ""
+                if ctx.get("value_description"):
+                    text = f"{text} Values: {ctx['value_description']}".strip()
+                column = {**column, "description": text}
+            columns.append(column)
+        described.append({**table, "columns": columns})
+    return described
+
+
 def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
     """Merge *additions* into *base*, enriching existing entries.
 
@@ -732,6 +763,7 @@ class CandidatePreparationAgent(BaseAgent):
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
+        relevant_tables = _describe_matched_columns(relevant_tables, attr_contexts)
 
         # --- 6. Drop value anchors that name schema rather than data ---
         # Anchors were matched against stored values without the schema, so a

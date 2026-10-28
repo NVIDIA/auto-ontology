@@ -39,6 +39,7 @@ from sqlalchemy import values as sa_values
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
+    catalog_description_expr,
     column_description_expr,
     table_description_expr,
 )
@@ -562,7 +563,8 @@ def apply_metadata_batch(
     table_rows: list[dict],
     column_rows: list[dict],
 ) -> None:
-    """Write descriptions and sample values, **without overwriting existing ones**.
+    """Write descriptions, value descriptions and sample values, **without
+    overwriting existing ones**.
 
     ``coalesce(new, existing)``, and the direction matters: a curated
     description survives a batch that has nothing to say about it.
@@ -616,6 +618,7 @@ def apply_metadata_batch(
                 column("table_name", Text),
                 column("column_name", Text),
                 column("description", Text),
+                column("value_description", Text),
                 column("sample_values", Text),
                 name="incoming",
             ).data(
@@ -624,6 +627,7 @@ def apply_metadata_batch(
                         row["table_name"],
                         row["column_name"],
                         row.get("description"),
+                        row.get("value_description"),
                         row.get("sample_values"),
                     )
                     for row in column_rows
@@ -649,6 +653,10 @@ def apply_metadata_batch(
                 .values(
                     description=func.coalesce(
                         incoming.c.description, s.catalog_column.c.description
+                    ),
+                    value_description=func.coalesce(
+                        incoming.c.value_description,
+                        s.catalog_column.c.value_description,
                     ),
                     sample_values=func.coalesce(
                         incoming.c.sample_values, s.catalog_column.c.sample_values
@@ -1031,7 +1039,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
-                column_description_expr().label("column_description"),
+                catalog_description_expr().label("column_description"),
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
@@ -1115,7 +1123,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 s.catalog_column.c.id,
                 s.catalog_column.c.name,
                 s.catalog_column.c.data_type,
-                column_description_expr().label("description"),
+                catalog_description_expr().label("description"),
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,
@@ -1179,7 +1187,7 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_schema.c.name.label("table_schema"),
                     s.catalog_column.c.name.label("column_name"),
                     s.catalog_column.c.data_type,
-                    column_description_expr().label("description"),
+                    catalog_description_expr().label("description"),
                     s.catalog_column.c.sample_values,
                     s.catalog_database.c.name.label("database_name"),
                 )

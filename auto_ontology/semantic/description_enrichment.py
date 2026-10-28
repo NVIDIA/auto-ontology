@@ -2,16 +2,16 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Rewrite table and column descriptions once the semantic layer is complete.
+"""Write the semantic description of every ColumnAttribute once compilation is done.
 
-The taxonomy pass describes nothing itself: it keeps the descriptions a source
-already carried and leaves the rest blank. This pass runs last, after FK
-resolution and the bridge-table stage, when every join a table takes part in is
-known. One LLM call per table rewrites the table's description and those of its
-non-FK columns, given:
+The taxonomy pass generates no descriptions: the catalog keeps only what a
+source supplied, in ``description`` and ``value_description``. This pass runs
+last, after FK resolution and the bridge-table stage, when every join a table
+takes part in is known. One LLM call per table writes the description of each
+non-FK column's ColumnAttribute, given:
 
-* the column's original description, which stays authoritative for meaning and
-  value codes;
+* the column's catalog description and value description, which stay
+  authoritative for meaning and value codes;
 * its profiled samples, storage format and value shape;
 * the table's key columns and the column each one joins to;
 * the tables one join away, with their columns; and
@@ -21,6 +21,10 @@ non-FK columns, given:
 
 FK columns are context only. They carry no ColumnAttribute, and their meaning
 is the column they point at.
+
+The catalog is never written, and nothing is re-embedded: an attribute's
+embedding is built from the catalog description, not from this text. The
+SQL generator shows this text for the columns semantic retrieval matched.
 """
 
 from __future__ import annotations
@@ -33,16 +37,14 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.dal.descriptions import (
-    fetch_attribute_embedding_rows,
     fetch_neighbour_tables,
     fetch_table_for_enrichment,
     fetch_table_links,
     fetch_tables_with_term,
-    write_enriched_descriptions,
+    write_attribute_descriptions,
 )
 from auto_ontology.semantic.cancellation import is_cancelled
-from auto_ontology.semantic.embed import SemanticEmbedder
-from auto_ontology.semantic.models import TableDescriptionsResult
+from auto_ontology.semantic.models import ColumnDescriptionsResult
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
@@ -88,40 +90,39 @@ _KEY_TOKENS = frozenset({"id", "code", "key", "no", "num", "number"})
 
 _SYSTEM_PROMPT = """\
 You document a relational database for a semantic layer that a text-to-SQL \
-agent reads. Rewrite the description of one table and of the columns listed \
-under "Columns to describe".
+agent reads. Write the description of each column listed under "Columns to \
+describe".
 
 Rules:
-- An existing description is authoritative for meaning. Keep every value code \
-and mapping it states exactly (for example "1 = active, 0 = closed"), \
-and drop only noise such as repeated punctuation or annotator notes.
+- An existing description and value description are authoritative for \
+meaning. Keep every value code and mapping they state exactly (for example \
+"1 = active, 0 = closed"), and drop only noise such as repeated punctuation or \
+annotator notes.
 - Use the samples, format and value shape as evidence of how values are \
 written, and say it when it matters for filtering (for example "7-digit code \
 stored as text", "Y/N flag", "date written YYYYMMDD").
 - Use the key columns and joined tables to explain what a column refers to. \
 When a hint says a column looks like a joined table's key but the join uses \
 another column, say what the column is and that it is not that key.
-- When the existing description and the data disagree, describe what the data \
-shows.
-- One or two plain sentences per column, and for the table: what one row \
-represents. No SQL, no speculation beyond the evidence.
+- When the existing descriptions and the data disagree, describe what the \
+data shows.
+- Each description must read as a standalone fact about the data. Never refer \
+to the existing descriptions, the samples, the hints or this prompt, and never \
+say that something was or was not provided.
+- One or two plain sentences per column. No SQL, no speculation beyond the \
+evidence.
 - Return exactly one entry per column to describe, using its physical name."""
 
 
-def enrich_descriptions(
-    database_name: str,
-    table_ids: list[str],
-    *,
-    embedder: SemanticEmbedder | None = None,
-) -> int:
-    """Rewrite descriptions for the tables in *table_ids* that have a Term.
+def enrich_descriptions(database_name: str, table_ids: list[str]) -> int:
+    """Describe the attributes of the tables in *table_ids* that have a Term.
 
     *table_ids* is the work list the taxonomy pass started from — tables that
     had no Term yet — so a table is enriched in the same compilation that first
     processes it and never again. Those still without a Term are skipped and
     come back on the next compilation together with the taxonomy pass.
 
-    Returns the number of tables whose descriptions were rewritten.
+    Returns the number of tables whose attributes were described.
     """
     with_term = fetch_tables_with_term(table_ids)
     work = [table_id for table_id in table_ids if table_id in with_term]
@@ -132,14 +133,12 @@ def enrich_descriptions(
     logger.info("Description enrichment: %d table(s)", len(work))
     enriched = 0
     with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futures = {
-            pool.submit(_enrich_one, table_id, embedder): table_id for table_id in work
-        }
+        futures = {pool.submit(_enrich_one, table_id): table_id for table_id in work}
         for future in as_completed(futures):
             if future.result():
                 enriched += 1
     logger.info(
-        "Description enrichment finished (database=%r): %d of %d table(s) rewritten",
+        "Description enrichment finished (database=%r): %d of %d table(s) described",
         database_name,
         enriched,
         len(work),
@@ -147,22 +146,18 @@ def enrich_descriptions(
     return enriched
 
 
-def _enrich_one(table_id: str, embedder: SemanticEmbedder | None) -> bool:
+def _enrich_one(table_id: str) -> bool:
     if is_cancelled():
         return False
     try:
-        return enrich_table_descriptions(table_id, embedder=embedder)
+        return enrich_table_descriptions(table_id)
     except Exception:
         logger.exception("Description enrichment failed for table %s", table_id)
         return False
 
 
-def enrich_table_descriptions(
-    table_id: str,
-    *,
-    embedder: SemanticEmbedder | None = None,
-) -> bool:
-    """Rewrite one table's descriptions; ``True`` when anything was written."""
+def enrich_table_descriptions(table_id: str) -> bool:
+    """Describe one table's attributes; ``True`` when any was written."""
     table = fetch_table_for_enrichment(table_id)
     if table is None:
         return False
@@ -176,43 +171,30 @@ def enrich_table_descriptions(
     neighbours = fetch_neighbour_tables(neighbour_ids[:_MAX_NEIGHBOURS])
     context = build_table_context(table, links, neighbours)
 
-    table_description = ""
     by_name: dict[str, str] = {}
     for start in range(0, len(targets), _BATCH_SIZE):
         batch = targets[start : start + _BATCH_SIZE]
         result = _describe(context, batch, table, links, neighbours)
-        if result is None:
-            continue
-        if not table_description:
-            table_description = (result.table_description or "").strip()
-        by_name.update(resolve_column_names(result, [c["name"] for c in batch]))
+        if result is not None:
+            by_name.update(resolve_column_names(result, [c["name"] for c in batch]))
 
-    column_text: dict[str, str] = {}
-    attribute_text: dict[str, str] = {}
-    for column in targets:
-        text = by_name.get(column["name"])
-        if not text:
-            continue
-        column_text[str(column["id"])] = text
-        attribute_text[str(column["attribute_id"])] = _with_format(
-            text, column.get("format")
-        )
-    if not table_description and not column_text:
+    descriptions = {
+        str(column["attribute_id"]): by_name[column["name"]]
+        for column in targets
+        if by_name.get(column["name"])
+    }
+    if not descriptions:
         logger.warning("[%s] enrichment produced no descriptions", table["name"])
         return False
 
-    written = write_enriched_descriptions(
-        table_id, table_description or None, column_text, attribute_text
-    )
+    written = write_attribute_descriptions(descriptions)
     logger.info(
-        "[%s] enriched: table=%s, %d column(s), %d attribute(s)",
+        "[%s] described %d of %d attribute(s)",
         table["name"],
-        written["table"],
-        len(written["columns"]),
-        len(written["attributes"]),
+        len(written),
+        len(targets),
     )
-    _reembed(table_id, written, embedder)
-    return bool(written["table"] or written["columns"] or written["attributes"])
+    return bool(written)
 
 
 def _describe(
@@ -221,7 +203,7 @@ def _describe(
     table: dict[str, Any],
     links: list[dict[str, Any]],
     neighbours: dict[str, dict[str, Any]],
-) -> TableDescriptionsResult | None:
+) -> ColumnDescriptionsResult | None:
     prompt = f"{context}\n\nColumns to describe:\n" + "\n".join(
         _target_line(c) for c in batch
     )
@@ -232,7 +214,7 @@ def _describe(
         return invoke_with_structured_output(
             get_llm_client(temperature=0.0),
             [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=prompt)],
-            TableDescriptionsResult,
+            ColumnDescriptionsResult,
         )
     except Exception:
         logger.warning(
@@ -250,8 +232,8 @@ def build_table_context(
 ) -> str:
     """The prompt section every batch of one table shares."""
     lines = [f"Table: {_qualified(table)}"]
-    if table.get("source_description"):
-        lines.append(f"Existing description: {table['source_description']}")
+    if table.get("description"):
+        lines.append(f"Description: {table['description']}")
 
     by_name = {c["name"]: c for c in table["columns"]}
     key_lines: list[str] = []
@@ -284,8 +266,10 @@ def build_table_context(
 
 def _target_line(column: dict[str, Any]) -> str:
     parts = [f"  - {column['name']} ({column.get('data_type') or 'unknown'})"]
-    if column.get("source_description"):
-        parts.append(f"existing description: {column['source_description']}")
+    if column.get("description"):
+        parts.append(f"existing description: {column['description']}")
+    if column.get("value_description"):
+        parts.append(f"value description: {column['value_description']}")
     samples = _samples(column)
     if samples:
         parts.append(f"samples: {', '.join(samples)}")
@@ -317,11 +301,11 @@ def collision_hints(
 ) -> list[str]:
     """Columns that look like a joined table's key but are not the join.
 
-    A column is flagged when it reads as an identifier of a joined table
-    (``Store Code`` next to a join to ``stores``), or both columns read as
+    A column is flagged when its name is only a joined table's name plus a key
+    word (``Store Code`` next to a join to ``stores``), or both columns read as
     identifiers sharing a distinctive word while written differently, and the
-    join between the two tables runs through other columns. The hint states both value shapes, which is usually what tells the
-    two apart.
+    join between the two tables runs through other columns. The hint states
+    both value shapes, which is usually what tells the two apart.
     """
     joined_columns: dict[str, set[str]] = {}
     join_pairs: dict[str, list[tuple[str, str]]] = {}
@@ -350,7 +334,7 @@ def collision_hints(
                 f"{table['name']}.{local} = {neighbour['name']}.{other}"
                 for local, other in pairs
             )
-            if is_key_like and tokens & _table_tokens(neighbour["name"]):
+            if is_key_like and tokens <= _table_tokens(neighbour["name"]):
                 found.append(
                     f"{name} names table {neighbour['name']}, but the join is "
                     f"{join_text}" + _shapes(own_shape, neighbour, pairs)
@@ -427,7 +411,7 @@ def value_shape(samples: list[str], data_type: str | None) -> str | None:
 
 
 def resolve_column_names(
-    result: TableDescriptionsResult, requested: list[str]
+    result: ColumnDescriptionsResult, requested: list[str]
 ) -> dict[str, str]:
     """Map the model's column names back to the physical names requested.
 
@@ -452,12 +436,6 @@ def resolve_column_names(
     return out
 
 
-def _with_format(text: str, notation: str | None) -> str:
-    if not notation or "format:" in text:
-        return text
-    return f"{text} — format: {notation}"
-
-
 def _samples(column: dict[str, Any]) -> list[str]:
     values = stringify_sample_values(
         column.get("sample_values"), max_len=_MAX_SAMPLE_LEN
@@ -468,40 +446,3 @@ def _samples(column: dict[str, Any]) -> list[str]:
 def _qualified(table: dict[str, Any]) -> str:
     schema = table.get("schema_name")
     return f"{schema}.{table['name']}" if schema else table["name"]
-
-
-def _reembed(
-    table_id: str,
-    written: dict[str, Any],
-    embedder: SemanticEmbedder | None,
-) -> None:
-    """Refresh both vector collections for what was rewritten.
-
-    Retrieval reads the indexes, not the catalog, so a description rewritten in
-    Postgres alone would be invisible to it.
-    """
-    from auto_ontology.server.datasources.service import refresh_vdb_embeddings
-
-    if written["table"] or written["columns"]:
-        try:
-            refresh_vdb_embeddings([table_id, *written["columns"]])
-        except Exception:
-            logger.warning(
-                "Failed to refresh data-object embeddings for table %s",
-                table_id,
-                exc_info=True,
-            )
-
-    if embedder is None or not written["attributes"]:
-        return
-    rows = fetch_attribute_embedding_rows(written["attributes"])
-    try:
-        for row in rows:
-            embedder.vdb.delete_by_id(row["id"])
-        embedder.embed_column_attributes(rows)
-    except Exception:
-        logger.warning(
-            "Failed to re-embed enriched attributes for table %s",
-            table_id,
-            exc_info=True,
-        )

@@ -131,15 +131,11 @@ class ColumnDescription(BaseModel):
     )
 
 
-class TableDescriptionsResult(BaseModel):
-    """LLM output: improved descriptions for one table and its columns."""
+class ColumnDescriptionsResult(BaseModel):
+    """LLM output: semantic descriptions for a table's columns."""
 
     model_config = ConfigDict(extra="forbid")
 
-    table_description: str = Field(
-        default="",
-        description="One or two sentences: what one row of the table represents.",
-    )
     columns: list[ColumnDescription] = Field(
         default_factory=list,
         description="One entry per column listed under 'Columns to describe'.",

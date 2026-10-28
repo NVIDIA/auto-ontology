@@ -522,12 +522,14 @@ def test_no_ids_yields_empty_frames_and_no_database() -> None:
     assert database == ""
 
 
-def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
-    """Asymmetric, deliberately.
+def test_node_ids_embed_catalog_descriptions_with_only_the_fk_fallback(
+    world,
+) -> None:
+    """Neither the table's Term nor a column's own attribute is borrowed.
 
-    These frames feed embeddings. Widening what gets embedded — by applying the
-    table fallback here too — would shift retrieval results with no test
-    anywhere failing.
+    These frames feed embeddings, and the semantic layer's generated attribute
+    text must not leak into them. An FK column has no attribute of its own, so
+    it still borrows the one it references.
     """
     table__term = world.term("Order", "a purchase")
     _link(s.table__term, table_id=world.tables["orders"], term_id=table__term)
@@ -537,13 +539,20 @@ def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
         column_id=world.columns["orders.total"],
         attribute_id=attribute,
     )
+    customer = world.attribute("customer-ref", "the buying customer")
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["orders.customer_id"],
+        attribute_id=customer,
+    )
 
     tables, columns, _ = d.fetch_tables_and_columns_by_node_ids(
         [world.tables["orders"]]
     )
     assert tables.iloc[0]["description"] is None
     by_name = columns.set_index("column_name")["description"].to_dict()
-    assert by_name["total"] == "money, in cents"
+    assert by_name["total"] is None
+    assert by_name["customer_id"] == "the buying customer"
 
 
 # --------------------------------------------------------------------------

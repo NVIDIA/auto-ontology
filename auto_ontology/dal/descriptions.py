@@ -4,10 +4,9 @@
 
 """Reads and writes for description enrichment.
 
-Enrichment rewrites ``description`` on tables, columns and the columns'
-semantic attributes. The ingested text is kept in ``source_description`` the
-first time a row is rewritten, and every later run reads it from there, so the
-pass never feeds on its own output.
+Enrichment writes the semantic description of each ColumnAttribute. The
+catalog's own ``description`` and ``value_description`` are its input and are
+never written here, so a re-run always starts from the ingested text.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from sqlalchemy import case, func, literal, select, update
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
-    column_description_expr,
+    catalog_description_expr,
     table_description_expr,
 )
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
@@ -40,10 +39,6 @@ def fetch_tables_with_term(table_ids: list[str]) -> set[str]:
 def fetch_table_for_enrichment(table_id: str) -> dict[str, Any] | None:
     """One table, its columns, and each column's semantic attribute.
 
-    ``source_description`` on the table and on each column is the text
-    enrichment should treat as authoritative: the preserved original when the
-    row was enriched before, otherwise the current description.
-
     ``attribute_id`` is set only for columns the taxonomy pass gave a semantic
     ColumnAttribute — exactly its non-FK columns, since suggested FKs are never
     stored. When a column carries several, the lowest id wins, matching
@@ -54,17 +49,11 @@ def fetch_table_for_enrichment(table_id: str) -> dict[str, Any] | None:
             s.catalog_table.c.id,
             s.catalog_table.c.name,
             s.catalog_table.c.description,
-            s.catalog_table.c.source_description,
-            s.catalog_table.c.description_certified,
             s.catalog_schema.c.name.label("schema_name"),
-            s.catalog_database.c.name.label("database_name"),
         )
         .select_from(
             s.catalog_table.join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
-            ).join(
-                s.catalog_database,
-                s.catalog_database.c.id == s.catalog_schema.c.database_id,
             )
         )
         .where(s.catalog_table.c.id == table_id)
@@ -72,7 +61,6 @@ def fetch_table_for_enrichment(table_id: str) -> dict[str, Any] | None:
     if not tables:
         return None
     table = dict(tables[0])
-    table["source_description"] = _source_text(table)
 
     columns = [
         dict(row)
@@ -82,24 +70,18 @@ def fetch_table_for_enrichment(table_id: str) -> dict[str, Any] | None:
                 s.catalog_column.c.name,
                 s.catalog_column.c.data_type,
                 s.catalog_column.c.description,
-                s.catalog_column.c.source_description,
-                s.catalog_column.c.description_certified,
+                s.catalog_column.c.value_description,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,
                 s.catalog_column.c.is_unique,
-                s.catalog_column.c.is_nullable,
             )
             .where(s.catalog_column.c.table_id == table_id)
             .order_by(s.catalog_column.c.ordinal_position, s.catalog_column.c.id)
         )
     ]
-    attributes: dict[str, dict[str, Any]] = {}
+    attributes: dict[str, str] = {}
     for row in store().query_read(
-        select(
-            s.column__has_attribute.c.column_id,
-            s.column_attribute.c.id,
-            s.column_attribute.c.certified,
-        )
+        select(s.column__has_attribute.c.column_id, s.column_attribute.c.id)
         .select_from(
             s.column__has_attribute.join(
                 s.column_attribute,
@@ -115,22 +97,12 @@ def fetch_table_for_enrichment(table_id: str) -> dict[str, Any] | None:
         )
         .order_by(s.column__has_attribute.c.column_id, s.column_attribute.c.id)
     ):
-        attributes.setdefault(str(row["column_id"]), dict(row))
+        attributes.setdefault(str(row["column_id"]), str(row["id"]))
 
     for column in columns:
-        column["source_description"] = _source_text(column)
-        attribute = attributes.get(str(column["id"]))
-        column["attribute_id"] = attribute["id"] if attribute else None
-        column["attribute_certified"] = bool(attribute and attribute["certified"])
+        column["attribute_id"] = attributes.get(str(column["id"]))
     table["columns"] = columns
     return table
-
-
-def _source_text(row: dict[str, Any]) -> str:
-    preserved = row.get("source_description")
-    if preserved is not None:
-        return preserved
-    return row.get("description") or ""
 
 
 def fetch_table_links(table_id: str) -> list[dict[str, Any]]:
@@ -197,8 +169,8 @@ def fetch_table_links(table_id: str) -> list[dict[str, Any]]:
 def fetch_neighbour_tables(table_ids: list[str]) -> dict[str, dict[str, Any]]:
     """Name, description and columns of each table, keyed by table id.
 
-    Descriptions use the same fallbacks the SQL prompt reads, so a neighbour is
-    shown to the LLM the way the text-to-SQL agent will see it.
+    Column descriptions are the catalog's, as the SQL generator shows them for
+    columns retrieval did not match.
     """
     if not table_ids:
         return {}
@@ -217,7 +189,7 @@ def fetch_neighbour_tables(table_ids: list[str]) -> dict[str, dict[str, Any]]:
             s.catalog_column.c.table_id,
             s.catalog_column.c.name,
             s.catalog_column.c.data_type,
-            column_description_expr().label("description"),
+            catalog_description_expr().label("description"),
             s.catalog_column.c.sample_values,
             s.catalog_column.c.format,
         )
@@ -230,139 +202,32 @@ def fetch_neighbour_tables(table_ids: list[str]) -> dict[str, dict[str, Any]]:
     return tables
 
 
-def write_enriched_descriptions(
-    table_id: str,
-    table_description: str | None,
-    column_descriptions: dict[str, str],
-    attribute_descriptions: dict[str, str],
-) -> dict[str, Any]:
-    """Write enriched text in one transaction; certified text is never replaced.
+def write_attribute_descriptions(descriptions: dict[str, str]) -> list[str]:
+    """Write semantic descriptions onto ColumnAttributes, keyed by attribute id.
 
-    * Table and column ``description`` is rewritten unless
-      ``description_certified``. The previous text moves to
-      ``source_description`` only if that is still NULL.
-    * An attribute's ``description`` is rewritten unless it is certified, in
-      which case the text goes to ``description_suggestion`` for a person to
-      accept.
-
-    *column_descriptions* and *attribute_descriptions* are keyed by column id
-    and attribute id. Returns the ids actually rewritten, under ``table``,
-    ``columns`` and ``attributes``.
+    A certified attribute keeps its description; the new text goes to
+    ``description_suggestion`` for a person to accept. Returns the ids whose
+    ``description`` was rewritten.
     """
-    written: dict[str, Any] = {"table": False, "columns": [], "attributes": []}
+    written: list[str] = []
     with write_transaction():
-        if table_description:
-            rows = store().query_write(
-                update(s.catalog_table)
-                .where(
-                    s.catalog_table.c.id == table_id,
-                    s.catalog_table.c.description_certified.is_(False),
-                )
-                .values(
-                    source_description=func.coalesce(
-                        s.catalog_table.c.source_description,
-                        s.catalog_table.c.description,
-                        "",
-                    ),
-                    description=table_description,
-                )
-                .returning(s.catalog_table.c.id)
-            )
-            written["table"] = bool(rows)
-
-        for column_id, text in column_descriptions.items():
-            rows = store().query_write(
-                update(s.catalog_column)
-                .where(
-                    s.catalog_column.c.id == column_id,
-                    s.catalog_column.c.table_id == table_id,
-                    s.catalog_column.c.description_certified.is_(False),
-                )
-                .values(
-                    source_description=func.coalesce(
-                        s.catalog_column.c.source_description,
-                        s.catalog_column.c.description,
-                        "",
-                    ),
-                    description=text,
-                )
-                .returning(s.catalog_column.c.id)
-            )
-            if rows:
-                written["columns"].append(str(rows[0]["id"]))
-
-        for attribute_id, text in attribute_descriptions.items():
+        for attribute_id, text in descriptions.items():
+            certified = s.column_attribute.c.certified
             rows = store().query_write(
                 update(s.column_attribute)
                 .where(s.column_attribute.c.id == attribute_id)
                 .values(
                     description=func.coalesce(
-                        _unless_certified(text), s.column_attribute.c.description
+                        case((certified.is_(False), literal(text)), else_=None),
+                        s.column_attribute.c.description,
                     ),
                     description_suggestion=func.coalesce(
-                        _if_certified(text),
+                        case((certified.is_(True), literal(text)), else_=None),
                         s.column_attribute.c.description_suggestion,
                     ),
                 )
-                .returning(s.column_attribute.c.id, s.column_attribute.c.certified)
+                .returning(s.column_attribute.c.id, certified)
             )
             if rows and not rows[0]["certified"]:
-                written["attributes"].append(str(rows[0]["id"]))
+                written.append(str(rows[0]["id"]))
     return written
-
-
-def _unless_certified(text: str) -> Any:
-    return case((s.column_attribute.c.certified.is_(False), literal(text)), else_=None)
-
-
-def _if_certified(text: str) -> Any:
-    return case((s.column_attribute.c.certified.is_(True), literal(text)), else_=None)
-
-
-def fetch_attribute_embedding_rows(attribute_ids: list[str]) -> list[dict[str, Any]]:
-    """The rows :meth:`SemanticEmbedder.embed_column_attributes` needs.
-
-    The same fields the server's sample-value refresh embeds with, so a
-    re-embedded attribute reads exactly like a freshly compiled one.
-    """
-    if not attribute_ids:
-        return []
-    rows = store().query_read(
-        select(
-            s.column_attribute.c.id,
-            s.column_attribute.c.name,
-            s.column_attribute.c.description,
-            s.column_attribute.c.datatype,
-            s.column_attribute.c.term_name,
-            s.column_attribute.c.source_column,
-            s.catalog_column.c.sample_values,
-            s.catalog_column.c.is_unique,
-            s.catalog_table.c.id.label("table_id"),
-            s.catalog_table.c.name.label("table_name"),
-            s.catalog_schema.c.name.label("schema_name"),
-        )
-        .select_from(
-            s.column_attribute.join(
-                s.column__has_attribute,
-                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
-            )
-            .join(
-                s.catalog_column,
-                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
-            )
-            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
-            .join(
-                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
-            )
-        )
-        .where(s.column_attribute.c.id.in_(attribute_ids))
-        .order_by(s.column_attribute.c.id, s.catalog_column.c.id)
-    )
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        if row["id"] in seen:
-            continue
-        seen.add(row["id"])
-        out.append(dict(row))
-    return out

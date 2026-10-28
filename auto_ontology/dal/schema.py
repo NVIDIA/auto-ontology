@@ -229,11 +229,6 @@ catalog_table = Table(
     ),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
-    # The description as ingested, kept when description enrichment rewrites
-    # `description`. Written once and never overwritten, so a later enrichment
-    # reads the original rather than its own previous output. '' records that
-    # there was none; NULL means enrichment has not touched the row.
-    Column("source_description", Text, nullable=True),
     # Set from the UI's certification checkbox, via patch_catalog_node. Easy to
     # miss, because nothing in the ingest ever writes it
     # -- it only appears once a human certifies a description. Without the
@@ -266,9 +261,10 @@ catalog_column = Table(
     ),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
-    # As on catalog_table: the ingested description, preserved once enrichment
-    # rewrites `description`.
-    Column("source_description", Text, nullable=True),
+    # What the stored values mean -- codes, units, ranges ("1 = active") --
+    # kept apart from `description`, which says what the column is. Shown to
+    # the SQL generator only for columns semantic retrieval matched.
+    Column("value_description", Text, nullable=True),
     # As on catalog_table: written only by the UI's certification checkbox.
     _certified("description_certified"),
     Column("data_type", Text, nullable=True),

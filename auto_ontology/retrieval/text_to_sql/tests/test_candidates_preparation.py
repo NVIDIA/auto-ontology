@@ -728,3 +728,43 @@ def test_removal_is_declined_when_the_table_supplies_a_needed_column(
     kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
 
     assert "frpm" in [t["name"] for t in kept]
+
+
+def test_retrieved_columns_take_the_attribute_description() -> None:
+    tables = [
+        {
+            "id": "t1",
+            "name": "orders",
+            "columns": [
+                {"name": "status", "description": "Order status."},
+                {"name": "total", "description": "Order total."},
+                {"name": "region", "description": "Sales region."},
+            ],
+        },
+        {"id": "t2", "name": "stores", "columns": [{"name": "status"}]},
+    ]
+    contexts = {
+        "a1": {
+            "table_id": "t1",
+            "col_name": "status",
+            "attr_description": "Fulfilment state of the order.",
+            "value_description": "1 = open, 2 = shipped",
+        },
+        "a2": {
+            "table_id": "t1",
+            "col_name": "total",
+            "attr_description": "",
+            "value_description": "",
+        },
+    }
+
+    described = candidates_preparation._describe_matched_columns(tables, contexts)
+
+    columns = {c["name"]: c["description"] for c in described[0]["columns"]}
+    assert columns == {
+        "status": "Fulfilment state of the order. Values: 1 = open, 2 = shipped",
+        "total": "Order total.",
+        "region": "Sales region.",
+    }
+    assert described[1]["columns"] == [{"name": "status"}]
+    assert tables[0]["columns"][0]["description"] == "Order status."

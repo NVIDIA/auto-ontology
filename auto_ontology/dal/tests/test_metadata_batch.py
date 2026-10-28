@@ -96,6 +96,7 @@ def test_fills_empty_descriptions(catalogs):
                 "table_name": "orders",
                 "column_name": "total",
                 "description": "order total",
+                "value_description": "in cents",
                 "sample_values": "1,2,3",
             }
         ],
@@ -104,6 +105,7 @@ def test_fills_empty_descriptions(catalogs):
     assert _row(s.catalog_table, target.orders)["description"] == "customer orders"
     column = _row(s.catalog_column, target.orders_total)
     assert column["description"] == "order total"
+    assert column["value_description"] == "in cents"
     assert column["sample_values"] == "1,2,3"
 
 
@@ -118,6 +120,7 @@ def test_curated_values_survive_a_batch_with_nothing_to_say(catalogs):
                 "table_name": "orders",
                 "column_name": "total",
                 "description": "curated",
+                "value_description": "curated values",
                 "sample_values": "a,b",
             }
         ],
@@ -133,6 +136,7 @@ def test_curated_values_survive_a_batch_with_nothing_to_say(catalogs):
     assert _row(s.catalog_table, target.orders)["description"] == "curated"
     column = _row(s.catalog_column, target.orders_total)
     assert column["description"] == "curated"
+    assert column["value_description"] == "curated values"
     assert column["sample_values"] == "a,b"
 
 

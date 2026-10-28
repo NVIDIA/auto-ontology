@@ -88,9 +88,11 @@ def update_node_properties(
         properties=properties,
     )
     if reembed_ids:
-        refresh_vdb_embeddings(reembed_ids)
+        _refresh_vdb_embeddings(reembed_ids)
 
-    if patched["label"] == Labels.COLUMN and "sample_values" in properties:
+    if patched["label"] == Labels.COLUMN and (
+        "sample_values" in properties or "description" in properties
+    ):
         try:
             _refresh_semantic_column_attribute_embeddings(node_id)
         except Exception:
@@ -162,7 +164,7 @@ def _get_node_ids_for_embedding_update(
     return []
 
 
-def refresh_vdb_embeddings(node_ids: list[str]) -> None:
+def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from auto_ontology.utils import get_embed_params
     from auto_ontology.utils.embedding import embed_rows
@@ -207,7 +209,7 @@ def refresh_vdb_embeddings(node_ids: list[str]) -> None:
 
 
 def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:
-    """Refresh semantic VDB rows whose text includes this Column's sample values."""
+    """Refresh semantic VDB rows whose text includes this Column's description or samples."""
     contexts = fetch_column_attribute_embedding_contexts_by_column_id(column_id)
     for term, attrs in contexts:
         if not attrs:

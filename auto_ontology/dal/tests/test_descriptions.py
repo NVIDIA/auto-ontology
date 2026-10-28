@@ -25,7 +25,7 @@ def require_schema():
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
-        store().query_read("SELECT source_description FROM catalog_column LIMIT 1")
+        store().query_read("SELECT value_description FROM catalog_column LIMIT 1")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
 
@@ -43,6 +43,7 @@ class World:
         self.term = _add(s.term, name=f"{prefix}-term")
         self.tables: dict[str, str] = {}
         self.columns: dict[str, str] = {}
+        self.attributes: list[str] = []
 
     def table(self, name: str, **values) -> str:
         tid = _add(s.catalog_table, schema_id=self.schema, name=name, **values)
@@ -79,6 +80,7 @@ class World:
                 attribute_id=aid, term_id=self.term
             )
         )
+        self.attributes.append(aid)
         return aid
 
 
@@ -90,58 +92,45 @@ def world():
         s.catalog_database.delete().where(s.catalog_database.c.id == w.db)
     )
     store().query_write(s.term.delete().where(s.term.c.id == w.term))
+    store().query_write(
+        s.column_attribute.delete().where(s.column_attribute.c.id.in_(w.attributes))
+    )
 
 
 def _one(table, row_id: str) -> dict:
     return dict(store().query_read(select(table).where(table.c.id == row_id))[0])
 
 
-def test_rewrite_keeps_the_original_once(world) -> None:
+def test_writes_attributes_and_leaves_the_catalog_alone(world) -> None:
     tid = world.table("orders", description="Sales orders.")
-    cid = world.column("orders", "Store Code", description="Store Code,, 7 digits")
-    blank = world.column("orders", "Express", position=2)
+    cid = world.column(
+        "orders", "Store Code", description="Store code.", value_description="1 = x"
+    )
+    world.column("orders", "Express", position=2)
     aid = world.attribute("orders", "Store Code", description="old")
 
-    d.write_enriched_descriptions(
-        tid, "Row per order.", {cid: "First.", blank: "Flag."}, {aid: "First."}
-    )
-    d.write_enriched_descriptions(tid, "Again.", {cid: "Second."}, {aid: "Second."})
+    assert d.write_attribute_descriptions({aid: "Local store code."}) == [aid]
 
-    table = _one(s.catalog_table, tid)
-    assert (table["description"], table["source_description"]) == (
-        "Again.",
-        "Sales orders.",
-    )
-    column = _one(s.catalog_column, cid)
-    assert (column["description"], column["source_description"]) == (
-        "Second.",
-        "Store Code,, 7 digits",
-    )
-    assert _one(s.catalog_column, blank)["source_description"] == ""
-    assert _one(s.column_attribute, aid)["description"] == "Second."
+    assert _one(s.column_attribute, aid)["description"] == "Local store code."
+    assert _one(s.catalog_column, cid)["description"] == "Store code."
+    assert _one(s.catalog_table, tid)["description"] == "Sales orders."
 
     read = d.fetch_table_for_enrichment(tid)
-    assert read["source_description"] == "Sales orders."
+    assert read["description"] == "Sales orders."
     by_name = {c["name"]: c for c in read["columns"]}
-    assert by_name["Store Code"]["source_description"] == "Store Code,, 7 digits"
+    assert by_name["Store Code"]["description"] == "Store code."
+    assert by_name["Store Code"]["value_description"] == "1 = x"
     assert by_name["Store Code"]["attribute_id"] == aid
-    assert by_name["Express"]["source_description"] == ""
     assert by_name["Express"]["attribute_id"] is None
 
 
-def test_certified_text_is_never_replaced(world) -> None:
-    tid = world.table("orders", description="Human.", description_certified=True)
-    cid = world.column(
-        "orders", "Store Code", description="Human.", description_certified=True
-    )
+def test_certified_text_becomes_a_suggestion(world) -> None:
+    world.table("orders")
+    world.column("orders", "Store Code")
     aid = world.attribute("orders", "Store Code", description="Human.", certified=True)
 
-    written = d.write_enriched_descriptions(tid, "LLM.", {cid: "LLM."}, {aid: "LLM."})
+    assert d.write_attribute_descriptions({aid: "LLM."}) == []
 
-    assert written == {"table": False, "columns": [], "attributes": []}
-    assert _one(s.catalog_table, tid)["description"] == "Human."
-    assert _one(s.catalog_table, tid)["source_description"] is None
-    assert _one(s.catalog_column, cid)["description"] == "Human."
     attribute = _one(s.column_attribute, aid)
     assert attribute["description"] == "Human."
     assert attribute["description_suggestion"] == "LLM."

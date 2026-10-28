@@ -39,8 +39,8 @@ def run_semantic_compilation(
 ) -> int:
     """Compile semantic taxonomy, embed all nodes into the VDB, then resolve FK edges.
 
-    Finishes by rewriting the descriptions of the tables this run compiled,
-    once every join they take part in is known.
+    Finishes by writing the semantic descriptions of the attributes of the
+    tables this run compiled, once every join they take part in is known.
 
     Returns the number of tables processed.
     """
@@ -120,14 +120,12 @@ def _run_semantic_compilation(
         logger.info("Semantic compilation cancelled — skipping description enrichment")
     else:
         logger.info("=" * 60)
-        logger.info("Improving table and column descriptions…")
+        logger.info("Describing column attributes…")
         logger.info("=" * 60)
         enriched_count = enrich_descriptions(
-            database_name,
-            [str(table["id"]) for table in tables],
-            embedder=embedder,
+            database_name, [str(table["id"]) for table in tables]
         )
-        logger.info("Tables with improved descriptions: %d", enriched_count)
+        logger.info("Tables with described attributes: %d", enriched_count)
 
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage

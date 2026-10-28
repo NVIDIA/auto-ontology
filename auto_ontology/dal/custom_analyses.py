@@ -22,7 +22,7 @@ from sqlalchemy import delete, func, literal, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.dal.sql_fragments import column_description_expr, name_contains
+from auto_ontology.dal.sql_fragments import catalog_description_expr, name_contains
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.server.sql_utils import SqlParseError
 
@@ -326,7 +326,7 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 s.catalog_column.c.ordinal_position,
-                column_description_expr().label("column_description"),
+                catalog_description_expr().label("column_description"),
             )
             .select_from(
                 s.custom_analysis__sql.join(
