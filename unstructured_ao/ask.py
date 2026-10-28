@@ -78,7 +78,7 @@ def ask(query: str, *, k: int = 10, note: bool = False) -> Answer:
     if not passages:
         return Answer(error="no_passages_retrieved")
 
-    found = search.chunk_ontology([p.text for p in passages])
+    found = search.chunk_ontology([p.chunk_id for p in passages])
     labels = ["; ".join(names) for names in found.labels]
     # The label belongs to the passage it describes, so it travels on it rather
     # than in a parallel list the caller has to keep aligned.

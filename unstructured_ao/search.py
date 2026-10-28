@@ -28,7 +28,6 @@ set — page keys, rank cut-offs, qrels — which belongs to whoever is measurin
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -403,41 +402,6 @@ def chunk_search(query: str, *, k: int = 10) -> list[Passage]:
     ]
 
 
-_chunk_ids: dict[str, str] | None = None
-_chunk_ids_lock = threading.Lock()
-
-
-def chunk_id_by_text(conn: Connection | None = None) -> dict[str, str]:
-    """``{joinable chunk text: chunk id}`` for the whole corpus, read once.
-
-    Text is the only key shared with a store that was populated by an outside
-    pipeline, and it has to be normalised before it joins. Held in memory
-    rather than queried per request: the corpus is a couple of thousand rows,
-    and no index would serve a match on normalised text anyway.
-    """
-    global _chunk_ids
-    if _chunk_ids is not None:
-        return _chunk_ids
-
-    # Outside the lock: borrowing a connection re-enters this function, and a
-    # plain Lock cannot be taken twice by the same thread.
-    if conn is None:
-        from auto_ontology.dal.session import get_engine
-
-        with get_engine().connect() as owned:
-            return chunk_id_by_text(owned)
-
-    with _chunk_ids_lock:
-        # Two threads that got this far both read the corpus and build the same
-        # map; the lock is here so neither sees the other's half-built one.
-        if _chunk_ids is None:
-            rows = conn.execute(
-                select(unstructured_chunk.c.id, unstructured_chunk.c.content)
-            ).mappings()
-            _chunk_ids = {joinable(r["content"]): str(r["id"]) for r in rows}
-    return _chunk_ids
-
-
 def _chunk_attribute_rows(
     conn: Connection, chunk_ids: list[str]
 ) -> list[dict[str, Any]]:
@@ -462,33 +426,30 @@ def _chunk_attribute_rows(
     return [dict(row) for row in conn.execute(statement).mappings()]
 
 
-def chunk_ontology(chunks: list[str]) -> ChunkOntology:
+def chunk_ontology(chunk_ids: list[str | None]) -> ChunkOntology:
     """What the ontology knows about passages retrieved some other way.
 
     The inverse of :func:`attribute_search`: instead of reaching passages
     through concepts, this reaches the concepts a passage is a reading of, and
     from them the families and relations those concepts carry. A passage this
-    ontology has never seen simply contributes nothing.
+    ontology has never seen, or one without an id, simply contributes nothing.
     """
-    if not chunks:
+    if not chunk_ids:
         return ChunkOntology()
 
     from auto_ontology.dal.session import get_engine
 
-    by_text = chunk_id_by_text()
     # Position of each passage, so a link can say which one it belongs to.
     position: dict[str, int] = {}
-    for index, chunk in enumerate(chunks):
-        chunk_id = by_text.get(joinable(chunk))
+    for index, chunk_id in enumerate(chunk_ids):
         if chunk_id is not None:
             position.setdefault(chunk_id, index)
     if not position:
-        return ChunkOntology(labels=[[] for _ in chunks])
+        return ChunkOntology(labels=[[] for _ in chunk_ids])
 
-    chunk_ids = list(position)
     engine = get_engine()
     with engine.connect() as conn:
-        rows = _chunk_attribute_rows(conn, chunk_ids)
+        rows = _chunk_attribute_rows(conn, list(position))
 
     links = [
         {
@@ -501,7 +462,7 @@ def chunk_ontology(chunks: list[str]) -> ChunkOntology:
         for row in rows
     ]
 
-    labels: list[list[str]] = [[] for _ in chunks]
+    labels: list[list[str]] = [[] for _ in chunk_ids]
     for link in links:
         names = labels[link["chunk"]]
         if link["name"] not in names:

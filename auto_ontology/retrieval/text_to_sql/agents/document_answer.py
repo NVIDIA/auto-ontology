@@ -74,7 +74,9 @@ class RetrieveDocumentCandidatesAgent(BaseAgent):
         try:
             if _documents_available():
                 passages = search.chunk_search(question, k=_CANDIDATE_COUNT)
-                found = search.chunk_ontology([passage.text for passage in passages])
+                found = search.chunk_ontology(
+                    [passage.chunk_id for passage in passages]
+                )
             else:
                 passages = []
                 found = search.ChunkOntology()

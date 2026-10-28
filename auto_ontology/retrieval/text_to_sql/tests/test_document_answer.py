@@ -58,13 +58,17 @@ def test_retrieve_candidates_keeps_stable_source_ids(monkeypatch: Any) -> None:
             )
         ],
     )
-    monkeypatch.setattr(
-        document_answer.search,
-        "chunk_ontology",
-        lambda _chunks: ChunkOntology(labels=[["Annual leave"]], note=""),
-    )
+    annotated: list[list[str | None]] = []
+
+    def chunk_ontology(chunk_ids: list[str | None]) -> ChunkOntology:
+        annotated.append(chunk_ids)
+        return ChunkOntology(labels=[["Annual leave"]], note="")
+
+    monkeypatch.setattr(document_answer.search, "chunk_ontology", chunk_ontology)
 
     result = RetrieveDocumentCandidatesAgent().execute(_state())
+
+    assert annotated == [["chunk-1"]]
 
     candidate = result["path_state"]["document_candidates"][0]
     assert candidate["document_id"] == "doc-1"
