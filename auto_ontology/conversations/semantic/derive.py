@@ -78,8 +78,8 @@ def _revisions(nodes: Sequence[dict[str, Any]]) -> list[SemanticEdge]:
     kept apart for.
 
     A ``target`` or ``proposed`` reading is not in the chain at all. Both are
-    statements about a value that was never the value: a 290ms goal beside a
-    measured 520ms is not the figure having changed, and derivation comparing
+    statements about a value that was never the value: a 60ms goal beside a
+    measured 180ms is not the figure having changed, and derivation comparing
     fields has no way to tell the difference once they are in one group.
 
     Grouped by ``attribute_key`` *and* subject, within one transcript. One key

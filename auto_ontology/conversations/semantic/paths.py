@@ -12,8 +12,8 @@ reader is left to guess what joins them.
 
 So every edge is also embedded, as the whole path it spells out:
 
-    Budget tracker (Project) --built_with--> Flask (Technology, a Python web
-    framework)
+    Dispatch tool (Project) --built_with--> Redis (Technology, an in-memory
+    data store)
 
 Both ends in full and the role between them, so the vector carries the fact the
 edge asserts rather than a pointer to it.
@@ -25,9 +25,9 @@ them would mean guessing at query time. The ``type`` rides along in the metadata
 for a caller that wants to filter after the fact.
 
 **What goes in the text matters more than it looks.** The endpoint
-*descriptions* are included, not just the names: "the quota is 1,200/day
-supersedes the quota is 1,000/day" is matchable by a question about quotas,
-while "Daily quota supersedes Daily quota" is matchable by nothing and is what
+*descriptions* are included, not just the names: "the cap is 4,800/day
+supersedes the cap is 3,000/day" is matchable by a question about the ceiling,
+while "Daily cap supersedes Daily cap" is matchable by nothing and is what
 you get from names alone. The ``reason`` is included for the same cause -- on a
 derived ``precedes`` it holds the day count, which is the literal answer to an
 interval question.
@@ -73,7 +73,7 @@ def path_text(
 
     Arrow-shaped rather than prose. The role is the content of the edge and has
     to survive verbatim: a question asking what something is *built with* should
-    match on that phrase, and a prose rendering ("the project uses Flask")
+    match on that phrase, and a prose rendering ("the project uses Redis")
     paraphrases away the only token the question shares with the row.
     """
     role = edge.get("role", "")

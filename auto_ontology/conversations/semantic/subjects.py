@@ -34,7 +34,7 @@ subject this pass assigns. Letting a statement be a subject here is precisely
 the defect being removed.
 
 The turn text goes with the question because the node text alone often cannot
-settle it. "The prototype's fetch call latency improved to 220ms" resolves by
+settle it. "The prototype's label render latency improved to 140ms" resolves by
 elimination when only one thing in the list is an application, and not at all
 when two are.
 """
@@ -85,25 +85,31 @@ from that list and nothing else. You may not name a thing that is not listed,
 and you may not answer with another statement.
 
 How to choose:
-  - A measurement belongs to what is being measured. "The prototype's fetch
-    call latency improved to 220ms" is about the application, even though the
+  - A measurement belongs to what is being measured. "The prototype's label
+    render latency improved to 140ms" is about the application, even though the
     sentence says "the prototype" and the application is named something else.
     The conversation renames its own subjects constantly; resolve the vague
     noun to the thing it refers to.
   - Pick the thing the figure is a property OF, not something merely present
     while it was measured. A latency measured in a browser is about the app,
     not about the browser; a quota enforced by an API is about the API.
-  - Prefer the most specific thing that genuinely carries it. An autocomplete
-    response time is about the autocomplete feature if the feature is listed,
+  - Prefer the most specific thing that genuinely carries it. An address lookup
+    response time is about the address lookup feature if the feature is listed,
     and about the application only if it is not.
-  - A fact about a decision is about the thing decided on. "Switched to
-    localStorage for caching" is about the application whose caching changed.
+  - A fact about a decision is about the thing decided on. "Switched to on-disk
+    storage for caching" is about the application whose caching changed.
   - When two things could both carry it, read the surrounding turns: they say
     which one was under discussion.
   - When nothing in the list plausibly carries it, say so by leaving the
     statement out of your answer. An omitted statement loses one edge; a wrong
     one attaches a figure to the wrong thing and makes the graph state
     something false.
+  - A statement marked REQUEST is the exception to all of the above: it is
+    about the PERSON who asked, not about the part they asked about. Choose the
+    person from the list. Asking for the error messages to be friendlier is a
+    fact about the asker, not about the messages, and filing it under the
+    messages makes it indistinguishable from a description of how they already
+    behave. If no person is listed, leave it out.
 """
 
 _TEMPLATE = """\
@@ -169,11 +175,21 @@ def _render_things(things: Sequence[NodeDraft]) -> str:
 
 
 def _render_statements(statements: Sequence[NodeDraft]) -> str:
+    """The statements to be placed, one per line.
+
+    The kinds are not rendered, deliberately: the choice is about which thing
+    carries the sentence, and a statement's kind does not bear on that. The one
+    exception is ``request``, which the rules below treat differently because
+    it is the only kind whose subject is the speaker rather than the thing the
+    sentence names, and a rule the prompt cannot see the trigger for is not a
+    rule.
+    """
     lines = []
     for label, node in zip(_labels("s", statements), statements):
         detail = node.description.strip().split("\n")[0][:200]
         reading = f" | {node.key}={node.value}" if node.key and node.value else ""
-        lines.append(f"- {label} | {node.name}{reading} | {detail}")
+        asked = " | REQUEST" if "request" in node.kinds else ""
+        lines.append(f"- {label} | {node.name}{reading}{asked} | {detail}")
     return "\n".join(lines)
 
 
@@ -263,7 +279,7 @@ def _accept(
 
     Either form is accepted, the label or the name. Labels are what the prompt
     asks for, and the first live run answered 412 of 412 with names instead --
-    `s25 -> Weather app` rather than `s25 -> n7` -- which a label-only lookup
+    `s25 -> Dispatch app` rather than `s25 -> n7` -- which a label-only lookup
     discarded in full. The labels were never the safeguard: what makes an
     invented subject detectable is that the answer has to resolve inside the
     list this call was *shown*, and a name checked against that list resolves

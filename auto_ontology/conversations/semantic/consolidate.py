@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from auto_ontology.conversations.semantic.extract import (
@@ -50,7 +50,7 @@ __all__ = ["Merge", "consolidate_graph", "plan_merges"]
 #:
 #: 0.90 rather than Cognee's 0.85. Their pass is run deliberately by a user who
 #: can inspect a dry run first; this one runs unattended inside every build, so
-#: it is tuned for precision. At 0.85 "fetch call latency" and "autocomplete
+#: it is tuned for precision. At 0.85 "sort step latency" and "address lookup
 #: input latency" are near enough to merge, and they are two measurements whose
 #: difference is the answer to a question in this benchmark.
 DEFAULT_THRESHOLD = 0.90
@@ -85,8 +85,8 @@ def _shares_a_name(left: str, right: str) -> bool:
 
     Required *in addition to* similarity, because similarity alone does not
     work here. Measured on one transcript's 63 things: at 0.90 cosine the pass
-    wanted to merge ``express`` with ``slack`` and ``javascript`` with ``axios``
-    and ``node fetch``; at 0.85 it collapsed nineteen technologies onto one
+    wanted to merge two unrelated service names, and one language with two of
+    its HTTP libraries; at 0.85 it collapsed nineteen technologies onto one
     node; at 0.95 it merged nothing at all. Short technology names of one type
     embed close together because the embedding encodes the *register* -- a
     JavaScript tooling name -- far more strongly than the identity.
@@ -129,7 +129,7 @@ def plan_merges(
     *vectors* are keyed by normalised name and embed the **name alone**, not
     the name and description together the way the search vectors do. Two
     distinct features of one project routinely share most of a description --
-    "part of the weather app, written this sprint" -- and comparing those
+    "part of the dispatch app, written this sprint" -- and comparing those
     merges things that merely sit near each other. The name is the claim about
     identity; the description is a claim about the thing.
 
@@ -243,6 +243,7 @@ def consolidate_graph(
     vectors: Mapping[str, Sequence[float]],
     *,
     threshold: float = DEFAULT_THRESHOLD,
+    review: Callable[[list[Merge], Sequence[NodeDraft]], list[Merge]] | None = None,
 ) -> list[Merge]:
     """Apply :func:`plan_merges` to *graph* in place, returning what was merged.
 
@@ -251,8 +252,16 @@ def consolidate_graph(
     module" says nothing once those are one node. Edges that become duplicates
     of each other are folded together, keeping the union of their turns, so a
     relation stated about both spellings is evidenced by both.
+
+    *review* is given the planned merges and the nodes, and returns the ones to
+    keep. It sees the **plan**, not the result, and that is the only point a
+    merge can be reconsidered at: absorbing a duplicate unions its turns and
+    evidence into the survivor and then deletes it, so afterwards there is
+    nothing left to separate and no later pass can tell the merge happened.
     """
     merges = plan_merges(graph.nodes, graph.edges, vectors, threshold=threshold)
+    if review is not None and merges:
+        merges = review(merges, graph.nodes)
     if not merges:
         return []
 

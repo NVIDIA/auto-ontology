@@ -668,6 +668,65 @@ def test_things_are_rendered_apart_from_what_was_said_about_them() -> None:
     assert "[object]" not in note
 
 
+class TestUnrealisedTags:
+    """``[proposed]`` and ``[target]`` are glossed where they appear.
+
+    A tag no sentence explains reads as decoration: a reader shown a
+    ``[proposed]`` lint config asked which rules were *enforced* listed them.
+    """
+
+    def test_a_proposal_is_said_not_to_have_happened(self) -> None:
+        note = note_text(
+            [_node("Lint", ["proposed"], "a config extending a style guide", [29])],
+            [],
+        )
+
+        assert "[proposed] was suggested and never confirmed as done" in note
+        assert "Nothing tagged this way is something that was done:" in note
+
+    def test_a_goal_is_said_not_to_be_a_measurement(self) -> None:
+        note = note_text([_node("Aim", ["target"], "latency of 290ms", [60])], [])
+
+        assert "[target] is a goal, not a measurement" in note
+        assert "was suggested and never confirmed" not in note
+
+    def test_both_are_glossed_together_when_both_are_shown(self) -> None:
+        note = note_text(
+            [
+                _node("Lint", ["proposed"], "a config", [29]),
+                _node("Aim", ["target"], "latency of 290ms", [60]),
+            ],
+            [],
+        )
+
+        assert "[proposed] was suggested and never confirmed as done" in note
+        assert "[target] is a goal, not a measurement" in note
+
+    def test_a_statement_that_happened_is_not_hedged(self) -> None:
+        # The gloss would otherwise rule out something the reader could not
+        # have concluded, and spend context doing it.
+        note = note_text([_node("Stack", ["fact"], "the project uses X", [22])], [])
+
+        assert "Read the tags" not in note
+        assert "listed in the order it was said, earliest first:" in note
+
+    def test_a_request_is_listed_apart_from_what_the_project_has(self) -> None:
+        # Counting what the user asked for means having a set to count, which
+        # one undifferentiated list of statements is not.
+        note = note_text(
+            [
+                _node("Stack", ["fact"], "the project uses X", [2]),
+                _node("Wants 404 handled", ["request"], "wants 404 handled", [14]),
+            ],
+            [],
+        )
+
+        asked = note.index("asked for help with")
+        assert asked > note.index("the project uses X")
+        assert note.index("wants 404 handled") > asked
+        assert "wants 404 handled" not in note[:asked]
+
+
 def test_knowledge_edges_render_as_arrows() -> None:
     """The role is the content of the edge, so it is shown rather than glossed."""
     note = note_text(
@@ -1005,3 +1064,92 @@ class TestSubjectIsTheAboutEdge:
         right = {"name": "280ms", "about": ["Autocomplete"], "value": "280ms"}
 
         assert _not_a_revision(left, right) is not None
+
+
+class TestNeighbourhoodText:
+    """Names across the edge of the retrieved subgraph, and nothing else."""
+
+    @staticmethod
+    def _half(role: str, source_name: str, target_name: str, *, source_id="a"):
+        return {
+            "source_id": source_id,
+            "target_id": f"out-{target_name}",
+            "role": role,
+            "source_name": source_name,
+            "target_name": target_name,
+        }
+
+    nodes = [{"id": "a", "name": "Autocomplete", "kinds": ["object"]}]
+
+    def test_names_a_component_the_edge_rule_used_to_hide(self):
+        """The measured case: one has_component edge, far end not retrieved."""
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        text = neighbourhood_text(
+            self.nodes,
+            [
+                self._half(
+                    "has_component",
+                    "Autocomplete",
+                    "Request cancellation with AbortController",
+                )
+            ],
+        )
+
+        assert "Request cancellation with AbortController" in text
+        assert "Autocomplete is made up of" in text
+
+    def test_carries_no_turn_numbers(self):
+        """The far end was never retrieved, so no turn here can be cited."""
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        text = neighbourhood_text(
+            self.nodes, [self._half("built_with", "Autocomplete", "axios")]
+        )
+
+        assert "turn" not in text.lower()
+
+    def test_one_name_twice_is_listed_once(self):
+        """Two rows can share a name; two ids do not make two components."""
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        rows = [
+            self._half("has_component", "Autocomplete", "Loading spinner"),
+            self._half("has_component", "Autocomplete", "Loading spinner"),
+        ]
+        rows[1]["target_id"] = "out-second-row"
+
+        text = neighbourhood_text(self.nodes, rows)
+
+        assert text.count("Loading spinner") == 1
+
+    def test_an_edge_pointing_in_is_anchored_on_the_retrieved_end(self):
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        text = neighbourhood_text(
+            self.nodes,
+            [
+                {
+                    "source_id": "outside",
+                    "target_id": "a",
+                    "role": "has_component",
+                    "source_name": "Weather app",
+                    "target_name": "Autocomplete",
+                }
+            ],
+        )
+
+        assert "Autocomplete is made up of: Weather app" in text
+
+    def test_nothing_across_the_boundary_renders_nothing(self):
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        assert neighbourhood_text(self.nodes, []) == ""
+
+    def test_a_far_end_without_a_name_is_dropped(self):
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        row = self._half("has_component", "Autocomplete", "x")
+        row["target_name"] = None
+
+        assert neighbourhood_text(self.nodes, [row]) == ""

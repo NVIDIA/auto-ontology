@@ -18,7 +18,7 @@ told the model nothing.
 
 **The two layers are rendered differently, on purpose.** A ``knowledge`` edge
 reads better arrow-shaped: its role *is* the content, a transcript yields dozens
-of them, and "the dashboard API is a component of the budget tracker" spends
+of them, and "the reporting API is a component of the dispatch tool" spends
 three lines saying what one arrow says. A ``semantic`` edge gets a sentence
 instead, because there the role is a schema term the reader does not know --
 "statement A supersedes statement B" requires knowing what the word means here,
@@ -88,8 +88,8 @@ SEMANTIC_HEADINGS = (
 #:
 #: One sentence, about preferences only. A preference question is a *request*:
 #: "help me set up caching, keep it simple" is scored on whether the reply uses
-#: localStorage, not on whether it can recite that the user dislikes heavy
-#: dependencies, and a block labelling lines ``[preference]`` invites the
+#: the lightweight option, not on whether it can recite that the user dislikes
+#: heavy dependencies, and a block labelling lines ``[preference]`` invites the
 #: recital. Adding it took preference following from 0.500 to 1.000.
 #:
 #: It said more once. A clause asking for a direct answer in as few words as it
@@ -102,6 +102,43 @@ _CLOSING = (
     "Where a preference is listed above, satisfy it in what you produce rather "
     "than restating it."
 )
+
+
+#: What the unrealised kinds mean, glossed where they are used.
+#:
+#: These tags were rendered and never explained, and an unexplained tag reads
+#: as decoration. Asked which settings were *enforced*, a reader shown a
+#: ``[proposed]`` line holding a config the assistant had offered as an example
+#: listed its settings as enforced; the right answer was that the transcript
+#: never says any were adopted, and the tag was the only thing in the context
+#: that said so. Measured at 0.0 on the same question in four rounds of four.
+#:
+#: Here rather than in ``_CLOSING`` because it is about how to read the lines
+#: directly above it, and a closing instruction is read as applying to the
+#: answer instead of to the evidence -- which is how the one closing clause
+#: that over-reached cost abstention 0.500 -> 0.250.
+#:
+#: Only the kinds actually present are glossed. A sentence explaining a tag
+#: that appears nowhere spends context ruling out something the reader could
+#: not have concluded.
+#:
+#: The ``proposed`` gloss says what to *do* as well as what the tag means,
+#: because stating only the meaning was not enough. Asked which ESLint rules
+#: were enforced, a reader given the gloss answered with the three rules and
+#: then wrote "this configuration is tagged [proposed] -- not something
+#: confirmed as actually enforced". It had read the tag, understood it, and
+#: still led with the list; the gold is that the transcript does not say, and
+#: the answer scored 0.0. A reader that knows what a tag means still has to be
+#: told that the honest answer is sometimes nothing.
+_UNREALISED = {
+    "proposed": (
+        "[proposed] was suggested and never confirmed as done, so if the "
+        "question asks what was enforced, adopted, chosen or actually done "
+        "and the only lines bearing on it are tagged this way, say the "
+        "transcript does not say rather than reciting them"
+    ),
+    "target": "[target] is a goal, not a measurement",
+}
 
 
 def _turns(value: Any) -> str:
@@ -236,8 +273,8 @@ def _node_line(
 ) -> str:
     """One statement, led by what it is about.
 
-    The subject is not decoration. "API response time improved to 220ms" and
-    "the autocomplete API response time is 280ms" are measurements of different
+    The subject is not decoration. "API response time improved to 140ms" and
+    "the address lookup API response time is 95ms" are measurements of different
     things, and a reader asked which is faster will compare them as though they
     were not. The subject lives on a knowledge edge, which this block used to
     drop while being the longest and most prominent part of the note.
@@ -258,10 +295,81 @@ def _thing_line(node: dict[str, Any], sessions: Sessions) -> str:
     return f"  - {name} ({node.get('type', '')}){tail}{where}"
 
 
+#: How the half-edge block reads, per relation. Phrased as a possession rather
+#: than an arrow, because these carry no turns and must not read like the
+#: evidenced relations above them.
+_NEIGHBOUR_HEADINGS = {
+    "has_component": "is made up of",
+    "built_with": "is built with",
+    "covers": "covers",
+    "refines": "refines",
+}
+
+
+def neighbourhood_text(
+    nodes: Sequence[dict[str, Any]],
+    half_edges: Sequence[dict[str, Any]],
+) -> str:
+    """What the retrieved things connect to, as names and nothing else.
+
+    *half_edges* comes from
+    :func:`~auto_ontology.conversations.semantic.store.fetch_half_edges`: one
+    end retrieved, the other not. Rendered apart from the evidenced relations
+    and without turn numbers, because that is exactly what distinguishes them
+    -- the far end was never retrieved, so no turn here can be cited for it.
+    A reader that wants one has to be told the name and nothing more.
+
+    The point is to stop the note hiding what the graph knows. A question about
+    a feature is usually a question about its parts, and a part is named for
+    what it does, not for the feature it belongs to -- ``Request cancellation
+    on a stale query`` shares no wording with "improving the address lookup"
+    and cannot be reached by embedding at any budget. The edge is the only route,
+    and it was being dropped for the far end it names.
+
+    Empty string when there is nothing across the boundary.
+    """
+    inside = {str(n["id"]): n for n in nodes if n.get("id")}
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for edge in half_edges:
+        source, target = str(edge.get("source_id")), str(edge.get("target_id"))
+        anchor, other = (
+            (source, edge.get("target_name"))
+            if source in inside
+            else (target, edge.get("source_name"))
+        )
+        if anchor not in inside or not other:
+            continue
+        names = grouped.setdefault((anchor, str(edge.get("role"))), [])
+        # By name. A containment relation extracted in both directions anchors
+        # on the same node twice -- measured once in 778 edges, a feature and
+        # one of its parts recorded as containing each other -- and the store
+        # dedupes by (source, target, role), where a flipped pair is two keys.
+        # Listing the far end twice reads as two components, so the display
+        # collapses them; the contradictory edge itself is a graph defect and
+        # ``has_component`` being antisymmetric is checkable without a model.
+        if str(other) not in names:
+            names.append(str(other))
+
+    lines: list[str] = []
+    for node in nodes:
+        anchor = str(node.get("id"))
+        for role, phrasing in _NEIGHBOUR_HEADINGS.items():
+            names = grouped.get((anchor, role))
+            if names:
+                lines.append(f"- {node.get('name')} {phrasing}: {', '.join(names)}")
+    if not lines:
+        return ""
+    return (
+        "Also recorded about these, named but not quoted -- ask for a name to "
+        "see what was said about it:\n" + "\n".join(lines)
+    )
+
+
 def note_text(
     nodes: Sequence[dict[str, Any]],
     edges: Sequence[dict[str, Any]],
     *,
+    half_edges: Sequence[dict[str, Any]] = (),
     session_index_by_turn: dict[tuple[str, int], int] | None = None,
 ) -> str:
     """The prompt block for a retrieved subgraph.
@@ -288,7 +396,18 @@ def note_text(
     """
     sessions = Sessions(session_index_by_turn)
     things = [n for n in nodes if list(n.get("kinds") or ()) == ["object"]]
-    statements = [n for n in nodes if list(n.get("kinds") or ()) != ["object"]]
+    # In the order they were said, which retrieval does not preserve and
+    # nothing else in the note supplies. ``precedes`` orders only the 13 of 131
+    # statements carrying both an event kind and a date, so a question asking
+    # the order in which topics were *raised* -- as against when they happened
+    # -- has the turn index and nothing else to go on. Measured at 0.550 over
+    # four rounds on exactly that question, against 1.000 on its twin.
+    statements = sorted(
+        (n for n in nodes if list(n.get("kinds") or ()) != ["object"]),
+        key=lambda n: (min(n.get("turn_indexes") or [10**6]), str(n.get("name") or "")),
+    )
+    asked = [n for n in statements if "request" in (n.get("kinds") or ())]
+    statements = [n for n in statements if "request" not in (n.get("kinds") or ())]
     # Computed before ``about`` is dropped below: those edges are the clearest
     # statement of a subject even though they read poorly as arrows.
     subjects = subjects_of(edges)
@@ -296,10 +415,11 @@ def note_text(
         str(n["id"]) for n in statements if n.get("id") and n.get("value")
     )
     # ``about`` is dropped: it attaches a statement to the thing it concerns,
-    # and the statement's own text already names that thing. "API daily quota
-    # 1,200 calls/day --about--> OpenWeather API v2.5" sits above a line
-    # reading "The new daily quota for the OpenWeather API is 1,200 calls per
-    # day". It is 61% of the knowledge layer and the most repetitive part of it.
+    # and the statement's own text already names that thing. "Daily label cap
+    # 4,800 parcels/day --about--> Shipping Rates API v1.4" sits above a line
+    # reading "The new daily label cap for the Shipping Rates API is 4,800
+    # parcels per day". It is 61% of the knowledge layer and its most
+    # repetitive part.
     knowledge = [
         e for e in edges if e.get("type") == "knowledge" and e.get("role") != "about"
     ]
@@ -321,10 +441,47 @@ def note_text(
             )
         )
     if statements:
-        blocks.append(
+        marked = {
+            kind
+            for node in statements
+            for kind in node.get("kinds") or ()
+            if kind in _UNREALISED
+        }
+        # Sorting the lines is not enough on its own: a reader with no reason
+        # to think a list is ordered falls back on the turn numbers, which is
+        # what it was doing before the sort and why the sort alone moved
+        # nothing. The order is stated here, next to the lines it describes,
+        # for the same reason the kinds gloss is.
+        heading = (
             "What this conversation established, extracted from the full "
-            "transcript:\n"
+            "transcript and listed in the order it was said, earliest first"
+        )
+        if marked:
+            heading += (
+                ". Read the tags: "
+                + "; ".join(
+                    text for kind, text in _UNREALISED.items() if kind in marked
+                )
+                + ". Nothing tagged this way is something that was done:"
+            )
+        else:
+            heading += ":"
+        blocks.append(
+            heading
+            + "\n"
             + "\n".join(_node_line(n, subjects, sessions) for n in statements)
+        )
+
+    # Apart from the statements above, and the separation is the point. Asked
+    # how many concerns the user mentioned wanting handled, a reader given one
+    # undifferentiated list of statements has every feature in the graph to
+    # choose from and answered 6 against a gold of 4; cognee answered 23. The
+    # set to count has to be a set before it can be counted.
+    if asked:
+        blocks.append(
+            "What the user asked for help with, as against what the project "
+            "already has. These are requests, not descriptions:\n"
+            + "\n".join(_node_line(n, subjects, sessions) for n in asked)
         )
 
     by_role: dict[str, list[dict[str, Any]]] = {}
@@ -342,6 +499,14 @@ def note_text(
 
     if timeline:
         blocks.append("When these happened, earliest first:\n" + timeline)
+
+    # Last of the graph blocks, and after the timeline: everything above is
+    # evidenced and this is not, so it reads as an appendix rather than as more
+    # of the same.
+    if blocks:
+        neighbours = neighbourhood_text(things, half_edges)
+        if neighbours:
+            blocks.append(neighbours)
 
     if blocks:
         blocks.append(_CLOSING)
