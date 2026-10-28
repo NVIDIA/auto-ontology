@@ -450,13 +450,13 @@ conversation = Table(
 #: ``Technology``, ``Timestamp`` -- which is open vocabulary and names the
 #: domain rather than the use.
 #:
-#: ``object`` is the kind of a thing that asserts nothing. ``Flask`` is not a
-#: fact; "the project is built with Flask" is the fact, and that is an edge.
+#: ``object`` is the kind of a thing that asserts nothing. ``Redis`` is not a
+#: fact; "the project is built with Redis" is the fact, and that is an edge.
 #: Having an explicit kind for things rather than an empty list keeps the column
 #: non-empty, which makes "every node of this sort" a containment test instead
 #: of a null check.
 #:
-#: The other four are reverse-engineered from what a transcript gets asked:
+#: The rest are reverse-engineered from what a transcript gets asked:
 #:
 #: ``fact``
 #:     Asserted once and stable. The endpoint a project targets.
@@ -470,6 +470,14 @@ conversation = Table(
 #:     The current value of something that moves, with the previous value still
 #:     in the transcript. That is the difference between retrieving a quota and
 #:     retrieving the wrong quota.
+#: ``request``
+#:     Something the speaker asked for help with, as against something the
+#:     project has. Without it the only box "I want to display friendly
+#:     messages for 404 and 400" fits is ``fact``, which stores it as a
+#:     description of the app and drops the wanting; a question counting what
+#:     the speaker raised then has every feature to choose from and no set to
+#:     count. Distinct from ``preference``, which is standing and applies to a
+#:     later answer, and from ``target``, which wants a value rather than work.
 CONVERSATION_NODE_KINDS = (
     "object",
     "fact",
@@ -478,6 +486,7 @@ CONVERSATION_NODE_KINDS = (
     "state",
     "target",
     "proposed",
+    "request",
 )
 
 #: The node type of a bare date. A leaf by construction: a date is something
@@ -517,8 +526,8 @@ CONVERSATION_EDGE_TYPES = ("knowledge", "semantic")
 #:
 #: ``unrelated`` is a verdict, not a relation. Candidates come from vector
 #: proximity, which cannot tell a superseded value from an unrelated one --
-#: "quota is 1,000" and "quota is 1,200" embed about as close as "coverage is
-#: 78%" and "coverage is 85%" -- so it is reached often, and storing it is what
+#: "the cap is 3,000" and "the cap is 4,800" embed about as close as "coverage
+#: is 71%" and "coverage is 84%" -- so it is reached often, and storing it is what
 #: stops the next pass paying to reach it again.
 CONVERSATION_SEMANTIC_ROLES = (
     "supersedes",
@@ -537,7 +546,7 @@ CONVERSATION_SEMANTIC_ROLES = (
 #: and is not in the split schema.
 #:
 #: Identity is the normalised name, not the id the extractor made up. A model
-#: reading window 3 and window 40 writes "OpenWeather API" both times when asked
+#: reading window 3 and window 40 writes "Shipping Rates API" both times when asked
 #: to, and ``uq_conversation_node_name`` is what makes the second one land on
 #: the first one's row instead of beside it.
 #:
@@ -576,12 +585,12 @@ conversation_node = Table(
     # These are what make `supersedes` and `contradicts` derivable instead of
     # adjudicated. Two nodes attached to one subject with one `attribute_key`
     # and different `value`s are, by construction, two readings of one quantity
-    # -- no model has to be asked whether "the quota is 1,000" and "the quota is
-    # 1,200" are about the same thing. Which is current is then a question about
+    # -- no model has to be asked whether "the cap is 3,000" and "the cap is
+    # 4,800" are about the same thing. Which is current is then a question about
     # their turn numbers, which is also not a judgement call.
     #
     # Separate from `name` because `name` is what a reader sees and drifts
-    # between windows ("Daily quota" / "API daily call quota"); the key is
+    # between windows ("Daily cap" / "API daily label cap"); the key is
     # machine-facing and normalised so the two collapse.
     Column("attribute_key", Text, nullable=True),
     Column("value", Text, nullable=True),

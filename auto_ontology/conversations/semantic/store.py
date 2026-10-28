@@ -10,7 +10,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import and_, delete, insert, select
+from sqlalchemy import and_, delete, insert, or_, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
@@ -137,7 +137,7 @@ def subjects_of(edges: Sequence[dict[str, Any]]) -> dict[str, list[str]]:
 
     Both readers of this need the same answer for the same reason. The note
     prefixes a rendered statement with its subject so "average response time
-    280ms" is not read as the app's; adjudication compares subjects so that
+    95ms" is not read as the app's; adjudication compares subjects so that
     reading is not written into the graph as a revision in the first place.
     """
     found: dict[str, list[str]] = {}
@@ -149,9 +149,9 @@ def subjects_of(edges: Sequence[dict[str, Any]]) -> dict[str, list[str]]:
         # `obtained_at` targets are read as subjects too, and the two callers
         # fail in opposite directions: the note prefixes a reading with a
         # library's name, and adjudication compares the wrong things. Measured:
-        # 'OpenWeather API key obtained' carries only `obtained_at` ->
-        # '2024-03-10', so its subject read as that date, and the retraction
-        # 'Never obtained an API key' was rejected as a revision of it for
+        # a statement that a token had been obtained carried only `obtained_at`
+        # -> a date, so its subject read as that date, and the retraction
+        # saying the token was never obtained was rejected as a revision for
         # naming a different one -- when the honest answer is that the first
         # statement has no recorded subject at all, which this guard allows.
         if edge.get("role") != "about":
@@ -225,6 +225,108 @@ def fetch_edges(
     if type_ is not None:
         query = query.where(edge.c.type == type_)
     return store().query_read(query)
+
+
+#: Roles worth naming across the edge of the retrieved subgraph. Structural
+#: relations only: these say what a thing *is made of* or *runs on*, which is
+#: what a question about a thing is usually asking. ``about`` is excluded
+#: because a hub carries dozens of them and the statement's own text already
+#: names its subject; ``precedes`` because a chronology reads as a sequence or
+#: not at all, and half a chain is worse than none.
+HALF_EDGE_ROLES = ("has_component", "built_with", "covers", "refines")
+
+
+def fetch_half_edges(
+    ids: Sequence[str],
+    *,
+    roles: Sequence[str] = HALF_EDGE_ROLES,
+    per_node: int = 12,
+) -> list[dict[str, Any]]:
+    """Structural edges with **one** end inside *ids*, for naming only.
+
+    :func:`fetch_edges` keeps an edge only when both ends matched, which is
+    right for everything that reads an edge as evidence: a relation rendered
+    with its turns has to have had both of its nodes retrieved. It is wrong for
+    telling a reader what *exists*. Measured on one summarisation question, a
+    component node named for what it does sat one ``has_component`` edge from
+    the feature holding it, which had matched; the edge was dropped for its
+    far end, the note never named the component, and the answer lost the nugget
+    asking for it. The same rule cost ``built_with html5`` once before.
+
+    So the two decisions are separated. Spending a turn slot on a node is
+    expensive and still requires a match; naming it costs about sixty
+    characters and does not. The caller renders these as bare names -- no
+    turns, no descriptions -- and the turn budget is untouched.
+
+    *per_node* caps how many come back for one end **per role**, because degree
+    is not uniform: on a 401-node transcript the median is 2 and the largest hub
+    is 35, so an uncapped pass is bounded in the average case and ragged in the
+    one that matters. Per role rather than per node, which was measured: counted
+    across roles, one hub feature's twelve components filled the budget and the
+    slice dropped the component that answered the question -- the single
+    name this function exists to surface -- because the cut fell alphabetically.
+    A cap that can discard the whole of one relation to make room for another is
+    the wrong shape; each relation answers a different question.
+
+    Ordered by role then name, so the cap takes a stable slice rather than
+    whatever the planner returns first.
+    """
+    if not ids or not roles:
+        return []
+    inside = list(ids)
+    edge = s.conversation_edge
+    source = s.conversation_node.alias("source")
+    target = s.conversation_node.alias("target")
+    query = (
+        select(
+            edge.c.source_id,
+            edge.c.target_id,
+            edge.c.role,
+            source.c.name.label("source_name"),
+            target.c.name.label("target_name"),
+            target.c.type.label("target_type"),
+        )
+        .select_from(
+            edge.join(source, source.c.id == edge.c.source_id).join(
+                target, target.c.id == edge.c.target_id
+            )
+        )
+        .where(
+            edge.c.role.in_(list(roles)),
+            # Exactly one end inside. Both-ended edges are already returned by
+            # ``fetch_edges`` with their evidence, and naming them again here
+            # would render the same relation twice in one note.
+            or_(
+                and_(edge.c.source_id.in_(inside), edge.c.target_id.notin_(inside)),
+                and_(edge.c.target_id.in_(inside), edge.c.source_id.notin_(inside)),
+            ),
+        )
+        .order_by(edge.c.role, target.c.name)
+    )
+    rows = store().query_read(query)
+
+    seen: set[tuple[str, str, str]] = set()
+    counts: dict[tuple[str, str], int] = {}
+    kept: list[dict[str, Any]] = []
+    known = set(inside)
+    for row in rows:
+        key = (str(row["source_id"]), str(row["target_id"]), str(row["role"]))
+        # The extractor can emit one relation twice from two windows, and a
+        # duplicate pair spends a slot saying what the note already says.
+        if key in seen:
+            continue
+        seen.add(key)
+        anchor = (
+            str(row["source_id"])
+            if str(row["source_id"]) in known
+            else str(row["target_id"])
+        )
+        bucket = (anchor, str(row["role"]))
+        if counts.get(bucket, 0) >= per_node:
+            continue
+        counts[bucket] = counts.get(bucket, 0) + 1
+        kept.append(row)
+    return kept
 
 
 def _require_distinct_names(nodes: Sequence[dict[str, Any]]) -> None:

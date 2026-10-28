@@ -115,13 +115,13 @@ the turns you were shown support it.
 
   supported    The turns state this relation, or state it plainly enough that a
                careful reader would agree. Wording need not match: "I added
-               lru-cache to the caching layer" supports
-               `Caching layer --built_with--> lru-cache`.
+               node-cache to the response cache" supports
+               `Response cache --built_with--> node-cache`.
   unsupported  The turns talk about both ends and say something INCOMPATIBLE
                with this. If the turns say the retry logic was removed, `Retry
                logic --deployed_to--> Production` is unsupported. If the user
-               chose vanilla JS over React, `Weather app --built_with-->
-               React 18.2` is unsupported.
+               chose plain scripts over a framework, `Dispatch app
+               --built_with--> Vue 3.4` is unsupported.
   absent       The turns never mention one of the two ends. Say this rather
                than guessing. It usually means the relation came from a
                different part of the conversation, which you cannot see.
@@ -129,18 +129,18 @@ the turns you were shown support it.
 A NAME MORE PRECISE THAN THE SENTENCE IS STILL SUPPORTED. This is the mistake
 to avoid above all others. A turn writing "HTML and CSS" supports
 `--built_with--> HTML5` and `--built_with--> CSS3`; a turn writing "the
-OpenWeather API" supports `--built_with--> OpenWeather API v2.5`; a turn
+Shipping Rates API" supports `--built_with--> Shipping Rates API v1.4`; a turn
 writing "jest" supports `--built_with--> jest v29`. The relation is the claim
 being checked, not the wording of the end's name, and these were all called
 unsupported once -- which deleted true relations and made an answer listing the
 project's technologies lose half of them.
 
 Judge only what is written. Do not use what you know about how such software is
-normally built: `Weather app --built_with--> JavaScript` is 'absent' if these
+normally built: `Dispatch app --built_with--> JavaScript` is 'absent' if these
 turns never say so, however likely it is.
 
 A relation may be stated by either speaker, in a question or in an answer. The
-user asking "can we add debouncing to the autocomplete?" and the assistant
+user asking "can we add retries to the address lookup?" and the assistant
 answering with the code supports the relation between them.
 
 Be sparing with 'unsupported'. It is the verdict that removes information, and
@@ -399,7 +399,7 @@ does to that claim.
   supports    The turn states the claim, or states it plainly enough that a
               careful reader would agree.
   denies      The turn says the OPPOSITE. The user saying "I've never actually
-              obtained an API key" denies the claim "OpenWeather API key
+              obtained a carrier token" denies the claim "Carrier token
               obtained", however much the two sentences look alike.
   unrelated   The turn neither states nor contradicts the claim. It may be
               about the same topic and still say nothing about this.
@@ -513,7 +513,7 @@ def verify_node_citations(
     """Check each multi-turn statement against every turn it cites.
 
     Only statements, and only those citing :data:`MIN_CITED_TURNS` or more. A
-    *thing* legitimately spans every turn that mentions it -- ``Autocomplete``
+    *thing* legitimately spans every turn that mentions it -- one feature
     appearing in twenty turns is the graph working -- so there is no claim there
     to be wrong about. A statement citing several turns is asserting that each
     one says it, and that assertion is what this tests.
@@ -620,12 +620,12 @@ First decide WHICH OF TWO THINGS this is, because only one of them is a missing
 statement:
 
   retraction   The SPEAKER takes back something they said. "I've never actually
-               obtained an API key" against 'OpenWeather API key obtained'. The
+               obtained a carrier token" against 'Carrier token obtained'. The
                transcript holds both claims, the speaker is in conflict with
                themselves, and the retraction belongs in the graph beside what
                it denies.
   inaccuracy   The claim is simply recorded WRONGLY. The graph says the cache
-               uses a Map and the code uses an LRU cache; nobody retracted
+               uses a plain map and the code uses an LRU cache; nobody retracted
                anything, one node is just wrong. There is no new statement to
                add here -- the repair is to the existing node, which is not
                yours to make -- so say 'inaccuracy' and write nothing else of

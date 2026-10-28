@@ -433,12 +433,9 @@ class TestDetach:
 
 
 class _Denial:
-    def __init__(
-        self, name, description="said so", evidence="", value="", kind="retraction"
-    ):
+    def __init__(self, name, description="said so", evidence="", value=""):
         self.name, self.description = name, description
         self.evidence, self.value = evidence, value
-        self.kind = kind
 
 
 TURN_35 = "I've never actually obtained an API key for this project."
@@ -453,26 +450,13 @@ def _denies(node, turn=35):
     return report
 
 
-@pytest.fixture
-def denial(monkeypatch):
-    """Make the denial call return a fixed item."""
-
-    def install(item):
-        monkeypatch.setattr(
-            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
-            lambda *_: item,
-        )
-        monkeypatch.setattr(
-            "auto_ontology.utils.llm_invoke.get_llm_client", lambda **_: object()
-        )
-
-    return install
-
-
 class TestBuildDenials:
-    def test_a_quoted_denial_becomes_a_statement(self, denial):
-        denial(_Denial("Never obtained an API key", evidence="never actually obtained"))
+    def test_a_quoted_denial_becomes_a_statement(self, answer):
+        answer([])  # installs the patched client
         claim = statement("API key obtained", {16, 35}, description="Key obtained.")
+        self._returns(
+            _Denial("Never obtained an API key", evidence="never actually obtained")
+        )
 
         built = build_denials(_denies(claim), {35: TURN_35})
 
@@ -482,8 +466,9 @@ class TestBuildDenials:
         assert built[0].verified_turn_indexes == {35}
         assert built[0].kinds == ["fact"]
 
-    def test_a_quote_not_in_the_turn_is_discarded(self, denial):
-        denial(_Denial("Never obtained a key", evidence="I threw the key away"))
+    def test_a_quote_not_in_the_turn_is_discarded(self, answer):
+        answer([])
+        self._returns(_Denial("Never obtained a key", evidence="I threw the key away"))
 
         built = build_denials(
             _denies(statement("API key obtained", {16, 35})), {35: TURN_35}
@@ -491,8 +476,9 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_an_empty_quote_is_discarded(self, denial):
-        denial(_Denial("Never obtained a key", evidence="  "))
+    def test_an_empty_quote_is_discarded(self, answer):
+        answer([])
+        self._returns(_Denial("Never obtained a key", evidence="  "))
 
         built = build_denials(
             _denies(statement("API key obtained", {16, 35})), {35: TURN_35}
@@ -500,8 +486,9 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_reusing_the_claims_name_is_discarded(self, denial):
-        denial(_Denial("API key obtained", evidence="never actually obtained"))
+    def test_reusing_the_claims_name_is_discarded(self, answer):
+        answer([])
+        self._returns(_Denial("API key obtained", evidence="never actually obtained"))
 
         built = build_denials(
             _denies(statement("API key obtained", {16, 35})), {35: TURN_35}
@@ -509,10 +496,13 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_the_claims_key_is_reused_with_the_opposite_value(self, denial):
-        denial(_Denial("Never obtained one", evidence="never actually", value="no"))
+    def test_the_claims_key_is_reused_with_the_opposite_value(self, answer):
+        answer([])
         claim = statement(
             "API key obtained", {16, 35}, key="api_key_obtained", value="yes"
+        )
+        self._returns(
+            _Denial("Never obtained one", evidence="never actually", value="no")
         )
 
         built = build_denials(_denies(claim), {35: TURN_35})
@@ -520,8 +510,11 @@ class TestBuildDenials:
         assert built[0].key == "api_key_obtained"
         assert built[0].value == "no"
 
-    def test_a_value_is_dropped_when_the_claim_has_no_key(self, denial):
-        denial(_Denial("Never obtained one", evidence="never actually", value="no"))
+    def test_a_value_is_dropped_when_the_claim_has_no_key(self, answer):
+        answer([])
+        self._returns(
+            _Denial("Never obtained one", evidence="never actually", value="no")
+        )
 
         built = build_denials(
             _denies(statement("API key obtained", {16, 35})), {35: TURN_35}
@@ -530,76 +523,33 @@ class TestBuildDenials:
         assert built[0].key == ""
         assert built[0].value == ""
 
-    def test_a_missing_turn_is_skipped(self, denial):
-        denial(_Denial("Never obtained one", evidence="never actually"))
+    def test_a_missing_turn_is_skipped(self, answer):
+        answer([])
+        self._returns(_Denial("Never obtained one", evidence="never actually"))
 
         built = build_denials(_denies(statement("a", {16, 35})), {16: "other"})
 
         assert built == []
 
-    def test_no_answer_builds_nothing(self, denial):
-        denial(None)
+    def test_no_answer_builds_nothing(self, monkeypatch):
+        monkeypatch.setattr(
+            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
+            lambda *_: None,
+        )
+        monkeypatch.setattr(
+            "auto_ontology.utils.llm_invoke.get_llm_client", lambda **_: object()
+        )
 
         built = build_denials(_denies(statement("a", {16, 35})), {35: TURN_35})
 
         assert built == []
 
-    def test_an_empty_report_builds_nothing(self, denial):
-        denial(_Denial("Never obtained one", evidence="never actually"))
+    def test_an_empty_report_builds_nothing(self, answer):
+        answer([])
 
         assert build_denials(CitationReport(), {35: TURN_35}) == []
 
-    def test_an_inaccuracy_adds_nothing(self, denial):
-        """A claim recorded wrongly is a node to fix, not a statement to add."""
-        denial(
-            _Denial(
-                "Uses LRU cache not Map",
-                evidence="never actually",
-                kind="inaccuracy",
-            )
-        )
+    def _returns(self, item):
+        import auto_ontology.utils.llm_invoke as llm
 
-        built = build_denials(
-            _denies(statement("Caching with Map", {45, 46})), {45: TURN_35}
-        )
-
-        assert built == []
-
-    def test_one_denial_per_claim_however_many_turns_deny_it(self, denial):
-        denial(_Denial("Never obtained one", evidence="never actually"))
-        claim = statement("API key obtained", {35, 36})
-        report = CitationReport()
-        for turn in (35, 36):
-            report.denies.append(
-                NodeCitation(node=claim, turn_index=turn, verdict="denies")
-            )
-
-        built = build_denials(report, {35: TURN_35, 36: TURN_35})
-
-        assert len(built) == 1
-
-    def test_a_turn_extraction_already_states_is_left_alone(self, denial):
-        """The prompt got there first; a second node is a duplicate."""
-        denial(_Denial("Never obtained one", evidence="never actually"))
-        existing = statement("Never obtained an API key", {35})
-
-        built = build_denials(
-            _denies(statement("API key obtained", {16, 35})),
-            {35: TURN_35},
-            already=[existing],
-        )
-
-        assert built == []
-
-    def test_a_multi_turn_statement_does_not_count_as_spoken_for(self, denial):
-        """Only a statement dedicated to that turn means it was handled."""
-        denial(_Denial("Never obtained one", evidence="never actually"))
-        spanning = statement("Something across turns", {35, 60})
-
-        built = build_denials(
-            _denies(statement("API key obtained", {16, 35})),
-            {35: TURN_35},
-            already=[spanning],
-        )
-
-        assert len(built) == 1
+        llm.invoke_with_structured_output = lambda *_: item

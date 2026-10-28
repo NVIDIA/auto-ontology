@@ -11,9 +11,9 @@ list, and it is what :mod:`note` reads at query time.
 Three steps:
 
 1. **Propose.** Attributes whose vectors sit close together are candidate
-   pairs. Cheap, and wrong on its own: "the quota is 1,000" and "the quota is
-   1,200" embed almost identically, and so do "coverage is 78%" and "latency is
-   250ms" relative to the rest of a transcript.
+   pairs. Cheap, and wrong on its own: "the cap is 3,000" and "the cap is
+   4,800" embed almost identically, and so do "coverage is 71%" and "latency is
+   180ms" relative to the rest of a transcript.
 2. **Adjudicate.** A model says what the relation actually is and why, so the
    edge carries provenance. The ``unrelated`` verdicts are stored too -- they
    are most of the answer, and keeping them is what stops a later pass paying
@@ -149,7 +149,7 @@ later in the conversation.
 
 Each statement says what it is ABOUT. Two statements about different subjects \
 are not a revision of each other, however alike they read: the app's average \
-response time and the autocomplete's average response time are two quantities \
+response time and the address lookup's average response time are two quantities \
 that share a word, not one quantity measured twice. The property key says the \
 same thing more narrowly -- different keys are different properties unless \
 the extractor keyed one property two ways.
@@ -320,18 +320,18 @@ def _not_a_revision(left: dict, right: dict) -> str | None:
     adjudicator got both wrong on the first transcript measured, so they are
     checked here rather than left to the prompt above:
 
-    **Different subjects.** The weather app's API response time, improved to
-    220ms in session three, was ruled a revision of the autocomplete's 280ms
-    from session two. Two quantities, one word in common. The note then said
-    the autocomplete now answers in 220ms, and the reader -- comparing against
-    a 250ms fetch latency -- named the wrong one as faster. An unrecorded
+    **Different subjects.** The application's API response time, improved to
+    140ms in session three, was ruled a revision of one feature's 95ms from
+    session two. Two quantities, one word in common. The note then said the
+    feature now answers in 140ms, and the reader -- comparing against a 180ms
+    latency elsewhere -- named the wrong one as faster. An unrecorded
     subject is not a mismatch: it is read off the knowledge edges, and a
     statement the extractor left unattached would otherwise be exempt from
     every revision it genuinely belongs to.
 
-    **The same value twice.** One 220ms reading was ruled a revision of
-    another 220ms reading, the extractor having keyed one measurement as both
-    ``api_response_time`` and ``api_response_time_ms``. Nothing was revised, so
+    **The same value twice.** One 140ms reading was ruled a revision of
+    another 140ms reading, the extractor having keyed one measurement as both
+    ``carrier_reply_time`` and ``carrier_reply_time_ms``. Nothing was revised, so
     there is nothing for a reader to prefer; it is a duplicate, and the note
     spends three lines implying a change that did not happen.
     """

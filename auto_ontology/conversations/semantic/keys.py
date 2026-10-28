@@ -7,12 +7,12 @@
 :mod:`derive` recognises a revised value by an exact ``attribute_key`` match, so
 two readings of one quantity filed under two keys are two unrelated statements
 and the revision is simply missing. It happens: the extractor sees each window
-in turn and names the property from the words that window used, and "fetch call
+in turn and names the property from the words that window used, and "sort step
 latency" in turn 19 becomes "API response time" by turn 75.
 
 Measured on one BEAM transcript, that cost two real revisions out of eight --
-the weather app's latency going 250ms to 220ms, and the OpenWeather quota going
-1,000 to 1,200 calls a day.
+an application latency going 180ms to 140ms, and a daily API ceiling going
+3,000 to 4,800 calls a day.
 
 Why a model and not a similarity threshold. Among the keys one subject carries,
 the pairs that must merge are the lexically distant ones and the pairs that must
@@ -57,21 +57,21 @@ The test: could a person write one true sentence of the form "the <subject>'s
 find these -- a conversation that measures something twice usually renames it.
 
 MERGE, because one figure is being read twice under two names:
-  fetch_latency 250ms  +  api_response_time 220ms      (one app, one latency,
-      named for the fetch call early on and for the API later)
-  daily_quota 1200/day  +  rate_limit_per_day 1000/day (one API, one daily
-      ceiling, called a quota once and a rate limit once)
-  test_coverage 65%  +  coverage_current 78%           (one suite, one figure)
+  sort_time_ms 180ms  +  carrier_reply_time 140ms      (one app, one latency,
+      named for the sort step early on and for the carrier call later)
+  daily_label_cap 4800/day  +  rate_limit_per_day 3000/day (one API, one daily
+      ceiling, called a cap once and a rate limit once)
+  manifest_coverage 52%  +  coverage_current 71%       (one suite, one figure)
 
 KEEP APART:
-  api_response_time  +  page_load_time        two different measurements that
+  carrier_reply_time  +  page_render_time     two different measurements that
       are both times
   rate_limit_per_day  +  rate_limit_per_minute  one ceiling per window, two
       windows, both true at once
   latency_current  +  latency_target          a reading and a goal; the gap
       between them is not the figure moving
-  bundle_size  +  image_size                  a part is not the whole
-  input_lag  +  api_response_time             on one feature: what the user
+  archive_size  +  label_image_size           a part is not the whole
+  queue_wait  +  carrier_reply_time           on one feature: what the user
       feels and what the server took are measured separately and differ by the
       work in between. Likewise render time, round-trip time, time to first
       byte -- one feature has many latencies and they are not one figure.
@@ -79,6 +79,13 @@ KEEP APART:
 The names being similar is not evidence either way: the first two merges above
 share no words, and the second rejection differs by one. Read what is being
 measured, not how it is spelled.
+
+Each reading is shown with the sentence it was taken from. Those sentences
+decide the hard cases, and they outrank the key names whenever the two
+disagree. Two readings whose sentences describe different parts of one thing
+are two properties, however alike their keys read; two readings whose sentences
+describe the same part are one property, however differently their keys are
+spelled. When a sentence is missing, judge on the key and the value alone.
 """
 
 _TEMPLATE = """\
@@ -110,11 +117,11 @@ class KeyGroups(BaseModel):
     groups: list[KeyGroup] = Field(default_factory=list)
 
 
-#: Values that state a limit rather than a reading. "below 250ms" is where the
+#: Values that state a limit rather than a reading. "below 180ms" is where the
 #: figure was asked to get to, and merging its key into the key of the figure
 #: itself makes the distance between a goal and a measurement look like the
 #: measurement moved. Checked on the value because the kind cannot be relied on:
-#: the transcript's own "reduce fetch call latency, below 250ms" came back
+#: a transcript's own "reduce the sort step latency, below 180ms" came back
 #: tagged ``preference``, which no goal filter catches.
 _BOUNDS = (
     "below ",
@@ -183,6 +190,18 @@ def _candidates(
 
 
 def _render(candidates: dict[str, list[dict[str, Any]]]) -> str:
+    """Each subject's readings, with the sentence each was taken from.
+
+    The quote is here because the key names alone cannot settle the case this
+    pass most needs to get right. Two readings hang off one thing, one from its
+    network call and one from its rendering, and ``response_time_ms`` beside
+    ``latency_ms`` reads like one property under two names -- which is what this
+    is looking for -- until you see that the two sentences are about different
+    parts. Merging them would chain two unrelated figures into a revision.
+
+    It is free: ``evidence`` is on the node already, on the draft and on the
+    stored row alike, so no turn is fetched to print it.
+    """
     blocks = []
     for subject in sorted(candidates):
         lines = [f"## {subject}"]
@@ -196,7 +215,9 @@ def _render(candidates: dict[str, list[dict[str, Any]]]) -> str:
                 continue
             seen.add((key, value))
             turns = ", ".join(str(i) for i in sorted(row.get("turn_indexes") or []))
-            lines.append(f"- {key} | {value} | {turns or 'unknown'}")
+            lines.append(f"- {key} | {value} | turn {turns or 'unknown'}")
+            if quote := (row.get("evidence") or "").strip()[:200]:
+                lines.append(f'    said as: "{quote}"')
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 

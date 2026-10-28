@@ -16,7 +16,7 @@ A **node** is anything the transcript talks about, on two axes:
 better than whichever of five listed types fits worst.
 
 *kinds* is what the node is for, and is multi-valued. ``object`` is a thing that
-asserts nothing: ``Flask`` is not a fact, the fact is that the project is built
+asserts nothing: ``Redis`` is not a fact, the fact is that the project is built
 with it, and that is an edge. The other four -- ``fact``, ``preference``,
 ``event``, ``state`` -- are statements, and a node is honestly more than one at
 once: a deadline has a date (``event``) and moved (``state``).
@@ -74,25 +74,38 @@ NODE_KINDS = (
     "state",
     "target",
     "proposed",
+    "request",
 )
 
 #: The kinds that assert something, as opposed to naming a thing.
-STATEMENT_KINDS = ("fact", "preference", "event", "state", "target", "proposed")
+STATEMENT_KINDS = (
+    "fact",
+    "preference",
+    "event",
+    "state",
+    "target",
+    "proposed",
+    "request",
+)
 
 #: Statements about something other than how the world currently is.
 #:
-#: Both were measured as errors before they were kinds. Asked which ESLint
-#: rules the project *enforced*, where the transcript has the user saying
-#: "here's an example of what I've tried, I'm not sure this is the right
-#: approach", the extractor stored the config as a ``fact`` and the reader
-#: recited it as enforced -- the answer the benchmark wants is that nothing
-#: was. And a stated goal of 290ms stored as a ``state`` alongside a measured
-#: 520ms is two readings of one property, which derivation dutifully turned
-#: into a revision of a number nobody ever measured.
-UNREALISED_KINDS = ("target", "proposed")
+#: Both were measured as errors before they were kinds. Asked which settings
+#: the project *enforced*, where the transcript has the user saying "here's an
+#: example of what I've tried, I'm not sure this is the right approach", the
+#: extractor stored the config as a ``fact`` and the reader recited it as
+#: enforced -- the answer the benchmark wants is that nothing was. And a stated
+#: goal of 60ms stored as a ``state`` alongside a measured 180ms is two
+#: readings of one property, which derivation dutifully turned into a revision
+#: of a number nobody ever measured.
+#:
+#: ``request`` joins them for the same reason: asking for error handling to be
+#: sorted out is not a reading of how it currently behaves, and comparing the
+#: two by key would date the request against the behaviour.
+UNREALISED_KINDS = ("target", "proposed", "request")
 
 NodeKind = Literal[
-    "object", "fact", "preference", "event", "state", "target", "proposed"
+    "object", "fact", "preference", "event", "state", "target", "proposed", "request"
 ]
 
 
@@ -107,9 +120,9 @@ class NodeItem(BaseModel):
     name: str = Field(
         description=(
             "The node's name, 1-8 words. For a thing, as the transcript names "
-            "it: 'OpenWeather API', 'Christina', 'Flask'. For a statement, a "
-            "short readable summary: 'Daily quota 1,200 calls'. For a date, "
-            "ISO form: '2024-03-10'."
+            "it: 'Shipping Rates API', 'Alex', 'Redis'. For a statement, a "
+            "short readable summary: 'Daily label cap 4,800 parcels'. For a "
+            "date, ISO form: '2023-07-14'."
         )
     )
     type: str = Field(
@@ -141,8 +154,8 @@ class NodeItem(BaseModel):
         default="",
         description=(
             "The MEASURABLE PROPERTY this node states a reading of, lowercase "
-            "with underscores: 'daily_quota', 'response_time_ms', "
-            "'bundle_size_limit'. Two turns stating the same property MUST use "
+            "with underscores: 'daily_label_cap', 'sort_time_ms', "
+            "'archive_size_limit'. Two turns stating the same property MUST use "
             "the same key, even when the values differ -- that is how a "
             "revision is detected. Set it ONLY together with 'value', and "
             "leave BOTH empty otherwise: a key naming this node rather than a "
@@ -152,15 +165,15 @@ class NodeItem(BaseModel):
     value: str = Field(
         default="",
         description=(
-            "The reading itself, as stated, with its unit: '1200 calls/day', "
-            "'280ms', '2.5MB'. Short, not a sentence. Set it only together "
+            "The reading itself, as stated, with its unit: '4800 parcels/day', "
+            "'95ms', '3.1MB'. Short, not a sentence. Set it only together "
             "with 'key'. Empty whenever nothing measurable was stated."
         ),
     )
     occurred_on: str = Field(
         default="",
         description=(
-            "Events only. The ISO date the event HAPPENED ('2024-03-10'), read "
+            "Events only. The ISO date the event HAPPENED ('2023-07-14'), read "
             "from the sentence itself. Empty if the sentence does not say "
             "when. NEVER the date of the turn."
         ),
@@ -280,25 +293,25 @@ word: Person, Project, Technology, Feature, Metric, Timestamp, Platform) and
 `kinds` (what it is for).
 
   kinds = ['object']  for a THING that asserts nothing by itself: a person, a
-                      library, a platform, a feature, a bare date. 'Flask' is
-                      an object. The fact that the project uses Flask is an
-                      EDGE, not a property of Flask.
+                      library, a platform, a feature, a bare date. 'Redis' is
+                      an object. The fact that the project uses Redis is an
+                      EDGE, not a property of Redis.
 
   kinds = one or more of these, for a STATEMENT the speaker made:
     fact        asserted once and stays true (the API in use, the language, the
-                breakpoints chosen).
+                defaults chosen).
     preference  a STANDING constraint on how the user wants things done, which
                 should still apply to a question asked later: "keep it simple",
-                "stay under 2.5MB", "no frameworks, vanilla JS only". Only the
-                user's; never the assistant's suggestion.
+                "stay under 3.1MB", "no frameworks, plain scripts only". Only
+                the user's; never the assistant's suggestion.
     event       something that happened, tied to a date. Put the ISO date the
                 event HAPPENED in occurred_on, read from the sentence. If the
-                speaker says on April 10 that the key was obtained on March 10,
-                occurred_on is 2024-03-10, NOT the turn's date.
+                speaker says on August 2 that the token was obtained on July 14,
+                occurred_on is 2023-07-14, NOT the turn's date.
     state       the current value of something measurable that can change (a
-                quota, a coverage percentage, a response time).
-    target      a value WANTED but not reached: "get latency down to 290ms",
-                "stay under 2.5MB". Never also 'state' -- a goal is not a
+                cap, a coverage percentage, a sort time).
+    target      a value WANTED but not reached: "get sort time down to 60ms",
+                "stay under 3.1MB". Never also 'state' -- a goal is not a
                 reading, and storing it as one makes the gap between them look
                 like the figure changed.
     proposed    something shown, tried or suggested but not adopted: config the
@@ -306,14 +319,44 @@ word: Person, Project, Technology, Feature, Metric, Timestamp, Platform) and
                 code the assistant offers as an example, a placeholder domain.
                 If a later turn says it was adopted, that turn's node is the
                 'fact'; this one stays 'proposed'.
+    request     a CONCERN the user wants the product to handle: a failure, an
+                edge case or a behaviour they want dealt with. "I want to make
+                sure I'm handling errors properly", "I want to display friendly
+                messages for 404 and 400", "what if the user keeps retrying
+                after hitting the rate limit". Name it as the asking, 'Wants
+                friendly messages for 404 and 400', not as the thing asked
+                about -- a node named for the part stores the sentence as a
+                description of the part and the wanting is lost. Keep one
+                request per sentence even when it names several parts.
+                This kind is NARROW. Asking for help building, implementing,
+                reviewing, explaining or improving something is not a request:
+                the whole conversation is that, and a kind that holds most of
+                the transcript distinguishes nothing. Nor is a question about
+                how something works. The test is whether the sentence names
+                something that could go wrong or behave badly and asks for it
+                to be handled. Not 'preference' (a standing rule that applies
+                to a later answer, even when phrased as a want) and not
+                'target' (which wants a value, not work). Never the
+                assistant's offer, which is 'proposed'.
+                A request never REPLACES anything. When the same sentence also
+                says what the project uses, wants or measures, extract those
+                nodes exactly as you would have without this kind, and the
+                request in addition. And deciding a sentence is NOT a request
+                never means dropping it: give it the kind it would have had if
+                this kind did not exist. Asked for help writing a config, the
+                config is still 'proposed' and the rules in it are still the
+                content of that node -- the ask being excluded here says
+                nothing about the config, and a transcript whose only record
+                of a setting is the bare name of the tool it configures cannot
+                answer whether the setting was ever adopted.
 
   A node can be several kinds at once: a deadline that moved is
   ['event', 'state']. Never mix 'object' with the others.
 
 FEATURES. Every CAPABILITY the conversation builds, changes or measures is a
 thing in its own right: type 'Feature', kinds ['object'], named for what it does
--- 'Autocomplete', 'City search', 'Caching layer', 'Retry logic', 'Loading
-indicator', 'Error handling', 'Pagination'. Extract these as readily as you
+-- 'Address lookup', 'Label printing', 'Response cache', 'Retry logic',
+'Progress indicator', 'Error handling', 'Pagination'. Extract these as readily as you
 extract libraries. A conversation about building software talks about its
 features constantly, and a graph of only libraries and tools has nowhere to put
 anything that was said about them.
@@ -322,56 +365,64 @@ A feature is a PART OF THE PRODUCT that persists: something a user could still
 be using next month, which can be measured again then and give a different
 number. Apply that test literally, because three other things look like
 features and are not:
-  - NOT the work done to it. 'Autocomplete' is a feature; 'Autocomplete input
-    lag optimization' and 'Fetch call latency optimization' are work, and work
-    cannot hold a reading -- a latency belongs to the thing made faster, not to
-    the act of making it faster.
-  - NOT a reading taken from it. 'API integration test coverage' and 'Error
+  - NOT the work done to it. 'Address lookup' is a feature; 'Address lookup
+    latency optimization' and 'Label render latency optimization' are work, and
+    work cannot hold a reading -- a latency belongs to the thing made faster,
+    not to the act of making it faster.
+  - NOT a reading taken from it. 'Label printing test coverage' and 'Misroute
     rate reduction' are measurements. The feature is the module tested; the
     coverage is a STATEMENT about it. Naming the measurement as a thing puts
     every reading on its own subject, where nothing can be compared to
     anything.
-  - NOT the file or symbol holding it. `apiClient.js`, `config.js` and
-    '.env file for API key' are files; if they matter they are Technology.
-  - Name the capability, not the implementation. The feature is 'Autocomplete';
-    `lru-cache` and `lodash.debounce` are separate Technology nodes it is
+  - Test those two by the name's last word, which is reliable because both
+    classes name themselves. A name ending in optimization, reduction,
+    improvement, refactor, migration, fix or cleanup is the WORK; a
+    name ending in coverage, rate, latency, time, count, size, percentage or
+    score is the READING. In both cases drop the last word and whatever
+    qualifies it, and the feature is what remains: name that instead, and put
+    the rest in a statement about it.
+  - NOT the file or symbol holding it. `rateClient.js`, `settings.js` and
+    '.env file for the carrier token' are files; if they matter they are
+    Technology.
+  - Name the capability, not the implementation. The feature is 'Address
+    lookup'; `node-cache` and `p-retry` are separate Technology nodes it is
     built_with.
 
 One node per capability, however many aspects of it the window discusses.
-'Autocomplete', 'Autocomplete suggestions UI', 'Autocomplete test cases',
-'Autocomplete API call reduction' and 'Loading indicator for autocomplete' are
-ONE feature seen from five sides -- list 'Autocomplete' and attach the rest as
-statements about it. Likewise every cache concern -- expiration, eviction,
-locking, compression, what is cached -- is the one 'Caching layer'. When a
-candidate name only makes sense by naming another feature inside it, it is that
-feature.
-  - A feature is a thing even when the window only measures it. "The
-    autocomplete now responds in 280ms" is a statement AND evidence that the
-    Autocomplete feature exists; list both.
+'Address lookup', 'Address lookup results UI', 'Address lookup test cases',
+'Address lookup API call reduction' and 'Progress indicator for address lookup'
+are ONE feature seen from five sides -- list 'Address lookup' and attach the
+rest as statements about it. Likewise every cache concern -- expiration,
+eviction, locking, compression, what is cached -- is the one 'Response cache'.
+When a candidate name only makes sense by naming another feature inside it, it
+is that feature.
+  - A feature is a thing even when the window only measures it. "The address
+    lookup now responds in 95ms" is a statement AND evidence that the Address
+    lookup feature exists; list both.
   - Reuse one node per capability across windows, exactly as named before.
-    'Autocomplete' and 'Autocomplete feature' are one feature the graph cannot
-    put two measurements on.
+    'Address lookup' and 'Address lookup feature' are one feature the graph
+    cannot put two measurements on.
   - Expect a long conversation to have on the order of ten or twenty features
     in total, most of them already in the list of nodes found earlier. A window
     that adds five new ones has almost certainly split one capability, or
     promoted a measurement.
   - This matters more than it looks. Every measurement is a property of
     something, and when the feature is missing the whole application absorbs it
-    -- the autocomplete's 280ms and the app's overall 220ms then read as one
+    -- the address lookup's 95ms and the app's overall 140ms then read as one
     figure that improved, which is a claim the transcript never made. Split the
-    feature too finely and the mirror image happens: the 65% and 78% coverage
+    feature too finely and the mirror image happens: the 52% and 71% coverage
     readings land on different subjects and the graph cannot see that one
     replaced the other.
 
 TIMESTAMPS. A point in time is its own node: type 'Timestamp', kinds
-['object'], and the normalised date as its name -- '2024', '2024-03',
-'2024-03-10'. Keep only the precision the text states; do not invent a day the
+['object'], and the normalised date as its name -- '2023', '2023-07',
+'2023-07-14'. Keep only the precision the text states; do not invent a day the
 speaker did not give.
-  - A span with both ends stated ("two weeks from April 5", "between March and
-    June") is ONE Timestamp named '<start>/<end>': '2024-04-05/2024-04-19',
-    '2024-03/2024-06'. With only one end stated, name that end alone.
+  - A span with both ends stated ("two weeks from July 14", "between May and
+    August") is ONE Timestamp named '<start>/<end>': '2023-07-14/2023-07-28',
+    '2023-05/2023-08'. With only one end stated, name that end alone.
   - Reuse one Timestamp node for every reference to the same normalised date.
-    Two nodes named '2024-03-10' are one date the graph cannot order.
+    Two nodes named '2023-07-14' are one date the graph cannot order.
   - A Timestamp is a leaf. It has no outgoing edges.
   - Link to it with a verb that says what happened then: `obtained_at`,
     `completed_at`, `deployed_at`, `starts_at`, `ends_at`, `runs_during` for a
@@ -382,25 +433,25 @@ speaker did not give.
 
 A statement that states a READING of something measurable also carries `key` and
 `value`. Both or neither, never one:
-  - key is the PROPERTY: daily_quota, response_time_ms, bundle_size_limit.
-  - value is what it was said to be: "1200 calls/day", "280ms", "2.5MB".
+  - key is the PROPERTY: daily_label_cap, sort_time_ms, archive_size_limit.
+  - value is what it was said to be: "4800 parcels/day", "95ms", "3.1MB".
   - A 'state' or a 'target' always has both -- both are readings of a
     measurable figure, and a 'state' you cannot put a value on is a 'fact'.
-  - Everything else usually has NEITHER. "The app handles a city-not-found
+  - Everything else usually has NEITHER. "The app handles an address-not-found
     error" is a fact with nothing to measure: leave key and value empty rather
-    than inventing 'feature_city_not_found'. A key exists so a SECOND reading
+    than inventing 'feature_address_not_found'. A key exists so a SECOND reading
     of the same property can be recognised as the same property; one that will
     only ever name this node does nothing and crowds out the ones that work.
   - Two turns stating the same property MUST use the SAME key even when the
-    values disagree. If turn 12 says the quota is 1,000 and turn 48 says it is
-    1,200, both are nodes with key 'daily_quota' and different values. Return
-    BOTH. Do not reconcile them, do not keep only the newest, and do not rename
-    the second key to 'updated_daily_quota'. Deciding which is current is a
-    later step that needs both.
-  - The `description` MUST NAME WHAT THE VALUE IS OF. "The user improved API
-    response time to 220ms" does not say whose, and a reader holding six
-    latency figures will attach it to the wrong one. Write "The weather app's
-    overall API response time improved to 220ms". This is the ONLY place the
+    values disagree. If turn 12 says the cap is 3,000 and turn 48 says it is
+    4,800, both are nodes with key 'daily_label_cap' and different values.
+    Return BOTH. Do not reconcile them, do not keep only the newest, and do not
+    rename the second key to 'updated_daily_label_cap'. Deciding which is
+    current is a later step that needs both.
+  - The `description` MUST NAME WHAT THE VALUE IS OF. "The user improved sort
+    time to 140ms" does not say whose, and a reader holding six latency figures
+    will attach it to the wrong one. Write "The dispatch app's overall sort
+    time improved to 140ms". This is the ONLY place the
     subject is recorded here, so a description that does not name it loses it:
     write what the figure is a property of even when the turn said only "the
     prototype", and if the turn did not say, write the turn's own words rather
@@ -409,9 +460,9 @@ A statement that states a READING of something measurable also carries `key` and
 DENIALS AND RETRACTIONS. A turn saying something did NOT happen, or taking back
 something said earlier, is ITS OWN NODE. Never list it as a further citation on
 the node it denies.
-  - "I've never actually obtained an API key" is a new statement, named for the
-    denial -- 'Never obtained an API key'. It is NOT another turn supporting
-    'OpenWeather API key obtained'. Attaching it there makes the graph say that
+  - "I've never actually obtained a carrier token" is a new statement, named for
+    the denial -- 'Never obtained a carrier token'. It is NOT another turn
+    supporting 'Carrier token obtained'. Attaching it there makes the graph say that
     turn CONFIRMS what it refuses, which is the one reading the transcript
     rules out, and it leaves the retraction nowhere at all.
   - This is the one place where reusing an earlier name is wrong. A denial has
@@ -436,11 +487,11 @@ An EDGE joins two THINGS you listed, named with the transcript's own verb:
 builds, built_with, has_component, deployed_to, starts_at, ends_at, covers,
 restricted_to, and the `_at` verbs above for a Timestamp.
 
-Asking for help with a task is NOT a preference. "Help me fix the CORS error",
-"how do I debug this layout shift", "suggest a load testing tool" are requests,
-and the conversation is made almost entirely of them. Record what the request
-*established* -- the error exists (fact), the tool they picked (fact), the
-constraint they attached to it (preference) -- and not the asking. If you
+Asking for help with a task is NOT a preference. "Help me fix the timeout
+error", "how do I trace this duplicate label", "suggest a load testing tool"
+are requests, and the conversation is made almost entirely of them. Record
+what the request *established* -- the error exists (fact), the tool they picked
+(fact), the constraint they attached to it (preference) -- and not the asking. If you
 cannot state a preference as a rule that would change how you answer some
 *other* question, it is not one.
 
@@ -448,14 +499,14 @@ Rules:
 - Reuse node names EXACTLY as they appear in the list already found. Do not
   rename and do not invent a variant.
 - Reuse a `key` EXACTLY as shown for a property already found. A second reading
-  of test coverage uses the same key as the first; `test_coverage_current` and
-  `api_test_coverage` for one figure make the two readings uncomparable. Use a
+  of test coverage uses the same key as the first; `coverage_current` and
+  `label_test_coverage` for one figure make the two readings uncomparable. Use a
   new key only when the property is genuinely a different measurement, and then
   make the difference explicit in the key itself.
 - Every edge's source and target must name a node -- one in this window's list
   or one already found.
 - description must contain the actual value, date or constraint. "The user
-  discussed the quota" is worthless; "The user's daily call quota is 1,200"
+  discussed the cap" is worthless; "The user's daily label cap is 4,800"
   is the statement.
 - source_turns must contain only turn numbers shown in this window, and only
   turns that actually state the thing, not turns that are merely nearby.
@@ -706,7 +757,7 @@ def _node_key(item: NodeItem, kinds: list[str]) -> tuple[str, str, str]:
     A thing is its name. A statement is its property *and its value*, because
     two readings of one quantity have to stay two nodes: keying a statement by
     property alone is the one mistake that makes a revision unrecoverable --
-    the later 1,200 would overwrite the earlier 1,000 and nothing downstream
+    the later 4,800 would overwrite the earlier 3,000 and nothing downstream
     could tell the value had ever moved.
     """
     name = normalise_name(item.name)

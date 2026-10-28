@@ -54,6 +54,14 @@ logger = logging.getLogger(__name__)
 #: Extra rows to request so dropped subject nodes do not consume answer slots.
 _SUBJECT_HEADROOM = 2
 
+#: How many path rows to scan per group of budget. Groups are sparse near the
+#: top -- ten groups cost thirteen rows on the question this was measured on --
+#: but a transcript whose nearest relations all fan out widely could spend far
+#: more, and an unfilled budget silently narrows the result. Ten rows a group
+#: is slack enough to be unreachable in practice on the graphs seen so far and
+#: still a bounded read.
+_PATH_SCAN = 10
+
 __all__ = ["SemanticHits", "search_semantic"]
 
 
@@ -145,6 +153,21 @@ def _matched_path_endpoints(
     Source before target, because the source of a ``supersedes`` is the current
     value and of a ``precedes`` the earlier event: when the node budget runs out
     mid-path, the half worth keeping is the first one.
+
+    **The budget counts relations, not rows.** One node's ``has_component``
+    fans out over every component it has, and each of those is a separate path
+    carrying nearly the same text, so a flat top-*path_k* pays for the same
+    relation several times: asked to list what came up about a feature, the ten
+    nearest paths were six rows from two source nodes and introduced seven
+    nodes. So hits are grouped by ``(source, role)`` -- one relation, all of its
+    targets -- and *path_k* caps the groups while the scan runs deeper to fill
+    them. On that question ten groups cost thirteen rows and introduced
+    twenty-eight nodes, among them the one the answer needed, which the flat
+    scan missed at rank thirty-five.
+
+    Groups stay in nearest-first order, so the deeper rows widen the result
+    without reordering it: a relation is placed by its closest path, and
+    arriving later only means every nearer relation was already counted.
     """
     if path_k <= 0:
         return []
@@ -155,16 +178,32 @@ def _matched_path_endpoints(
 
     hits = get_one_hop_path_vdb(database_name=database_name).retrieval(
         [vector],
-        top_k=path_k,
+        top_k=path_k * _PATH_SCAN,
         where={"database_name": database_name, "label": "Conversation"},
     )
-    found: list[str] = []
+    # Insertion-ordered, so iterating the groups is still nearest-relation
+    # first. Endpoints are collected per group rather than globally to keep a
+    # group's own source ahead of its targets.
+    groups: dict[tuple[str, str], list[str]] = {}
     for hit in hits[0] if hits else []:
         metadata = hit.get("metadata") or {}
-        for end in ("source_id", "target_id"):
-            row_id = metadata.get(end)
-            if row_id and str(row_id) not in found:
-                found.append(str(row_id))
+        source = metadata.get("source_id")
+        target = metadata.get("target_id")
+        if not source or not target:
+            continue
+        key = (str(source), str(metadata.get("role") or ""))
+        if key not in groups:
+            if len(groups) >= path_k:
+                continue
+            groups[key] = [str(source)]
+        if str(target) not in groups[key]:
+            groups[key].append(str(target))
+
+    found: list[str] = []
+    for endpoints in groups.values():
+        for row_id in endpoints:
+            if row_id not in found:
+                found.append(row_id)
     return found
 
 
@@ -243,6 +282,12 @@ def search_semantic(
     # answering a question usually needs both.
     edges = semantic_store.fetch_edges([str(row["id"]) for row in nodes])
 
+    # One end retrieved, the other not: named in the note and nothing more. The
+    # turn budget below is unaffected -- ``spans`` is built from *nodes*, so a
+    # thing reached only by name contributes no turns and cannot crowd out one
+    # that matched.
+    half_edges = semantic_store.fetch_half_edges([str(row["id"]) for row in nodes])
+
     spans = _node_spans(nodes, widen=widen, limit=node_turns)
     rows = fetch_turns(database_name, spans=spans) if spans else []
 
@@ -279,6 +324,7 @@ def search_semantic(
         note=note_text(
             nodes,
             edges,
+            half_edges=half_edges,
             session_index_by_turn=_sessions(database_name) if nodes else None,
         ),
         graph=graph_text(nodes, edges),
