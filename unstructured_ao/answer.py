@@ -22,18 +22,24 @@ number measured for this pipeline is paced against *this* budget. Moving it is
 a change of behaviour and belongs in its own step, not inside a move.
 """
 
-import os
+from __future__ import annotations
+
 import random
 import threading
 import time
+from typing import TYPE_CHECKING
 
-#: The generator and where it is served. A reasoning model, capped — see
-#: ``REASONING_EFFORT``.
-API_BASE = "https://integrate.api.nvidia.com/v1"
-GEN_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+if TYPE_CHECKING:
+    from openai import OpenAI
+
+#: The generator's model triplet, ``UNSTRUCTURED_{ENDPOINT,API_KEY,MODEL}``.
+#: Unset fields fall back like every other triplet: ``DEFAULT_MODELS_*``, then
+#: ``NVIDIA_API_KEY`` / ``BASE_URL`` / ``MODEL_NAME``, then a Nemotron default
+#: chosen by the key. The pacing below was measured on Nemotron via integrate.
+_PREFIX = "UNSTRUCTURED"
 GEN_MAX_TOKENS = 4096
 
-#: How the endpoint is told how much to think, per mode.
+#: How integrate.api.nvidia.com is told how much to think, per mode.
 REASONING_MODES = {
     "default": {},
     "off": {"chat_template_kwargs": {"thinking": False}},
@@ -41,6 +47,19 @@ REASONING_MODES = {
     "medium": {"reasoning": {"effort": "medium"}},
     "high": {"reasoning": {"effort": "high"}},
 }
+
+#: The same modes for any other endpoint. The inference gateway rejects
+#: ``reasoning`` with a 400 and takes the flat ``reasoning_effort`` instead —
+#: the spelling integrate silently ignores.
+GATEWAY_REASONING_MODES = {
+    "default": {},
+    "off": {"chat_template_kwargs": {"thinking": False}},
+    "low": {"reasoning_effort": "low"},
+    "medium": {"reasoning_effort": "medium"},
+    "high": {"reasoning_effort": "high"},
+}
+
+_INTEGRATE_HOST = "integrate.api.nvidia.com"
 
 #: How much the generator may reason before answering. Unbounded, it spends the
 #: whole budget thinking on hard questions and returns nothing; capping it keeps
@@ -105,7 +124,7 @@ CHUNK_SEPARATOR = "\n\n---\n\n"
 class RateLimiter:
     """Spaces requests to one model evenly across all worker threads."""
 
-    def __init__(self, per_minute: float):
+    def __init__(self, per_minute: float) -> None:
         self._interval = 60.0 / per_minute
         self._lock = threading.Lock()
         self._next = 0.0
@@ -125,15 +144,34 @@ class RateLimiter:
 #: stages are meant to be run one at a time.
 GEN_LIMITER = RateLimiter(GEN_RPM)
 
-_client = None
+_client: OpenAI | None = None
 _client_lock = threading.Lock()
 
 
-def api_key() -> str:
-    return os.environ.get("NVIDIA_API_KEY", "")
+def _resolved() -> dict[str, str]:
+    """``endpoint``, ``api_key`` and ``model`` from ``UNSTRUCTURED_*``."""
+    from auto_ontology.utils.model_config import resolve
+
+    return {
+        "endpoint": resolve(_PREFIX, "ENDPOINT").rstrip("/"),
+        "api_key": resolve(_PREFIX, "API_KEY"),
+        "model": resolve(_PREFIX, "MODEL"),
+    }
 
 
-def get_client():
+def gen_model() -> str:
+    """The model :func:`complete` asks for."""
+    resolved = _resolved()
+    return resolved["model"]
+
+
+def reasoning_body(endpoint: str) -> dict[str, object]:
+    """The request fields that set ``REASONING_EFFORT`` on *endpoint*."""
+    modes = REASONING_MODES if _INTEGRATE_HOST in endpoint else GATEWAY_REASONING_MODES
+    return modes[REASONING_EFFORT]
+
+
+def get_client() -> OpenAI:
     """The generation client, built once per process.
 
     No client-side retries: they bypass ``GEN_LIMITER``, so each paced attempt
@@ -147,14 +185,17 @@ def get_client():
         if _client is None:
             from openai import OpenAI
 
-            key = api_key()
-            if not key:
+            config = _resolved()
+            if not config["api_key"]:
                 raise RuntimeError(
-                    "NVIDIA_API_KEY is not set — get a free key at "
-                    "https://build.nvidia.com"
+                    f"No API key for answering: set {_PREFIX}_API_KEY, "
+                    "DEFAULT_MODELS_API_KEY or NVIDIA_API_KEY"
                 )
             _client = OpenAI(
-                base_url=API_BASE, api_key=key, timeout=180.0, max_retries=0
+                base_url=config["endpoint"],
+                api_key=config["api_key"],
+                timeout=180.0,
+                max_retries=0,
             )
     return _client
 
@@ -190,7 +231,7 @@ def answer(
     chunks: list[str],
     labels: list[str] | None = None,
     note: str | None = None,
-    client=None,
+    client: OpenAI | None = None,
 ) -> tuple[str, str | None]:
     """A grounded answer to *query*, as ``(answer, error)``."""
     context = build_context(chunks, labels, note)
@@ -201,7 +242,9 @@ def answer(
     return complete(messages, client=client)
 
 
-def complete(messages: list[dict], client=None) -> tuple[str, str | None]:
+def complete(
+    messages: list[dict[str, str]], client: OpenAI | None = None
+) -> tuple[str, str | None]:
     """One paced, retried completion over a conversation, as ``(text, error)``.
 
     Never raises: a caller answering several hundred questions must not lose
@@ -209,7 +252,8 @@ def complete(messages: list[dict], client=None) -> tuple[str, str | None]:
     caller to record and retry later.
     """
     client = client or get_client()
-    body = REASONING_MODES[REASONING_EFFORT]
+    model = gen_model()
+    body = reasoning_body(str(client.base_url))
     extra = {"extra_body": body} if body else {}
 
     # Charged per attempt, not once per call: a retry costs the endpoint the
@@ -220,7 +264,7 @@ def complete(messages: list[dict], client=None) -> tuple[str, str | None]:
         GEN_LIMITER.acquire(slots)
         try:
             response = client.chat.completions.create(
-                model=GEN_MODEL,
+                model=model,
                 messages=messages,
                 temperature=0.0,
                 max_tokens=GEN_MAX_TOKENS,

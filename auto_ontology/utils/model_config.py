@@ -4,9 +4,10 @@
 
 """Shared resolution of model-endpoint env var triplets.
 
-Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``, and
-``UNSTRUCTURED_PAGE_ELEMENTS``) exposes three fields — ``ENDPOINT`` (URL),
-``API_KEY``, and ``MODEL`` — as ``<PREFIX>_<FIELD>`` env vars. Any field left
+Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``,
+``UNSTRUCTURED_PAGE_ELEMENTS``, and ``UNSTRUCTURED``) exposes three fields —
+``ENDPOINT`` (URL), ``API_KEY``, and ``MODEL`` — as ``<PREFIX>_<FIELD>`` env
+vars. Any field left
 unset normally falls back to the corresponding ``DEFAULT_MODELS_<FIELD>``, so a
 single ``DEFAULT_MODELS_*`` triplet can supply the shared endpoint/key/model for
 all of them. Each field also falls back to its legacy pre-triplet env var name
@@ -41,6 +42,8 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
             "https://inference-api.nvidia.com/v1/ocr"
         ),
         "UNSTRUCTURED_PAGE_ELEMENTS_MODEL": ("nvidia/nvidia/nemotron-page-elements-v3"),
+        "UNSTRUCTURED_ENDPOINT": "https://inference-api.nvidia.com/v1",
+        "UNSTRUCTURED_MODEL": "nvidia/nvidia/nemotron-3-super-120b-long-ctx",
     },
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
@@ -59,6 +62,8 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
             "https://ai.api.nvidia.com/v1/cv/nvidia"
         ),
         "UNSTRUCTURED_PAGE_ELEMENTS_MODEL": "nemotron-page-elements-v3",
+        "UNSTRUCTURED_ENDPOINT": "https://integrate.api.nvidia.com/v1",
+        "UNSTRUCTURED_MODEL": "nvidia/nemotron-3-super-120b-a12b",
     },
 }
 

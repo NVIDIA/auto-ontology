@@ -41,6 +41,46 @@ def test_page_elements_uses_key_specific_defaults(
     assert resolve(prefix, "MODEL", use_shared_default=False) == model
 
 
+@pytest.mark.parametrize(
+    ("api_key", "endpoint", "model"),
+    [
+        (
+            "sk-test",
+            "https://inference-api.nvidia.com/v1",
+            "nvidia/nvidia/nemotron-3-super-120b-long-ctx",
+        ),
+        (
+            "nvapi-test",
+            "https://integrate.api.nvidia.com/v1",
+            "nvidia/nemotron-3-super-120b-a12b",
+        ),
+    ],
+)
+def test_unstructured_answer_uses_key_specific_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    api_key: str,
+    endpoint: str,
+    model: str,
+) -> None:
+    prefix = "UNSTRUCTURED"
+    for name in (
+        f"{prefix}_API_KEY",
+        f"{prefix}_ENDPOINT",
+        f"{prefix}_MODEL",
+        "DEFAULT_MODELS_API_KEY",
+        "DEFAULT_MODELS_ENDPOINT",
+        "DEFAULT_MODELS_MODEL",
+        "BASE_URL",
+        "MODEL_NAME",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NVIDIA_API_KEY", api_key)
+
+    assert resolve(prefix, "API_KEY") == api_key
+    assert resolve(prefix, "ENDPOINT") == endpoint
+    assert resolve(prefix, "MODEL") == model
+
+
 def test_shared_default_remains_the_normal_precedence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
