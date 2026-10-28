@@ -129,6 +129,17 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert combined_aggregate_rule in format_projection_rules(True)
 
 
+def test_derived_formula_nulls_stay_inside_the_calculation() -> None:
+    strict = format_projection_rules(shorten_answer=True)
+
+    assert "handle NULL operands inside that calculation" in strict
+    assert "another aggregate still needs" in strict
+    assert "exclude rows where the required input operands are NULL" not in strict
+    assert "handle NULL operands inside that calculation" not in (
+        format_projection_rules(shorten_answer=False)
+    )
+
+
 def test_calculation_sql_template_is_structural_guidance() -> None:
     rendered = format_calculation_sql_template(
         {

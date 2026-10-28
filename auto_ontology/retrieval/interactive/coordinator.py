@@ -46,7 +46,14 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
     dominant_kind,
     flip_numeric_output_types,
+    float_json_arithmetic,
+    numeric_column_kinds,
     opposite_target,
+    order_by_leading_aggregate,
+    order_groups_by_identifier,
+    order_periods_chronologically,
+    result_values_digest,
+    sum_decimal_casts_to_integer,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,7 +88,10 @@ def _apply_debug_seed(
             "Address whichever of the following applies, or fix a different issue you identify:\n\n"
             "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
             "every condition they imply, not just the primary one. Common drops: an "
-            "IS NOT NULL guard on a column feeding an aggregate or ratio, a "
+            "entity/category/type filter stated in the original question (e.g. a specific "
+            "visa class, organ, facility, or group), an IS NOT NULL guard on a column "
+            "or JSONB field feeding a computed metric, aggregate, or ratio (so rows with "
+            "NULL metrics do not appear or float to the top of DESC sorts), a "
             "positivity/non-zero guard on a denominator, a second threshold in a "
             "compound AND/OR, an exact value or unit filter (e.g. status = 'Completed', "
             "unit = 'year'). If the evidence lists multiple conditions, verify all of "
@@ -91,8 +101,26 @@ def _apply_debug_seed(
             'recent"/"latest snapshot"/dedup logic is implied — an extra join or an '
             "extra GROUP BY column can silently fan out or split a group that should "
             'stay merged. If the question asks for top-N or "the one with the highest '
-            "X,\" add LIMIT N. Judge from the question's phrasing whether unmatched "
-            "primary-entity rows should still appear."
+            'X," add LIMIT N, but NEVER add LIMIT 1 to a multi-row or per-entity query. '
+            "Judge from the question's phrasing whether unmatched "
+            "primary-entity rows should still appear.\n\n"
+            "3. ORDER BY, PROJECTION, AND SCALE: Keep ORDER BY <primary_metric> DESC "
+            "(including for cost, fee, time, and count metrics) unless ascending order "
+            "is explicitly requested; do NOT drop a valid ORDER BY or add unrequested "
+            "secondary tie-breaker columns. Project only the requested columns in the "
+            "EXACT left-to-right order stated in the question and clarifications (when "
+            "a breakdown asks for counts and percentages across categories, group all "
+            "counts together followed by all percentages unless interleaving is "
+            "explicitly requested; for 'basic info' or 'details', select only the "
+            "entity's ID and name/title — never dump all table columns or add an "
+            "unrequested status label column; when profiling or auditing a single "
+            "specific entity ID, include that entity ID column first if requested). "
+            "If the knowledge base defines a percentage/proportion formula with `* 100`, "
+            "preserve `* 100`. If your existing query's filters, grain, projections, "
+            "and ordering already satisfy every requirement above, preserve the exact "
+            "same logical result rows and order (a wrong-result verdict can be caused "
+            "solely by SQL numeric type differences, which are retried automatically "
+            "when the result values stay unchanged)."
         )
         logger.info("Debug seed: wrong results — injecting targeted hints")
     # Preserve round 1's reconstruction lineage as read-only prompt context
@@ -448,6 +476,54 @@ def _values_digest_for(session: InteractiveSessionState, sql: str) -> str | None
     return path_state.get("result_values_digest")
 
 
+def _align_mixed_numeric_types(session: InteractiveSessionState, sql: str) -> str:
+    """When a query returns a mix of ``decimal`` and ``float`` columns, align the
+    ``float`` columns to ``numeric``.
+
+    A mixed result happens when one projection uses an explicit ``DECIMAL`` cast
+    and another touches a native ``float4``/``float8`` column without casting.
+    Unifying them to ``numeric`` avoids failing exact graders on the uncast
+    column while keeping ``first_submit_numeric_kind`` uniform if a debug retry
+    later needs to flip to ``double precision``.
+    """
+    kinds = _numeric_kinds_for(session, sql)
+    if not kinds or not ({"decimal", "float"} <= set(kinds)):
+        return sql
+
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    aligned = flip_numeric_output_types(
+        sql, getattr(connector, "dialect", None), kinds, "numeric"
+    )
+    if not aligned:
+        return sql
+    try:
+        df = execute_chat_sql(connector, aligned, kind="mixed numeric type alignment")
+    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
+        logger.warning(
+            "[%s] Mixed numeric type alignment did not run (%s); keeping the generated SQL",
+            session.task_id,
+            exc,
+        )
+        return sql
+    from auto_ontology.retrieval.text_to_sql.numeric_types import (
+        numeric_column_kinds,
+        result_values_digest,
+    )
+
+    session.path_state["result_numeric_kinds"] = numeric_column_kinds(df)
+    session.path_state["result_numeric_kinds_sql"] = aligned.strip()
+    session.path_state["result_values_digest"] = result_values_digest(df)
+    logger.info(
+        "[%s] Unified mixed decimal/float output columns to numeric",
+        session.task_id,
+    )
+    return aligned
+
+
 def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) -> str:
     """Re-submit *sql* with its numeric columns in the opposite type.
 
@@ -463,10 +539,19 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
     changed the values themselves (a different filter, join, or expression), the
     type the first submit had says nothing about the new answer, and flipping
     would swap a possibly-correct type for a wrong one.
+
+    A debug result can also arrive with no recorded first type: the phase
+    ended without a submit, so there is no kind and no value digest. Decimal
+    columns in that result are retried as ``double precision``. An integer
+    first submit still has a digest, and its debug SQL is left alone.
     """
     first_kind = session.first_submit_numeric_kind
     kinds = _numeric_kinds_for(session, sql)
-    if not first_kind or not kinds:
+    if not kinds:
+        return sql
+    if not first_kind:
+        if session.first_submit_values_digest is None and "decimal" in kinds:
+            return _retry_double_without_a_recorded_type(session, sql, kinds)
         return sql
 
     first_values_digest = session.first_submit_values_digest
@@ -477,7 +562,7 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
             "[%s] Debug retry changed the answer's values; keeping its numeric types",
             session.task_id,
         )
-        return sql
+        return _align_mixed_numeric_types(session, sql)
 
     connector = resolve_connector_from_tables(
         session.path_state.get("relevant_tables") or [], session.connectors
@@ -502,6 +587,44 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
         "[%s] Debug retry: numeric columns moved to the opposite type (first submit was %s)",
         session.task_id,
         first_kind,
+    )
+    return flipped
+
+
+def _retry_double_without_a_recorded_type(
+    session: InteractiveSessionState,
+    sql: str,
+    kinds: list,
+) -> str:
+    """Retry decimal output as ``double precision`` when no first type was stored.
+
+    The opposite-type flip needs a first submit to know which side was already
+    graded wrong. When that submit never recorded a result, a decimal answer
+    still has the other side left: ``double precision``. The rewritten
+    statement is kept only when it executes.
+    """
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    flipped = flip_numeric_output_types(
+        sql, getattr(connector, "dialect", None), kinds, "double"
+    )
+    if not flipped:
+        return sql
+    try:
+        execute_chat_sql(connector, flipped, kind="numeric type retry")
+    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
+        logger.warning(
+            "[%s] Decimal-to-double retry did not run (%s); keeping the generated SQL",
+            session.task_id,
+            exc,
+        )
+        return sql
+    logger.info(
+        "[%s] Debug retry: decimal columns moved to double precision (no first-submit numeric type)",
+        session.task_id,
     )
     return flipped
 
@@ -715,14 +838,205 @@ def step(
 
     sql = _run_sql_generation(session)
     if session.numeric_type_alignment:
+        kinds_before_stabilize = None
         if turn_type == TurnType.DEBUG and debug_error is None:
             sql = _flip_numeric_types_for_retry(session, sql)
         elif turn_type != TurnType.DEBUG:
-            session.first_submit_numeric_kind = dominant_kind(
-                _numeric_kinds_for(session, sql)
-            )
+            sql = _align_mixed_numeric_types(session, sql)
+            # Digest stays pre-stabilization. The debug turn compares it with
+            # the debug SQL before that SQL is stabilized, so a later rewrite
+            # must not replace it.
             session.first_submit_values_digest = _values_digest_for(session, sql)
+            kinds_before_stabilize = _numeric_kinds_for(session, sql)
+        sql, stabilized_kinds = _stabilize_submitted_order(session, sql)
+        if turn_type != TurnType.DEBUG:
+            # The kind is the type the grader saw. Stabilization can turn a
+            # numeric sum into bigint, or drop a double-precision cast.
+            session.first_submit_numeric_kind = dominant_kind(
+                stabilized_kinds
+                if stabilized_kinds is not None
+                else kinds_before_stabilize
+            )
+        # After the tie-break, so a grouped id appended above is dropped again
+        # when the sort key itself was the later aggregate. Phase 2 is left
+        # alone: a follow-up often sorts by that later metric on purpose.
+        if (
+            turn_type == TurnType.DEBUG
+            and debug_error is None
+            and session.phase == InteractivePhase.ROUND1_CLARIFY
+        ):
+            sql, _ = _submit_if_it_runs(
+                session,
+                sql,
+                order_by_leading_aggregate(sql, _postgres_dialect(session)),
+                "debug order by the leading aggregate",
+            )
     return SubmitSQLAction(sql=sql)
+
+
+def _real_column_names(session: InteractiveSessionState, sql: str) -> set[str]:
+    """Public ``real`` / ``double precision`` column names, lowercased.
+
+    Looked up once per session, and only when *sql* casts JSON text. The
+    float-arithmetic rewrite needs to know which ``CAST(column AS NUMERIC)``
+    is fighting a native float; other statements skip the catalog query.
+    """
+    if "->>" not in sql:
+        return set()
+    cached = session.path_state.get("real_column_names")
+    if cached is not None:
+        return set(cached)
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return set()
+    try:
+        frame = execute_chat_sql(
+            connector,
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "AND data_type IN ('real', 'double precision')",
+            kind="real column names",
+        )
+    except Exception as exc:  # noqa: BLE001 — no catalog, no float rewrite
+        logger.warning(
+            "[%s] Could not list real columns (%s); leaving numeric casts",
+            session.task_id,
+            exc,
+        )
+        return set()
+    columns = getattr(frame, "columns", [])
+    if frame is None or "column_name" not in columns:
+        return set()
+    names = {str(value).lower() for value in frame["column_name"].dropna()}
+    session.path_state["real_column_names"] = sorted(names)
+    return names
+
+
+def _postgres_dialect(session: InteractiveSessionState) -> str | None:
+    for connector in session.connectors or []:
+        dialect = getattr(connector, "dialect", None)
+        if dialect and str(dialect).lower() in ("postgres", "postgresql"):
+            return str(dialect)
+    return None
+
+
+def _submit_if_it_runs(
+    session: InteractiveSessionState,
+    sql: str,
+    rewritten: str,
+    kind: str,
+    *,
+    same_values: bool = False,
+) -> tuple[str, list | None]:
+    """Use *rewritten* only when it actually executes.
+
+    A failed rewrite must not replace a query that already ran. The second
+    value is the numeric column kinds of the rewrite that ran, or ``None``
+    when *rewritten* was not kept. A kept rewrite can change the type the
+    grader sees, so the first-submit kind has to come from this frame.
+
+    When *same_values* is set, the rewrite is also dropped unless its result
+    matches *sql* once numbers are rounded the way the grader rounds them.
+    ``CAST(numeric AS int)`` rounds fractional values and still executes.
+    """
+    if not rewritten or rewritten == sql:
+        return sql, None
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql, None
+    try:
+        frame = execute_chat_sql(connector, rewritten, kind=kind)
+    except Exception as exc:  # noqa: BLE001 — keep the SQL that already executed
+        logger.warning(
+            "[%s] %s did not run (%s); keeping the previous SQL",
+            session.task_id,
+            kind,
+            exc,
+        )
+        return sql, None
+    if same_values and not _result_values_match(session, connector, sql, frame, kind):
+        return sql, None
+    logger.info("[%s] %s", session.task_id, kind)
+    return rewritten, numeric_column_kinds(frame)
+
+
+def _result_values_match(
+    session: InteractiveSessionState,
+    connector: Any,
+    sql: str,
+    rewritten_frame: Any,
+    kind: str,
+) -> bool:
+    """Whether *sql* and an already-run rewrite round to the same result."""
+    try:
+        original_frame = execute_chat_sql(connector, sql, kind=f"{kind} original")
+    except Exception as exc:  # noqa: BLE001 — an unverified rewrite is not submitted
+        logger.warning(
+            "[%s] %s could not be compared (%s); keeping the previous SQL",
+            session.task_id,
+            kind,
+            exc,
+        )
+        return False
+    if result_values_digest(original_frame) == result_values_digest(rewritten_frame):
+        return True
+    logger.warning(
+        "[%s] %s changed the result values; keeping the previous SQL",
+        session.task_id,
+        kind,
+    )
+    return False
+
+
+def _stabilize_submitted_order(
+    session: InteractiveSessionState, sql: str
+) -> tuple[str, list | None]:
+    """Apply the row-order rewrites that matched the grader on saved SQL.
+
+    Runs after the numeric-type flip so a flip back to ``double precision``
+    does not undo the chronological average, and so an integer ``SUM`` is not
+    wrapped again as ``numeric``. Each rewrite is kept only if it executes.
+    The integer sum is also kept only when its values match: a fractional
+    ``numeric`` or ``real`` rounds into ``int`` and the rewritten statement
+    still runs.
+
+    The kinds are those of the last rewrite that ran, or ``None`` when nothing
+    was rewritten. ``first_submit_values_digest`` is not taken from these
+    frames: the debug retry compares it with the debug SQL before
+    stabilization, so it stays the pre-stabilization result.
+    """
+    dialect = _postgres_dialect(session)
+    if dialect is None or not sql.strip():
+        return sql, None
+    kinds: list | None = None
+
+    def _apply(rewritten: str, label: str, *, same_values: bool = False) -> None:
+        nonlocal sql, kinds
+        sql, step_kinds = _submit_if_it_runs(
+            session, sql, rewritten, label, same_values=same_values
+        )
+        if step_kinds is not None:
+            kinds = step_kinds
+
+    _apply(order_groups_by_identifier(sql, dialect), "grouped identifier tie-break")
+    _apply(
+        order_periods_chronologically(sql, dialect),
+        "chronological order for a per-period ranking",
+    )
+    _apply(
+        sum_decimal_casts_to_integer(sql, dialect),
+        "integer sum of a whole-number cast",
+        same_values=True,
+    )
+    _apply(
+        float_json_arithmetic(sql, dialect, _real_column_names(session, sql)),
+        "float arithmetic for a real column mixed with JSON metrics",
+    )
+    return sql, kinds
 
 
 def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:

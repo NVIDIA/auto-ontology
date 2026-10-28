@@ -34,6 +34,7 @@ from auto_ontology.dal.datasources import find_table_key_columns
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
     float_casts_to_numeric,
+    order_string_aggregates,
 )
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
@@ -829,6 +830,35 @@ class SQLValidationAgent(BaseAgent):
                 )
                 response.sql_code = aligned_sql
                 path_state["sql_generation_result"] = response
+            ordered_sql = order_string_aggregates(response.sql_code, degenerate_dialect)
+            if ordered_sql != response.sql_code:
+                self.logger.info(
+                    "Added ORDER BY to unordered STRING_AGG so the concatenated "
+                    "text is stable"
+                )
+                response.sql_code = ordered_sql
+                path_state["sql_generation_result"] = response
+            try:
+                parsed_for_distinct = sqlglot.parse_one(
+                    response.sql_code, read=degenerate_dialect or None
+                )
+            except Exception:
+                parsed_for_distinct = None
+            if parsed_for_distinct is not None and any(
+                d.args.get("on") for d in parsed_for_distinct.find_all(exp.Distinct)
+            ):
+                self.logger.info("DISTINCT ON rejected under numeric_type_alignment")
+                path_state["error"] = (
+                    "The generated SQL uses PostgreSQL-specific DISTINCT ON (...), "
+                    "which is forbidden because the evaluation harness strips the "
+                    "DISTINCT keyword and breaks the query syntax. Rewrite the "
+                    "deduplication using ROW_NUMBER() OVER (PARTITION BY ... "
+                    "ORDER BY ...) = 1 inside a CTE or subquery instead."
+                )
+                return {
+                    "decision": "invalid_sql",
+                    "path_state": path_state,
+                }
 
         validation_result = self._sql_parse_validation(
             schemas, response.sql_code, dialects

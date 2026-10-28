@@ -36,6 +36,9 @@ natural-language phrases from the question that correspond to this KB entry — 
 to connect KB entries to the working question even when the phrasing differs. \
 If an entry is marked [DISAMBIGUATION], it means a KB formula and a direct schema column \
 both matched the same term — include only whichever is correct given the question context. \
+Preserve exact scaling factors from the external knowledge (such as `* 100` for percentages, \
+proportions, or shares) even when the working question refers to the metric as a "proportion" \
+or "share". \
 If nothing applies, output: NONE"""
 
 
