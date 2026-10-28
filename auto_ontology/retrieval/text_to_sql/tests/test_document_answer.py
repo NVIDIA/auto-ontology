@@ -4,6 +4,8 @@
 
 from typing import Any
 
+import pytest
+
 from auto_ontology.retrieval.text_to_sql import text_to_sql_graph
 from auto_ontology.retrieval.text_to_sql.agents import document_answer
 from auto_ontology.retrieval.text_to_sql.agents.document_answer import (
@@ -37,6 +39,20 @@ def test_disabled_unstructured_flow_routes_directly_to_structured_data(
     )
 
     assert route_unstructured_flow(_state()) == "structured"
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [{"calculation_only": True}, {"prediction_override": True}],
+    ids=["calculation", "prediction"],
+)
+def test_an_explicit_mode_bypasses_enabled_documents(
+    monkeypatch: Any, mode: dict[str, bool]
+) -> None:
+    monkeypatch.setattr(text_to_sql_graph, "is_unstructured_flow_enabled", lambda: True)
+
+    assert route_unstructured_flow(_state()) == "documents"
+    assert route_unstructured_flow({**_state(), **mode}) == "structured"
 
 
 def test_retrieve_candidates_keeps_stable_source_ids(monkeypatch: Any) -> None:

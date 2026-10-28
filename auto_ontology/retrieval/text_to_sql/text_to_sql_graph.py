@@ -276,8 +276,15 @@ def route_document_relevance(state: AgentState) -> str:
     return "structured"
 
 
-def route_unstructured_flow(_state: AgentState) -> str:
-    """Skip every document node when document-aware chat is disabled."""
+def route_unstructured_flow(state: AgentState) -> str:
+    """Skip every document node when document-aware chat is disabled.
+
+    A caller that asked for calculation or prediction explicitly skips them too.
+    Not ``question_type``: the intent agent sets it on every question, and
+    ``calculation`` is its default.
+    """
+    if state.get("calculation_only") or state.get("prediction_override") is True:
+        return "structured"
     return "documents" if is_unstructured_flow_enabled() else "structured"
 
 
