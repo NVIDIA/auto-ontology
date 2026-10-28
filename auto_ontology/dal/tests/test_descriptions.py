@@ -97,44 +97,44 @@ def _one(table, row_id: str) -> dict:
 
 
 def test_rewrite_keeps_the_original_once(world) -> None:
-    tid = world.table("frpm", description="Free meals.")
-    cid = world.column("frpm", "School Code", description="School Code,, 7 digits")
-    blank = world.column("frpm", "Charter", position=2)
-    aid = world.attribute("frpm", "School Code", description="old")
+    tid = world.table("orders", description="Sales orders.")
+    cid = world.column("orders", "Store Code", description="Store Code,, 7 digits")
+    blank = world.column("orders", "Express", position=2)
+    aid = world.attribute("orders", "Store Code", description="old")
 
     d.write_enriched_descriptions(
-        tid, "Row per school.", {cid: "First.", blank: "Flag."}, {aid: "First."}
+        tid, "Row per order.", {cid: "First.", blank: "Flag."}, {aid: "First."}
     )
     d.write_enriched_descriptions(tid, "Again.", {cid: "Second."}, {aid: "Second."})
 
     table = _one(s.catalog_table, tid)
     assert (table["description"], table["source_description"]) == (
         "Again.",
-        "Free meals.",
+        "Sales orders.",
     )
     column = _one(s.catalog_column, cid)
     assert (column["description"], column["source_description"]) == (
         "Second.",
-        "School Code,, 7 digits",
+        "Store Code,, 7 digits",
     )
     assert _one(s.catalog_column, blank)["source_description"] == ""
     assert _one(s.column_attribute, aid)["description"] == "Second."
 
     read = d.fetch_table_for_enrichment(tid)
-    assert read["source_description"] == "Free meals."
+    assert read["source_description"] == "Sales orders."
     by_name = {c["name"]: c for c in read["columns"]}
-    assert by_name["School Code"]["source_description"] == "School Code,, 7 digits"
-    assert by_name["School Code"]["attribute_id"] == aid
-    assert by_name["Charter"]["source_description"] == ""
-    assert by_name["Charter"]["attribute_id"] is None
+    assert by_name["Store Code"]["source_description"] == "Store Code,, 7 digits"
+    assert by_name["Store Code"]["attribute_id"] == aid
+    assert by_name["Express"]["source_description"] == ""
+    assert by_name["Express"]["attribute_id"] is None
 
 
 def test_certified_text_is_never_replaced(world) -> None:
-    tid = world.table("frpm", description="Human.", description_certified=True)
+    tid = world.table("orders", description="Human.", description_certified=True)
     cid = world.column(
-        "frpm", "School Code", description="Human.", description_certified=True
+        "orders", "Store Code", description="Human.", description_certified=True
     )
-    aid = world.attribute("frpm", "School Code", description="Human.", certified=True)
+    aid = world.attribute("orders", "Store Code", description="Human.", certified=True)
 
     written = d.write_enriched_descriptions(tid, "LLM.", {cid: "LLM."}, {aid: "LLM."})
 
@@ -148,38 +148,42 @@ def test_certified_text_is_never_replaced(world) -> None:
 
 
 def test_links_cover_declared_and_semantic_fks_both_ways(world) -> None:
-    world.table("frpm")
-    world.table("schools")
-    world.table("satscores")
-    frpm_cds = world.column("frpm", "CDSCode")
-    schools_cds = world.column("schools", "CDSCode")
-    sat_cds = world.column("satscores", "cds")
-    world.column("frpm", "Self")
+    world.table("orders")
+    world.table("stores")
+    world.table("returns")
+    orders_key = world.column("orders", "StoreKey")
+    stores_key = world.column("stores", "StoreKey")
+    returns_key = world.column("returns", "store_key")
+    world.column("orders", "Self")
     store().query_write(
         s.column__foreign_key.insert().values(
-            source_column_id=frpm_cds, target_column_id=schools_cds
+            source_column_id=orders_key, target_column_id=stores_key
         )
     )
-    frpm_attr = world.attribute("frpm", "CDSCode")
+    orders_attr = world.attribute("orders", "StoreKey")
     store().query_write(
-        s.column__semantic_fk.insert().values(column_id=sat_cds, attribute_id=frpm_attr)
+        s.column__semantic_fk.insert().values(
+            column_id=returns_key, attribute_id=orders_attr
+        )
     )
 
     links = {
         (link["direction"], link["local_column"], link["other_table_name"])
-        for link in d.fetch_table_links(world.tables["frpm"])
+        for link in d.fetch_table_links(world.tables["orders"])
     }
-    assert links == {("out", "CDSCode", "schools"), ("in", "CDSCode", "satscores")}
+    assert links == {("out", "StoreKey", "stores"), ("in", "StoreKey", "returns")}
 
     assert d.fetch_tables_with_term(list(world.tables.values())) == set()
     store().query_write(
-        s.table__term.insert().values(table_id=world.tables["frpm"], term_id=world.term)
+        s.table__term.insert().values(
+            table_id=world.tables["orders"], term_id=world.term
+        )
     )
     assert d.fetch_tables_with_term(list(world.tables.values())) == {
-        world.tables["frpm"]
+        world.tables["orders"]
     }
 
-    neighbours = d.fetch_neighbour_tables([world.tables["schools"]])
-    assert [c["name"] for c in neighbours[world.tables["schools"]]["columns"]] == [
-        "CDSCode"
+    neighbours = d.fetch_neighbour_tables([world.tables["stores"]])
+    assert [c["name"] for c in neighbours[world.tables["stores"]]["columns"]] == [
+        "StoreKey"
     ]

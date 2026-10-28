@@ -36,35 +36,35 @@ def _column(
     }
 
 
-def _frpm() -> tuple[dict, list[dict], dict]:
+def _orders() -> tuple[dict, list[dict], dict]:
     table = {
-        "id": "t-frpm",
-        "name": "frpm",
+        "id": "t-orders",
+        "name": "orders",
         "schema_name": "main",
         "source_description": "",
         "columns": [
-            _column("CDSCode", ["01100170109835", "01100170112607"]),
-            _column("School Code", ["0109835", "0112607"], attribute_id="a-sc"),
-            _column("School Name", ["FAME Public Charter"], attribute_id="a-sn"),
+            _column("StoreKey", ["10020030004567", "10020030004589"]),
+            _column("Store Code", ["0004567", "0004589"], attribute_id="a-sc"),
+            _column("Store Name", ["Main Street Market"], attribute_id="a-sn"),
         ],
     }
     links = [
         {
-            "local_column": "CDSCode",
-            "other_table_id": "t-schools",
-            "other_table_name": "schools",
-            "other_column": "CDSCode",
+            "local_column": "StoreKey",
+            "other_table_id": "t-stores",
+            "other_table_name": "stores",
+            "other_column": "StoreKey",
             "direction": "out",
         }
     ]
     neighbours = {
-        "t-schools": {
-            "id": "t-schools",
-            "name": "schools",
-            "description": "California schools.",
+        "t-stores": {
+            "id": "t-stores",
+            "name": "stores",
+            "description": "Retail stores.",
             "columns": [
-                _column("CDSCode", ["01100170109835", "01100170112607"]),
-                _column("School", ["FAME Public Charter"]),
+                _column("StoreKey", ["10020030004567", "10020030004589"]),
+                _column("Store", ["Main Street Market"]),
             ],
         }
     }
@@ -72,7 +72,7 @@ def _frpm() -> tuple[dict, list[dict], dict]:
 
 
 def test_value_shape() -> None:
-    assert de.value_shape(["0109835", "0112607"], "TEXT") == "7 digits stored as text"
+    assert de.value_shape(["0004567", "0004589"], "TEXT") == "7 digits stored as text"
     assert de.value_shape(["12", "345"], "INTEGER") == "2-3 digits"
     assert de.value_shape(["1.5", "20"], "TEXT") == "numbers stored as text"
     assert de.value_shape(["Y", "N"], "TEXT") == "1-letter upper-case codes"
@@ -81,50 +81,50 @@ def test_value_shape() -> None:
 
 
 def test_name_tokens_split_camel_and_spaces() -> None:
-    assert de.name_tokens("CDSCode") == {"cds", "code"}
-    assert de.name_tokens("School Code") == {"school", "code"}
+    assert de.name_tokens("StoreKey") == {"store", "key"}
+    assert de.name_tokens("Store Code") == {"store", "code"}
     assert de.name_tokens("district_id") == {"district", "id"}
 
 
 def test_hint_flags_a_code_that_is_not_the_join_key() -> None:
-    table, links, neighbours = _frpm()
+    table, links, neighbours = _orders()
     hints = de.collision_hints(table["columns"][1:], table, links, neighbours)
 
     assert len(hints) == 1
     hint = hints[0]
-    assert hint.startswith("School Code names table schools")
-    assert "frpm.CDSCode = schools.CDSCode" in hint
+    assert hint.startswith("Store Code names table stores")
+    assert "orders.StoreKey = stores.StoreKey" in hint
     assert "this column is 7 digits stored as text" in hint
-    assert "schools.CDSCode is 14 digits stored as text" in hint
+    assert "stores.StoreKey is 14 digits stored as text" in hint
 
 
 def test_no_hint_for_the_join_column_itself() -> None:
-    table, links, neighbours = _frpm()
+    table, links, neighbours = _orders()
     assert de.collision_hints(table["columns"][:1], table, links, neighbours) == []
 
 
 def test_context_lists_joins_and_neighbour_columns() -> None:
-    table, links, neighbours = _frpm()
+    table, links, neighbours = _orders()
     context = de.build_table_context(table, links, neighbours)
 
-    assert "Table: main.frpm" in context
-    assert "CDSCode -> schools.CDSCode (14 digits stored as text)" in context
-    assert "Joined table: schools" in context
-    assert "Description: California schools." in context
-    assert "  - School (TEXT) | samples: FAME Public Charter" in context
+    assert "Table: main.orders" in context
+    assert "StoreKey -> stores.StoreKey (14 digits stored as text)" in context
+    assert "Joined table: stores" in context
+    assert "Description: Retail stores." in context
+    assert "  - Store (TEXT) | samples: Main Street Market" in context
 
 
 def test_resolve_column_names_accepts_echoed_annotation() -> None:
     result = TableDescriptionsResult(
         table_description="",
         columns=[
-            ColumnDescription(column_name="School Code (TEXT)", description="A."),
+            ColumnDescription(column_name="Store Code (TEXT)", description="A."),
             ColumnDescription(column_name="unknown", description="B."),
-            ColumnDescription(column_name="School Name", description=""),
+            ColumnDescription(column_name="Store Name", description=""),
         ],
     )
-    assert de.resolve_column_names(result, ["School Code", "School Name"]) == {
-        "School Code": "A."
+    assert de.resolve_column_names(result, ["Store Code", "Store Name"]) == {
+        "Store Code": "A."
     }
 
 
@@ -137,17 +137,17 @@ def _patch_reads(table: dict, links: list[dict], neighbours: dict):
 
 
 def test_enrich_writes_only_columns_with_an_attribute() -> None:
-    table, links, neighbours = _frpm()
+    table, links, neighbours = _orders()
     table["columns"][1]["format"] = "NNNNNNN"
     result = TableDescriptionsResult(
-        table_description="One row per school and academic year.",
+        table_description="One row per store and month.",
         columns=[
-            ColumnDescription(column_name="School Code", description="Local code."),
-            ColumnDescription(column_name="School Name", description="Name."),
-            ColumnDescription(column_name="CDSCode", description="Should be ignored."),
+            ColumnDescription(column_name="Store Code", description="Local code."),
+            ColumnDescription(column_name="Store Name", description="Name."),
+            ColumnDescription(column_name="StoreKey", description="Should be ignored."),
         ],
     )
-    written = {"table": True, "columns": ["col-School Code"], "attributes": []}
+    written = {"table": True, "columns": ["col-Store Code"], "attributes": []}
     reads = _patch_reads(table, links, neighbours)
     with (
         reads[0],
@@ -158,20 +158,20 @@ def test_enrich_writes_only_columns_with_an_attribute() -> None:
         patch.object(de, "write_enriched_descriptions", return_value=written) as write,
         patch.object(de, "_reembed") as reembed,
     ):
-        assert de.enrich_table_descriptions("t-frpm") is True
+        assert de.enrich_table_descriptions("t-orders") is True
 
     write.assert_called_once_with(
-        "t-frpm",
-        "One row per school and academic year.",
-        {"col-School Code": "Local code.", "col-School Name": "Name."},
+        "t-orders",
+        "One row per store and month.",
+        {"col-Store Code": "Local code.", "col-Store Name": "Name."},
         {"a-sc": "Local code. — format: NNNNNNN", "a-sn": "Name."},
     )
-    reembed.assert_called_once_with("t-frpm", written, None)
+    reembed.assert_called_once_with("t-orders", written, None)
 
 
 def test_prompt_carries_existing_description_and_hint() -> None:
-    table, links, neighbours = _frpm()
-    table["columns"][1]["source_description"] = "School Code, 1 = x"
+    table, links, neighbours = _orders()
+    table["columns"][1]["source_description"] = "Store Code, 1 = x"
     reads = _patch_reads(table, links, neighbours)
     with (
         reads[0],
@@ -181,23 +181,23 @@ def test_prompt_carries_existing_description_and_hint() -> None:
         patch.object(de, "get_llm_client"),
         patch.object(de, "write_enriched_descriptions") as write,
     ):
-        assert de.enrich_table_descriptions("t-frpm") is False
+        assert de.enrich_table_descriptions("t-orders") is False
 
     prompt = llm.call_args.args[1][1].content
-    assert "existing description: School Code, 1 = x" in prompt
-    assert "Hints:\n- School Code names table schools" in prompt
+    assert "existing description: Store Code, 1 = x" in prompt
+    assert "Hints:\n- Store Code names table stores" in prompt
     write.assert_not_called()
 
 
 def test_table_without_attributes_is_skipped() -> None:
-    table, links, neighbours = _frpm()
+    table, links, neighbours = _orders()
     for column in table["columns"]:
         column["attribute_id"] = None
     with (
         patch.object(de, "fetch_table_for_enrichment", return_value=table),
         patch.object(de, "invoke_with_structured_output") as llm,
     ):
-        assert de.enrich_table_descriptions("t-frpm") is False
+        assert de.enrich_table_descriptions("t-orders") is False
     llm.assert_not_called()
 
 

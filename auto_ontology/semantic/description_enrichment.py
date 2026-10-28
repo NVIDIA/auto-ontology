@@ -16,8 +16,8 @@ non-FK columns, given:
 * the table's key columns and the column each one joins to;
 * the tables one join away, with their columns; and
 * deterministic hints for columns whose name suggests a joined table's key while
-  the join actually runs through a different column — ``frpm."School Code"``
-  is not ``schools.CDSCode``.
+  the join actually runs through a different column — ``orders."Store Code"``
+  is not ``stores.StoreKey``.
 
 FK columns are context only. They carry no ColumnAttribute, and their meaning
 is the column they point at.
@@ -93,7 +93,7 @@ under "Columns to describe".
 
 Rules:
 - An existing description is authoritative for meaning. Keep every value code \
-and mapping it states exactly (for example "1 = charter, 0 = not charter"), \
+and mapping it states exactly (for example "1 = active, 0 = closed"), \
 and drop only noise such as repeated punctuation or annotator notes.
 - Use the samples, format and value shape as evidence of how values are \
 written, and say it when it matters for filtering (for example "7-digit code \
@@ -318,7 +318,7 @@ def collision_hints(
     """Columns that look like a joined table's key but are not the join.
 
     A column is flagged when it reads as an identifier of a joined table
-    (``School Code`` next to a join to ``schools``), or both columns read as
+    (``Store Code`` next to a join to ``stores``), or both columns read as
     identifiers sharing a distinctive word while written differently, and the
     join between the two tables runs through other columns. The hint states both value shapes, which is usually what tells the
     two apart.
@@ -433,7 +433,7 @@ def resolve_column_names(
 
     The prompt annotates each column as ``<name> (<type>)``, and a model given a
     name with spaces or parentheses sometimes echoes the annotation back
-    (``"Academic Year (TEXT)"``). Exact match first, then the longest requested
+    (``"Order Date (TEXT)"``). Exact match first, then the longest requested
     name the returned string starts with.
     """
     requested_set = set(requested)
