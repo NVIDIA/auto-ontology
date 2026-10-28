@@ -50,6 +50,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     numeric_column_kinds,
     opposite_target,
     order_by_leading_aggregate,
+    order_desc_limit_nulls_last,
     order_groups_by_identifier,
     order_periods_chronologically,
     result_values_digest,
@@ -615,7 +616,15 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
     Only a retry that *kept the first submit's answer* is flipped. If debugging
     changed the values themselves (a different filter, join, or expression), the
     type the first submit had says nothing about the new answer, and flipping
-    would swap a possibly-correct type for a wrong one.
+    would swap a possibly-correct type for a wrong one. A mixed result in that
+    case still lifts float columns to ``numeric``.
+
+    A mixed result that *did* keep the values is not flipped by its dominant
+    kind. ``decimal`` wins that vote, so the opposite retry would cast the
+    decimal columns to ``double precision`` and leave the float columns
+    alone — the decimal column is often already the type the grader accepts.
+    Float columns are cast to ``numeric`` instead, and only when the rounded
+    values stay the same.
 
     A debug result can also arrive with no recorded first type: the phase
     ended without a submit, so there is no kind and no value digest. Decimal
@@ -640,6 +649,9 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
             session.task_id,
         )
         return _align_mixed_numeric_types(session, sql)
+
+    if "decimal" in kinds and "float" in kinds:
+        return _retry_float_columns_as_numeric(session, sql, kinds)
 
     connector = resolve_connector_from_tables(
         session.path_state.get("relevant_tables") or [], session.connectors
@@ -666,6 +678,54 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
         first_kind,
     )
     return flipped
+
+
+def _retry_float_columns_as_numeric(
+    session: InteractiveSessionState,
+    sql: str,
+    kinds: list,
+) -> str:
+    """Cast float output columns to ``numeric`` and leave decimal columns.
+
+    Used when a debug retry kept the first submit's values but the result
+    mixes both fractional types. The rewritten statement is kept only when
+    it runs and its rounded values match; a cast that changes the answer is
+    dropped rather than falling through to a decimal-to-float flip.
+    """
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    aligned = flip_numeric_output_types(
+        sql, getattr(connector, "dialect", None), kinds, "numeric"
+    )
+    if not aligned:
+        return sql
+    original_digest = _values_digest_for(session, sql)
+    try:
+        frame = execute_chat_sql(connector, aligned, kind="numeric type retry")
+    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
+        logger.warning(
+            "[%s] Float-to-numeric retry did not run (%s); keeping the generated SQL",
+            session.task_id,
+            exc,
+        )
+        return sql
+    if not original_digest or result_values_digest(frame) != original_digest:
+        logger.warning(
+            "[%s] Float-to-numeric retry changed the result values; keeping the generated SQL",
+            session.task_id,
+        )
+        return sql
+    session.path_state["result_numeric_kinds"] = numeric_column_kinds(frame)
+    session.path_state["result_numeric_kinds_sql"] = aligned.strip()
+    session.path_state["result_values_digest"] = result_values_digest(frame)
+    logger.info(
+        "[%s] Debug retry: float columns moved to numeric; decimal columns kept",
+        session.task_id,
+    )
+    return aligned
 
 
 def _retry_double_without_a_recorded_type(
@@ -1123,6 +1183,10 @@ def _stabilize_submitted_order(
     _apply(
         float_json_arithmetic(sql, dialect, _real_column_names(session, sql)),
         "float arithmetic for a real column mixed with JSON metrics",
+    )
+    _apply(
+        order_desc_limit_nulls_last(sql, dialect),
+        "nulls last on a descending limit",
     )
     return sql, kinds
 

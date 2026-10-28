@@ -307,6 +307,80 @@ def test_wrong_answer_debug_resubmits_the_opposite_numeric_type():
     assert connector.executed == [action.sql]  # verified before it is submitted
 
 
+def test_mixed_debug_keeps_decimal_columns_and_casts_floats_to_numeric() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    original = pd.DataFrame({"a": [Decimal("1.50")], "b": [2.25]})
+    casted = pd.DataFrame({"a": [Decimal("1.50")], "b": [Decimal("2.25")]})
+    digest = result_values_digest(original)
+    assert digest == result_values_digest(casted)
+    connector = _TableConnector(casted)
+    sql = "SELECT a, b FROM aliens"
+    sess = _table_session(connector, sql, ["decimal", "float"], digest=digest)
+    sess.first_submit_numeric_kind = "decimal"
+    sess.first_submit_values_digest = digest
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == "SELECT a, CAST(b AS DECIMAL) FROM aliens"
+    assert "DOUBLE PRECISION" not in action.sql.upper()
+    assert connector.executed == [action.sql]
+
+
+def test_mixed_debug_drops_the_float_cast_when_values_change() -> None:
+    from decimal import Decimal
+
+    import pandas as pd
+
+    from auto_ontology.retrieval.text_to_sql.numeric_types import result_values_digest
+
+    original = pd.DataFrame({"a": [Decimal("1.50")], "b": [2.25]})
+    connector = _TableConnector(
+        pd.DataFrame({"a": [Decimal("9.99")], "b": [Decimal("2.25")]})
+    )
+    sql = "SELECT a, b FROM aliens"
+    digest = result_values_digest(original)
+    sess = _table_session(connector, sql, ["decimal", "float"], digest=digest)
+    sess.first_submit_numeric_kind = "decimal"
+    sess.first_submit_values_digest = digest
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed  # the cast was probed, then rejected
+
+
+def test_desc_limit_puts_nulls_last_before_submit() -> None:
+    connector = _Connector()
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
+    sess.path_state["relevant_tables"] = []
+    sql = "SELECT id, score FROM aliens ORDER BY score DESC LIMIT 5"
+
+    action = _step_follow_up(sess, sql)
+
+    assert (
+        action.sql
+        == "SELECT id, score FROM aliens ORDER BY score DESC NULLS LAST LIMIT 5"
+    )
+    assert connector.executed == [action.sql]
+
+
+def test_desc_limit_nulls_last_is_off_without_alignment() -> None:
+    connector = _Connector()
+    sess = _make_session(connectors=[connector])
+    sess.path_state["relevant_tables"] = []
+    sql = "SELECT id, score FROM aliens ORDER BY score DESC LIMIT 5"
+
+    action = _step_follow_up(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
+
+
 def test_decimal_first_submit_retries_as_double_precision():
     connector = _Connector()
     sess, sql = _debug_session(connector, first_kind="decimal", kinds=("decimal",))
