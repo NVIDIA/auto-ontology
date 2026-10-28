@@ -50,6 +50,7 @@ from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_agent_construction import (
     SQLAgentConstructionAgent,
     SQLDeepAgentConstructionAgent,
+    SQLEnsembleConstructionAgent,
 )
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
@@ -74,6 +75,7 @@ from auto_ontology.retrieval.text_to_sql.db_probe.config import (
 from auto_ontology.retrieval.text_to_sql.sql_agent.config import (
     is_sql_agent_enabled,
     is_sql_deep_agent_enabled,
+    is_sql_ensemble_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -380,7 +382,9 @@ def create_graph():
     # the node labels in sync for what is one A/B switch.
     # Most specific flag wins, so an arm can be switched on without having to
     # remember to switch the previous one off.
-    if is_sql_deep_agent_enabled():
+    if is_sql_ensemble_enabled():
+        construction_agent = SQLEnsembleConstructionAgent()
+    elif is_sql_deep_agent_enabled():
         construction_agent = SQLDeepAgentConstructionAgent()
     elif is_sql_agent_enabled():
         construction_agent = SQLAgentConstructionAgent()

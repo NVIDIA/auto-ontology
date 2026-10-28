@@ -95,3 +95,123 @@ def test_reconstruction_uses_evidence_from_state(
     assert evidence_message.endswith("The time refers to events.duration LIKE 'M:SS%'.")
     assert "The time refers to" not in prompt
     assert "events.duration LIKE '1:54%'" not in prompt
+
+
+def _repair_state(candidates: list | None) -> AgentState:
+    """A state parked at the repair loop, with *candidates* as the pool."""
+    path_state: dict = {
+        "error": "no such column: totl",
+        "error_analysis_done": True,
+        "sql_generation_result": SimpleNamespace(sql_code="SELECT totl", thought=""),
+    }
+    if candidates is not None:
+        path_state["sql_candidates"] = candidates
+    return cast(
+        AgentState,
+        {
+            "llm": MagicMock(),
+            "initial_question": "How many orders?",
+            "evidence": "",
+            "messages": [],
+            "path_state": path_state,
+        },
+    )
+
+
+def _reconstructs_as(
+    monkeypatch: pytest.MonkeyPatch, sql: str
+) -> SimpleNamespace:
+    """Make the repair LLM return *sql*, and hand back what it returned."""
+    rebuilt = SimpleNamespace(sql_code=sql, thought="")
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        lambda _llm, _messages, _model: rebuilt,
+    )
+    return rebuilt
+
+
+def test_repaired_sql_joins_the_candidate_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = [
+        SimpleNamespace(sql_code="SELECT totl", thought=""),
+        SimpleNamespace(sql_code="SELECT other", thought=""),
+    ]
+    rebuilt = _reconstructs_as(monkeypatch, "SELECT total")
+
+    result = SQLReconstructionAgent().execute(_repair_state(pool))
+
+    candidates = result["path_state"]["sql_candidates"]
+    assert [c.sql_code for c in candidates] == [
+        "SELECT totl",
+        "SELECT other",
+        "SELECT total",
+    ]
+    assert candidates[-1] is rebuilt
+    assert result["path_state"]["sql_generation_result"] is rebuilt
+
+
+def test_appending_leaves_the_generated_slots_where_they_were(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = [SimpleNamespace(sql_code=f"SELECT {i}", thought="") for i in range(6)]
+    _reconstructs_as(monkeypatch, "SELECT repaired")
+
+    result = SQLReconstructionAgent().execute(_repair_state(pool))
+
+    candidates = result["path_state"]["sql_candidates"]
+    assert [c.sql_code for c in candidates[:6]] == [f"SELECT {i}" for i in range(6)]
+    assert candidates[6].sql_code == "SELECT repaired"
+
+
+def test_a_repair_that_converges_adds_no_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = [
+        SimpleNamespace(sql_code="SELECT totl", thought=""),
+        SimpleNamespace(sql_code="  SELECT total  ", thought=""),
+    ]
+    _reconstructs_as(monkeypatch, "SELECT total")
+
+    result = SQLReconstructionAgent().execute(_repair_state(pool))
+
+    assert len(result["path_state"]["sql_candidates"]) == 2
+
+
+def test_the_pool_does_not_mutate_in_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = [SimpleNamespace(sql_code="SELECT totl", thought="")]
+    _reconstructs_as(monkeypatch, "SELECT total")
+
+    SQLReconstructionAgent().execute(_repair_state(pool))
+
+    assert [c.sql_code for c in pool] == ["SELECT totl"]
+
+
+def test_repair_starts_a_pool_when_there_was_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reconstructs_as(monkeypatch, "SELECT total")
+
+    result = SQLReconstructionAgent().execute(_repair_state(None))
+
+    candidates = result["path_state"]["sql_candidates"]
+    assert [c.sql_code for c in candidates] == ["SELECT total"]
+
+
+def test_an_unconstructable_repair_leaves_the_pool_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = [SimpleNamespace(sql_code="SELECT totl", thought="")]
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        lambda _llm, _messages, _model: None,
+    )
+
+    result = SQLReconstructionAgent().execute(_repair_state(pool))
+
+    assert result["decision"] == "unconstructable"
+    assert result["path_state"]["sql_candidates"] is pool

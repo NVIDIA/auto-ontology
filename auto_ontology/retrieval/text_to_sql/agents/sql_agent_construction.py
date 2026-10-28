@@ -26,6 +26,9 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
 )
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.sql_agent.deep import run_deep_sql_agent
+from auto_ontology.retrieval.text_to_sql.sql_agent.ensemble import (
+    run_ensemble_sql_agent,
+)
 from auto_ontology.retrieval.text_to_sql.sql_agent.loop import run_sql_agent
 from auto_ontology.retrieval.text_to_sql.sql_agent.tools import SQLAgentToolbox
 from auto_ontology.retrieval.text_to_sql.state import AgentState, get_original_question
@@ -192,8 +195,38 @@ class SQLDeepAgentConstructionAgent(SQLAgentConstructionAgent):
         return run_deep_sql_agent(llm, messages, toolbox, state)
 
 
+class SQLEnsembleConstructionAgent(SQLAgentConstructionAgent):
+    """Construct SQL by writing it several ways and picking by execution.
+
+    The third arm. Where the loop and the deep agent both spend their budget
+    improving one query, this one runs the deep agent once and then spends the
+    rest rewriting its query several ways from what it found, letting the
+    database arbitrate between them; see :mod:`..sql_agent.ensemble` for the
+    measurement that says the remaining errors live where independently
+    written queries disagree.
+
+    It shares the node, the prompt and the contract with the other two, which
+    is the only reason the three can be compared at all. It also shares the
+    toolbox, because the exploration it runs is a single deep agent's -- so
+    the tool counts logged here mean what they mean on the deep arm, and only
+    ``turns`` reads differently, counting candidates rather than model turns.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.agent_name = "sql_ensemble_construction"
+        self.logger = logging.getLogger(f"{__name__}.{self.agent_name}")
+
+    def _run(
+        self, llm: Any, messages: list, toolbox: SQLAgentToolbox, state: AgentState
+    ) -> Any:
+        return run_ensemble_sql_agent(
+            llm, messages, toolbox, state, question=get_original_question(state)
+        )
+
 
 __all__ = [
     "SQLAgentConstructionAgent",
     "SQLDeepAgentConstructionAgent",
+    "SQLEnsembleConstructionAgent",
 ]
