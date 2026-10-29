@@ -59,8 +59,8 @@ Rules:
 - Do not copy background, explanations, formulas, SQL, values, unrelated terms, or
   inventories of tables or columns into the sanitized question.
 - Evidence must not add a second interpretation or broaden the user's request.
-- Part 2 must derive entities only from the completed sanitized question, never directly
-  from this evidence section.
+- Part 2 must derive entities only from the completed sanitized question, except for
+  the fields this evidence names (see the Evidence field rule in Part 2).
 
 {evidence}
 
@@ -91,7 +91,8 @@ sanitized_question: How many shipments were delivered last month?
 
 Populate "required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database \
 tables, columns, or relationships. Extract only from the completed sanitized intent. \
-Do not extract entities directly from Glossary or Evidence sections.
+Do not extract entities directly from the Glossary. From the Evidence, extract only the \
+fields it names, as the Evidence field rule below describes.
 
 Preserve the exact casing of terms as they appear in the completed sanitized question.
 Do not lowercase, uppercase, or normalize them.
@@ -103,6 +104,13 @@ it never adds an extra one, so the number of entries stays what it would have be
 without the Glossary. Leave a phrase untouched when no Glossary entry applies.
   Example (Glossary: "MRR" = "monthly recurring revenue"):
   "show MRR by region" → ["monthly recurring revenue", "region"], not ["MRR", "region"]
+
+Evidence field rule: when the Evidence names a database field — a column used in a
+mapping, filter, or formula, whether written in backticks, in quotes, or bare — add that
+field as an entity, copied exactly as written and without its table name. These entries
+are added on top of the entities from the question and do not count toward the limit.
+  Example (Evidence: "Active refers to `Account Status` = 'A' in accounts"):
+  "how many active accounts" → ["account", "active account", "Account Status"]
 
 Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")

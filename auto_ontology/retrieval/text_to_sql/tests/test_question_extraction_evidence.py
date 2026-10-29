@@ -100,6 +100,80 @@ def test_agent_forwards_state_evidence_without_changing_original_question(
     assert result["path_state"]["entities"] == ["loyalty points", "customer"]
 
 
+def test_prompt_extracts_fields_named_by_evidence() -> None:
+    prompt = create_question_extraction_prompt(
+        "How many active accounts?",
+        evidence="Active refers to `Account Status` = 'A'.",
+        include_subject=False,
+    )
+
+    assert "Evidence field rule" in prompt
+    assert "do not count toward the limit" in prompt
+
+
+@pytest.mark.parametrize(
+    ("evidence", "expected"),
+    [
+        (
+            "Active refers to `Account Status` = 'A' in accounts",
+            ["account", "Account Status"],
+        ),
+        (
+            "Active refers to `accounts`.`Account Status` = 'A'",
+            ["account", "Account Status"],
+        ),
+        ("Active refers to `account` = 'A'", ["account"]),
+        ("Active refers to status = 'A'", ["account"]),
+    ],
+)
+def test_agent_always_adds_backticked_evidence_fields(
+    monkeypatch: pytest.MonkeyPatch, evidence: str, expected: list[str]
+) -> None:
+    monkeypatch.setattr(
+        question_extraction,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionExtractionLiteModel(
+            sanitized_question="How many active accounts?",
+            required_entity_name=["account"],
+        ),
+    )
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "How many active accounts?",
+        "evidence": evidence,
+        "path_state": {},
+        "glossary": [],
+    }
+
+    result = QuestionExtractionAgent(include_subject=False).execute(state)
+
+    assert result["path_state"]["entities"] == expected
+
+
+def test_agent_adds_evidence_fields_when_extraction_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_extraction,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: None,
+    )
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "How many active accounts?",
+        "evidence": "Active refers to `Account Status` = 'A'.",
+        "path_state": {},
+        "glossary": [],
+    }
+
+    result = QuestionExtractionAgent(include_subject=False).execute(state)
+
+    assert result["path_state"]["entities"] == [
+        "How many active accounts?",
+        "Account Status",
+    ]
+
+
 def test_intent_rewrite_and_evidence_feed_question_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

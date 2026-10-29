@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
@@ -26,6 +27,25 @@ from auto_ontology.retrieval.text_to_sql.state import (
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
+
+# A backtick-quoted name directly followed by ``.`` and another backtick
+# (`table`.`column`) qualifies the next name rather than naming a field.
+_EVIDENCE_FIELD = re.compile(r"`([^`\n]+)`")
+
+
+def _with_evidence_fields(entities: list[str], evidence: str) -> list[str]:
+    """Append each backtick-quoted evidence field the entities do not name yet."""
+    evidence = evidence or ""
+    merged = list(entities)
+    seen = {entity.strip().casefold() for entity in merged}
+    for match in _EVIDENCE_FIELD.finditer(evidence):
+        if evidence.startswith(".`", match.end()):
+            continue
+        field = match.group(1).strip()
+        if field and field.casefold() not in seen:
+            merged.append(field)
+            seen.add(field.casefold())
+    return merged
 
 
 def _filter_glossary_by_used_names(
@@ -99,7 +119,9 @@ class QuestionExtractionAgent(BaseAgent):
                     "Question extraction returned None, using original question"
                 )
                 path_state["normalized_question"] = original_question
-                path_state["entities"] = [original_question]
+                path_state["entities"] = _with_evidence_fields(
+                    [original_question], evidence
+                )
                 if self._include_subject:
                     path_state["subject"] = original_question
                 return result
@@ -117,6 +139,7 @@ class QuestionExtractionAgent(BaseAgent):
                     "Question extraction returned empty entities — using question"
                 )
                 entities = [sanitized]
+            entities = _with_evidence_fields(entities, evidence)
 
             path_state["normalized_question"] = sanitized
             path_state["entities"] = entities
@@ -157,7 +180,9 @@ class QuestionExtractionAgent(BaseAgent):
                 exc,
             )
             path_state["normalized_question"] = original_question
-            path_state["entities"] = [original_question]
+            path_state["entities"] = _with_evidence_fields(
+                [original_question], evidence
+            )
             if self._include_subject:
                 path_state["subject"] = original_question
 
