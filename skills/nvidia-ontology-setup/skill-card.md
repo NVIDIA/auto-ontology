@@ -43,8 +43,8 @@ Mitigation: Review and scan skill before deployment. <br>
 **Other Properties Related to Output:** [Secrets are never requested in the conversation or placed in command arguments; users write them into a values file or .env themselves.] <br>
 
 ## Evaluation Agents Used: <br>
-- Claude Code (`aws/anthropic/bedrock-claude-opus-4-8`) <br>
-- Codex (`openai/openai/gpt-5.5`) <br>
+- Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`) <br>
+- Codex (`openai/openai/gpt-6.1-sol`) <br>
 
 
 
@@ -73,12 +73,12 @@ Underlying evaluation signals used in this run: <br>
 ## Evaluation Results: <br>
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 95.6% — baseline ran, but no comparable score was available; uplift unavailable | 89.5% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 90.0% → 100.0% (+10.0 points) | 60.0% → 85.0% (+25.0 points) |
-| Correctness | 36.0% → 100.0% (+64.0 points) | 68.0% → 100.0% (+32.0 points) |
-| Discoverability | 94.0% — baseline ran, but no comparable score was available; uplift unavailable | 87.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 42.8% → 95.5% (+52.7 points) | 54.5% → 88.5% (+34.0 points) |
-| Efficiency | 88.3% — baseline ran, but no comparable score was available; uplift unavailable | 87.2% — baseline ran, but no comparable score was available; uplift unavailable |
+| Overall | 92.4% — baseline ran, but no comparable score was available; uplift unavailable | 90.9% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 80.0% → 100.0% (+20.0 points) | 85.0% → 100.0% (+15.0 points) |
+| Correctness | 54.0% → 100.0% (+46.0 points) | 60.0% → 98.0% (+38.0 points) |
+| Discoverability | 88.0% — baseline ran, but no comparable score was available; uplift unavailable | 91.0% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 45.8% → 95.0% (+49.2 points) | 65.2% → 83.8% (+18.6 points) |
+| Efficiency | 79.1% — baseline ran, but no comparable score was available; uplift unavailable | 81.6% — baseline ran, but no comparable score was available; uplift unavailable |
 
 ## Skill Version(s): <br>
 0.3.1 (source: frontmatter) <br>
