@@ -462,6 +462,10 @@ def should_clarify(
             vdb_only_entities=vdb_only,
             resolved_schema_terms=resolved_schema_text,
         )
+        from .value_gaps import record_value_notes, resolve_value_gaps
+
+        gaps, value_notes = resolve_value_gaps(session, gaps)
+        record_value_notes(session, value_notes)
         if gaps:
             session.incomplete_formula_terms = gaps
             logger.info("Completeness (turn-0 scan) — gaps: %s", gaps)

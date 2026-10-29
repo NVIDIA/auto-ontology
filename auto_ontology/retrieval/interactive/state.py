@@ -113,6 +113,10 @@ class InteractiveSessionState:
     _ambiguity_resolution_notes: list[str] = field(
         default_factory=list
     )  # injected verbatim into evidence, computed once
+    # Evidence lines for "which stored value means X" gaps that were closed from a
+    # DISTINCT lookup instead of a question to the user (see value_gaps.py).
+    # Accumulated across turns, injected verbatim into evidence.
+    _value_resolution_notes: list[str] = field(default_factory=list)
     _ambiguity_resolved: bool = False  # guards the once-only resolution call — an empty notes list still means "already ran"
     # Whether the SQL the grader saw on the last non-debug submit returned
     # ``"float"`` or ``"decimal"`` (None: neither). Recorded after order

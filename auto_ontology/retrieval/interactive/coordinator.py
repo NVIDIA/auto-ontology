@@ -30,6 +30,7 @@ from .output_type import (
 )
 from .conditional_output import conditional_output_enabled, get_conditional_output_hint
 from .completeness import detect_incomplete_formulas
+from .value_gaps import record_value_notes, resolve_value_gaps
 from .evidence import (
     build_grounded_terms_hint,
     generate_evidence,
@@ -385,6 +386,14 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             "[%s] SQL gen — injected %d ambiguity-resolution note(s)",
             session.task_id,
             len(session._ambiguity_resolution_notes),
+        )
+    if session._value_resolution_notes:
+        # Facts read from the database, so they go in verbatim like the notes above.
+        evidence = "\n".join(filter(None, [evidence, *session._value_resolution_notes]))
+        logger.info(
+            "[%s] SQL gen — injected %d value-lookup note(s)",
+            session.task_id,
+            len(session._value_resolution_notes),
         )
     if should_inject_default_sort(session.working_question):
         evidence = "\n".join(filter(None, [evidence, _DEFAULT_SORT_HINT]))
@@ -1100,6 +1109,8 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
             "[%s] Merged question: %s", session.task_id, session.working_question
         )
 
+        gaps, value_notes = resolve_value_gaps(session, gaps)
+        record_value_notes(session, value_notes)
         session.incomplete_formula_terms = gaps
         logger.info("[%s] Incomplete formula terms: %s", session.task_id, gaps)
 
