@@ -94,22 +94,6 @@ def _norm(value: Any) -> str:
     return str(value).strip().casefold()
 
 
-def _unwrap_string_column(node: Any) -> Optional[exp.Column]:
-    """Return an ``exp.Column`` from *node*, unwrapping LOWER/UPPER/TRIM/CAST/Paren."""
-    cur = node
-    while isinstance(cur, (exp.Lower, exp.Upper, exp.Trim, exp.Cast, exp.Paren)):
-        cur = cur.this
-    return cur if isinstance(cur, exp.Column) else None
-
-
-def _unwrap_string_literal(node: Any) -> Optional[str]:
-    """Return a string literal value from *node*, unwrapping LOWER/UPPER/TRIM."""
-    cur = node
-    while isinstance(cur, (exp.Lower, exp.Upper, exp.Trim, exp.Paren)):
-        cur = cur.this
-    return cur.this if isinstance(cur, exp.Literal) and cur.is_string else None
-
-
 def _string_predicates(tree: exp.Expression) -> list[tuple[exp.Column, list[str]]]:
     """Positive string-equality / ``IN`` predicates as ``(column_node, values)``.
 
@@ -120,21 +104,19 @@ def _string_predicates(tree: exp.Expression) -> list[tuple[exp.Column, list[str]
     out: list[tuple[exp.Column, list[str]]] = []
 
     for eq in tree.find_all(exp.EQ):
-        col = _unwrap_string_column(eq.this) or _unwrap_string_column(eq.expression)
-        lit = _unwrap_string_literal(eq.expression) or _unwrap_string_literal(eq.this)
+        col = _as_column(eq.this) or _as_column(eq.expression)
+        lit = _as_string_literal(eq.expression) or _as_string_literal(eq.this)
         if col is not None and lit is not None:
             out.append((col, [lit]))
 
     for in_expr in tree.find_all(exp.In):
-        if isinstance(in_expr.parent, exp.Not) or in_expr.args.get("negate"):
-            continue
-        col = _unwrap_string_column(in_expr.this)
+        col = _as_column(in_expr.this)
         if col is None:
             continue
         values = [
-            lit
+            e.this
             for e in (in_expr.expressions or [])
-            if (lit := _unwrap_string_literal(e)) is not None
+            if isinstance(e, exp.Literal) and e.is_string
         ]
         if values:
             out.append((col, values))
@@ -838,9 +820,6 @@ def find_literal_mismatches(
         for v in actual:
             actual_by_norm.setdefault(_norm(v), []).append(v)
 
-        any_present_in_list = any(_norm(u) in actual_by_norm for u in values)
-        unmatched_in_list: list[str] = []
-
         for used in values:
             norm = _norm(used)
             siblings = actual_by_norm.get(norm, [])
@@ -870,9 +849,7 @@ def find_literal_mismatches(
                 suggested = difflib.get_close_matches(
                     used, actual, n=3, cutoff=_CLOSE_MATCH_CUTOFF
                 )
-            if not suggested:
-                if len(values) >= 2 and any_present_in_list:
-                    unmatched_in_list.append(used)
+            if not suggested:  # no near-miss → value legitimately absent, leave it
                 continue
             mismatches.append(
                 {
@@ -881,18 +858,6 @@ def find_literal_mismatches(
                     "column": col.name,
                     "used": used,
                     "suggested": suggested,
-                    "actual": actual,
-                }
-            )
-
-        if unmatched_in_list:
-            mismatches.append(
-                {
-                    "kind": "partial_in_mismatch",
-                    "table": owning_table,
-                    "column": col.name,
-                    "used": ", ".join(unmatched_in_list),
-                    "missing_values": unmatched_in_list,
                     "actual": actual,
                 }
             )
@@ -985,32 +950,10 @@ def _render_integer_division_mismatch(m: dict[str, Any]) -> str:
     )
 
 
-def _render_partial_in_mismatch(m: dict[str, Any]) -> str:
-    actual = m.get("actual") or []
-    actual_clause = (
-        f"Actual values in {m['table']}.{m['column']} are ONLY "
-        f"[{', '.join(repr(str(v)) for v in actual[:20])}]. "
-        if actual
-        else ""
-    )
-    missing = ", ".join(repr(str(v)) for v in (m.get("missing_values") or []))
-    return (
-        f"- Column {m['table']}.{m['column']}: your IN-list includes {missing}, "
-        f"which does NOT exist in {m['table']}.{m['column']}. {actual_clause}"
-        "Check whether this condition belongs to a different column or JSONB sub-key "
-        "in the schema that actually stores all of the requested category values "
-        "(e.g. a treatment outcome JSONB field vs. a medication column), or remove "
-        "any unrequested invented synonym."
-    )
-
-
 def build_value_repair_error(mismatches: list[dict[str, Any]]) -> str:
     """Render mismatches (string near-misses and/or numeric scale issues)
     into a targeted reconstruction instruction."""
     string_mismatches = [m for m in mismatches if m.get("kind", "string") == "string"]
-    partial_in_mismatches = [
-        m for m in mismatches if m.get("kind") == "partial_in_mismatch"
-    ]
     case_duplicate_mismatches = [
         m for m in mismatches if m.get("kind") == "case_duplicate"
     ]
@@ -1037,15 +980,6 @@ def build_value_repair_error(mismatches: list[dict[str, Any]]) -> str:
             "(choose the one that matches the question's intent). Change ONLY the "
             "mismatched literal(s); keep all joins, columns, grouping, and other "
             "filters exactly as they are."
-        )
-    if partial_in_mismatches:
-        body = "\n".join(_render_partial_in_mismatch(m) for m in partial_in_mismatches)
-        sections.append(
-            "One or more IN(...) predicates reference category value(s) that do not "
-            "exist in the chosen column, indicating the filter may be targeting a "
-            "neighboring column instead of the column/JSONB field that stores the "
-            "full set of requested values:\n"
-            f"{body}"
         )
     if case_duplicate_mismatches:
         body = "\n".join(

@@ -84,24 +84,8 @@ class ProactiveValueCheckAgent(BaseAgent):
                     known_types[(table_name.lower(), col_name.lower())] = data_type
 
         with ProbeExecutor(connector) as executor:
-            if state.get("validate_sql_values", False):
-                # Agentic SQLValueValidationAgent already handles single-literal
-                # spelling/case edits, but cannot change columns when an IN(...)
-                # list only partially exists in the chosen column. Run only the
-                # partial-IN check and integer-division self-apply when the SQL
-                # actually contains an IN(...) or `/` expression.
-                mismatches = (
-                    [
-                        m
-                        for m in find_literal_mismatches(executor, dialect, sql_code)
-                        if m.get("kind") == "partial_in_mismatch"
-                    ]
-                    if " in " in f" {sql_code.lower()} " or " in(" in sql_code.lower()
-                    else []
-                )
-            else:
-                mismatches = find_literal_mismatches(executor, dialect, sql_code)
-                mismatches += find_numeric_scale_mismatches(executor, dialect, sql_code)
+            mismatches = find_literal_mismatches(executor, dialect, sql_code)
+            mismatches += find_numeric_scale_mismatches(executor, dialect, sql_code)
         mismatches += find_integer_division_mismatches(
             dialect, sql_code, known_types=known_types
         )
@@ -136,11 +120,10 @@ class ProactiveValueCheckAgent(BaseAgent):
         path_state["error"] = build_value_repair_error(mismatches)
         # This error was derived from a live probe against the query's own
         # already-joined tables — the fix is always "use the real value we
-        # just found there," never "go search for a new table," EXCEPT for
-        # partial_in_mismatch where the missing category value may live in a
-        # different table's column/JSONB field not yet in relevant_tables.
-        if all(m.get("kind") != "partial_in_mismatch" for m in mismatches):
-            path_state["error_known_fixable"] = True
+        # just found there," never "go search for a new table." Skip
+        # reconstruction's LLM error-classification for it (see
+        # sql_reconstruction.py) so it can't be misread as missing_data.
+        path_state["error_known_fixable"] = True
         self.logger.info(
             "[%s] Proactive check — routing to reconstruction to fix %d literal(s): %s",
             path_state.get("task_id", "?"),

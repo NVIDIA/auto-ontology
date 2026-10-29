@@ -819,7 +819,7 @@ def step(
         pending = {
             e: hits
             for e, hits in session._last_ambiguous_hits.items()
-            if e not in already_resolved
+            if e not in already_resolved and e not in session._ever_kb_covered_norms
         }
         if pending:
             from .entity_resolution import resolve_pending_ambiguities

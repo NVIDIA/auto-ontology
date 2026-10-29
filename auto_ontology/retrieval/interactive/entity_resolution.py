@@ -1344,15 +1344,18 @@ def _find_unresolvable_entities(
         norm = _normalize_entity(entity) or entity.lower().strip()
         if norm not in needs_kb_rescue and norm in search_norms:
             candidate = candidates_by_id.get(str(hit.get("id") or ""))
+            raw_text = str(hit.get("text") or "").strip()
+            raw_detail = re.sub(r"^ColumnAttribute:[^.]+\.\s*", "", raw_text).strip()
             if candidate and candidate.get("attribute"):
                 term = candidate.get("term") or ""
-                hit_text = (
+                header = (
                     f"{candidate['attribute']} ({term})"
                     if term
                     else candidate["attribute"]
                 )
+                hit_text = f"{header} — {raw_detail}" if raw_detail else header
             else:
-                hit_text = hit.get("text") or ""
+                hit_text = raw_text
             resolved_hits.append(
                 (norm, hit_text, float(hit.get("score", 1.0)), str(hit.get("id") or ""))
             )

@@ -26,19 +26,31 @@ line in SQL-friendly notation:
 Only include conditions expressible with specific column names and values — skip \
 natural-language qualifiers with no clear SQL translation. \
 Never invent a column-like name (Title_Case/snake_case) for a term with no confirmed \
-mapping. If no term in a formula has a confirmed mapping, omit the line entirely. If \
-only some terms are confirmed, keep the formula structure and substitute \
+mapping. If no term in a formula has a confirmed mapping, omit the line entirely — \
+EXCEPT when that entry defines a sub-metric referenced as an operand by another \
+formula required by the working question (e.g. a sub-index inside a composite score), \
+in which case keep the sub-formula line and use [UNRESOLVED: <term>] for its unmapped \
+operands. If only some terms are confirmed, keep the formula structure and substitute \
 [UNRESOLVED: <term>] — using the term's exact original wording from the question — \
 for each unconfirmed operand, never a name that could pass as a real column. \
-Do NOT use a VDB-matched column mapping when it clearly conflicts with the term's \
-required data type, unit, or role in the formula — specifically: (a) a boolean flag \
-or a duration/hours column where the formula sums or subtracts monetary costs/fees, \
-(b) a measurement-uncertainty/error column (e.g. "Upper Uncertainty") where the formula \
-requires the actual physical quantity (e.g. mass), or (c) a flat column whose meaning \
-differs from a sibling sub-field when the other operands of the same formula all come \
-from sub-keys of a single JSONB column (e.g. cost_breakdown or risk_profile). In any \
-such conflict, treat that operand as unconfirmed and write [UNRESOLVED: <term>] instead \
-of forcing the mismatched column. \
+When a confirmed mapping's description or "Sample values:" lists JSON sub-keys \
+(e.g. `initial_margin_pct`, `Low_52W`, `High_52W`, `Tx_Adh`, `Func_Impv`, \
+`disposal.disposal_cost`), use those exact JSON sub-keys for operands that match \
+them. Do NOT use a VDB-matched flat column mapping when it clearly conflicts with \
+the term's required data type, unit, table scope, or role in the formula — \
+specifically: (a) a boolean flag or a duration/hours column where the formula sums \
+or subtracts monetary costs/fees, (b) a measurement-uncertainty/error column \
+(e.g. "Upper Uncertainty") where the formula requires the actual physical quantity \
+(e.g. mass), (c) a flat column whose meaning differs from a sibling sub-field when \
+the other operands of the same formula all come from sub-keys of a single JSONB \
+column (e.g. cost_breakdown or risk_profile), (d) a flat column whose only sample \
+value is `0.0` when a JSONB column on the same table has a sub-key for that metric \
+(e.g. `disposal.disposal_cost` in `Cost Breakdown`), or (e) a narrower attribute on \
+a different table (such as `Medication Adherence` on `Treatment Basics`) when the \
+formula explicitly defines a rate over `treatment outcomes` and `Treatment Outcome` \
+has a JSONB column (`Treatment Progress Metrics`) with a matching sub-key (`Tx_Adh`). \
+In any such conflict, use the matching JSONB sub-key if shown in the mappings, or \
+write [UNRESOLVED: <term>] instead of forcing the mismatched flat column. \
 Skip any entry not required by the working question. \
 Entries may include a "# matched from: <terms>" annotation line listing the original \
 natural-language phrases from the question that correspond to this KB entry — use these \
@@ -76,9 +88,22 @@ def build_grounded_terms_hint(session: InteractiveSessionState) -> str:
     if not best:
         return ""
 
-    lines = [
-        f'  "{norm}" → {hit_text}' for norm, (hit_text, _score, _hit_id) in best.items()
-    ]
+    ambiguous_map = getattr(session, "_last_ambiguous_hits", None) or {}
+    lines: list[str] = []
+    for norm, (hit_text, _score, hit_id) in best.items():
+        lines.append(f'  "{norm}" → {hit_text}')
+        alt_hits = ambiguous_map.get(norm) or []
+        shown_alts = 0
+        for alt in alt_hits:
+            alt_id = str(alt.get("id") or "")
+            alt_score = float(alt.get("score") or 1.0)
+            alt_text = str(alt.get("text") or "").strip()
+            if not alt_text or alt_id == hit_id or alt_score > 0.68:
+                continue
+            lines.append(f'    (close alternative for "{norm}": {alt_text})')
+            shown_alts += 1
+            if shown_alts >= 2:
+                break
     return (
         "\nConfirmed schema mappings for terms VDB-matched to the question "
         "(terms not listed here have no confirmed mapping):\n" + "\n".join(lines) + "\n"

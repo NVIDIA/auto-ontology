@@ -114,9 +114,14 @@ def _parse_gaps(
         return []
     gaps: list[tuple[str, str]] = []
     seen: set[str] = set()
+    saw_complete_line = False
     for line in response.splitlines():
-        if line.upper().startswith("INCOMPLETE:"):
-            body = line[len("INCOMPLETE:") :].strip()
+        cleaned = line.strip().lstrip("-* ").strip("*").strip()
+        upper = cleaned.upper()
+        if upper == "COMPLETE":
+            saw_complete_line = True
+        elif upper.startswith("INCOMPLETE:"):
+            body = cleaned[len("INCOMPLETE:") :].strip()
             if "|" in body:
                 term, missing = body.split("|", 1)
                 term = term.strip()
@@ -126,6 +131,8 @@ def _parse_gaps(
                 seen.add(term)
                 gaps.append((term, missing.strip()))
     if not gaps:
+        if saw_complete_line:
+            return []
         # Response was neither "COMPLETE" nor any recognizable "INCOMPLETE:"
         # line — malformed LLM output, not a genuine completeness verdict.
         # Preserve whatever was already tracked rather than silently wiping it.

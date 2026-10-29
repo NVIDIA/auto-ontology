@@ -99,18 +99,11 @@ class CombinedPrecheckAgent(BaseAgent):
             )
             return True
 
-        # The agentic post-generation validator already checks single-literal
-        # equality predicates against the database, so only run _value_check
-        # under validate_sql_values=True when the SQL contains an IN(...) list
-        # (where partial_in_mismatch can detect a wrong sibling column) or
-        # integer division (`/`).
-        sql_lower = f" {sql_code.lower()} "
-        if is_db_probe_proactive() and (
-            not state.get("validate_sql_values", False)
-            or " in " in sql_lower
-            or " in(" in sql_lower
-            or "/" in sql_lower
-        ):
+        # The agentic post-generation validator already checks every literal
+        # against the database and shares its findings across reconstructions.
+        # Running the deterministic literal probe as well would repeat those
+        # database reads. Join and JSONB checks remain independent.
+        if is_db_probe_proactive() and not state.get("validate_sql_values", False):
             any_invalid = run_subcheck(self._value_check) or any_invalid
 
         join_ok = True
