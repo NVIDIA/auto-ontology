@@ -14,7 +14,6 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     format_calculation_sql_template,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
-    format_important_columns_for_prompt,
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
@@ -465,64 +464,3 @@ def test_sql_generation_is_unconstructable_when_both_candidates_fail(
     assert result["path_state"]["unconstructable_explanation"] == (
         "LLM failed to produce a response."
     )
-
-
-def test_important_columns_include_full_details_of_kept_tables_only() -> None:
-    rendered = format_important_columns_for_prompt(
-        [
-            {
-                "attr_name": "Charter Number",
-                "col_name": "CharterNum",
-                "table_name": "schools",
-                "schema_name": "main",
-                "database_name": "california_schools",
-                "datatype": "text",
-            },
-            {
-                "attr_name": "District Name",
-                "col_name": "District",
-                "table_name": "schools",
-                "schema_name": "main",
-                "database_name": "california_schools",
-                "datatype": "text",
-            },
-            {
-                "attr_name": "Removed Table Value",
-                "col_name": "value",
-                "table_name": "filtered_out",
-                "schema_name": "main",
-                "database_name": "california_schools",
-                "datatype": "text",
-            },
-        ],
-        [
-            {
-                "name": "schools",
-                "schema_name": "main",
-                "database_name": "california_schools",
-                "columns": [
-                    {
-                        "name": "CharterNum",
-                        "data_type": "text",
-                        "description": "Four-character charter number.",
-                        "sample_values": ["0040", "0728"],
-                        "format": "NNNN",
-                    },
-                    {
-                        "name": "District",
-                        "data_type": "text",
-                        "description": "District overseeing the school.",
-                    },
-                ],
-            }
-        ],
-    )
-
-    assert "Semantic match: Charter Number" in rendered
-    assert "california_schools.main.schools" in rendered
-    assert "Four-character charter number." in rendered
-    assert "sample values: 0040, 0728" in rendered
-    assert "format: NNNN" in rendered
-    assert "Semantic match: District Name" in rendered
-    assert "Removed Table Value" not in rendered
-    assert "structural bridge" not in rendered

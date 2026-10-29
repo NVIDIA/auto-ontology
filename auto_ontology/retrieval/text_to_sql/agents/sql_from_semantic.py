@@ -39,7 +39,6 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
-    format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
 )
@@ -289,13 +288,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 if relevant_tables
                 else "No tables available."
             )
-            important_columns = format_important_columns_for_prompt(
-                matched_attributes,
-                relevant_tables,
-                target_db=target_db,
-                dialect=dialect,
-            )
-
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
@@ -308,7 +300,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
-                important_columns=important_columns,
                 join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )
