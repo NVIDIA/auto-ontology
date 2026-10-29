@@ -154,8 +154,8 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
     messages = mock_invoke.call_args.args[1]
     assert messages[1].content.endswith(evidence)
     assert "MUST follow every instruction" in messages[1].content
-    assert "Evidence compliance is strict, not lenient" in messages[2].content
-    assert "Arithmetic that comes from the evidence is correct as written" in (
+    assert "honor the MEANING of every instruction" in messages[2].content
+    assert "Never flag a formulation that computes the same result" in (
         messages[2].content
     )
 
@@ -245,10 +245,9 @@ def test_short_answer_validation_requires_exact_projection(
     assert "Critical projection issues" in result["path_state"]["error"]
     assert "account_id, which was not requested" in result["path_state"]["error"]
     messages = mock_invoke.call_args.args[1]
-    assert "STRICT SHORT-ANSWER OVERRIDE" in messages[0].content
-    assert "STRICT PROJECTION CHECK" in messages[1].content
-    assert "every requested field, exactly once" in messages[1].content
-    assert "NO additional fields" in messages[1].content
+    assert "SHORT-ANSWER PROJECTION" in messages[0].content
+    assert "PROJECTION CHECK" in messages[1].content
+    assert "the order of the output columns" in messages[1].content
 
 
 @patch(
@@ -282,8 +281,8 @@ def test_non_short_answer_validation_omits_strict_projection_check(
 
     assert result["decision"] == "valid_sql"
     messages = mock_invoke.call_args.args[1]
-    assert "STRICT SHORT-ANSWER OVERRIDE" not in messages[0].content
-    assert "STRICT PROJECTION CHECK" not in messages[1].content
+    assert "SHORT-ANSWER PROJECTION" not in messages[0].content
+    assert "PROJECTION CHECK" not in messages[1].content
 
 
 @patch(

@@ -122,18 +122,20 @@ class IntentValidationModel(BaseModel):
     projection_issues: list[str] = Field(
         default_factory=list,
         description=(
-            "When strict short-answer validation is requested, list every extra, "
-            "missing, duplicated, reordered, or reshaped output field compared with "
-            "the exact projection requested by the question and evidence. Leave "
-            "EMPTY [] only when the projection matches exactly."
+            "When short-answer validation is requested, list each requested output "
+            "field that is missing and each added field the question does not ask "
+            "for. Column order, name parts, entity identifiers and raw stored flags "
+            "are not issues. Leave EMPTY [] when the requested fields are returned."
         ),
     )
     evidence_issues: list[str] = Field(
         default_factory=list,
         description=(
-            "List every way the SQL violates Authoritative Evidence, including a "
-            "missing or substituted value, column/table mapping, filter, operator, "
-            "or formula. Leave EMPTY [] when all evidence instructions are followed."
+            "List each way the SQL would give a different answer than the "
+            "Authoritative Evidence defines: a missing or wrong value, column "
+            "mapping, filter, or calculation. An equivalent formulation of the "
+            "evidence is not an issue. Leave EMPTY [] when the SQL means what the "
+            "evidence says."
         ),
     )
 
@@ -1060,11 +1062,11 @@ class SQLValidationAgent(BaseAgent):
         )
         if state.get("shorten_answer", False):
             system_prompt += (
-                "\n\nSTRICT SHORT-ANSWER OVERRIDE: Projection matching is not "
-                "lenient. The outermost SELECT must return exactly every output "
-                "field requested by the question and evidence, with no extra fields "
-                "and no missing fields. Any mismatch is a critical "
-                "projection_issues failure."
+                "\n\nSHORT-ANSWER PROJECTION: The outermost SELECT must return "
+                "every output field requested by the question and evidence and no "
+                "unrequested fields. A missing or unrequested field is a critical "
+                "projection_issues failure. Follow the PROJECTION CHECK for the "
+                "answer shapes that are acceptable."
             )
         messages = [SystemMessage(content=system_prompt)]
         if evidence:
