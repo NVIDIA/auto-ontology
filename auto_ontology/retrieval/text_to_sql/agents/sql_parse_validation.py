@@ -48,6 +48,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_used_schema_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    DIRECT_ANSWER_FIELD_RULES,
     INTENT_VALIDATION_SYSTEM_PROMPT,
     INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
     create_intent_validation_prompt,
@@ -1060,6 +1061,7 @@ class SQLValidationAgent(BaseAgent):
             if _JOINS_VALIDATED_ELSEWHERE
             else INTENT_VALIDATION_SYSTEM_PROMPT
         )
+        system_prompt += f"\n\n{DIRECT_ANSWER_FIELD_RULES}"
         if state.get("shorten_answer", False):
             system_prompt += (
                 "\n\nSHORT-ANSWER PROJECTION: The outermost SELECT must return "

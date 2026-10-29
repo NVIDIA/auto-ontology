@@ -14,6 +14,7 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     IntentValidationModel,
     SQLValidationAgent,
 )
+from auto_ontology.retrieval.text_to_sql.prompts import DIRECT_ANSWER_FIELD_RULES
 
 
 @patch(
@@ -158,6 +159,53 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
     assert "Never flag a formulation that computes the same result" in (
         messages[2].content
     )
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
+    return_value=IntentValidationModel(is_valid=True),
+)
+def test_intent_validation_checks_direct_answer_field_projection(
+    mock_invoke: MagicMock,
+) -> None:
+    path_state = {
+        "sql_generation_result": SimpleNamespace(
+            sql_code="SELECT status_flag FROM accounts WHERE account_id = 7"
+        ),
+        "relevant_tables": [
+            {
+                "name": "accounts",
+                "schema_name": "public",
+                "columns": [
+                    {
+                        "name": "status_flag",
+                        "data_type": "boolean",
+                        "description": "Stored account status.",
+                    }
+                ],
+            }
+        ],
+    }
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "Return the stored account status",
+        "connectors": [],
+        "path_state": path_state,
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {**path_state, "sql_code": path_state["sql_generation_result"].sql_code},
+        ["public.accounts"],
+        ["public.accounts.status_flag"],
+    )
+
+    assert result["decision"] == "valid_sql"
+    messages = mock_invoke.call_args.args[1]
+    assert DIRECT_ANSWER_FIELD_RULES in messages[0].content
+    assert "DIRECT ANSWER FIELD CHECK" in messages[-1].content
+    assert "Record the violation in projection_issues" in messages[-1].content
+    assert "normalization was explicitly requested" in messages[-1].content
 
 
 @patch(

@@ -7,6 +7,17 @@ import os
 # Controls how many entity noun phrases are extracted for SQL generation.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
+DIRECT_ANSWER_FIELD_RULES = """## Direct Answer Fields
+
+For a yes/no question, when an available text or boolean column directly stores
+the requested property or state, project that column unchanged as the answer.
+Do not wrap the column in CASE, compare it merely to translate its stored value,
+cast it, or otherwise normalize it to YES/NO. Transform it only when the question
+or Authoritative Evidence explicitly requests a normalized representation.
+Computed boolean or conditional output is appropriate only when no direct answer
+field exists and the answer must be derived.
+"""
+
 _PROJECTION_RULES = (
     "**Projection**\n"
     "- SELECT only the columns explicitly asked; extra columns make the result "
@@ -999,6 +1010,14 @@ def create_intent_validation_prompt(
         if shorten_answer
         else ""
     )
+    direct_answer_criterion = (
+        "\nDIRECT ANSWER FIELD CHECK: For a yes/no question, use the schema metadata "
+        "and Authoritative Evidence to determine whether a referenced text or boolean "
+        "column directly stores the requested property or state. If so, wrapping that "
+        "column in CASE or otherwise translating it to YES/NO is a critical reshaping "
+        "of the requested answer unless normalization was explicitly requested. Record "
+        "the violation in projection_issues and mark the SQL invalid."
+    )
     parsed_usage_block = (
         "\nUSED SQL OBJECTS "
         "(catalog metadata only for tables and columns referenced by the query):\n"
@@ -1019,6 +1038,7 @@ Check for CRITICAL issues ONLY (be lenient):
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 {evidence_criterion}
 {projection_criterion}
+{direct_answer_criterion}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \

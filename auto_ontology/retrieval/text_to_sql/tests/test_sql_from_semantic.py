@@ -17,6 +17,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    DIRECT_ANSWER_FIELD_RULES,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_dialect_rules,
@@ -208,6 +209,17 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert sum(evidence in message.content for message in messages) == 2
     assert evidence in messages[-1].content
     assert "## Authoritative Evidence" in messages[-1].content
+    direct_answer_messages = [
+        message for message in messages if message.content == DIRECT_ANSWER_FIELD_RULES
+    ]
+    assert len(direct_answer_messages) == 1
+    assert messages.index(direct_answer_messages[0]) < len(messages) - 1
+    assert "project that column unchanged" in DIRECT_ANSWER_FIELD_RULES
+    assert "explicitly requests a normalized representation" in (
+        DIRECT_ANSWER_FIELD_RULES
+    )
+    normalized_rules = " ".join(DIRECT_ANSWER_FIELD_RULES.split())
+    assert "only when no direct answer field exists" in normalized_rules
     assert (
         result["path_state"]["sql_generation_result"].sql_code
         == "SELECT COUNT(*) FROM accounts"
