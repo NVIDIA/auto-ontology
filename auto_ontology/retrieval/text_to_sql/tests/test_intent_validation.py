@@ -296,6 +296,10 @@ def test_short_answer_validation_requires_exact_projection(
     assert "SHORT-ANSWER PROJECTION" in messages[0].content
     assert "PROJECTION CHECK" in messages[1].content
     assert "the order of the output columns" in messages[1].content
+    assert "SELECT * or table.* in the outermost SELECT" in messages[1].content
+    assert "primary key column(s) returned for a request to list" in (
+        messages[1].content
+    )
 
 
 @patch(

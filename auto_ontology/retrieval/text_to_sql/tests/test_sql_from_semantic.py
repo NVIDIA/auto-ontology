@@ -137,6 +137,12 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert strict_rule in format_projection_rules(shorten_answer=True)
     assert combined_aggregate_rule not in format_projection_rules(False)
     assert combined_aggregate_rule in format_projection_rules(True)
+    for shorten_only_rule in (
+        "Never use SELECT * or table.*",
+        "return only the table's primary key column(s)",
+    ):
+        assert shorten_only_rule not in format_projection_rules(False)
+        assert shorten_only_rule in format_projection_rules(True)
 
 
 def test_calculation_sql_template_is_structural_guidance() -> None:

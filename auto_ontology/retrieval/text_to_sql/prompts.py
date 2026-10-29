@@ -45,6 +45,10 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- Never use SELECT * or table.*; name each returned column explicitly.\n"
+        "- When the question asks to list or show records without naming any "
+        "field to return, return only the table's primary key column(s), as "
+        "listed under primary key in the schema.\n"
         "- When the question or evidence requests one aggregate over two "
         "alternative categories joined by 'and' (for example, a count for X and Y), "
         "return ONE aggregate and combine the category predicates with OR in the "
@@ -996,8 +1000,11 @@ def create_intent_validation_prompt(
         "projection_issues a requested field that is missing, or an added field "
         "that the question does not ask for and that is not needed to identify or "
         "read the requested values. Aggregates and transformed values count as "
-        "output fields. Do NOT record any of the following, which are acceptable "
+        "output fields. A SELECT * or table.* in the outermost SELECT is always a "
+        "projection issue. Do NOT record any of the following, which are acceptable "
         "shapes of the requested answer:\n"
+        "   - the table's primary key column(s) returned for a request to list or "
+        "show records that names no field to return;\n"
         "   - a person's name returned as its stored parts (e.g. first-name and "
         "last-name columns) rather than one concatenated value;\n"
         "   - the identifier of each named entity returned next to the requested "
