@@ -267,26 +267,6 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
 - All fields are required."""
 
 
-SCHEMA_ONLY_SQL_SYSTEM_PROMPT = f"""Reason step by step, then write one complete
-SQL query that answers the request using only the supplied schema. Return exactly
-the requested output fields and no others.
-
-{_SQL_GENERATION_OUTPUT_SPEC}"""
-
-
-SCHEMA_ONLY_SQL_USER_PROMPT = """### Question
-{question}
-
-### Evidence
-{evidence}
-
-Write a single {dialect} query that answers the question.
-
-The following table view describes the database and the tables in it.
-{tables}
-"""
-
-
 def format_dialect_rules(dialect: str | None) -> str:
     """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
 

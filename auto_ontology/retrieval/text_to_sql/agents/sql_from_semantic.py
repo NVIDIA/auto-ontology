@@ -23,7 +23,6 @@ Design Decisions:
 """
 
 import logging
-from collections.abc import Callable
 from typing import Any, Dict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -48,8 +47,6 @@ from auto_ontology.retrieval.text_to_sql.state import (
     get_question_for_processing,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
-    SCHEMA_ONLY_SQL_SYSTEM_PROMPT,
-    SCHEMA_ONLY_SQL_USER_PROMPT,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_authoritative_evidence,
@@ -61,7 +58,6 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_value_anchors_section,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
-from auto_ontology.utils.rerank import get_rerank_kwargs, rerank_hits
 
 logger = logging.getLogger(__name__)
 
@@ -340,76 +336,35 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             return messages
 
-        def build_schema_only_messages() -> list[BaseMessage]:
-            """Build the minimal question/evidence/table-view prompt."""
-            tables = format_tables_for_prompt(
-                relevant_tables, target_db=target_db, dialect=dialect
-            )
-            user_prompt = SCHEMA_ONLY_SQL_USER_PROMPT.format(
-                question=sanitized_question,
-                evidence=evidence,
-                dialect=dialect or "SQL",
-                tables=tables,
-            )
-            return [
-                SystemMessage(content=SCHEMA_ONLY_SQL_SYSTEM_PROMPT),
-                HumanMessage(content=user_prompt),
-            ]
-
-        schema = SQLGenerationModel
-
-        def invoke_candidate(
-            name: str,
-            build_messages: Callable[[], list[BaseMessage]],
-        ) -> tuple[SQLGenerationModel | None, list[BaseMessage]]:
-            """Generate one candidate with isolated retries and prompt context."""
-            messages = build_messages()
-            max_retries = 3
-            response = None
-            for attempt in range(1, max_retries + 1):
-                try:
-                    response = safe_invoke_with_structured_output(llm, messages, schema)
-                except Exception as e:
-                    self.logger.error(
-                        "%s SQL generation failed: %s: %s",
-                        name,
-                        type(e).__name__,
-                        e,
-                        exc_info=True,
-                    )
-                    response = None
-                if response is not None:
-                    self.logger.info(
-                        "%s SQL description generated: %s...",
-                        name,
-                        response.description[:100],
-                    )
-                    break
-                self.logger.warning(
-                    "%s SQL generation returned no response on attempt %d/%d.",
-                    name,
-                    attempt,
-                    max_retries,
+        messages = build_semantic_messages()
+        max_retries = 3
+        response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = safe_invoke_with_structured_output(
+                    llm, messages, SQLGenerationModel
                 )
-            return response, messages
-
-        semantic_response, semantic_messages = invoke_candidate(
-            "semantic", build_semantic_messages
-        )
-        schema_response, schema_messages = invoke_candidate(
-            "schema-only", build_schema_only_messages
-        )
-        candidates = [
-            (source, response, messages)
-            for source, response, messages in (
-                ("semantic", semantic_response, semantic_messages),
-                ("schema-only", schema_response, schema_messages),
+            except Exception as e:
+                self.logger.error(
+                    "SQL generation failed: %s: %s",
+                    type(e).__name__,
+                    e,
+                    exc_info=True,
+                )
+                response = None
+            if response is not None:
+                self.logger.info(
+                    "SQL description generated: %s...", response.description[:100]
+                )
+                break
+            self.logger.warning(
+                "SQL generation returned no response on attempt %d/%d.",
+                attempt,
+                max_retries,
             )
-            if response is not None
-        ]
 
-        if not candidates:
-            self.logger.error("Both SQL generation candidates failed.")
+        if response is None:
+            self.logger.error("SQL generation failed after %d attempts.", max_retries)
             return {
                 "path_state": {
                     **path_state,
@@ -417,49 +372,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 },
                 "decision": "unconstructable",
             }
-
-        selected = candidates[0]
-        if len(candidates) == 2:
-            rerank_query = f"Question:\n{sanitized_question}"
-            if evidence:
-                rerank_query += f"\n\nEvidence:\n{evidence}"
-            hits = [
-                {"id": source, "text": candidate.description}
-                for source, candidate, _ in candidates
-            ]
-            try:
-                ranked = rerank_hits(
-                    rerank_query,
-                    hits,
-                    top_n=1,
-                    **get_rerank_kwargs(),
-                )
-            except Exception:
-                self.logger.exception(
-                    "SQL description rerank failed; using the semantic candidate."
-                )
-                ranked = []
-            if ranked:
-                winner_id = ranked[0].get("id")
-                selected = next(
-                    (
-                        candidate
-                        for candidate in candidates
-                        if candidate[0] == winner_id
-                    ),
-                    candidates[0],
-                )
-                self.logger.info(
-                    "SQL candidate selected by description rerank: %s (score=%s).",
-                    selected[0],
-                    ranked[0].get("_rerank_score"),
-                )
-
-        selected_source, response, messages = selected
-        if len(candidates) == 1:
-            self.logger.info(
-                "Using the only successful SQL candidate: %s.", selected_source
-            )
 
         thought = (getattr(response, "thought", "") or "").strip()
         if thought:
