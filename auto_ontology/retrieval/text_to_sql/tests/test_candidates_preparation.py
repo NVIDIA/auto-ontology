@@ -12,7 +12,6 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
 from auto_ontology.retrieval.text_to_sql.models import (
-    AnchorColumnModel,
     TableRelevanceModel,
     TableRemovalModel,
 )
@@ -20,56 +19,193 @@ from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
 
-def test_anchor_maps_evidence_to_schema_table_column(
-    monkeypatch,
-) -> None:
-    captured: dict = {}
+def _hop(source: str, source_col: str, target: str, target_col: str) -> dict:
+    return {
+        "source_schema": "main",
+        "source_table": source,
+        "source_column": source_col,
+        "target_schema": "main",
+        "target_table": target,
+        "target_column": target_col,
+    }
 
-    class FakeLlm:
-        def bind(self, **_kwargs):
-            return self
 
-    def fake_invoke(_llm, messages, _model):
-        captured["prompt"] = messages[-1].content
-        return AnchorColumnModel(anchor_id="frpm", reasoning="Evidence matches")
+def _catalog_table(table_id: str, name: str) -> dict:
+    return {
+        "id": table_id,
+        "name": name,
+        "schema_name": "main",
+        "database_name": "db",
+        "columns": [],
+    }
 
+
+def _stub_preparation(monkeypatch, contexts: dict, tables: list[dict]) -> None:
+    by_id = {t["id"]: t for t in tables}
     monkeypatch.setattr(
-        candidates_preparation, "invoke_with_structured_output", fake_invoke
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
     )
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_filter_tables_by_relevance",
+        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
+            tables,
+            "",
+        ),
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_attr_column_contexts",
+        lambda ids, database_name=None: contexts,
+    )
+    monkeypatch.setattr(candidates_preparation, "fetch_term_synonyms", lambda ids: {})
+    monkeypatch.setattr(
+        candidates_preparation, "get_relevant_tables_from_candidates", lambda c: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_by_ids",
+        lambda ids: [by_id[i] for i in ids if i in by_id],
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "find_connected_junction_tables", lambda ids: ([], [])
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_kept_table_bridges",
+        lambda ids, allowed: ([], [], 0),
+    )
+
+
+def _attr_context(col: str, table_id: str, table: str) -> dict:
+    return {
+        "attr_name": col.title(),
+        "col_name": col,
+        "col_id": f"col-{col}",
+        "table_id": table_id,
+        "table_name": table,
+        "schema_name": "main",
+        "database_name": "db",
+    }
+
+
+def _execute(attr_ids: list[str]) -> dict:
     state = cast(
         AgentState,
         {
-            "llm": FakeLlm(),
-            "evidence": "eligible rate = FRPM / Enrollment",
+            "initial_question": "What is the average loan amount by male borrowers?",
+            "llm": object(),
+            "data_retriever": object(),
+            "path_state": {
+                "entities": ["loan amount", "male borrower"],
+                "target_db": "db",
+                "retrieved_column_attributes": [{"id": a} for a in attr_ids],
+            },
         },
     )
+    return CandidatePreparationAgent().execute(state)["path_state"]
+
+
+def test_join_paths_connect_every_pair_of_matched_tables(monkeypatch) -> None:
     contexts = {
-        "frpm": {
-            "attr_name": "FRPM Count (K-12)",
-            "schema_name": "main",
-            "table_name": "frpm",
-            "col_name": "frpm_count_k12",
-            "attr_description": "Eligible meal-program students.",
-        },
-        "enrollment": {
-            "attr_name": "Enrollment (K-12)",
-            "schema_name": "main",
-            "table_name": "frpm",
-            "col_name": "enrollment_k12",
-            "attr_description": "K-12 student enrollment.",
-        },
+        "amount": _attr_context("amount", "t-loan", "loan"),
+        "gender": _attr_context("gender", "t-client", "client"),
     }
+    _stub_preparation(
+        monkeypatch,
+        contexts,
+        [_catalog_table("t-loan", "loan"), _catalog_table("t-client", "client")],
+    )
+    seen: list[list[str]] = []
+    path = [
+        _hop("loan", "account_id", "account", "account_id"),
+        _hop("account", "account_id", "disp", "account_id"),
+        _hop("disp", "client_id", "client", "client_id"),
+    ]
 
-    anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
-        state, "Which school has the highest eligible rate?", contexts
+    def fake_paths(table_ids: list[str]) -> list[dict]:
+        seen.append(table_ids)
+        return [{"table_ids": ("t-loan", "t-client"), "path": path}]
+
+    monkeypatch.setattr(candidates_preparation, "find_table_join_paths", fake_paths)
+
+    out = _execute(["amount", "gender"])
+
+    assert seen == [["t-loan", "t-client"]]
+    assert [a["col_name"] for a in out["matched_attributes"]] == ["amount", "gender"]
+    assert "primary_attribute" not in out
+    # account and disp never reached the final tables, so the path is unusable.
+    assert out["attribute_join_paths"] == []
+
+
+def test_a_pair_path_whose_tables_all_reach_sql_generation_is_kept(
+    monkeypatch,
+) -> None:
+    contexts = {
+        "amount": _attr_context("amount", "t-loan", "loan"),
+        "frequency": _attr_context("frequency", "t-account", "account"),
+    }
+    _stub_preparation(
+        monkeypatch,
+        contexts,
+        [_catalog_table("t-loan", "loan"), _catalog_table("t-account", "account")],
+    )
+    path = [_hop("loan", "account_id", "account", "account_id")]
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_table_join_paths",
+        lambda ids: [{"table_ids": ("t-loan", "t-account"), "path": path}],
     )
 
-    assert anchor_id == "frpm"
-    assert "Authoritative evidence:" in captured["prompt"]
-    assert "main.frpm.frpm_count_k12" in captured["prompt"]
-    assert "main.frpm.enrollment_k12" in captured["prompt"]
-    assert "FRPM Count (K-12)" not in captured["prompt"]
-    assert "schema.table.column physical references" in captured["prompt"]
+    out = _execute(["amount", "frequency"])
+
+    assert out["attribute_join_paths"] == [{"pair": True, "path": path}]
+
+
+def test_hub_siblings_are_found_from_every_matched_table(monkeypatch) -> None:
+    contexts = {
+        "amount": _attr_context("amount", "t-loan", "loan"),
+        "gender": _attr_context("gender", "t-client", "client"),
+    }
+    _stub_preparation(
+        monkeypatch,
+        contexts,
+        [
+            _catalog_table("t-loan", "loan"),
+            _catalog_table("t-client", "client"),
+            _catalog_table("t-account", "account"),
+            _catalog_table("t-disp", "disp"),
+        ],
+    )
+    monkeypatch.setattr(candidates_preparation, "find_table_join_paths", lambda ids: [])
+    monkeypatch.setattr(candidates_preparation, "_HUB_SIBLING_EXPANSION_ENABLED", True)
+    siblings = {
+        "t-loan": [
+            {"id": "t-account", "target_table": "account", "is_hub": True},
+            {"id": "t-disp", "target_table": "disp", "is_hub": False},
+        ],
+        "t-client": [
+            {"id": "t-disp", "target_table": "disp", "is_hub": False},
+            {"id": "t-loan", "target_table": "loan", "is_hub": False},
+        ],
+    }
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_anchor_hub_siblings",
+        lambda table_id, max_siblings=None: (siblings[table_id], 0),
+    )
+
+    out = _execute(["amount", "gender"])
+
+    names = sorted(t["name"] for t in out["relevant_tables"])
+    assert names == ["account", "client", "disp", "loan"]
+    [structural] = out["attribute_join_paths"]
+    assert sorted(h["id"] for h in structural["path"]) == ["t-account", "t-disp"]
 
 
 def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk() -> (
@@ -303,7 +439,9 @@ def test_a_table_two_searches_return_merges_the_same_way_whichever_finishes_firs
     assert out[0]["description"] == "found by q"
 
 
-def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> None:
+def test_additional_table_retrieve_starts_before_join_paths_return(
+    monkeypatch,
+) -> None:
     retrieve_started = threading.Event()
     release_retrieve = threading.Event()
     retrieve_was_running = []
@@ -313,15 +451,17 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
         assert release_retrieve.wait(timeout=2)
         return [{"id": "extra", "name": "extra", "database_name": "db"}]
 
-    def fake_anchor(self, state, question, contexts):
+    def fake_join_paths(table_ids):
         retrieve_was_running.append(retrieve_started.wait(timeout=2))
         release_retrieve.set()
-        return "a1", "anchor reason"
+        return []
 
     monkeypatch.setattr(
         CandidatePreparationAgent, "_retrieve_additional_tables", fake_retrieve
     )
-    monkeypatch.setattr(CandidatePreparationAgent, "_identify_anchor", fake_anchor)
+    monkeypatch.setattr(
+        candidates_preparation, "find_table_join_paths", fake_join_paths
+    )
     monkeypatch.setattr(
         CandidatePreparationAgent,
         "_filter_tables_by_relevance",
@@ -355,7 +495,6 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
         lambda candidates: [],
     )
     monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
-    monkeypatch.setattr(candidates_preparation, "find_join_path", lambda *a, **k: [])
     monkeypatch.setattr(
         candidates_preparation,
         "find_connected_junction_tables",

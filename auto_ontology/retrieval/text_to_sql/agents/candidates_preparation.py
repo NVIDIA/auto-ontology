@@ -20,12 +20,14 @@ Design Decisions:
 - Stores fetched data in path_state for reusability across multiple SQL agents
 - Handles embeddings and conversation history lookup
 - LLM relevance filter removes noise tables before SQL construction
-- Extra table retrieve runs in parallel with the anchor-column LLM
+- Extra table retrieve runs in parallel with the join-path lookups
+- Join paths connect every pair of matched tables; no column is singled out
+  as the question's starting point
 """
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -34,8 +36,8 @@ from auto_ontology.dal.attributes import (
     fetch_attr_column_contexts,
     find_anchor_hub_siblings,
     find_connected_junction_tables,
-    find_join_path,
     find_kept_table_bridges,
+    find_table_join_paths,
 )
 from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
@@ -56,7 +58,6 @@ from auto_ontology.retrieval.data_access.semantic_search import search_semantic_
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.formatters_util import qualify_table
 from auto_ontology.retrieval.text_to_sql.models import (
-    AnchorColumnModel,
     CustomAnalysisRelevanceModel,
     TableRelevanceModel,
 )
@@ -110,7 +111,7 @@ def _qualified_name(t: dict) -> str:
 _RELEVANCE_FILTER_MAX_COLS = int(os.environ.get("RELEVANCE_FILTER_MAX_COLS", "25"))
 
 # Off by default. find_anchor_hub_siblings() pulls in tables that share a
-# hub with the anchor's own table via FK — see its docstring for why. Opt-in
+# hub with a matched table via FK — see its docstring for why. Opt-in
 # via env flag (this deployment's .env sets it to true) so new/other
 # deployments aren't defaulted into the extra store + embedding-search cost
 # without an explicit choice.
@@ -142,9 +143,14 @@ _HUB_SIBLING_CAP = int(os.environ.get("HUB_SIBLING_CAP", "6"))
 # has a chance to be seen, without unbounded index-scan cost.
 _HUB_SIBLING_RANK_K = 30
 
-#: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
-#: wide candidate set cannot starve the rest of the request.
-_JOIN_PATH_WORKERS = 4
+
+def _merge_hub_sibling_hops(hop_lists: Any) -> list[dict]:
+    """One entry per hub and per sibling table across several tables' results."""
+    merged: dict[tuple[Any, bool], dict] = {}
+    for hops in hop_lists:
+        for hop in hops:
+            merged.setdefault((hop.get("id"), bool(hop.get("is_hub"))), hop)
+    return list(merged.values())
 
 
 def _format_relevance_filter_column(c: dict) -> str:
@@ -176,6 +182,38 @@ def _build_relevance_tables_summary(tables: list[dict]) -> str:
                 for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
             )
     return "\n".join(lines)
+
+
+def _drop_pair_paths_outside(join_paths: list[dict], tables: list[dict]) -> list[dict]:
+    """*join_paths* without the table-pair paths that touch a table not in *tables*.
+
+    Pair paths are built before the relevance filter; one through a table it
+    dropped would offer SQL generation a join into a table it may not use.
+    """
+    kept = {
+        (
+            str(t.get("schema_name") or "").casefold(),
+            str(t.get("name") or "").casefold(),
+        )
+        for t in tables
+    }
+
+    def _inside(hop: dict, side: str) -> bool:
+        key = (
+            str(hop.get(f"{side}_schema") or "").casefold(),
+            str(hop.get(f"{side}_table") or "").casefold(),
+        )
+        return key in kept
+
+    return [
+        entry
+        for entry in join_paths
+        if not entry.get("pair")
+        or all(
+            _inside(hop, "source") and _inside(hop, "target")
+            for hop in entry.get("path") or []
+        )
+    ]
 
 
 def _describe_matched_columns(
@@ -343,7 +381,7 @@ class CandidatePreparationAgent(BaseAgent):
         custom_analyses_str = self._build_custom_analyses_str(relevant_queries)
 
         # Extra-table retrieval only needs the question + entities — independent
-        # of the anchor-column LLM/join-path work below. Kick it off in the
+        # of the join-path work below. Kick it off in the
         # background so the two multi-second steps overlap instead of stacking.
         extra_pool = ThreadPoolExecutor(max_workers=1)
         extra_future = extra_pool.submit(
@@ -355,7 +393,7 @@ class CandidatePreparationAgent(BaseAgent):
         )
 
         # --- 2. Enrich ColumnAttributes with store context and build join paths ---
-        primary_attribute: dict | None = None
+        matched_attributes: list[dict] = []
         attribute_join_paths: list[dict] = []
         attr_contexts: dict[str, dict] = {}
         term_synonyms: dict[str, list[str]] = {}
@@ -385,111 +423,79 @@ class CandidatePreparationAgent(BaseAgent):
                 term_synonyms = fetch_term_synonyms(attr_ids)
                 self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
-                anchor_id, anchor_reasoning = self._identify_anchor(
-                    state, question, attr_contexts
-                )
-                self.logger.info("Anchor attribute id: %s", anchor_id)
-                if anchor_reasoning:
-                    record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
-
-                if anchor_id and anchor_id in attr_contexts:
-                    anchor_ctx = attr_contexts[anchor_id]
-                    primary_attribute = {
-                        "id": anchor_id,
-                        "attr_name": anchor_ctx["attr_name"],
-                        "col_name": anchor_ctx["col_name"],
-                        "table_name": anchor_ctx["table_name"],
-                        "schema_name": anchor_ctx["schema_name"],
-                        "database_name": anchor_ctx["database_name"],
-                        "datatype": anchor_ctx.get("datatype") or "",
+                matched_attributes = [
+                    {
+                        "id": aid,
+                        "attr_name": ctx["attr_name"],
+                        "col_name": ctx["col_name"],
+                        "table_name": ctx["table_name"],
+                        "schema_name": ctx["schema_name"],
+                        "database_name": ctx["database_name"],
+                        "datatype": ctx.get("datatype") or "",
                     }
+                    for aid, ctx in attr_contexts.items()
+                ]
 
-                    dest_items = [
-                        (did, dctx)
-                        for did, dctx in attr_contexts.items()
-                        if did != anchor_id
-                    ]
-                    # Bounded, not one worker per destination. Each worker runs
-                    # find_join_path, which is several sequential checkouts from a
-                    # 10-connection pool; a wide fan-out exhausts it, and
-                    # find_join_path catches the QueuePool timeout and returns []
-                    # -- so the failure shows up as missing joins in the prompt
-                    # rather than as an error.
-                    workers = min(len(dest_items) or 1, _JOIN_PATH_WORKERS)
-                    with ThreadPoolExecutor(max_workers=workers) as pool:
-                        futures = {
-                            pool.submit(
-                                find_join_path, anchor_ctx["col_id"], dctx["col_id"]
-                            ): (did, dctx)
-                            for did, dctx in dest_items
-                        }
-                        for future in as_completed(futures):
-                            dest_id, dest_ctx = futures[future]
-                            join_path = future.result()
-                            attribute_join_paths.append(
-                                {
-                                    "id": dest_id,
-                                    "attr_name": dest_ctx["attr_name"],
-                                    "col_name": dest_ctx["col_name"],
-                                    "table_name": dest_ctx["table_name"],
-                                    "schema_name": dest_ctx["schema_name"],
-                                    "database_name": dest_ctx["database_name"],
-                                    "datatype": dest_ctx.get("datatype") or "",
-                                    "path": join_path,
-                                }
-                            )
-                            self.logger.info(
-                                "Join path to %s (%s): %d hop(s)",
-                                dest_ctx["attr_name"],
-                                dest_id,
-                                len(join_path),
-                            )
-
-                    # Looser, discovery-only signal: find_join_path above cannot
-                    # reach a sibling table that shares a hub with the anchor
-                    # (forward-only, by design — see its docstring). Surface
-                    # those siblings (and the hub itself) separately so the
-                    # relevance filter doesn't drop a structurally-connected
-                    # table it has no other way to recognize. Scoped to the
-                    # anchor's own outgoing FKs only. These are also force-kept
-                    # in relevant_tables below (§5b-§5c) rather than merely shown to
-                    # the relevance filter, since it's unreliable at preserving
-                    # structurally-connected tables even when given this info.
-                    anchor_table_id = anchor_ctx.get("table_id")
-                    if anchor_table_id and _HUB_SIBLING_EXPANSION_ENABLED:
-                        # Uncapped here (max_siblings=None) — capping now happens
-                        # after ranking, in _rank_and_cap_hub_siblings, instead of
-                        # on the DAL's arbitrary return order.
-                        hub_sibling_hops, _ = find_anchor_hub_siblings(
-                            anchor_table_id, max_siblings=None
-                        )
-                        hub_sibling_hops, hub_sibling_truncated = (
-                            self._rank_and_cap_hub_siblings(
-                                state,
-                                path_state.get("entities") or [],
-                                target_db,
-                                hub_sibling_hops,
-                                cap=_HUB_SIBLING_CAP,
-                            )
-                        )
-                        if hub_sibling_hops:
-                            attribute_join_paths.append({"path": hub_sibling_hops})
-                            forced_table_ids.update(
-                                h["id"] for h in hub_sibling_hops if h.get("id")
-                            )
-                            self.logger.info(
-                                "Found %d hub-sibling table(s) via anchor's own FK "
-                                "(hub included): %s%s",
-                                len(hub_sibling_hops),
-                                [h["target_table"] for h in hub_sibling_hops],
-                                f" ({hub_sibling_truncated} sibling(s) truncated by cap)"
-                                if hub_sibling_truncated
-                                else "",
-                            )
-                else:
-                    self.logger.warning(
-                        "No valid anchor attribute found — skipping join path computation"
+                matched_table_ids = list(
+                    dict.fromkeys(
+                        ctx["table_id"]
+                        for ctx in attr_contexts.values()
+                        if ctx.get("table_id")
                     )
+                )
+                for pair in find_table_join_paths(matched_table_ids):
+                    attribute_join_paths.append({"pair": True, "path": pair["path"]})
+                    self.logger.info(
+                        "Join path %s <-> %s: %d hop(s)",
+                        pair["path"][0].get("source_table"),
+                        pair["path"][-1].get("target_table"),
+                        len(pair["path"]),
+                    )
+
+                # Looser, discovery-only signal: the join paths above only
+                # connect tables already matched, so a sibling table that shares
+                # a hub with one of them is never reached. Surface those
+                # siblings (and the hub itself) separately so the relevance
+                # filter doesn't drop a structurally-connected table it has no
+                # other way to recognize. These are also force-kept in
+                # relevant_tables below (§5b-§5c) rather than merely shown to the
+                # relevance filter, since it's unreliable at preserving
+                # structurally-connected tables even when given this info.
+                if matched_table_ids and _HUB_SIBLING_EXPANSION_ENABLED:
+                    hub_sibling_hops = _merge_hub_sibling_hops(
+                        # Uncapped here (max_siblings=None) — capping happens
+                        # after ranking, in _rank_and_cap_hub_siblings, instead
+                        # of on the DAL's arbitrary return order.
+                        find_anchor_hub_siblings(table_id, max_siblings=None)[0]
+                        for table_id in matched_table_ids
+                    )
+                    hub_sibling_hops, hub_sibling_truncated = (
+                        self._rank_and_cap_hub_siblings(
+                            state,
+                            path_state.get("entities") or [],
+                            target_db,
+                            [
+                                h
+                                for h in hub_sibling_hops
+                                if h.get("id") not in matched_table_ids
+                            ],
+                            cap=_HUB_SIBLING_CAP,
+                        )
+                    )
+                    if hub_sibling_hops:
+                        attribute_join_paths.append({"path": hub_sibling_hops})
+                        forced_table_ids.update(
+                            h["id"] for h in hub_sibling_hops if h.get("id")
+                        )
+                        self.logger.info(
+                            "Found %d hub-sibling table(s) via the matched tables' "
+                            "FKs (hubs included): %s%s",
+                            len(hub_sibling_hops),
+                            [h["target_table"] for h in hub_sibling_hops],
+                            f" ({hub_sibling_truncated} sibling(s) truncated by cap)"
+                            if hub_sibling_truncated
+                            else "",
+                        )
 
             # --- 4. Retrieve relevant tables ---
             relevant_tables = get_relevant_tables_from_candidates(candidates)
@@ -711,7 +717,7 @@ class CandidatePreparationAgent(BaseAgent):
         # The relevance filter is unreliable at preserving join-chain bridge
         # tables even when its prompt shows it the exact connection, so force
         # these back in by code instead of relying on it. Two sources:
-        #   (a) the anchor's hub + capped siblings, already computed above
+        #   (a) the matched tables' hubs + capped siblings, already computed above
         #       and collected into forced_table_ids;
         #   (b) any bridge table needed to connect pairs of tables the
         #       filter itself decided to KEEP — this only ever restores
@@ -763,6 +769,9 @@ class CandidatePreparationAgent(BaseAgent):
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
+        attribute_join_paths = _drop_pair_paths_outside(
+            attribute_join_paths, relevant_tables
+        )
         relevant_tables = _describe_matched_columns(relevant_tables, attr_contexts)
 
         # --- 6. Drop value anchors that name schema rather than data ---
@@ -796,7 +805,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "sql_attributes": sql_attributes,
                 "sql_attributes_str": sql_attributes_str,
                 "table_relevance_reasoning": table_relevance_reasoning,
-                "primary_attribute": primary_attribute,
+                "matched_attributes": matched_attributes,
                 "attribute_join_paths": attribute_join_paths,
                 "term_synonyms": term_synonyms,
             }
@@ -917,7 +926,7 @@ class CandidatePreparationAgent(BaseAgent):
     ) -> list[dict]:
         """Embed the question and entities and search for extra Table hits.
 
-        Independent of the anchor-column LLM/join-path work in ``execute`` —
+        Independent of the join-path work in ``execute`` —
         intended to run in a background thread in parallel with it.
         """
         search_queries = [question] + list(entities)
@@ -1235,87 +1244,6 @@ class CandidatePreparationAgent(BaseAgent):
             return tables, reasoning
 
         return filtered, reasoning
-
-    def _identify_anchor(
-        self,
-        state: "AgentState",
-        question: str,
-        contexts: dict[str, dict],
-    ) -> tuple[str | None, str]:
-        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question.
-
-        Returns ``(anchor_id, reasoning)`` — reasoning is empty when no LLM
-        call was needed (0 or 1 candidates) or the call failed.
-        """
-        ids = list(contexts.keys())
-        if not ids:
-            return None, ""
-        if len(ids) == 1:
-            return ids[0], ""
-
-        try:
-            llm = state["llm"]
-        except KeyError:
-            self.logger.warning(
-                "_identify_anchor: no LLM in state — using first attribute"
-            )
-            return ids[0], ""
-
-        def _physical_column(ctx: dict) -> str:
-            parts = (
-                ctx.get("schema_name"),
-                ctx.get("table_name"),
-                ctx.get("col_name"),
-            )
-            return ".".join(str(part) for part in parts if part) or "(unknown)"
-
-        attrs_block = "\n".join(
-            f"- id: {aid} | physical column: {_physical_column(ctx)}"
-            + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
-            for aid, ctx in contexts.items()
-        )
-        evidence = str(state.get("evidence") or "").strip()
-        evidence_block = f"\n\nAuthoritative evidence:\n{evidence}" if evidence else ""
-        messages = [
-            SystemMessage(
-                content=(
-                    "You are identifying the primary column attribute that is the main focus "
-                    "of a user's analytical question."
-                )
-            ),
-            HumanMessage(
-                content=(
-                    f"Question: {question}{evidence_block}\n\n"
-                    f"Available column attributes:\n{attrs_block}\n\n"
-                    "Return the id of the single column attribute that best represents "
-                    "the primary subject of the question. Map evidence concepts to "
-                    "the listed schema.table.column physical references, not to "
-                    "semantic attribute names."
-                )
-            ),
-        ]
-
-        try:
-            result = invoke_with_structured_output(
-                llm.bind(max_tokens=1024), messages, AnchorColumnModel
-            )
-        except Exception:
-            self.logger.warning(
-                "_identify_anchor: LLM call failed — using first attribute",
-                exc_info=True,
-            )
-            return ids[0], ""
-
-        if result and result.anchor_id and result.anchor_id in contexts:
-            self.logger.info(
-                "Anchor column identified: %s (%s)", result.anchor_id, result.reasoning
-            )
-            return result.anchor_id, (result.reasoning or "").strip()
-
-        self.logger.warning(
-            "_identify_anchor: LLM returned invalid id — using first attribute"
-        )
-        return ids[0], ""
 
     def _build_custom_analyses_str(self, relevant_queries: list[dict]) -> list[str]:
         """Build string representation of custom analyses for prompts."""

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for the known_types fallback in find_jsonb_path_mismatches, and for
-the datatype tags added to format_semantic_context.
+the datatype shown for matched columns.
 """
 
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
@@ -11,7 +11,9 @@ from auto_ontology.retrieval.text_to_sql.db_probe.jsonb_path_check import (
     build_jsonb_path_repair_error,
     find_jsonb_path_mismatches,
 )
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_semantic_context
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_important_columns_for_prompt,
+)
 
 
 def _dead_executor() -> ProbeExecutor:
@@ -92,42 +94,21 @@ def test_repair_error_renders_wrong_type_distinctly_from_key_mismatch():
     assert "isn't JSONB-typed" in both
 
 
-def test_format_semantic_context_includes_datatype_tags():
-    primary_attribute = {
-        "schema_name": "",
-        "table_name": "aliens",
-        "col_name": "notes",
-        "attr_name": "AlienNotes",
-        "datatype": "jsonb",
-    }
-    attribute_join_paths = [
+def test_important_columns_fall_back_to_the_attribute_datatype():
+    """A matched column the catalog rows lack still shows its JSONB type."""
+    matched = [
         {
-            "attr_name": "SpeciesName",
-            "col_name": "name",
             "schema_name": "",
-            "table_name": "species",
-            "datatype": "text",
-            "path": [],
+            "table_name": "aliens",
+            "col_name": "notes",
+            "attr_name": "AlienNotes",
+            "datatype": "jsonb",
         }
     ]
 
-    result = format_semantic_context(primary_attribute, attribute_join_paths)
+    result = format_important_columns_for_prompt(
+        matched, [{"name": "aliens", "schema_name": "", "columns": []}]
+    )
 
-    assert "[jsonb]" in result
-    assert "[text]" in result
-
-
-def test_format_semantic_context_omits_tag_when_datatype_unknown():
-    """Attrs not yet re-ingested with datatype must render exactly as before
-    — no stray tag/bracket artifacts.
-    """
-    primary_attribute = {
-        "schema_name": "",
-        "table_name": "aliens",
-        "col_name": "notes",
-        "attr_name": "AlienNotes",
-    }
-
-    result = format_semantic_context(primary_attribute, [])
-
-    assert "[" not in result
+    assert "Semantic match: AlienNotes" in result
+    assert "jsonb" in result

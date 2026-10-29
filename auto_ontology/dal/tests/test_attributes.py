@@ -252,6 +252,54 @@ def test_a_two_column_join_is_one_hop(joined) -> None:
     ]
 
 
+def test_table_join_paths_connect_every_reachable_pair(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("accounts", pk=["id"])
+    world.column("accounts", "id", 1)
+    world.column("accounts", "customer_id", 2)
+    world.attribute("account-id", owner="accounts.id")
+    world.references("accounts.customer_id", "customer-id")
+    world.table("loans")
+    world.column("loans", "account_id")
+    world.references("loans.account_id", "account-id")
+    world.table("island")
+    world.column("island", "x")
+
+    paths = a.find_table_join_paths(
+        [
+            world.tables["loans"],
+            world.tables["customers"],
+            world.tables["island"],
+            world.tables["loans"],
+        ]
+    )
+
+    joins = {
+        pair: [
+            (
+                h["source_table"],
+                h["source_column"],
+                h["target_table"],
+                h["target_column"],
+            )
+            for h in path
+        ]
+        for pair, path in ((p["table_ids"], p["path"]) for p in paths)
+    }
+    assert joins == {
+        (world.tables["loans"], world.tables["customers"]): [
+            ("loans", "account_id", "accounts", "id"),
+            ("accounts", "customer_id", "customers", "id"),
+        ]
+    }
+
+
+def test_table_join_paths_need_two_tables(joined) -> None:
+    assert a.find_table_join_paths([joined.tables["orders"]]) == []
+
+
 def test_join_path_uses_only_the_selected_parallel_semantic_fk(world) -> None:
     world.table("customers", pk=["id"])
     world.column("customers", "id")

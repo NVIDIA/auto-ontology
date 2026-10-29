@@ -174,21 +174,28 @@ def _hop_column(
     databases names each side correctly; only the bridge-table builder in
     ``auto_ontology.dal.attributes`` omits it, and there *target_db* is the fallback.
     """
-    database = hop.get(f"{side}_database") or target_db or ""
-    schema = hop.get(f"{side}_schema", "")
-    table = hop.get(f"{side}_table", "")
     column = hop.get(f"{side}_column", "")
-    prefix = qualify_table(database, schema, table, dialect)
-    return f"{prefix}.{column}"
+    return f"{_hop_table(hop, side, target_db, dialect)}.{column}"
+
+
+def _hop_table(
+    hop: dict,
+    side: str,
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    database = hop.get(f"{side}_database") or target_db or ""
+    return qualify_table(
+        database, hop.get(f"{side}_schema", ""), hop.get(f"{side}_table", ""), dialect
+    )
 
 
 def format_semantic_context(
-    primary_attribute: dict,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
 ) -> str:
-    """Format the semantic anchor and verified optional join paths for a prompt.
+    """Format the verified optional join paths for a prompt.
 
     Names are qualified exactly as :func:`format_tables_for_prompt` does. The
     prompt tells the model to copy a selected path's verified join conditions,
@@ -196,80 +203,53 @@ def format_semantic_context(
     model may copy into SQL — on a catalog-qualified engine, dropping the catalog
     makes it unresolvable.
     """
-    anchor_schema = primary_attribute.get("schema_name", "")
-    anchor_table = primary_attribute.get("table_name", "")
-    anchor_col = primary_attribute.get("col_name", "")
-    anchor_name = primary_attribute.get("attr_name", "")
-    anchor_database = primary_attribute.get("database_name") or target_db or ""
-    anchor_full = qualify_table(anchor_database, anchor_schema, anchor_table, dialect)
-    # Only present on attrs (re-)ingested since this field was added — older
-    # rows just omit the tag.
-    anchor_datatype = primary_attribute.get("datatype") or ""
-    anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
-
+    if not attribute_join_paths:
+        return ""
     lines: list[str] = [
-        "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
-        f"  Table: {anchor_full}",
-        f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
+        "JOIN PATHS (VERIFIED OPTIONS — derived from the semantic model). "
+        "These paths show how available tables can join; they are not a plan "
+        "and most may be irrelevant to this question. Select only paths needed "
+        "to reach tables that contribute to the answer. Never add a path merely "
+        "because it is listed. When a path is needed, use its exact join "
+        "conditions. A selected path is indivisible: keep every intermediate "
+        "bridge table and every hop. Never shorten it or join its endpoints "
+        "directly:"
     ]
-
-    if attribute_join_paths:
-        lines.append("")
-        lines.append(
-            "JOIN PATHS (VERIFIED OPTIONS — derived from the semantic model). "
-            "These paths show how available tables can join; they are not a plan "
-            "and most may be irrelevant to this question. Select only paths needed "
-            "to reach tables that contribute to the answer. Never add a path merely "
-            "because it is listed. When a path is needed, use its exact join "
-            "conditions. A selected path is indivisible: keep every intermediate "
-            "bridge table and every hop. Never shorten it or join its endpoints "
-            "directly:"
-        )
-        for entry in attribute_join_paths:
-            attr_name = entry.get("attr_name", "")
-            col_name = entry.get("col_name", "")
-            schema = entry.get("schema_name", "")
-            table = entry.get("table_name", "")
-            datatype = entry.get("datatype") or ""
-            datatype_tag = f" [{datatype}]" if datatype else ""
-            # Structural entries (hub-sibling / bridge-table reconciliation)
-            # carry only "path" — no named attribute they resolve to. Render
-            # a generic label instead of a blank "  : ." header line.
-            if attr_name or col_name or table:
-                database = entry.get("database_name") or target_db or ""
-                full_table = qualify_table(database, schema, table, dialect)
-                lines.append(f"  {attr_name}: {full_table}.{col_name}{datatype_tag}")
-            else:
-                lines.append("  (structural bridge — connects tables kept above)")
-            path = entry.get("path") or []
-            if path:
-                lines.append("    Join path:")
-                for hop in path:
-                    left = _hop_column(hop, "source", target_db, dialect)
-                    right = _hop_column(hop, "target", target_db, dialect)
-                    lines.append(f"      {left} = {right}")
+    for entry in attribute_join_paths:
+        path = entry.get("path") or []
+        if entry.get("pair") and path:
+            start = _hop_table(path[0], "source", target_db, dialect)
+            end = _hop_table(path[-1], "target", target_db, dialect)
+            lines.append(f"  {start} <-> {end}")
+        else:
+            lines.append("  (structural bridge — connects tables kept above)")
+        if path:
+            lines.append("    Join path:")
+            for hop in path:
+                left = _hop_column(hop, "source", target_db, dialect)
+                right = _hop_column(hop, "target", target_db, dialect)
+                lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
 
 
 def format_important_columns_for_prompt(
-    primary_attribute: dict | None,
-    attribute_join_paths: list[dict],
+    matched_attributes: list[dict],
     tables: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
 ) -> str:
     """Render columns selected by semantic retrieval with full catalog details.
 
-    ``primary_attribute`` and named entries in ``attribute_join_paths`` identify
-    columns whose ColumnAttributes matched extracted question entities. Their
-    owning tables also appear in the ordinary schema section; this deliberately
-    repeats the matched columns so the SQL model can distinguish them from the
-    rest of a potentially wide table.
+    ``matched_attributes`` are the columns whose ColumnAttributes matched
+    extracted question entities. Their owning tables also appear in the
+    ordinary schema section; this deliberately repeats the matched columns so
+    the SQL model can distinguish them from the rest of a potentially wide
+    table.
     """
     entries = [
         entry
-        for entry in [primary_attribute, *attribute_join_paths]
+        for entry in matched_attributes
         if entry
         and entry.get("table_name")
         and entry.get("col_name")

@@ -115,12 +115,14 @@ def test_analyze_error_includes_hedged_known_columns():
         "llm": mock_llm,
         "path_state": {
             "target_db": "alien",
-            "primary_attribute": {
-                "attr_name": "AlienNotes",
-                "col_name": "notes",
-                "table_name": "aliens",
-                "datatype": "jsonb",
-            },
+            "matched_attributes": [
+                {
+                    "attr_name": "AlienNotes",
+                    "col_name": "notes",
+                    "table_name": "aliens",
+                    "datatype": "jsonb",
+                }
+            ],
             "attribute_join_paths": [],
         },
         "data_retriever": MagicMock(),

@@ -435,10 +435,9 @@ ORDER BY total_sales DESC;"""
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
   or CASE logic within the SQL.
-- SEMANTIC HINT (if present) shows a likely starting table and suggested join
-  paths derived from the semantic model. Treat it as a strong hint: prefer it
-  when it fits. Never force the semantic hint if it doesn't match the question.
-- SUGGESTED JOIN PATHS show verified column-level join conditions:
+- JOIN PATHS (if present) list how pairs of available tables connect, derived
+  from the semantic model. Choose the tables the question needs, then use the
+  paths that connect them. They show verified column-level join conditions:
 {join_template}
   Follow hops in order when the path spans more than one table. Once you choose
   a path, every intermediate/bridge table and every listed hop is mandatory.

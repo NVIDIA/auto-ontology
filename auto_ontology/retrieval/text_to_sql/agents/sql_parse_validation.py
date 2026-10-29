@@ -1028,14 +1028,12 @@ class SQLValidationAgent(BaseAgent):
 
         join_paths = ""
         if not _JOINS_VALIDATED_ELSEWHERE:
-            primary_attribute = path_state.get("primary_attribute") or {}
             attribute_join_paths = path_state.get("attribute_join_paths") or []
-            if primary_attribute and attribute_join_paths:
+            if attribute_join_paths:
                 join_paths = (
                     "AUTHORITATIVE JOIN PATHS "
                     "(keep joins that follow these verified paths):\n"
                     + format_semantic_context(
-                        primary_attribute,
                         attribute_join_paths,
                         target_db=path_state.get("target_db"),
                         dialect=dialect,

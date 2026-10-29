@@ -177,18 +177,6 @@ class CombinedCandidateFilterModel(BaseModel):
     )
 
 
-class AnchorColumnModel(BaseModel):
-    """LLM output for identifying the primary ColumnAttribute for the question."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    reasoning: str = Field(..., description="Brief reasoning (1-2 sentences max).")
-    anchor_id: str | None = Field(
-        ...,
-        description="The id of the ColumnAttribute that is the primary focus of the question.",
-    )
-
-
 class FollowUpResolutionModel(StrictModel):
     """Contextualize the current user question against completed prior turns."""
 

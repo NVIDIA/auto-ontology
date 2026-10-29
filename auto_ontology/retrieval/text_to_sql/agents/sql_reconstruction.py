@@ -97,16 +97,14 @@ def _error_to_text(error: Any) -> str:
 
 
 def _collect_known_columns(
-    primary_attribute: dict | None,
+    matched_attributes: list[dict] | None,
     attribute_join_paths: list[dict] | None,
 ) -> tuple[list[str], list[str]]:
     """Shared line-collection for known columns/join keys, used by both the
     repair prompt and the (more hedged) classification prompt renderers
     below. See ``_format_known_columns`` for the column/hop line format.
     """
-    entries = list(attribute_join_paths or [])
-    if primary_attribute:
-        entries = [primary_attribute] + entries
+    entries = list(matched_attributes or []) + list(attribute_join_paths or [])
 
     column_lines = []
     seen_columns = set()
@@ -165,7 +163,7 @@ def _without_prior_repair_turns(messages: list) -> list:
 
 
 def _format_known_columns(
-    primary_attribute: dict | None,
+    matched_attributes: list[dict] | None,
     attribute_join_paths: list[dict] | None,
 ) -> str:
     """Render a short, repair-focused reminder of already-resolved column
@@ -175,7 +173,7 @@ def _format_known_columns(
     prompt, not the first-pass generation prompt.
     """
     column_lines, hop_lines = _collect_known_columns(
-        primary_attribute, attribute_join_paths
+        matched_attributes, attribute_join_paths
     )
     if not column_lines and not hop_lines:
         return ""
@@ -196,7 +194,7 @@ def _format_known_columns(
 
 
 def _format_known_columns_for_classification(
-    primary_attribute: dict | None,
+    matched_attributes: list[dict] | None,
     attribute_join_paths: list[dict] | None,
 ) -> str:
     """Render the same known-columns data for the error CLASSIFIER prompt,
@@ -205,16 +203,16 @@ def _format_known_columns_for_classification(
     Unlike the repair prompt's "already resolved, use these exact names"
     (appropriate there — it's just telling the LLM what names to write), this
     context feeds a root-cause judgment call: is the data missing, or is the
-    SQL just wrong? The anchor/join-path resolution that produces this data
+    SQL just wrong? The retrieval/join-path resolution that produces this data
     is itself a best-effort LLM+graph process that has been wrong before
-    (see candidates_preparation.py's anchor-selection fallback path and its
-    "relevance filter has repeatedly proven unreliable" note) — so this must
+    (see candidates_preparation.py's "relevance filter has repeatedly proven
+    unreliable" note) — so this must
     NOT be framed as ground truth, or the classifier could be biased toward
     "fixable" even when the resolution itself picked the wrong table/column
     and a real missing_data rediscovery is needed.
     """
     column_lines, hop_lines = _collect_known_columns(
-        primary_attribute, attribute_join_paths
+        matched_attributes, attribute_join_paths
     )
     if not column_lines and not hop_lines:
         return ""
@@ -403,7 +401,7 @@ class SQLReconstructionAgent(BaseAgent):
         # instruction. See _format_known_columns_for_classification's
         # docstring for why the framing differs.
         known_columns_section = _format_known_columns_for_classification(
-            path_state.get("primary_attribute"),
+            path_state.get("matched_attributes"),
             path_state.get("attribute_join_paths"),
         )
 
@@ -657,7 +655,7 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         known_columns_section = _format_known_columns(
-            path_state.get("primary_attribute"),
+            path_state.get("matched_attributes"),
             path_state.get("attribute_join_paths"),
         )
 

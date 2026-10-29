@@ -288,25 +288,14 @@ def test_prompt_renders_date_format_when_present() -> None:
 
 
 def test_semantic_context_keeps_catalog_on_spark() -> None:
-    """The anchor, the attribute lines and the join hops all carry the catalog.
+    """The pair header and the join hops all carry the catalog.
 
     The prompt tells the model to copy a selected path's verified join conditions,
     so any name here can end up in SQL.
     """
-    primary_attribute = {
-        "database_name": "lakehouse",
-        "schema_name": "lakehouse",
-        "table_name": "clusters",
-        "col_name": "cluster_id",
-        "attr_name": "ClusterId",
-    }
     join_paths = [
         {
-            "attr_name": "EventName",
-            "col_name": "name",
-            "database_name": "lakehouse",
-            "schema_name": "lakehouse",
-            "table_name": "events",
+            "pair": True,
             "path": [
                 {
                     "source_database": "lakehouse",
@@ -323,11 +312,11 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
     ]
 
     rendered = format_semantic_context(
-        primary_attribute, join_paths, target_db="lakehouse", dialect="spark"
+        join_paths, target_db="lakehouse", dialect="spark"
     )
 
-    assert "Table: lakehouse.lakehouse.clusters" in rendered
-    assert "lakehouse.lakehouse.events.name" in rendered
+    assert "lakehouse.lakehouse.clusters <-> lakehouse.lakehouse.events" in rendered
+    assert "SEMANTIC HINT" not in rendered
     assert (
         "lakehouse.lakehouse.clusters.cluster_id"
         " = lakehouse.lakehouse.events.cluster_id" in rendered
@@ -339,13 +328,8 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
 def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
     """find_table_bridge omits the per-hop database, so target_db stands in."""
     rendered = format_semantic_context(
-        {"schema_name": "lakehouse", "table_name": "clusters", "col_name": "id"},
         [
             {
-                "attr_name": "A",
-                "col_name": "id",
-                "schema_name": "lakehouse",
-                "table_name": "events",
                 "path": [
                     {
                         "source_schema": "lakehouse",
@@ -363,17 +347,14 @@ def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
     )
 
     assert "lakehouse.lakehouse.clusters.id = lakehouse.lakehouse.events.id" in rendered
+    assert "(structural bridge — connects tables kept above)" in rendered
 
 
 def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
     rendered = format_semantic_context(
-        {"schema_name": "public", "table_name": "orders", "col_name": "id"},
         [
             {
-                "attr_name": "Region",
-                "col_name": "id",
-                "schema_name": "public",
-                "table_name": "regions",
+                "pair": True,
                 "path": [
                     {
                         "source_schema": "public",
@@ -397,13 +378,28 @@ def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
     )
 
     assert "selected path is indivisible" in rendered
+    assert "  public.orders <-> public.regions" in rendered
     assert "public.orders.account_id = public.accounts.id" in rendered
     assert "public.accounts.region_id = public.regions.id" in rendered
     assert "public.accounts.id = public.accounts.region_id" not in rendered
 
 
+def _pair_path(database: str | None = None) -> list[dict]:
+    hop = {
+        "source_schema": "lakehouse",
+        "source_table": "clusters",
+        "source_column": "cluster_id",
+        "target_schema": "lakehouse",
+        "target_table": "events",
+        "target_column": "cluster_id",
+    }
+    if database:
+        hop |= {"source_database": database, "target_database": database}
+    return [{"pair": True, "path": [hop]}]
+
+
 def test_semantic_context_matches_table_section_spelling() -> None:
-    """The hint and the schema context must name the same table identically."""
+    """The join paths and the schema context must name the same table identically."""
     table = {
         "name": "clusters",
         "database_name": "lakehouse",
@@ -411,20 +407,14 @@ def test_semantic_context_matches_table_section_spelling() -> None:
         "columns": [{"name": "cluster_id", "data_type": "string"}],
     }
     tables_section = format_tables_for_prompt([table], dialect="spark")
-    hint = format_semantic_context(
-        {
-            "database_name": "lakehouse",
-            "schema_name": "lakehouse",
-            "table_name": "clusters",
-            "col_name": "cluster_id",
-            "attr_name": "ClusterId",
-        },
-        [],
-        dialect="spark",
-    )
+    hint = format_semantic_context(_pair_path("lakehouse"), dialect="spark")
 
     assert "lakehouse.lakehouse.clusters" in tables_section
-    assert "Table: lakehouse.lakehouse.clusters" in hint
+    assert "lakehouse.lakehouse.clusters <-> " in hint
+
+
+def test_semantic_context_is_empty_without_join_paths() -> None:
+    assert format_semantic_context([]) == ""
 
 
 def test_prompt_falls_back_to_target_db_when_table_has_no_database() -> None:
@@ -465,12 +455,7 @@ def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:
         target_db="lakehouse",
         dialect="spark",
     )
-    hint = format_semantic_context(
-        {"schema_name": "lakehouse", "table_name": "clusters", "col_name": "id"},
-        [],
-        target_db="lakehouse",
-        dialect="spark",
-    )
+    hint = format_semantic_context(_pair_path(), target_db="lakehouse", dialect="spark")
 
     assert "lakehouse.lakehouse.clusters" in tables_section
-    assert "Table: lakehouse.lakehouse.clusters" in hint
+    assert "lakehouse.lakehouse.clusters <-> " in hint

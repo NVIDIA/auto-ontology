@@ -34,18 +34,9 @@ def test_intent_validation_keeps_authoritative_attribute_join(
                 "JOIN customers ON orders.customer_id = customers.id"
             )
         ),
-        "primary_attribute": {
-            "attr_name": "Order Customer",
-            "col_name": "customer_id",
-            "table_name": "orders",
-            "schema_name": "public",
-        },
         "attribute_join_paths": [
             {
-                "attr_name": "Customer Name",
-                "col_name": "name",
-                "table_name": "customers",
-                "schema_name": "public",
+                "pair": True,
                 "path": [
                     {
                         "source_schema": "public",

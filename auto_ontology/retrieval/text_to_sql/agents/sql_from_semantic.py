@@ -118,13 +118,13 @@ class SQLFromCandidatesAgent(BaseAgent):
         """Validate that CandidatePreparationAgent has run (keys exist in path_state)."""
         path_state = state.get("path_state", {})
         has_context = (
-            "primary_attribute" in path_state
+            "matched_attributes" in path_state
             or "attribute_join_paths" in path_state
             or "retrieved_column_attributes" in path_state
         )
         if not has_context:
             self.logger.warning(
-                "CandidatePreparationAgent output missing: expected primary_attribute, "
+                "CandidatePreparationAgent output missing: expected matched_attributes, "
                 "attribute_join_paths, or retrieved_column_attributes in path_state"
             )
             return False
@@ -162,7 +162,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             original_question, sanitized_question
         )
 
-        primary_attribute: dict | None = path_state.get("primary_attribute")
+        matched_attributes: list[dict] = path_state.get("matched_attributes") or []
         attribute_join_paths: list[dict] = path_state.get("attribute_join_paths") or []
         relevant_tables = path_state.get("relevant_tables", [])
         relevant_queries = path_state.get("relevant_queries", [])
@@ -177,9 +177,9 @@ class SQLFromCandidatesAgent(BaseAgent):
         dialect = getattr(connector, "dialect", None)
 
         self.logger.info(
-            "Semantic context: anchor=%s, join_paths=%d, custom_analyses=%d, "
-            "sql_attributes=%d, fallback_tables=%d",
-            primary_attribute.get("attr_name") if primary_attribute else None,
+            "Semantic context: matched_attributes=%d, join_paths=%d, "
+            "custom_analyses=%d, sql_attributes=%d, fallback_tables=%d",
+            len(matched_attributes),
             len(attribute_join_paths),
             len(custom_analyses),
             len(sql_attributes),
@@ -268,13 +268,11 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            # Build the join-paths section (semantic hint + suggested joins).
             join_paths = ""
-            if primary_attribute:
+            if attribute_join_paths:
                 join_paths = (
-                    "## Semantic Hints & Join Paths\n"
+                    "## Join Paths\n"
                     + format_semantic_context(
-                        primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,
                         dialect=dialect,
@@ -292,8 +290,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 else "No tables available."
             )
             important_columns = format_important_columns_for_prompt(
-                primary_attribute,
-                attribute_join_paths,
+                matched_attributes,
                 relevant_tables,
                 target_db=target_db,
                 dialect=dialect,

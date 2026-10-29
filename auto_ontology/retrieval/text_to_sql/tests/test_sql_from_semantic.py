@@ -218,7 +218,7 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
             "messages": [],
             "connectors": [],
             "path_state": {
-                "primary_attribute": None,
+                "matched_attributes": [],
                 "relevant_tables": [],
                 "relevant_queries": [],
             },
@@ -302,7 +302,7 @@ def test_sql_generation_reranks_descriptions_without_sending_sql(monkeypatch) ->
             "messages": [],
             "connectors": [],
             "path_state": {
-                "primary_attribute": None,
+                "matched_attributes": [],
                 "relevant_tables": [
                     {
                         "name": "accounts",
@@ -374,7 +374,7 @@ def test_sql_generation_rerank_failure_falls_back_to_semantic(monkeypatch) -> No
             "messages": [],
             "connectors": [],
             "path_state": {
-                "primary_attribute": None,
+                "matched_attributes": [],
                 "relevant_tables": [],
                 "relevant_queries": [],
             },
@@ -417,7 +417,7 @@ def test_sql_generation_uses_only_successful_candidate(monkeypatch) -> None:
             "messages": [],
             "connectors": [],
             "path_state": {
-                "primary_attribute": None,
+                "matched_attributes": [],
                 "relevant_tables": [],
                 "relevant_queries": [],
             },
@@ -453,7 +453,7 @@ def test_sql_generation_is_unconstructable_when_both_candidates_fail(
             "messages": [],
             "connectors": [],
             "path_state": {
-                "primary_attribute": None,
+                "matched_attributes": [],
                 "relevant_tables": [],
                 "relevant_queries": [],
             },
@@ -467,17 +467,17 @@ def test_sql_generation_is_unconstructable_when_both_candidates_fail(
     )
 
 
-def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
+def test_important_columns_include_full_details_of_kept_tables_only() -> None:
     rendered = format_important_columns_for_prompt(
-        {
-            "attr_name": "Charter Number",
-            "col_name": "CharterNum",
-            "table_name": "schools",
-            "schema_name": "main",
-            "database_name": "california_schools",
-            "datatype": "text",
-        },
         [
+            {
+                "attr_name": "Charter Number",
+                "col_name": "CharterNum",
+                "table_name": "schools",
+                "schema_name": "main",
+                "database_name": "california_schools",
+                "datatype": "text",
+            },
             {
                 "attr_name": "District Name",
                 "col_name": "District",
@@ -485,7 +485,6 @@ def test_important_columns_include_full_details_and_ignore_structural_paths() ->
                 "schema_name": "main",
                 "database_name": "california_schools",
                 "datatype": "text",
-                "path": [],
             },
             {
                 "attr_name": "Removed Table Value",
@@ -494,9 +493,7 @@ def test_important_columns_include_full_details_and_ignore_structural_paths() ->
                 "schema_name": "main",
                 "database_name": "california_schools",
                 "datatype": "text",
-                "path": [],
             },
-            {"path": [{"source_table": "schools", "target_table": "districts"}]},
         ],
         [
             {
