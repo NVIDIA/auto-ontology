@@ -48,16 +48,25 @@ class AgentRunError(RuntimeError):
 
 
 try:
-    llm_client = get_non_reasoning_llm_client()
-except (ValueError, EnvironmentError) as e:
-    logger.error("Failed to initialize non-reasoning LLM client: %s", e)
-    llm_client = None
-
-try:
     reasoning_llm_client = get_llm_client()
 except (ValueError, EnvironmentError) as e:
     logger.error("Failed to initialize reasoning LLM client: %s", e)
     reasoning_llm_client = None
+
+# Everything but SQL generation runs on the cheap model, as it does on main.
+# Falling back to the reasoning client rather than to None when the
+# non-reasoning model is unconfigured: an unset NON_REASONING_API_KEY should
+# leave the pipeline running exactly as it did before this split, not hand
+# every node a null client.
+try:
+    llm_client = get_non_reasoning_llm_client()
+except (ValueError, EnvironmentError) as e:
+    logger.info(
+        "No non-reasoning LLM client (%s); running every node on the "
+        "reasoning model.",
+        e,
+    )
+    llm_client = reasoning_llm_client
 
 graph = create_graph()
 app = graph.compile()
