@@ -375,3 +375,38 @@ def test_agentic_flag_skips_duplicate_proactive_value_probe(
     result = agent.execute(state)
 
     assert result["decision"] == "valid_sql"
+
+
+def test_partial_in_mismatch_flags_missing_category_when_subset_present() -> None:
+    from auto_ontology.retrieval.text_to_sql.db_probe.literal_check import (
+        build_value_repair_error,
+        find_literal_mismatches,
+    )
+
+    class _FakeProbeExecutor:
+        budget_left = 10
+
+        def run(self, sql: str, purpose: str = "") -> dict:
+            del sql, purpose
+            return {
+                "ok": True,
+                "rows": [
+                    {"value": "High"},
+                    {"value": "Medium"},
+                    {"value": "Low"},
+                ],
+                "error": None,
+            }
+
+    sql = (
+        "SELECT COUNT(*) FROM treatmentbasics "
+        "WHERE med_adh IN ('High', 'Medium', 'Compliant')"
+    )
+    mismatches = find_literal_mismatches(_FakeProbeExecutor(), "postgres", sql)
+
+    assert len(mismatches) == 1
+    assert mismatches[0]["kind"] == "partial_in_mismatch"
+    assert mismatches[0]["missing_values"] == ["Compliant"]
+    error_text = build_value_repair_error(mismatches)
+    assert "'Compliant'" in error_text
+    assert "JSONB" in error_text

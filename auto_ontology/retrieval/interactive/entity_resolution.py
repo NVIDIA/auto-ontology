@@ -967,6 +967,7 @@ def _resolve_collisions(
             margin_ok = (loser_score - winner_score) >= _COLLISION_WINNER_MARGIN
             gap_ok = (
                 next_distinct is not None
+                and float(next_distinct["score"]) <= CLARIFY_MAX_DISTANCE
                 and (float(next_distinct["score"]) - loser_score)
                 < _COLLISION_LOSER_MAX_GAP
             )

@@ -30,6 +30,15 @@ mapping. If no term in a formula has a confirmed mapping, omit the line entirely
 only some terms are confirmed, keep the formula structure and substitute \
 [UNRESOLVED: <term>] — using the term's exact original wording from the question — \
 for each unconfirmed operand, never a name that could pass as a real column. \
+Do NOT use a VDB-matched column mapping when it clearly conflicts with the term's \
+required data type, unit, or role in the formula — specifically: (a) a boolean flag \
+or a duration/hours column where the formula sums or subtracts monetary costs/fees, \
+(b) a measurement-uncertainty/error column (e.g. "Upper Uncertainty") where the formula \
+requires the actual physical quantity (e.g. mass), or (c) a flat column whose meaning \
+differs from a sibling sub-field when the other operands of the same formula all come \
+from sub-keys of a single JSONB column (e.g. cost_breakdown or risk_profile). In any \
+such conflict, treat that operand as unconfirmed and write [UNRESOLVED: <term>] instead \
+of forcing the mismatched column. \
 Skip any entry not required by the working question. \
 Entries may include a "# matched from: <terms>" annotation line listing the original \
 natural-language phrases from the question that correspond to this KB entry — use these \
