@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -510,10 +510,7 @@ def _strip_default_tools(llm: BaseChatModel) -> None:
         logger.debug("Could not disable the general-purpose subagent: %s", exc)
 
     profile = HarnessProfileConfig(**config_kwargs)
-    for key in (
-        f"{provider}:{identifier}" if provider and identifier else None,
-        provider,
-    ):
+    for key in (f"{provider}:{identifier}" if provider and identifier else None, provider):
         if key:
             try:
                 register_harness_profile(key, profile)
@@ -666,20 +663,50 @@ def _evidence(state: Any) -> str:
     return nested if isinstance(nested, str) else ""
 
 
+def _merge_leading_system(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """*messages* with the system stack gathered into one message at the front.
+
+    The construction prompt arrives as system messages interleaved around the
+    question and the schema -- system, system, question, system, system, system,
+    schema. The endpoint caches a prefix only as far as the end of its leading
+    system block, so interleaving capped the cached prefix at 3,385 tokens of a
+    17,020-token request and left the ~10,000-token schema to be re-bought on
+    every turn of the loop. Replaying a captured request with the stack merged
+    takes it from 20% cached to 100%.
+
+    Done here rather than with an explicit ``cache_control`` marker because the
+    Gym harness proxies these calls through a schema that forbids unknown keys
+    on content parts, and rejects such a marker with HTTP 422.
+
+    Relative order is preserved within the system messages and within the rest,
+    and the protocol the caller appends stays last, so the model still reads the
+    instructions in the sequence they were written for. What changes is that the
+    question and schema now follow the whole instruction stack instead of
+    sitting inside it.
+    """
+    system = [m for m in messages if isinstance(m, SystemMessage)]
+    rest = [m for m in messages if not isinstance(m, SystemMessage)]
+    if len(system) < 2:
+        return list(messages)
+    merged = SystemMessage(
+        content="\n\n".join(str(m.content) for m in system if str(m.content).strip())
+    )
+    return [merged, *rest]
+
+
 def run_deep_sql_agent(
     llm: BaseChatModel,
     messages: list[BaseMessage],
     toolbox: SQLAgentToolbox,
     state: Any,
 ) -> SQLAgentOutcome:
-    """Construct one SQL candidate with the deep agent, then gate it.
+    """Construct SQL with the deep agent, gating the answer before accepting it.
 
     The gate is the loop's own, applied here to the structured answer rather
     than to a ``submit_sql`` call. It earned its place: over 866 questions it
     bounced a quarter of the submissions it later passed, and the checks it
     runs are the ones that catch scoring errors the model declines to look for
-    itself. Findings are recorded for observability, but do not trigger another
-    generation: the deep-agent path produces exactly one final SQL candidate.
+    itself. A bounce costs one more invocation, capped like the loop's.
     """
     agent = _build_agent(llm, build_tools(toolbox, state))
 
@@ -687,14 +714,14 @@ def run_deep_sql_agent(
     # Protocol last, after the construction prompt's own system messages and
     # the question. Those end by asking for the query, so a protocol placed
     # before them is the instruction the model reads first and abandons last.
-    conversation: list[BaseMessage] = list(messages) + [
+    conversation: list[BaseMessage] = _merge_leading_system(messages) + [
         SystemMessage(content=protocol_prompt())
     ]
     trajectory: list[dict[str, Any]] = []
     answer: Optional[SQLGenerationModel] = None
     stop_reason = "answered"
 
-    for attempt in range(1):
+    for attempt in range(config.max_submission_bounces() + 1):
         if time.monotonic() > deadline:
             stop_reason = "deadline"
             break
@@ -735,13 +762,19 @@ def run_deep_sql_agent(
             stop_reason = "no_answer"
             break
 
-        findings = _gate_submission(answer.sql_code, toolbox, first_pass=(attempt == 0))
+        findings = _gate_submission(
+            answer.sql_code, toolbox, first_pass=(attempt == 0)
+        )
         if not findings:
             break
 
         trajectory[-1]["gate"] = findings
-        stop_reason = "gate_exhausted"
-        break
+        if attempt == config.max_submission_bounces():
+            stop_reason = "gate_exhausted"
+            break
+        conversation = list(result.get("messages") or conversation) + [
+            HumanMessage(content=findings)
+        ]
 
     # After the gate, not before it: the gate's findings are the author's to
     # act on with its remaining turns, and a query still being revised is not

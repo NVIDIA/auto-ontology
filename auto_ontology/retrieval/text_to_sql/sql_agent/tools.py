@@ -25,6 +25,7 @@ Three rules hold for all of them:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -149,6 +150,52 @@ def _known_types(relevant_tables: list[dict]) -> dict[tuple[str, str], str]:
             if col_name and data_type:
                 types[(table_name.lower(), col_name.lower())] = data_type
     return types
+
+
+#: Shortest description phrase worth reporting, in words. Two-word overlaps
+#: ("the account", "of money") fire on almost every question and would train
+#: the model to ignore the finding.
+_WORDING_MIN_PHRASE_WORDS = 3
+
+#: Words carrying no schema meaning, so a phrase made only of these does not
+#: count as a match.
+_WORDING_STOPWORDS = frozenset(
+    "a an and or of the in on at to for is are was were be been by with from "
+    "as that this it its their his her not no into unit".split()
+)
+
+
+def _uses_column(sql: str, name: str) -> bool:
+    """Whether *sql* mentions the column *name*.
+
+    A substring test rather than a token scan, so that quoted names with spaces
+    ("Charter Funding Type") match as readily as bare ones. It over-collects --
+    a column whose name occurs inside a longer identifier counts as used -- and
+    that is the direction to err in: counting a column present when it is not
+    costs one missed finding, while counting it absent costs a false alarm on
+    every query the check sees.
+    """
+    return name.lower() in sql.lower()
+
+
+def _description_overlap(description: str, question: str) -> str:
+    """The longest run of description words that the question also contains.
+
+    Word runs rather than a similarity score: "amount of money" appearing
+    verbatim in both is evidence a reader can check, where a cosine distance
+    over the same pair is not something the model can act on.
+    """
+    words = [w for w in re.findall(r"[a-z0-9]+", description.lower())]
+    best = ""
+    for start in range(len(words)):
+        for end in range(len(words), start, -1):
+            phrase = " ".join(words[start:end])
+            if len(phrase) <= len(best) or phrase not in question:
+                continue
+            if all(w in _WORDING_STOPWORDS for w in words[start:end]):
+                continue
+            best = phrase
+    return best
 
 
 @dataclass
@@ -349,7 +396,60 @@ class SQLAgentToolbox:
         if missing_agg:
             findings.append(f"GROUP BY is unsafe: {missing_agg}")
 
+        findings.extend(self._wording_findings(quoted))
+
         return findings
+
+    def _wording_findings(self, sql: str) -> list[str]:
+        """Columns the question names more plainly than the ones *sql* uses.
+
+        Every other check here asks whether the query is valid against the
+        database. None asks whether it answers the question that was put, which
+        is where the construction actually goes wrong: a query reading
+        ``trans.balance`` for "own an amount of money greater than 3000USD"
+        parses, executes and returns rows, so it clears every gate while
+        answering something else. ``trans.amount`` is described in the catalog
+        as "amount of money, Unit：USD" -- the question's own words.
+
+        Matched on description text rather than on the semantic layer's curated
+        entity names, because the names are what missed: the layer knew that
+        column as "Balance After Transaction" and had no label resembling
+        "amount of money" to match the question against.
+
+        Reported as a prompt to re-read, never as a verdict. A question often
+        does mean the sibling column, and the gate must not push a correct
+        query off a column it chose deliberately.
+        """
+        question = (self.question or "").lower()
+        if not question:
+            return []
+
+        candidates: list[tuple[int, str, str, str, str]] = []
+        for table in self.relevant_tables:
+            table_name = table.get("name") or "?"
+            for column in table.get("columns") or []:
+                if not isinstance(column, dict):
+                    continue
+                name = (column.get("name") or "").strip()
+                description = (column.get("description") or "").strip()
+                if not name or not description or _uses_column(sql, name):
+                    continue
+                overlap = _description_overlap(description, question)
+                if len(overlap.split()) >= _WORDING_MIN_PHRASE_WORDS:
+                    candidates.append(
+                        (len(overlap.split()), table_name, name, description, overlap)
+                    )
+
+        if not candidates:
+            return []
+
+        _, table_name, name, description, overlap = max(candidates)
+        return [
+            f'The question says "{overlap}". {table_name}.{name} is described '
+            f'as "{description}" and your query does not use it. Re-read the '
+            "question against the columns you selected, and keep yours only if "
+            "it is the better reading."
+        ]
 
     def diagnose_sql(self, sql: str) -> str:
         """Probe the live database for the failure modes that survive static checks.

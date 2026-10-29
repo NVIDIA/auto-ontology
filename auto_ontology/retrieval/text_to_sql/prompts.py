@@ -44,11 +44,47 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     )
 
 
+#: Dated to the day, not the second. This string sits near the front of every
+#: prompt, ahead of the system instructions and the schema, so a wall-clock time
+#: made the whole prefix unique per question and nothing behind it could be
+#: served from the provider's prompt cache. No question in the benchmark resolves
+#: to a time of day -- "schools opened after 2000/1/1" needs the date alone -- so
+#: the seconds bought nothing and cost the cache.
 main_system_prompt_template = (
-    "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
-    "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
+    "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, "
+    "'Day': {date.day} }}.\n\n"
     "{custom_prompts}"
 )
+
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def important_columns_block(important_columns: str) -> str:
+    """The semantic-match section, or nothing when it is switched off.
+
+    Off by default. Over 323 paired questions the matcher omitted a column the
+    gold query uses on 45% of them, and omission barely tracked the outcome --
+    43% of the questions the arm got wrong against 46% of the ones both arms got
+    right -- so the section's picks were carrying a preference instruction the
+    matcher had not earned. The schema-only control receives no equivalent and
+    scores at least as well. Set ``SQL_SEMANTIC_COLUMNS`` to restore it, which is
+    what pairs an A/B against this default.
+    """
+    if os.environ.get("SQL_SEMANTIC_COLUMNS", "").strip().lower() not in _TRUTHY:
+        return ""
+    return (
+        "## Semantically Important Columns\n"
+        "The columns below were matched to entities extracted from the question. "
+        "The matching is unreliable: verify a column against the schema, its "
+        "description and its sample values before relying on it, and prefer a "
+        "different available column when that one matches the question more "
+        "clearly.\n"
+        "- Do not project a column merely because it is listed here.\n"
+        "- Treat constraints stated in their descriptions, formats, and sample "
+        "values as requirements when using those columns.\n\n"
+        f"{important_columns}\n\n"
+    )
 
 
 create_sql_user_prompt = (
@@ -64,18 +100,7 @@ create_sql_user_prompt = (
     "Use ONLY the tables and columns listed below. "
     "Do NOT invent tables, schemas, or columns.\n\n"
     "{tables}\n\n"
-    "## Semantically Important Columns\n"
-    "The columns below were matched directly to entities extracted from the "
-    "question, so give them extra weight when resolving ambiguity.\n"
-    "- Prefer a matched column when it fits the requested meaning, filter, or output.\n"
-    "- Give matched columns a preference for projection only when they represent "
-    "an output the user requested. Do not project extra columns merely because "
-    "they are listed here.\n"
-    "- Treat constraints stated in their descriptions, formats, and sample values "
-    "as requirements when using those columns.\n"
-    "- This is a strong hint, not a mandate; use a different available column when "
-    "it more clearly matches the question.\n\n"
-    "{important_columns}\n\n"
+    "{important_columns_block}"
     "## Example SQL Queries\n"
     "{queries}\n\n"
     "## Conversation History\n"
@@ -283,12 +308,6 @@ def create_sql_from_candidates_prompt(
             "(unqualified — do NOT add a schema or database prefix).\n"
         )
         join_template = "    JOIN target_table ON source_table.source_column = target_table.target_column"
-        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM sales AS s
-JOIN customers AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
-GROUP BY c.country_name
-ORDER BY total_sales DESC;"""
     else:
         table_name_rule = (
             "- Use table names exactly as shown in AVAILABLE TABLES, INCLUDING the "
@@ -299,14 +318,6 @@ ORDER BY total_sales DESC;"""
             "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
             "         = target_schema.target_table.target_column"
         )
-        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM PUBLIC.SALES AS s
-JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN
-  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
-  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
-GROUP BY c.country_name
-ORDER BY total_sales DESC;"""
 
     # Solved question/SQL pairs retrieved by question wording from a labelled
     # corpus of other databases. Two failure modes need heading off: borrowing
@@ -320,50 +331,22 @@ ORDER BY total_sales DESC;"""
     sql_examples_block = (
         "## How To Use Reference Query Patterns\n"
         "The request includes solved question/SQL pairs from OTHER databases, "
-        "retrieved because their wording resembles this request. They are "
-        "precedent for how a request of this kind becomes SQL — nothing else.\n"
-        "Work through them like this:\n"
-        "1. Read each pair's question, and its evidence when present, and judge "
-        "which pairs ask for the same KIND of thing as this request: a count, a "
-        "ratio, a share, a superlative, a per-group breakdown, one entity or a "
-        "list. Ignore the subject matter; two questions about different domains "
-        "can still be the same kind of request.\n"
-        "2. From the pairs that match in kind, transfer the construction: which "
-        "aggregate answers it, whether the answer needs a join to reach a name "
-        "or label, whether a ratio is cast to REAL before dividing, whether a "
-        "conditional share puts the filter in a CASE inside the aggregate "
-        "rather than in WHERE, and whether DISTINCT is needed.\n"
-        "3. When a pair's evidence states a formula, study how that formula was "
-        "turned into SQL — operand order, the cast, whether the result was scaled "
-        "by 100, whether anything was rounded — and give THIS request's evidence "
-        "the same treatment.\n"
-        "4. Then rebuild the query for this database from scratch: every table, "
-        "column and alias must come from AVAILABLE TABLES, and every filter value "
-        "from this question or its evidence. Names, aliases and literals in the "
-        "pairs do NOT exist here.\n"
-        "5. The pairs are ordered by question similarity, not by how well they "
-        "fit. The first is not automatically the best; prefer whichever pair "
-        "matches this request's kind most closely, and when pairs disagree with "
-        "each other, follow that one rather than the earliest.\n"
-        "6. If no pair matches the kind of request being made, ignore them all "
-        "and build from the question and schema: project exactly what is asked "
-        "and nothing beside it, and bound the result only where the question "
-        "implies a bound. Forcing an ill-fitting pattern is worse than using "
-        "none.\n"
-        "The Rules section still governs throughout: a pair shows how a request "
-        "of this kind is usually built, but where a pair and a rule disagree, "
-        "the rule wins. The question, its evidence, and the schema outrank both.\n"
-        "What they tell you nothing about, no matter what they do:\n"
-        "- Which columns to SELECT, or how many. The pair answered a different "
-        "question; what to return follows from THIS question and the Rules "
-        "section, even when the pair returns more or fewer columns.\n"
-        "- Whether to add LIMIT, and with what number. That follows from this "
-        "question's own wording under the Rules section.\n"
-        "- How many tables YOUR query needs. A single-table pair is no reason to "
-        "drop a join this question requires, and a multi-join pair is no reason "
-        "to add one; their schema is not yours.\n"
-        "- Which columns exist, or what a column is called here.\n"
-        "- Which values to filter on.\n\n"
+        "retrieved because their wording resembles this one. Transfer their "
+        "construction -- which aggregate answers a request of this kind, whether "
+        "reaching a name needs a join, whether a ratio is cast to REAL before "
+        "dividing, whether a conditional share puts its filter in a CASE inside "
+        "the aggregate, whether DISTINCT is needed -- and where a pair's evidence "
+        "states a formula, how that formula became SQL.\n"
+        "Then rebuild for this database from scratch: every table, column and "
+        "alias from AVAILABLE TABLES, every filter value from this question or "
+        "its evidence. The pairs' own names and literals do not exist here.\n"
+        "They are ordered by wording similarity, not by fit: the first is not "
+        "the best, and if none asks for the same kind of thing, ignore them all "
+        "and build from the question and schema.\n"
+        "They say nothing about which columns to SELECT or how many, nor whether "
+        "to add LIMIT -- those follow from this question and the Rules section. "
+        "Where a pair and a rule disagree the rule wins; the question, its "
+        "evidence and the schema outrank both.\n\n"
         if has_sql_examples
         else ""
     )
@@ -384,44 +367,22 @@ ORDER BY total_sales DESC;"""
   Follow hops in order when the path spans more than one table. Once you choose
   a path, every intermediate/bridge table and every listed hop is mandatory.
   Never shorten the path or join its endpoints directly.
-- DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
-  adapt its full SQL directly as your starting point — you may reuse it wholesale,
-  trimming only what does not apply. Do NOT copy its aliases.
+- DOMAIN-SPECIFIC CUSTOM ANALYSES: use one that matches to locate the tables,
+  columns, joins and formulas this question needs, and to see how they are meant
+  to be combined. It shows how the data is laid out, not what to return: let the
+  question decide the output columns and the filters. Do NOT copy its aliases.
 - SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
   If one matches the question's intent, incorporate its expression or SQL pattern
   into your query. Treat them like reusable building blocks for calculations.
-- When creating a JOIN, both sides of the ON condition must use columns with
-  the same data type. Never join a text column to a numeric column or a date
-  column to an integer column, or uuid column to a string column.
 - Never match a human name/label against an id or foreign-key column (`*_id`,
   `link_to_*`). To filter by a name, join to the table holding the name columns
   (first_name/last_name/*_name) and filter there. Join each foreign key to the
   primary key it actually references (e.g. `expense.link_to_member` =
   `member.member_id`, never `event.event_id`).
-- Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
-  RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
-  NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
 - If the question filters by a single constant value on a column,
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 {_SQL_GENERATION_OUTPUT_SPEC}
-
-Example:
-
-thought:
-Join sales and customers, filter last full quarter, aggregate by country.
-"Total sales" means gross SUM(sales_amount), with no refund adjustment
-since the question didn't ask for one.
-
-sql_code:
-{example_sql}
-
-response:
-This calculates total sales revenue per country for the most recently completed
-calendar quarter. It combines the sales records with the customers list so each
-sale is attributed to a country, sums the sales amounts within that quarter,
-and then groups the results by country and orders them from highest to lowest
-total sales.
 """
 
 

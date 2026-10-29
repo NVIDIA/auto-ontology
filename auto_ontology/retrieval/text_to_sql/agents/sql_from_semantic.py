@@ -55,6 +55,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_dual_question_block,
     format_projection_rules,
     format_sql_examples_section,
+    important_columns_block,
     format_value_anchors_section,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -260,7 +261,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             queries=relevant_queries,
             qa_from_conversations=similar_questions_txt,
             tables=tables_section,
-            important_columns=important_columns,
+            important_columns_block=important_columns_block(important_columns),
             join_paths=join_paths,
             custom_analyses=ca_section + sa_section,
         )

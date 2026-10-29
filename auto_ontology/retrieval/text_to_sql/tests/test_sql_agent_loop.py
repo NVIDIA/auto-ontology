@@ -504,7 +504,7 @@ def test_every_turn_is_handed_a_conversation_ending_in_a_user_message(
         )
 
 
-def test_deep_agent_returns_first_candidate_even_when_gate_finds_issues(
+def test_deep_agent_bounces_then_returns_candidate_when_gate_keeps_finding_issues(
     monkeypatch,
 ) -> None:
     answer = SQLGenerationModel(
@@ -527,6 +527,6 @@ def test_deep_agent_returns_first_candidate_even_when_gate_finds_issues(
 
     outcome = deep.run_deep_sql_agent(object(), [], _toolbox(), {})
 
-    assert invocations == 1
+    assert invocations == config.max_submission_bounces() + 1
     assert outcome.result is answer
     assert outcome.stop_reason == "gate_exhausted"
