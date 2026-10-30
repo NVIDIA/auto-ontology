@@ -12,8 +12,10 @@ without restating its description. Every other attribute of the database gets
 ``''``.
 
 Seeing the members side by side also exposes descriptions that mislead — a
-running total described as a per-event value. The same call returns corrected
-text, applied to whichever description is wrong:
+running total described as a per-event value — and catalog descriptions that
+say nothing, being empty or only the column's name. The same call returns
+corrected text for the first and a written one for the second, applied to
+whichever description needs it:
 
 * the attribute's semantic description, through
   :func:`auto_ontology.dal.descriptions.write_attribute_descriptions`, so a
@@ -79,8 +81,11 @@ words that fit another member better.
 catalog_description_fix; when the semantic description is, in \
 description_fix. Keep everything accurate from the original, including every \
 value code, and change only what is wrong.
-- Leave a fix empty when its description is accurate, merely terse, or \
-missing. Never reword accurate text.
+- A column whose catalog description reads "(missing)" needs one: always \
+write it in catalog_description_fix, one plain sentence on what the column \
+holds, in words that set it apart from the others.
+- Otherwise leave a fix empty when its description is accurate or merely \
+terse. Never reword accurate text.
 
 Return exactly one entry per listed column, using its table.column as written."""
 
@@ -182,7 +187,9 @@ def build_group_prompt(group: list[dict[str, Any]]) -> str:
             lines.append(f"  table: {member['table_description']}")
         catalog = (member.get("column_description") or "").strip()
         semantic = (member.get("description") or "").strip()
-        if catalog:
+        if is_bare_description(member):
+            lines.append("  catalog description: (missing)")
+        else:
             lines.append(f"  catalog description: {catalog}")
         if semantic and semantic != catalog:
             lines.append(f"  semantic description: {semantic}")
@@ -195,6 +202,16 @@ def build_group_prompt(group: list[dict[str, Any]]) -> str:
             lines.append(f"  samples: {', '.join(samples[:_MAX_SAMPLES])}")
         blocks.append("\n".join(lines))
     return "\n".join(blocks)
+
+
+def is_bare_description(member: dict[str, Any]) -> bool:
+    """Whether the catalog description is empty or only repeats the name."""
+    text = normalized_name(member.get("column_description") or "")
+    return text in {
+        "",
+        normalized_name(member.get("column_name") or ""),
+        normalized_name(member.get("name") or ""),
+    }
 
 
 def member_label(member: dict[str, Any]) -> str:

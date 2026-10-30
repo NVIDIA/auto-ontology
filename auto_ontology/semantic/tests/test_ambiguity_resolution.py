@@ -115,6 +115,19 @@ def test_prompt_shows_both_descriptions_only_when_they_differ() -> None:
     assert "semantic description: X." not in prompt
 
 
+def test_a_catalog_description_that_only_repeats_the_name_is_missing() -> None:
+    bare = _attr("a", "results", "points", column_description="Points")
+    empty = _attr("b", "standings", "points")
+    written = _attr("c", "teams", "points", column_description="Points per race.")
+
+    assert ar.is_bare_description(bare)
+    assert ar.is_bare_description(empty)
+    assert not ar.is_bare_description(written)
+    prompt = ar.build_group_prompt([bare, empty, written])
+    assert prompt.count("catalog description: (missing)") == 2
+    assert "catalog description: Points per race." in prompt
+
+
 def test_fixes_go_to_the_description_that_misleads() -> None:
     attributes = [
         _attr("a", "results", "points", column_description="Race points."),
