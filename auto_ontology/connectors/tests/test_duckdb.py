@@ -100,13 +100,20 @@ def test_composite_foreign_key_pairs_columns_by_position(keyed_db) -> None:
 
 
 def test_attached_catalog_keys_are_not_reported(keyed_db, tmp_path) -> None:
-    """A same-named table in another catalog must not contribute its keys."""
+    """Same-named tables in another catalog must not contribute their keys.
+
+    Every column the attached keys name also exists here, so a leaked row
+    would be stored against this database's tables rather than dropped.
+    """
     other = tmp_path / "other.duckdb"
     conn = duckdb.connect(str(other))
     conn.execute(
         """
         CREATE SCHEMA "Sales Ops";
         CREATE TABLE "Sales Ops".customers (email TEXT PRIMARY KEY);
+        CREATE TABLE "Sales Ops"."Order Lines" (
+            "Cust Id" TEXT REFERENCES "Sales Ops".customers
+        );
         """
     )
     conn.close()
@@ -114,6 +121,10 @@ def test_attached_catalog_keys_are_not_reported(keyed_db, tmp_path) -> None:
     pks = keyed_db.get_pks()
     assert _rows(pks[pks.table_name == "customers"]) == [
         ("Sales Ops", "customers", "id", 1)
+    ]
+    fks = keyed_db.get_fks()
+    assert _rows(fks[fks.table_name == "Order Lines"]) == [
+        ("Sales Ops", "Order Lines", "Cust Id", "Sales Ops", "customers", "id")
     ]
 
 
