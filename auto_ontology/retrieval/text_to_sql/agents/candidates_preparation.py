@@ -39,6 +39,7 @@ from auto_ontology.dal.attributes import (
     find_kept_table_bridges,
     find_table_join_paths,
 )
+from auto_ontology.dal.ambiguity import fetch_ambiguity_resolvers
 from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
@@ -165,6 +166,8 @@ def _format_relevance_filter_column(c: dict) -> str:
         extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
     if desc:
         extra = (extra + f" | {desc}") if extra else f" | {desc}"
+    if c.get("ambiguity_resolver"):
+        extra += f" | when to use: {c['ambiguity_resolver']}"
     return f"    - {name} ({ctype}){extra}"
 
 
@@ -245,6 +248,21 @@ def _describe_matched_columns(
             columns.append(column)
         described.append({**table, "columns": columns})
     return described
+
+
+def _attach_ambiguity_resolvers(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Set ``ambiguity_resolver`` on every column of *tables* that has one."""
+    resolvers = fetch_ambiguity_resolvers([t["id"] for t in tables if t.get("id")])
+    if not resolvers:
+        return tables
+    attached = []
+    for table in tables:
+        columns = []
+        for column in table.get("columns") or []:
+            text = resolvers.get((str(table.get("id")), column.get("name")))
+            columns.append({**column, "ambiguity_resolver": text} if text else column)
+        attached.append({**table, "columns": columns})
+    return attached
 
 
 def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
@@ -773,6 +791,7 @@ class CandidatePreparationAgent(BaseAgent):
             attribute_join_paths, relevant_tables
         )
         relevant_tables = _describe_matched_columns(relevant_tables, attr_contexts)
+        relevant_tables = _attach_ambiguity_resolvers(relevant_tables)
 
         # --- 6. Drop value anchors that name schema rather than data ---
         # Anchors were matched against stored values without the schema, so a
@@ -1064,7 +1083,9 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.warning("No LLM in state — skipping relevance filter")
             return tables, ""
 
-        tables_summary = _build_relevance_tables_summary(tables)
+        tables_summary = _build_relevance_tables_summary(
+            _attach_ambiguity_resolvers(tables)
+        )
 
         domain_rules_text = rules_to_text(state.get("domain_rules", []))
         domain_rules_section = ""

@@ -1,4 +1,9 @@
 {
+  "ambiguity": {
+    "fetch_ambiguity_resolvers": "(table_ids: 'list[str]') -> 'dict[tuple[str, str], str]'",
+    "fetch_attributes_for_ambiguity": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "write_ambiguity_resolvers": "(database_name: 'str', resolvers: 'dict[str, str]') -> 'int'"
+  },
   "attributes": {
     "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",

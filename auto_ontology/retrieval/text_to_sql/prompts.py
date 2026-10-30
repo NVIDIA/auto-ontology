@@ -90,6 +90,8 @@ create_sql_user_prompt = (
     "must be defined in FROM or JOIN. Never reference an undefined alias.\n"
     "- Verify each column exists in the table you reference it from. "
     "Do not confuse columns across tables.\n"
+    "- When similarly named columns exist in several tables, a column's "
+    "'when to use' note says which one the question needs; follow it.\n"
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
@@ -1156,6 +1158,8 @@ Rules:
   you deem relevant.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
+- When similarly named columns exist in several tables, a column's "when to
+  use" note says which one the question needs; follow it.
 - When in doubt, do NOT remove — it is safer to include an extra table
   than to remove a necessary one.
 

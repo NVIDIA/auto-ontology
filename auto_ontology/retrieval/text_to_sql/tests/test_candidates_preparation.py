@@ -907,3 +907,36 @@ def test_retrieved_columns_take_the_attribute_description() -> None:
     }
     assert described[1]["columns"] == [{"name": "status"}]
     assert tables[0]["columns"][0]["description"] == "Order status."
+
+
+def test_resolvers_reach_every_column_and_the_relevance_summary(monkeypatch) -> None:
+    tables = [
+        {
+            "id": "t1",
+            "name": "results",
+            "columns": [{"name": "points"}, {"name": "grid"}],
+        },
+        {"id": "t2", "name": "standings", "columns": [{"name": "points"}]},
+    ]
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_ambiguity_resolvers",
+        lambda ids: {
+            ("t1", "points"): "Points from one race.",
+            ("t2", "points"): "Season total after a race.",
+        },
+    )
+
+    attached = candidates_preparation._attach_ambiguity_resolvers(tables)
+
+    assert attached[0]["columns"] == [
+        {"name": "points", "ambiguity_resolver": "Points from one race."},
+        {"name": "grid"},
+    ]
+    assert attached[1]["columns"][0]["ambiguity_resolver"] == (
+        "Season total after a race."
+    )
+    assert "ambiguity_resolver" not in tables[0]["columns"][0]
+    summary = candidates_preparation._build_relevance_tables_summary(attached)
+    assert "points (unknown) | when to use: Points from one race." in summary
+    assert "grid (unknown)\n" in summary

@@ -11,6 +11,7 @@ import os
 import time
 
 from auto_ontology.dal.datasources import fetch_all_tables_without_term
+from auto_ontology.semantic.ambiguity_resolution import resolve_ambiguities
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.description_enrichment import enrich_descriptions
@@ -39,8 +40,10 @@ def run_semantic_compilation(
 ) -> int:
     """Compile semantic taxonomy, embed all nodes into the VDB, then resolve FK edges.
 
-    Finishes by writing the semantic descriptions of the attributes of the
-    tables this run compiled, once every join they take part in is known.
+    Then writes the semantic descriptions of the attributes of the tables this
+    run compiled, once every join they take part in is known, and finishes by
+    noting when to use each attribute that shares its name with one in another
+    table of the database.
 
     Returns the number of tables processed.
     """
@@ -127,22 +130,34 @@ def _run_semantic_compilation(
         )
         logger.info("Tables with described attributes: %d", enriched_count)
 
+    resolver_count = 0
+    if is_cancelled():
+        logger.info("Semantic compilation cancelled — skipping ambiguity resolution")
+    else:
+        logger.info("=" * 60)
+        logger.info("Resolving same-named column attributes…")
+        logger.info("=" * 60)
+        resolver_count = resolve_ambiguities(database_name)
+        logger.info("Ambiguity resolvers written: %d", resolver_count)
+
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all five stages completed.
+    # exceptions, so reaching this means all six stages completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s), %d enriched table(s) in %.1fs",
+        "%d bridge table(s), %d enriched table(s), %d ambiguity resolver(s) "
+        "in %.1fs",
         database_name,
         count,
         fk_count,
         attr_count,
         bridge_table_count,
         enriched_count,
+        resolver_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)

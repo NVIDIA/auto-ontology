@@ -244,14 +244,17 @@ def test_compile_enriches_the_tables_it_started_with(cancelled: bool) -> None:
         patch.object(
             compile_module,
             "is_cancelled",
-            side_effect=[False, cancelled],
+            side_effect=[False, cancelled, cancelled],
         ),
         patch.object(compile_module, "enrich_descriptions", return_value=2) as enrich,
+        patch.object(compile_module, "resolve_ambiguities", return_value=1) as resolve,
     ):
         compile_module.run_semantic_compilation("db", domain_summary=MagicMock())
 
     assert c.call_args.kwargs["tables"] is tables
     if cancelled:
         enrich.assert_not_called()
+        resolve.assert_not_called()
     else:
         enrich.assert_called_once_with("db", ["t1", "t2"])
+        resolve.assert_called_once_with("db")

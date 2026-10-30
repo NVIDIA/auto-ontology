@@ -142,6 +142,49 @@ class ColumnDescriptionsResult(BaseModel):
     )
 
 
+class AmbiguityResolver(BaseModel):
+    """When to use one of several same-named columns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table_column: str = Field(
+        ...,
+        description="The member as written in the prompt: table.column.",
+    )
+    resolver: str = Field(
+        default="",
+        description=(
+            "One or two sentences on when to use this column instead of the "
+            "others, without restating its description."
+        ),
+    )
+    catalog_description_fix: str = Field(
+        default="",
+        description=(
+            "The corrected catalog description when the current one is "
+            "misleading; empty when it is accurate."
+        ),
+    )
+    description_fix: str = Field(
+        default="",
+        description=(
+            "The corrected semantic description when the current one is "
+            "misleading; empty when it is accurate."
+        ),
+    )
+
+
+class AmbiguityResolversResult(BaseModel):
+    """LLM output: one resolver per member of a group of same-named columns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    members: list[AmbiguityResolver] = Field(
+        default_factory=list,
+        description="One entry per listed member.",
+    )
+
+
 class PotentialFkSuggestion(BaseModel):
     """One column the LLM suspects is a foreign key."""
 

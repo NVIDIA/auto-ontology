@@ -505,6 +505,10 @@ column_attribute = Table(
     Column("table_id", Text, nullable=False),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
     Column("description_suggestion", Text, nullable=True),
+    # When to pick this attribute over others of the same name in other tables
+    # of its database; '' when its name is unique there. Rewritten for the whole
+    # database on every compilation.
+    Column("ambiguity_resolver", Text, nullable=False, server_default=text("''")),
     # Set once PII propagation from the attribute's columns has handled it.
     # Like `catalog_column.pii_processed`, tag edits are independent of it:
     # removing an automatically assigned PII tag is a user override and must not

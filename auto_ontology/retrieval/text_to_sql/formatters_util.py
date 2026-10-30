@@ -81,6 +81,8 @@ def _format_column_for_prompt(
     line = f"{indent}- {name} ({data_type})"
     if description:
         line += f" - {description}"
+    if column.get("ambiguity_resolver"):
+        line += f" | when to use: {column['ambiguity_resolver']}"
     if sample_values:
         if "json" in (data_type or "").lower():
             line += (
@@ -240,6 +242,7 @@ _COLUMN_HEADERS = [
     "is_nullable",
     "foreign key",
     "description",
+    "when to use",
     "sample values",
     "format",
 ]
@@ -275,6 +278,7 @@ def _column_row(
             else ""
         ),
         "description": description,
+        "when to use": _plain_cell(column.get("ambiguity_resolver")),
         "sample values": _plain_cell(
             _format_sample_values(column.get("sample_values"))
         ),

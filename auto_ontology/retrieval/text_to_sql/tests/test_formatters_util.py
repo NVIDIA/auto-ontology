@@ -228,6 +228,31 @@ def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
     assert "['open'" not in rendered
 
 
+def test_prompt_shows_when_to_use_only_when_a_column_has_one() -> None:
+    plain = format_tables_for_prompt(
+        [{"name": "results", "columns": [{"name": "points", "data_type": "real"}]}]
+    )
+    assert "when to use" not in plain
+
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "results",
+                "columns": [
+                    {
+                        "name": "points",
+                        "data_type": "real",
+                        "ambiguity_resolver": "Points from a single race.",
+                    },
+                    {"name": "grid", "data_type": "int"},
+                ],
+            }
+        ]
+    )
+    assert "column | type | is_nullable | when to use" in rendered
+    assert "points | real | unknown | Points from a single race." in rendered
+
+
 def test_prompt_omits_sample_values_when_absent() -> None:
     rendered = format_tables_for_prompt(
         [
