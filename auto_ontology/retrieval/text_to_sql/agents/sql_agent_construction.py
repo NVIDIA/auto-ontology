@@ -30,6 +30,7 @@ from auto_ontology.retrieval.text_to_sql.sql_agent.ensemble import (
     run_ensemble_sql_agent,
 )
 from auto_ontology.retrieval.text_to_sql.sql_agent.loop import run_sql_agent
+from auto_ontology.retrieval.text_to_sql.sql_agent.react import run_react_sql_agent
 from auto_ontology.retrieval.text_to_sql.sql_agent.tools import SQLAgentToolbox
 from auto_ontology.retrieval.text_to_sql.state import AgentState, get_original_question
 
@@ -195,6 +196,25 @@ class SQLDeepAgentConstructionAgent(SQLAgentConstructionAgent):
         return run_deep_sql_agent(llm, messages, toolbox, state)
 
 
+class SQLReactAgentConstructionAgent(SQLAgentConstructionAgent):
+    """Construct SQL with the deep agent's tools and protocol, without deepagents.
+
+    The same node, prompt and contract as the other arms. Compared with the deep
+    arm the only thing that differs is the framework: see
+    :mod:`..sql_agent.react`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.agent_name = "sql_react_agent_construction"
+        self.logger = logging.getLogger(f"{__name__}.{self.agent_name}")
+
+    def _run(
+        self, llm: Any, messages: list, toolbox: SQLAgentToolbox, state: AgentState
+    ) -> Any:
+        return run_react_sql_agent(llm, messages, toolbox, state)
+
+
 class SQLEnsembleConstructionAgent(SQLAgentConstructionAgent):
     """Construct SQL by writing it several ways and picking by execution.
 
@@ -228,5 +248,6 @@ class SQLEnsembleConstructionAgent(SQLAgentConstructionAgent):
 __all__ = [
     "SQLAgentConstructionAgent",
     "SQLDeepAgentConstructionAgent",
+    "SQLReactAgentConstructionAgent",
     "SQLEnsembleConstructionAgent",
 ]

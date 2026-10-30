@@ -51,6 +51,7 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_agent_construction import (
     SQLAgentConstructionAgent,
     SQLDeepAgentConstructionAgent,
     SQLEnsembleConstructionAgent,
+    SQLReactAgentConstructionAgent,
 )
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
@@ -79,6 +80,7 @@ from auto_ontology.retrieval.text_to_sql.sql_agent.config import (
     is_sql_agent_enabled,
     is_sql_deep_agent_enabled,
     is_sql_ensemble_enabled,
+    is_sql_react_agent_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -418,6 +420,8 @@ def create_graph():
     # remember to switch the previous one off.
     if is_sql_ensemble_enabled():
         construction_agent = SQLEnsembleConstructionAgent()
+    elif is_sql_react_agent_enabled():
+        construction_agent = SQLReactAgentConstructionAgent()
     elif is_sql_deep_agent_enabled():
         construction_agent = SQLDeepAgentConstructionAgent()
     elif is_sql_agent_enabled():

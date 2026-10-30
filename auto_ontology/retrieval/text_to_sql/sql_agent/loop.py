@@ -235,19 +235,53 @@ def run_sql_agent(
     llm: BaseChatModel,
     messages: list[BaseMessage],
     toolbox: SQLAgentToolbox,
+    *,
+    tool_schemas: Optional[list[dict]] = None,
+    handlers: Optional[dict[str, Callable[..., str]]] = None,
+    protocol: Optional[str] = None,
+    normalise: Optional[Callable[[str], str]] = None,
+    tool_choice: Optional[str] = None,
+    submit_tool: str = SUBMIT_TOOL,
+    submit_reply: Optional[Callable[[dict], str]] = None,
+    turn_warnings: bool = True,
+    max_turns: Optional[int] = None,
+    deadline_s: Optional[float] = None,
 ) -> SQLAgentOutcome:
     """Drive the construction conversation to a final query.
 
     *messages* is the same prompt the single-call path builds; the protocol
     rules are appended here so the two differ only in the loop.
+
+    The keyword arguments let another agent borrow the loop while supplying its
+    own tools, protocol and clean-up (see :mod:`.react`). Left at their
+    defaults the loop is exactly what it always was.
+
+    * *tool_schemas* / *handlers*: the tools bound to the model and what runs
+      when each is called. *submit_tool* must be in *tool_schemas*, and
+      ``report_unconstructable`` may be; both are handled here, not through
+      *handlers*.
+    * *protocol*: the closing system message, in place of ``PROTOCOL_PROMPT``.
+    * *normalise*: applied to a submitted query before the gate reads it.
+    * *tool_choice*: passed to ``bind_tools``; ``"required"`` makes every turn
+      a tool call, with no free-text turns.
+    * *submit_tool*: the name the final tool goes by in *tool_schemas*.
+    * *submit_reply*: the tool result sent back for a submission, from its
+      arguments, in place of ``"Recorded."``.
+    * *turn_warnings*: whether to warn the model as the turn cap nears.
+    * *max_turns* / *deadline_s*: the turn cap and wall-clock budget, in place
+      of :func:`config.max_turns` and :func:`config.deadline_s`.
     """
-    dispatch: dict[str, Callable[..., str]] = {
-        "run_sql": toolbox.run_sql,
-        "check_sql": toolbox.check_sql,
-        "diagnose_sql": toolbox.diagnose_sql,
-        "inspect_table": toolbox.inspect_table,
-        "search_tables": toolbox.search_tables,
-    }
+    dispatch: dict[str, Callable[..., str]] = (
+        handlers
+        if handlers is not None
+        else {
+            "run_sql": toolbox.run_sql,
+            "check_sql": toolbox.check_sql,
+            "diagnose_sql": toolbox.diagnose_sql,
+            "inspect_table": toolbox.inspect_table,
+            "search_tables": toolbox.search_tables,
+        }
+    )
 
     # Mid-loop feedback goes in as a *user* message, never a system one.
     # Bedrock hoists system messages out of the conversation, so a system
@@ -258,20 +292,25 @@ def run_sql_agent(
     # protocol below is the one genuine system instruction, and it is safe
     # there because the prompt it follows ends with the question.
     conversation: list[BaseMessage] = list(messages) + [
-        SystemMessage(content=PROTOCOL_PROMPT)
+        SystemMessage(content=protocol if protocol is not None else PROTOCOL_PROMPT)
     ]
     trajectory: list[dict[str, Any]] = []
     last_draft = ""
-    deadline = time.monotonic() + config.deadline_s()
-    max_turns = config.max_turns()
-    bound = llm.bind_tools(TOOL_SCHEMAS)
+    deadline = time.monotonic() + (
+        deadline_s if deadline_s is not None else config.deadline_s()
+    )
+    max_turns = max_turns if max_turns is not None else config.max_turns()
+    bound = llm.bind_tools(
+        tool_schemas if tool_schemas is not None else TOOL_SCHEMAS,
+        **({"tool_choice": tool_choice} if tool_choice else {}),
+    )
 
     turn = 0
     bounces = 0
     while turn < max_turns:
         turn += 1
         turns_left = max_turns - turn
-        if turns_left <= _WARN_AT_TURNS_LEFT:
+        if turn_warnings and turns_left <= _WARN_AT_TURNS_LEFT:
             conversation.append(HumanMessage(content=deadline_warning(turns_left + 1)))
 
         try:
@@ -319,14 +358,17 @@ def run_sql_agent(
                 draft = str(args.get("sql") or "").strip()
                 if draft:
                     last_draft = draft
-            if name in (SUBMIT_TOOL, UNCONSTRUCTABLE_TOOL):
+            if name in (submit_tool, UNCONSTRUCTABLE_TOOL):
                 # Answered here rather than mid-list: a turn that both checks
                 # something and submits should still get its check answered,
                 # in case the submission turns out to be unusable.
                 terminal = terminal or call
-                conversation.append(
-                    _tool_message(call, "Recorded.", name)
+                reply_text = (
+                    submit_reply(args)
+                    if submit_reply is not None and name == submit_tool
+                    else "Recorded."
                 )
+                conversation.append(_tool_message(call, reply_text, name))
                 continue
             handler = dispatch.get(name)
             if handler is None:
@@ -350,8 +392,14 @@ def run_sql_agent(
             )
 
         if terminal is not None:
+            if normalise is not None and terminal.get("name") == submit_tool:
+                submitted = dict(terminal.get("args") or {})
+                query = str(submitted.get("sql_code") or "").strip()
+                if query:
+                    submitted["sql_code"] = normalise(query)
+                    terminal = {**terminal, "args": submitted}
             if (
-                terminal.get("name") == SUBMIT_TOOL
+                terminal.get("name") == submit_tool
                 and bounces < config.max_submission_bounces()
                 and time.monotonic() < deadline
             ):

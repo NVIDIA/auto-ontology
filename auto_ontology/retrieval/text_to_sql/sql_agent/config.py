@@ -53,6 +53,17 @@ def is_sql_deep_agent_enabled() -> bool:
     return os.environ.get("SQL_DEEP_AGENT_ENABLED", "").strip().lower() in _TRUTHY
 
 
+def is_sql_react_agent_enabled() -> bool:
+    """Whether construction routes through the plain ReAct agent.
+
+    The deep agent's tools, protocol and clean-up on the bounded loop, without
+    deepagents; see :mod:`.react`. It outranks the deep agent so that setting it
+    is enough to switch arms, even where the deep flag is pinned on by an
+    environment file the caller cannot override.
+    """
+    return os.environ.get("SQL_REACT_AGENT_ENABLED", "").strip().lower() in _TRUTHY
+
+
 def is_deep_adjudicator_enabled() -> bool:
     """Whether the deep agent may consult the reading adjudicator.
 
@@ -127,6 +138,27 @@ def deadline_s() -> float:
     answer.
     """
     return _float_env("SQL_AGENT_DEADLINE_S", 120.0)
+
+
+def react_max_turns() -> int:
+    """The ReAct agent's turn cap, which ``SQL_AGENT_MAX_TURNS`` overrides.
+
+    Higher than the loop's: the ReAct agent runs the deep agent's protocol,
+    which explores before it drafts, and the loop's 12 cut questions off
+    mid-exploration. 30 is what the full BIRD dev run (1,118 vs 1,078 for the
+    schema-only control) used.
+    """
+    return _int_env("SQL_AGENT_MAX_TURNS", 30)
+
+
+def react_deadline_s() -> float:
+    """The ReAct agent's wall-clock budget, which ``SQL_AGENT_DEADLINE_S`` overrides.
+
+    The loop checks its deadline every turn and stops gating once it passes,
+    so the loop's 120 s skipped the gate on slow questions. 600 s is what the
+    full BIRD dev run used.
+    """
+    return _float_env("SQL_AGENT_DEADLINE_S", 600.0)
 
 
 def max_rows_shown() -> int:
@@ -413,6 +445,9 @@ def ensemble_candidates_path() -> str:
 
 __all__ = [
     "is_sql_agent_enabled",
+    "is_sql_react_agent_enabled",
+    "react_max_turns",
+    "react_deadline_s",
     "is_sql_ensemble_enabled",
     "max_turns",
     "max_submission_bounces",
