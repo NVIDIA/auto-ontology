@@ -87,10 +87,10 @@ def test_router_still_retries_invalid_sql() -> None:
     assert route_sql_validation(state) == "invalid_sql"
 
 
-def test_short_answer_execution_skips_empty_like_check() -> None:
+def test_short_answer_execution_reaches_the_result_checks() -> None:
     state = _state(decision="valid_sql", shorten_answer=True)
 
-    assert route_sql_execution(state) == "valid_sql_without_like_check"
+    assert route_sql_execution(state) == "valid_sql"
 
 
 def test_regular_execution_keeps_empty_like_check() -> None:

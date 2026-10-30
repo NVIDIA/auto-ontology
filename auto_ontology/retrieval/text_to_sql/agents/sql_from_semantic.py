@@ -80,8 +80,7 @@ def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
 The question was classified as `{subtype}`. Use this example only as a structural
 pattern. Adapt it to the available schema and SQL dialect. Never copy its table names,
 column names, or literal values unless the schema and question independently require
-the same identifiers or values. Its ORDER BY/LIMIT does not decide whether to use
-LIMIT or keep ties; the LIMIT rule in the instructions does.
+the same identifiers or values.
 
 ```sql
 {sql_template}

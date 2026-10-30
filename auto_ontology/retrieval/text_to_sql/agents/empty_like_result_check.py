@@ -5,15 +5,23 @@
 """
 Post-execution result integrity checks.
 
-Two checks run after successful SQL execution:
+Three checks run after successful SQL execution:
 
 1. All-NULL JSONB columns: if a JSONB-accessed computed column returns NULL for
    every row, the path is likely wrong (wrong nesting level or wrong key name).
    Routes once to reconstruction with a targeted error — no LLM call needed.
 
-2. Empty-result LIKE check: if execution returns zero rows and the SQL contains
+2. All-NULL result: if every value in every returned row is NULL, an unfiltered
+   sort key, the wrong column, or a filter that matches nothing is the likely
+   cause. Routes once to reconstruction; if the retry does not produce a
+   better answer, the original SQL and result are restored, so the check never
+   costs an answer.
+
+3. Empty-result LIKE check: if execution returns zero rows and the SQL contains
    LIKE/ILIKE predicates, uses an LLM to identify non-essential filters and
    routes once to reconstruction with explicit removal guidance.
+
+Short-answer runs only get check 2.
 """
 
 from __future__ import annotations
@@ -154,6 +162,69 @@ def _null_jsonb_aliases(sql: str, db_result: Any) -> list[str]:
     ]
 
 
+ALL_NULL_RESULT_ERROR = (
+    "SQL executed but every returned value is NULL. Common causes: (1) a column "
+    "used for ordering, ranking or a ratio has NULLs that are not filtered "
+    "(NULLs sort first in ASC order), so add `IS NOT NULL` on the sort key or on "
+    "both sides of a ratio; (2) the selected column is not the one that holds "
+    "the value; (3) for an aggregate, the WHERE filter matches no rows. Fix only "
+    "the cause that applies. Keep the question's intent and every other filter."
+)
+
+# What a reconstruction overwrites and an answer is built from. Restoring these
+# puts the run back exactly where the all-NULL retry left it.
+_ANSWER_FIELDS = (
+    "sql_code",
+    "sql_generation_result",
+    "sql_response_from_db",
+    "sql_columns",
+    "result_numeric_kinds",
+    "result_numeric_kinds_sql",
+    "result_values_digest",
+)
+ALL_NULL_ORIGINAL_KEY = "all_null_original"
+
+
+def _result_value_rows(db_result: Any) -> list[list[Any]]:
+    """Rows of *db_result* as value lists, for any shape execution produces."""
+    if (
+        isinstance(db_result, list)
+        and db_result
+        and all(isinstance(row, (list, tuple)) for row in db_result)
+    ):
+        return [list(row) for row in db_result]
+    return [list(row.values()) for row in _parse_db_rows(db_result)]
+
+
+def _is_all_null_result(db_result: Any) -> bool:
+    """Whether there is at least one row and every value in every row is NULL."""
+    rows = _result_value_rows(db_result)
+    return bool(rows) and all(row and all(v is None for v in row) for row in rows)
+
+
+def has_all_null_original(path_state: dict) -> bool:
+    return bool(path_state.get(ALL_NULL_ORIGINAL_KEY))
+
+
+def restore_all_null_original(path_state: dict) -> dict:
+    """Return *path_state* with the answer stored before the all-NULL retry."""
+    original = path_state.get(ALL_NULL_ORIGINAL_KEY) or {}
+    restored = {k: v for k, v in path_state.items() if k != ALL_NULL_ORIGINAL_KEY}
+    restored.update(original)
+    restored.pop("error", None)
+    restored.pop("unconstructable_explanation", None)
+    return restored
+
+
+def restore_all_null_original_node(state: AgentState) -> dict[str, Any]:
+    """Graph node: answer with the pre-retry SQL when the retry produced none."""
+    logger.info("All-NULL retry produced no SQL — restoring the original answer")
+    return {
+        "decision": "valid_sql",
+        "path_state": restore_all_null_original(dict(state.get("path_state", {}))),
+    }
+
+
 def _build_null_jsonb_error(null_aliases: list[str]) -> str:
     cols = ", ".join(f"`{a}`" for a in null_aliases)
     return (
@@ -234,11 +305,12 @@ class EmptyLikeResultCheckAgent(BaseAgent):
         path_state = dict(state.get("path_state", {}))
         sql_code = _get_sql_code(path_state)
         db_result = path_state.get("sql_response_from_db")
+        shorten_answer = state.get("shorten_answer", False)
 
         if not _is_empty_db_result(db_result):
             # Non-empty result: check for JSONB columns that are all-NULL,
             # which indicates a wrong nesting path rather than an empty table.
-            if not path_state.get("null_jsonb_retry_attempted"):
+            if not shorten_answer and not path_state.get("null_jsonb_retry_attempted"):
                 null_aliases = _null_jsonb_aliases(sql_code, db_result)
                 if null_aliases:
                     path_state["null_jsonb_retry_attempted"] = True
@@ -248,6 +320,31 @@ class EmptyLikeResultCheckAgent(BaseAgent):
                         null_aliases,
                     )
                     return {"decision": "invalid_sql", "path_state": path_state}
+            if path_state.get("null_jsonb_retry_attempted") or not _is_all_null_result(
+                db_result
+            ):
+                return {"decision": "valid_sql", "path_state": path_state}
+            if path_state.get("all_null_retry_attempted"):
+                if has_all_null_original(path_state):
+                    self.logger.info(
+                        "Retried SQL still returns only NULLs — restoring the original"
+                    )
+                    path_state = restore_all_null_original(path_state)
+                return {"decision": "valid_sql", "path_state": path_state}
+            rows = _result_value_rows(db_result)
+            path_state["all_null_retry_attempted"] = True
+            path_state[ALL_NULL_ORIGINAL_KEY] = {
+                k: path_state[k] for k in _ANSWER_FIELDS if k in path_state
+            }
+            path_state["error"] = ALL_NULL_RESULT_ERROR
+            self.logger.info(
+                "All-NULL result (%d row(s), %d column(s)) — routing to reconstruction",
+                len(rows),
+                len(rows[0]),
+            )
+            return {"decision": "invalid_sql", "path_state": path_state}
+
+        if shorten_answer:
             return {"decision": "valid_sql", "path_state": path_state}
 
         if not _sql_has_like(sql_code):

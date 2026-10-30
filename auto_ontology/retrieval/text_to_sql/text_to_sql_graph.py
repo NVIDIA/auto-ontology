@@ -45,6 +45,8 @@ from auto_ontology.retrieval.text_to_sql.agents.kumo_prediction import (
 )
 from auto_ontology.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
+    has_all_null_original,
+    restore_all_null_original_node,
 )
 from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
@@ -120,12 +122,18 @@ def route_sql_validation(state: AgentState) -> str:
     return "valid_sql"
 
 
-def route_sql_execution(state: AgentState) -> str:
-    """Route successful short answers around the empty-LIKE repair node."""
+def route_sql_validation_or_original(state: AgentState) -> str:
+    """Like :func:`route_sql_validation`, but a run that gives up after the
+    all-NULL retry answers with the SQL it had before that retry."""
     route = route_sql_validation(state)
-    if route == "valid_sql" and state.get("shorten_answer", False):
-        return "valid_sql_without_like_check"
+    if route == "unconstructable" and has_all_null_original(state["path_state"]):
+        return "restore_original"
     return route
+
+
+def route_sql_execution(state: AgentState) -> str:
+    """Route execution results; every successful result goes to the result checks."""
+    return route_sql_validation_or_original(state)
 
 
 def _make_soft_check_router(check_name: str):
@@ -426,6 +434,9 @@ def create_graph():
     unconstructable_sql_response_node = _make_node(
         "unconstructable_sql_response", agent_wrapper(sql_unconstructable_agent)
     )
+    restore_original_node = _make_node(
+        "restore_all_null_original", restore_all_null_original_node
+    )
 
     # ==================== CREATE GRAPH ====================
 
@@ -461,6 +472,7 @@ def create_graph():
     graph.add_node("check_empty_like_result", check_empty_like_result_node)
     graph.add_node("format_and_respond", format_and_respond_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
+    graph.add_node("restore_all_null_original", restore_original_node)
 
     # Minimal flow using only the defined nodes.
     graph.add_edge("question_intent", "question_extraction")
@@ -546,11 +558,12 @@ def create_graph():
     # SQL validation → route
     graph.add_conditional_edges(
         "validate_sql_query",
-        route_sql_validation,
+        route_sql_validation_or_original,
         {
             "valid_sql": pre_execute_target,
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
+            "restore_original": "restore_all_null_original",
         },
     )
 
@@ -570,11 +583,12 @@ def create_graph():
         route_sql_execution,
         {
             "valid_sql": "check_empty_like_result",
-            "valid_sql_without_like_check": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
+            "restore_original": "restore_all_null_original",
         },
     )
+    graph.add_edge("restore_all_null_original", "format_and_respond")
 
     # After the empty-LIKE check, run the value-repair check (also gated on an
     # empty result at run time).
