@@ -64,6 +64,8 @@ class ModelTable(BaseModel):
     description: str = ""
     pk: list[str] = Field(default_factory=list)
     type: str = ""
+    # Column pairs semantic compilation proved are stored in both directions.
+    symmetric_column_pairs: list[list[str]] = Field(default_factory=list)
     columns: list[ModelColumn] = Field(default_factory=list)
 
 

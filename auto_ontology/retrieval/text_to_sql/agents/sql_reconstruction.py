@@ -35,7 +35,10 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_tables_for_prompt,
+    symmetric_link_rules,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -166,17 +169,24 @@ def _without_prior_repair_turns(messages: list) -> list:
 def _format_known_columns(
     matched_attributes: list[dict] | None,
     attribute_join_paths: list[dict] | None,
+    tables: list[dict] | None = None,
 ) -> str:
     """Render a short, repair-focused reminder of already-resolved column
     names, so reconstruction doesn't have to re-guess casing/existence from
     the error message alone (e.g. "exch_spot" vs "EXCH_SPOT" when the real
     column is "quote_depth_snapshot"). Terse by design — this is a repair
     prompt, not the first-pass generation prompt.
+
+    Tables that store links in both directions get a line too, so a repair
+    does not reintroduce a join on both link columns.
     """
     column_lines, hop_lines = _collect_known_columns(
         matched_attributes, attribute_join_paths
     )
-    if not column_lines and not hop_lines:
+    symmetric_lines = [
+        f"- {rule}" for table in tables or [] for rule in symmetric_link_rules(table)
+    ]
+    if not column_lines and not hop_lines and not symmetric_lines:
         return ""
 
     sections = []
@@ -189,6 +199,11 @@ def _format_known_columns(
         sections.append(
             "\nKNOWN JOIN KEYS (already resolved — use these exact join "
             "conditions, do not guess FK column names):\n" + "\n".join(hop_lines)
+        )
+    if symmetric_lines:
+        sections.append(
+            "\nSYMMETRIC LINK TABLES (each link is stored in both directions):\n"
+            + "\n".join(symmetric_lines)
         )
 
     return "\n".join(sections) + "\n\n"
@@ -514,7 +529,7 @@ class SQLReconstructionAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
-        llm = state["llm"]
+        llm = state.get("reasoning_llm") or state["llm"]
         raw_error = path_state.get("error", "")
         error = _error_to_text(raw_error)
         if not isinstance(raw_error, str):
@@ -658,6 +673,7 @@ class SQLReconstructionAgent(BaseAgent):
         known_columns_section = _format_known_columns(
             path_state.get("matched_attributes"),
             path_state.get("attribute_join_paths"),
+            relevant_tables,
         )
 
         # Anchor ambiguous-term interpretation across repair attempts: without

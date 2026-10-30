@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select, union
+from sqlalchemy import delete, select, union, update
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
@@ -204,12 +204,21 @@ def _delete_semantic_rows(database_name: str | None) -> int:
         deleted = _delete_all_semantic()
     else:
         deleted = _delete_scoped_semantic(database_name)
+    _clear_compiled_table_facts(database_name)
     logger.info(
         "delete_semantic_layer: removed %d semantic rows for database %s",
         deleted,
         database_name or "<all>",
     )
     return deleted
+
+
+def _clear_compiled_table_facts(database_name: str | None) -> None:
+    """Clear what compilation wrote onto catalog tables, which a reset keeps."""
+    statement = update(s.catalog_table).values(symmetric_column_pairs=[])
+    if database_name is not None:
+        statement = statement.where(s.catalog_table.c.id.in_(_table_ids(database_name)))
+    store().query_write(statement)
 
 
 def _delete_semantic_vectors(database_name: str | None) -> int:

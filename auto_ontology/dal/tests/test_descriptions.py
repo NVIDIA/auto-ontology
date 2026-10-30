@@ -136,6 +136,33 @@ def test_certified_text_becomes_a_suggestion(world) -> None:
     assert attribute["description_suggestion"] == "LLM."
 
 
+def test_two_links_to_one_target_are_kept_apart(world) -> None:
+    """``connected(atom_id, atom_id2)`` points at ``atom`` twice; that is not a
+    self-reference, and neither side may collapse the two links into one."""
+    world.table("atom")
+    world.table("connected")
+    atom_key = world.column("atom", "atom_id")
+    first = world.column("connected", "atom_id", 1)
+    second = world.column("connected", "atom_id2", 2)
+    for source in (first, second):
+        store().query_write(
+            s.column__foreign_key.insert().values(
+                source_column_id=source, target_column_id=atom_key
+            )
+        )
+
+    outgoing = {
+        (link["direction"], link["local_column"], link["other_column"])
+        for link in d.fetch_table_links(world.tables["connected"])
+    }
+    assert outgoing == {("out", "atom_id", "atom_id"), ("out", "atom_id2", "atom_id")}
+    incoming = {
+        (link["direction"], link["local_column"], link["other_column"])
+        for link in d.fetch_table_links(world.tables["atom"])
+    }
+    assert incoming == {("in", "atom_id", "atom_id"), ("in", "atom_id", "atom_id2")}
+
+
 def test_links_cover_declared_and_semantic_fks_both_ways(world) -> None:
     world.table("orders")
     world.table("stores")

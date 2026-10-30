@@ -252,6 +252,55 @@ _JSONB_SAMPLE_NOTE = (
 )
 
 
+def _symmetric_pairs(table: dict) -> list[tuple[str, str]]:
+    pairs = table.get("symmetric_column_pairs")
+    if not isinstance(pairs, list):
+        return []
+    return [
+        (str(pair[0]), str(pair[1]))
+        for pair in pairs
+        if isinstance(pair, (list, tuple)) and len(pair) == 2
+    ]
+
+
+def _pair_target_table(table: dict, column_name: str) -> str:
+    """The table *column_name* references, from its ``schema.table.column`` FK."""
+    for column in table.get("columns") or []:
+        if isinstance(column, dict) and column.get("name") == column_name:
+            parts = str(column.get("semantic_fk") or "").split(".")
+            if len(parts) >= 2 and parts[-2]:
+                return parts[-2]
+    return "the linked table"
+
+
+def symmetric_link_notes(table: dict) -> list[str]:
+    """One note per column pair *table* stores in both directions."""
+    name = str(table.get("name") or "")
+    notes = []
+    for c1, c2 in _symmetric_pairs(table):
+        target = _pair_target_table(table, c1)
+        notes.append(
+            f"`{name}` is symmetric on ({c1}, {c2}): every link is stored in both "
+            f"directions. To list the members of one link (e.g. the {target} rows "
+            f"of one {name} record), join {target} on `{c1}` only and return a "
+            "single column; add DISTINCT when listing values. Use both "
+            f"`{c1}` and `{c2}` only when the question is about ordered pairs or "
+            "'what is linked to X'."
+        )
+    return notes
+
+
+def symmetric_link_rules(table: dict) -> list[str]:
+    """The same fact as :func:`symmetric_link_notes`, one short line per pair."""
+    name = str(table.get("name") or "")
+    return [
+        f"`{name}` stores every ({c1}, {c2}) link in both directions: to list "
+        f"one link's members join on `{c1}` only, never on both columns, unless "
+        "the question asks for ordered pairs."
+        for c1, c2 in _symmetric_pairs(table)
+    ]
+
+
 def _column_row(
     column: Any, database_name: str = "", dialect: str | None = None
 ) -> dict[str, str]:
@@ -341,6 +390,7 @@ def format_tables_for_prompt(
             blocks.append(_pipe_table(_COLUMN_HEADERS, column_rows))
             if any("json" in row["type"].lower() for row in column_rows):
                 blocks.append(_JSONB_SAMPLE_NOTE)
+        blocks.extend(symmetric_link_notes(table))
 
         formatted_tables.append("\n".join(block for block in blocks if block))
 
@@ -395,6 +445,7 @@ def format_used_schema_for_prompt(
         if table.get("pk"):
             line += f" | primary key: {table['pk']}"
         table_lines.append(line)
+        table_lines.extend(f"  {rule}" for rule in symmetric_link_rules(table))
 
     column_lines: list[str] = []
     for used_name in used_columns:

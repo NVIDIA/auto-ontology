@@ -245,6 +245,17 @@ catalog_table = Table(
     # association between entity roles. Compilation deliberately never clears
     # the flag: a later uncertain LLM response must not erase prior evidence.
     Column("is_junction_table", Boolean, nullable=False, server_default=text("false")),
+    # ``[[c1, c2], ...]``: column pairs whose every row is also stored mirrored
+    # (c1 and c2 swapped), proven by a data probe during semantic compilation.
+    # Like ``is_junction_table``, a run that does not detect a pair never clears
+    # it; only a run that proves pairs replaces the value, and a semantic reset
+    # clears it.
+    Column(
+        "symmetric_column_pairs",
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    ),
     _imported_id(),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
 )

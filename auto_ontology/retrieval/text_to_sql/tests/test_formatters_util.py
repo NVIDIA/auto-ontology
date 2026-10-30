@@ -484,3 +484,121 @@ def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:
 
     assert "lakehouse.lakehouse.clusters" in tables_section
     assert "lakehouse.lakehouse.clusters <-> " in hint
+
+
+def _orders_table(**overrides) -> dict:
+    return {
+        "name": "orders",
+        "schema_name": "main",
+        "database_name": "shop",
+        "description": "Purchase records.",
+        "pk": ["order_id"],
+        "columns": [
+            {"name": "order_id", "data_type": "INTEGER", "description": "Order id."},
+            {
+                "name": "customer_id",
+                "data_type": "INTEGER",
+                "semantic_fk": "main.customers.customer_id",
+            },
+            {
+                "name": "status",
+                "data_type": "TEXT",
+                "sample_values": ["open", "closed"],
+            },
+        ],
+        **overrides,
+    }
+
+
+def _connected_table() -> dict:
+    return {
+        "name": "connected",
+        "schema_name": "main",
+        "pk": ["atom_id", "atom_id2"],
+        "symmetric_column_pairs": [["atom_id", "atom_id2"]],
+        "columns": [
+            {
+                "name": "atom_id",
+                "data_type": "TEXT",
+                "semantic_fk": "main.atom.atom_id",
+            },
+            {
+                "name": "atom_id2",
+                "data_type": "TEXT",
+                "semantic_fk": "main.atom.atom_id",
+            },
+            {
+                "name": "bond_id",
+                "data_type": "TEXT",
+                "semantic_fk": "main.bond.bond_id",
+            },
+        ],
+    }
+
+
+_ORDERS_SNAPSHOT = (
+    "table | description | primary key\n"
+    "orders | Purchase records. | order_id\n"
+    "column | type | is_nullable | foreign key | description | sample values\n"
+    "order_id | INTEGER | unknown |  | Order id. | \n"
+    "customer_id | INTEGER | unknown | customers.customer_id |  | \n"
+    "status | TEXT | unknown |  |  | open, closed"
+)
+_ORDERS_USED_SNAPSHOT = (
+    "TABLES USED IN SQL:\n"
+    "- orders | description: Purchase records. | primary key: ['order_id']\n\n"
+    "COLUMNS USED IN SQL:\n"
+    "- orders.status (TEXT) | sample values: open, closed | is_nullable: unknown"
+)
+
+
+def test_a_table_without_symmetric_pairs_renders_as_before() -> None:
+    for table in (_orders_table(), _orders_table(symmetric_column_pairs=[])):
+        assert format_tables_for_prompt([table], dialect="sqlite") == _ORDERS_SNAPSHOT
+        assert (
+            format_used_schema_for_prompt(
+                [table], ["main.orders"], ["main.orders.status"], dialect="sqlite"
+            )
+            == _ORDERS_USED_SNAPSHOT
+        )
+
+
+def test_a_symmetric_table_gets_the_note_with_its_columns() -> None:
+    rendered = format_tables_for_prompt(
+        [_connected_table(), _orders_table()], dialect="sqlite"
+    )
+
+    connected, orders = rendered.split("\n\n")
+    assert connected.endswith(
+        "`connected` is symmetric on (atom_id, atom_id2): every link is stored in "
+        "both directions. To list the members of one link (e.g. the atom rows of "
+        "one connected record), join atom on `atom_id` only and return a single "
+        "column; add DISTINCT when listing values. Use both `atom_id` and "
+        "`atom_id2` only when the question is about ordered pairs or 'what is "
+        "linked to X'."
+    )
+    assert "symmetric" not in orders
+
+
+def test_the_used_schema_carries_the_symmetric_rule() -> None:
+    rendered = format_used_schema_for_prompt(
+        [_connected_table()],
+        ["main.connected"],
+        ["main.connected.atom_id"],
+        dialect="sqlite",
+    )
+
+    assert (
+        "`connected` stores every (atom_id, atom_id2) link in both directions: "
+        "to list one link's members join on `atom_id` only"
+    ) in rendered
+
+
+def test_an_unknown_link_target_still_renders() -> None:
+    table = _connected_table()
+    for column in table["columns"]:
+        column.pop("semantic_fk")
+
+    rendered = format_tables_for_prompt([table], dialect="sqlite")
+
+    assert "join the linked table on `atom_id` only" in rendered
