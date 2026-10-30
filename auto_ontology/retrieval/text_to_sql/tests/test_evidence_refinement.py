@@ -342,6 +342,33 @@ def test_repairs_constant_only_when_question_supplies_replacement() -> None:
     assert len(accepted) == 1
 
 
+def test_contradicting_literal_takes_the_question_value_and_keeps_the_rest() -> None:
+    line = "closed stores refers to status = 'closed'"
+    question = "How many open stores are there?"
+    literal_only = _repair(
+        original_line=line,
+        corrected_line="closed stores refers to status = 'open'",
+        corrected_value="open",
+        kind="constant_value",
+    )
+    column_too = _repair(
+        original_line=line,
+        corrected_line="closed stores refers to state = 'open'",
+        corrected_value="open",
+        kind="constant_value",
+    )
+
+    refined, accepted = apply_evidence_repairs(
+        line, [literal_only], question, _tables()
+    )
+    assert refined == "closed stores refers to status = 'open'"
+    assert len(accepted) == 1
+
+    refined, accepted = apply_evidence_repairs(line, [column_too], question, _tables())
+    assert refined == line
+    assert accepted == []
+
+
 def test_rejects_unverified_constant_and_formula_edits() -> None:
     unverified = _repair(
         original_line="amount > 10",

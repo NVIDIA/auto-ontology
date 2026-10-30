@@ -79,7 +79,11 @@ Allowed repairs:
    the exact stored representation;
 2. constant_value: replace a mistaken scalar constant only when the sanitized
    question explicitly supplies the intended constant, a value anchor proves it,
-   or as a fallback a column sample proves it;
+   or as a fallback a column sample proves it. A clear contradiction counts:
+   when an evidence line and the question describe the same concept but the
+   question names a different value, replace only the literal on the right-hand
+   side with the question's value, written as anchors or samples store it when
+   they show it. Keep the line's label, column and operator unchanged;
 3. predicate_operator: change only =, !=, <>, >, >=, <, or <= when the sanitized
    question makes the evidence operator unquestionably wrong. For example, "at
    least", "starting from", and "on or after" are inclusive; "more than" is strict.
@@ -113,6 +117,11 @@ STRICT SCOPE:
   paraphrases. Preserve surrounding qualifiers and all unrelated wording. If the
   evidence-defined concept is not semantically present in the question, leave the
   question unchanged. Do not ground any other question field or phrase.
+- When the question names the same concept as an evidence label but with a
+  different value (the label and its rule state one value, the question clearly
+  states another), the evidence contradicts the question. Leave that question
+  phrase unchanged in natural language so value correction can see the
+  question's value.
 - In grounded_evidence, replace only the evidence's own field references.
 - A field appearing in the tables section but not described by evidence MUST remain
   untouched in both outputs.

@@ -78,8 +78,8 @@ logger = logging.getLogger(__name__)
 # now" event; keep the two in step.
 NODE_START_EVENT = "step_start"
 
-# Stop after seven reconstruction calls.
-MAX_RECONSTRUCTION_ATTEMPTS = 7
+# Stop after five reconstruction calls.
+MAX_RECONSTRUCTION_ATTEMPTS = 5
 
 
 def route_sql_validation(state: AgentState) -> str:
@@ -89,7 +89,7 @@ def route_sql_validation(state: AgentState) -> str:
     Handles unified SQL validation attempts and retry logic:
     - "valid_sql" if parse/static/intent validation succeeds
     - "invalid_sql" if invalid (with retry logic)
-    - "unconstructable" after 7 reconstructions, or when a node already gave up
+    - "unconstructable" after 5 reconstructions, or when a node already gave up
       (e.g. an unreachable database, which no rewrite can fix)
 
     Args:

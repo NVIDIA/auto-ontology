@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 # The unified validation node always performs deterministic parsing/static
 # checks. Soft post-construction checks stop blocking after this many
 # reconstructions, but intent validation continues through every inner attempt.
-INTENT_VALIDATION_SKIPPED_AFTER = 5
+INTENT_VALIDATION_SKIPPED_AFTER = 3
 
 # See the former intent_validation.py for the rationale. When a deterministic
 # live join-path check is enabled, intent validation does not need to re-judge
