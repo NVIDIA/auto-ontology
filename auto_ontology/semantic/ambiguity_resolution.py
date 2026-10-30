@@ -175,6 +175,12 @@ def _resolve_one(group: list[dict[str, Any]]) -> dict[str, AmbiguityResolver]:
             exc_info=True,
         )
         return {}
+    if result is None:
+        logger.warning(
+            "Ambiguity resolution returned no result for %r — skipping it",
+            group[0].get("name"),
+        )
+        return {}
     return map_members(result, group)
 
 

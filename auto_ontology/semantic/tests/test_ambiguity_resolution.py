@@ -175,6 +175,18 @@ def test_fixes_go_to_the_description_that_misleads() -> None:
     )
 
 
+def test_a_group_without_a_result_is_skipped() -> None:
+    attributes = [
+        _attr("a", "results", "points"),
+        _attr("b", "driverStandings", "points"),
+    ]
+
+    mocks = _run(attributes, None)
+
+    mocks["llm"].assert_called_once()
+    mocks["write"].assert_called_once_with("db", {})
+
+
 def test_no_ambiguity_still_resets_the_database() -> None:
     mocks = _run([_attr("a", "results", "points")], None)
 
