@@ -36,10 +36,13 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
     get_custom_analyses_ids,
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
+from auto_ontology.dal.attributes import fetch_semantic_fks_from_tables
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
+    format_role_links,
     format_semantic_context,
     format_tables_for_prompt,
+    role_links_enabled,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -49,6 +52,7 @@ from auto_ontology.retrieval.text_to_sql.state import (
 from auto_ontology.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_context_sections,
     format_authoritative_evidence,
     format_custom_analyses_section,
     format_dialect_rules,
@@ -126,6 +130,18 @@ class SQLFromCandidatesAgent(BaseAgent):
             return False
         return True
 
+    def _role_links(self, relevant_tables: list[dict]) -> str:
+        """The ROLE LINKS block for *relevant_tables*; empty when off or none apply."""
+        if not role_links_enabled():
+            return ""
+        table_ids = {str(t["id"]) for t in relevant_tables if t.get("id")}
+        try:
+            rows = fetch_semantic_fks_from_tables(sorted(table_ids))
+        except Exception:
+            self.logger.warning("role links unavailable", exc_info=True)
+            return ""
+        return format_role_links(rows, table_ids)
+
     def build_messages(self, state: AgentState) -> list:
         """Assemble the construction prompt from the prepared context.
 
@@ -171,10 +187,11 @@ class SQLFromCandidatesAgent(BaseAgent):
             observation_block += (
                 f"\nTable selection reasoning:\n{relevance_reasoning}\n"
             )
-        observation_block += (
-            f"\nlist of important semantic entities with sql snippets:\n"
-            f"{custom_analyses_str}\n"
-        )
+        if custom_analyses_str:
+            observation_block += (
+                f"\nlist of important semantic entities with sql snippets:\n"
+                f"{custom_analyses_str}\n"
+            )
         if sql_attributes_str:
             observation_block += (
                 f"\nlist of sql attributes (derived metrics/formulas):\n"
@@ -231,6 +248,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                 )
                 + "\n\n"
             )
+        role_links = self._role_links(relevant_tables)
+        if role_links:
+            join_paths += role_links + "\n"
 
         # Build the available-tables schema section.
         tables_section = (
@@ -258,8 +278,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             ),
             main_question=main_question,
             observation_block=observation_block,
-            queries=relevant_queries,
-            qa_from_conversations=similar_questions_txt,
+            **format_context_sections(relevant_queries, similar_questions_txt),
             tables=tables_section,
             important_columns_block=important_columns_block(important_columns),
             join_paths=join_paths,
@@ -271,11 +290,11 @@ class SQLFromCandidatesAgent(BaseAgent):
             dialect=dialect,
             target_db=target_db,
             has_sql_examples=bool(sql_examples_section),
+            has_custom_analyses=bool(custom_analyses_str or ca_section),
+            has_sql_attributes=bool(sql_attributes),
         )
 
         messages = state["messages"] + [SystemMessage(content=system_prompt)]
-        if authoritative_evidence_section:
-            messages.append(SystemMessage(content=authoritative_evidence_section))
         if calculation_template_section:
             messages.append(SystemMessage(content=calculation_template_section))
         # Before the query patterns: anchors state what this database

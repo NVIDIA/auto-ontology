@@ -40,6 +40,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_general_prompt,
     create_sql_user_prompt,
+    format_context_sections,
     format_authoritative_evidence,
     format_dialect_rules,
     format_dual_question_block,
@@ -135,7 +136,7 @@ class SQLFromTablesAgent(BaseAgent):
             ),
             main_question=main_question,
             observation_block=observation_block,
-            queries=[],
+            **format_context_sections([], similar_questions),
             tables=format_tables_for_prompt(
                 relevant_tables,
                 target_db=path_state.get("target_db"),
@@ -143,7 +144,6 @@ class SQLFromTablesAgent(BaseAgent):
             ),
             important_columns_block="",
             join_paths="",
-            qa_from_conversations=similar_questions,
             custom_analyses="",
         )
 

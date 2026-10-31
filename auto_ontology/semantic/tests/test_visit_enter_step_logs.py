@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pytest import LogCaptureFixture, MonkeyPatch
 
-from auto_ontology.semantic import visit_enter
+from auto_ontology.semantic import column_profile, visit_enter
 from auto_ontology.semantic.models import ColumnAttributeSpec
 
 TABLE = {"id": "t1", "name": "orders", "schema_name": "public", "description": ""}
@@ -39,6 +39,7 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         visit_enter, "calculate_columns_profiling", lambda *_a, **_k: {}
     )
+    monkeypatch.setattr(column_profile, "profile_table", lambda *_a, **_k: {})
     monkeypatch.setattr(
         visit_enter,
         "suggest_potential_foreign_keys",
@@ -105,6 +106,7 @@ def test_steps_are_logged_in_pipeline_order(
     starts = [m for m in (r.getMessage() for r in caplog.records) if m.endswith("…")]
     order = [
         "Sampling column values (2 columns)",
+        "Profiling columns (2 columns)",
         "Detecting foreign keys",
         "Generating terms and descriptions (1 columns)",
         "Writing 1 term(s) to the graph",

@@ -101,6 +101,18 @@ def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
                     "name": "status",
                     "sample_values": ["open"],
                     "is_nullable": None,
+                    "profile": None,
+                }
+            ]
+        }
+    )
+    assert candidates_preparation._needs_column_metadata_backfill(
+        {
+            "columns": [
+                {
+                    "name": "status",
+                    "sample_values": ["open"],
+                    "is_nullable": True,
                 }
             ]
         }

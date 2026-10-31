@@ -51,6 +51,11 @@ def test_distinct_schema_is_unaffected_by_dialect() -> None:
     assert qualify_table("mydb", "public", "orders", "spark") == "mydb.public.orders"
 
 
+def test_sqlite_drops_the_database_part() -> None:
+    assert qualify_table("financial", "main", "client", "sqlite") == "main.client"
+    assert qualify_table("financial", "main", "client", "SQLite") == "main.client"
+
+
 def test_keeps_three_parts_for_distinct_schema() -> None:
     assert qualify_table("mydb", "public", "orders") == "mydb.public.orders"
 

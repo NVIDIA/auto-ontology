@@ -261,8 +261,13 @@ _ORDINALS = ("First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh")
 PROTOCOL_DEFAULT_ORDER = tuple(_PROTOCOL_BLOCKS)
 
 
-def protocol_prompt(order: Optional[Sequence[str]] = None) -> str:
+def protocol_prompt(
+    order: Optional[Sequence[str]] = None, *, include_analyses: bool = True
+) -> str:
     """Assemble the protocol, optionally with the body blocks reordered.
+
+    ``include_analyses=False`` drops the block about supplied analyses, for a
+    request that carries none.
 
     ``order`` names the body blocks, in the order they should appear. Names
     that are not blocks are ignored and blocks the order leaves out are
@@ -278,6 +283,8 @@ def protocol_prompt(order: Optional[Sequence[str]] = None) -> str:
     names = [name for name in (order or ()) if name in _PROTOCOL_BLOCKS]
     seen = set(names)
     names.extend(name for name in PROTOCOL_DEFAULT_ORDER if name not in seen)
+    if not include_analyses:
+        names.remove("analyses")
 
     ordinal_rank = {
         name: index
@@ -663,6 +670,16 @@ def _evidence(state: Any) -> str:
     return nested if isinstance(nested, str) else ""
 
 
+def has_analyses(state: Any) -> bool:
+    """Whether the request carries custom analyses for the protocol to speak of."""
+    if not isinstance(state, dict):
+        return False
+    path_state = state.get("path_state") or {}
+    return bool(
+        path_state.get("custom_analyses") or path_state.get("custom_analyses_str")
+    )
+
+
 def _merge_leading_system(messages: list[BaseMessage]) -> list[BaseMessage]:
     """*messages* with the system stack gathered into one message at the front.
 
@@ -715,7 +732,7 @@ def run_deep_sql_agent(
     # the question. Those end by asking for the query, so a protocol placed
     # before them is the instruction the model reads first and abandons last.
     conversation: list[BaseMessage] = _merge_leading_system(messages) + [
-        SystemMessage(content=protocol_prompt())
+        SystemMessage(content=protocol_prompt(include_analyses=has_analyses(state)))
     ]
     trajectory: list[dict[str, Any]] = []
     answer: Optional[SQLGenerationModel] = None

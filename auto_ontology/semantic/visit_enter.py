@@ -803,6 +803,21 @@ def process_table(
                 table_name,
                 exc_info=True,
             )
+        # Whole-table aggregates are unbounded scans, so they sit behind the
+        # same setting as the DISTINCT probes. Imported here because
+        # column_profile reuses this module's sampling helpers.
+        if probe_distinct_values:
+            from auto_ontology.semantic.column_profile import profile_table
+
+            try:
+                with _step(table_name, f"Profiling columns ({column_count} columns)"):
+                    profile_table(connector, table, ctx.get("columns", []))
+            except Exception:
+                logger.warning(
+                    "[%s] whole-table profiling failed — continuing without it",
+                    table_name,
+                    exc_info=True,
+                )
     else:
         logger.info(
             "[%s] Skipping value sampling — no live connector for %r",

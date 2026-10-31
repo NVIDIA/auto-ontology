@@ -277,6 +277,12 @@ catalog_column = Table(
     # `950324` and `1995-03-24` are the same day and share no predicate, and a
     # wrong guess yields SQL that runs, returns nothing, and looks right.
     Column("format", Text, nullable=True),
+    # A JSON object measured over the whole table, not the row sample that
+    # fills `sample_values`: row, NULL, empty-string and distinct counts, the
+    # range and length, the shape of text values, the most common values with
+    # their counts, and a model-written summary of all of it. See
+    # `auto_ontology.semantic.column_profile`.
+    Column("profile", Text, nullable=True),
     Column("is_unique", Boolean, nullable=True),
     # A real Boolean. It used to hold the *strings* `information_schema`
     # reports, 'YES' and 'NO', which read back as truthy either way -- so

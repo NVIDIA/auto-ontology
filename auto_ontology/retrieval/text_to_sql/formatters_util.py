@@ -6,9 +6,86 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
+from auto_ontology.utils.column_profile import profile_text
 from auto_ontology.utils.sample_values import stringify_sample_values
+
+
+#: Above this many roles a group is listed by name only: twenty-two lineup
+#: slots with a sentence each would outweigh the rest of the schema.
+_MAX_DESCRIBED_ROLES = 6
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def role_links_enabled() -> bool:
+    """Whether the prompt lists every role a table has towards another.
+
+    On by default; ``SQL_ROLE_LINKS=false`` hides it for an A/B.
+    """
+    return _env_flag("SQL_ROLE_LINKS")
+
+
+def format_role_links(rows: list[dict[str, Any]], table_ids: set[str]) -> str:
+    """Columns of one table that all point at the same column of another.
+
+    *rows* are semantic FK rows (see ``fetch_semantic_fks_from_tables``). The
+    join paths show only one of these columns, the stored default, so without
+    this the model joins ``posts`` to ``users`` through whichever role was
+    chosen at ingest rather than the one the question names.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if str(row.get("target_table_id")) not in table_ids:
+            continue
+        key = (str(row["source_table_id"]), str(row["target_column_id"]))
+        groups.setdefault(key, []).append(row)
+    blocks = []
+    for members in groups.values():
+        columns = {str(m["source_column_id"]): m for m in members}
+        if len(columns) < 2:
+            continue
+        first = members[0]
+        lines = [
+            f"{first['source_table_name']} -> "
+            f"{first['target_table_name']}.{first['target_column_name']}:"
+        ]
+        if len(columns) > _MAX_DESCRIBED_ROLES:
+            names = ", ".join(str(m["source_column_name"]) for m in columns.values())
+            lines.append(f"  - {first['source_table_name']}: {names}")
+        else:
+            for m in columns.values():
+                description = _plain_cell(m.get("source_column_description"))
+                line = f"  - {m['source_table_name']}.{m['source_column_name']}"
+                lines.append(f"{line}: {description}" if description else line)
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "ROLE LINKS (several columns point at the same target; each is a "
+        "different role):\n"
+        + "\n".join(blocks)
+        + "\nJoin on the column whose role the question means, even where a "
+        "join path above shows another of them.\n"
+    )
+
+
+def column_profile_enabled() -> bool:
+    """Whether the schema section shows each column's profile.
+
+    On by default; ``SQL_COLUMN_PROFILE=false`` hides it, so one ingest can
+    score the prompt with and without it.
+    """
+    return _env_flag("SQL_COLUMN_PROFILE")
 
 
 def _format_sample_values(raw: Any) -> str:
@@ -90,6 +167,10 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
 # the database and a two-part name resolves.
 _CATALOG_QUALIFIED_DIALECTS = frozenset({"spark", "trino"})
 
+# Dialects with no database level in a name at all: SQLite reads
+# ``db.schema.table`` as a syntax error, and the open file is the database.
+_SCHEMA_ONLY_DIALECTS = frozenset({"sqlite"})
+
 
 def qualify_table(
     database_name: str,
@@ -118,7 +199,9 @@ def qualify_table(
     """
     parts = [database_name, schema_name, table_name]
     collapsible = (dialect or "").lower() not in _CATALOG_QUALIFIED_DIALECTS
-    if (
+    if (dialect or "").lower() in _SCHEMA_ONLY_DIALECTS:
+        parts = [schema_name, table_name]
+    elif (
         collapsible
         and database_name
         and schema_name
@@ -304,6 +387,7 @@ _COLUMN_HEADERS = [
     "description",
     "sample values",
     "format",
+    "profile",
 ]
 _JSONB_SAMPLE_NOTE = (
     "JSONB sample values are keys (dot = nesting level, use as "
@@ -318,6 +402,7 @@ def _column_row(column: Any) -> dict[str, str]:
     notation = _plain_cell(column.get("format"))
     if notation and "format:" in description.lower():
         notation = ""
+    profile = column.get("profile") if column_profile_enabled() else None
     nullability = column.get("is_nullable")
     if nullability is True:
         nullable = "true"
@@ -325,6 +410,7 @@ def _column_row(column: Any) -> dict[str, str]:
         nullable = "false"
     else:
         nullable = "unknown"
+    shown_profile = profile_text(profile) if profile else ""
     return {
         "column": _plain_cell(column.get("name", "UNKNOWN")),
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
@@ -334,6 +420,7 @@ def _column_row(column: Any) -> dict[str, str]:
             _format_sample_values(column.get("sample_values"))
         ),
         "format": notation,
+        "profile": _plain_cell(shown_profile),
     }
 
 
@@ -390,6 +477,12 @@ def format_tables_for_prompt(
             blocks.append(_pipe_table(_COLUMN_HEADERS, column_rows))
             if any("json" in row["type"].lower() for row in column_rows):
                 blocks.append(_JSONB_SAMPLE_NOTE)
+        others = table.get("other_columns") or []
+        if others:
+            blocks.append(
+                "other columns (inspect_table shows them): "
+                + ", ".join(_plain_cell(name) for name in others)
+            )
 
         formatted_tables.append("\n".join(block for block in blocks if block))
 

@@ -53,8 +53,14 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables_from_candidates,
 )
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
+from auto_ontology.retrieval.text_to_sql.agents.role_selection import (
+    apply_question_roles,
+)
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
-from auto_ontology.retrieval.text_to_sql.formatters_util import qualify_table
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    qualify_table,
+    role_links_enabled,
+)
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -226,15 +232,21 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
-    """Whether a relevant table lacks samples or nullability metadata."""
+    """Whether a relevant table lacks samples, nullability or profile metadata.
+
+    Checked by key, not value, for the last two: the store row carries both
+    keys even when it holds no value, so a table it has filled is not fetched
+    again.
+    """
     columns = table.get("columns") or []
     has_samples = any(
         isinstance(column, dict) and column.get("sample_values") for column in columns
     )
-    has_complete_nullability = bool(columns) and all(
-        isinstance(column, dict) and "is_nullable" in column for column in columns
+    has_complete_metadata = bool(columns) and all(
+        isinstance(column, dict) and "is_nullable" in column and "profile" in column
+        for column in columns
     )
-    return not has_samples or not has_complete_nullability
+    return not has_samples or not has_complete_metadata
 
 
 logger = logging.getLogger(__name__)
@@ -431,6 +443,11 @@ class CandidatePreparationAgent(BaseAgent):
                                 dest_id,
                                 len(join_path),
                             )
+                    if role_links_enabled():
+                        apply_question_roles(
+                            f"{question}\n{state.get('evidence') or ''}",
+                            attribute_join_paths,
+                        )
 
                     # Looser, discovery-only signal: find_join_path above cannot
                     # reach a sibling table that shares a hub with the anchor

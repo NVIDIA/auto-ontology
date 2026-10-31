@@ -45,6 +45,7 @@ from auto_ontology.dal.sql_fragments import (
 from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
+from auto_ontology.utils.column_profile import dump_profile, parse_profile
 from auto_ontology.utils.sample_values import (
     dump_sample_values,
     parse_sample_values,
@@ -540,6 +541,23 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
     )
 
 
+def store_column_profiles(table_id: str, profiles: dict[str, dict[str, Any]]) -> None:
+    """Write whole-table profiles, JSON-encoded, onto a table's columns.
+
+    A column with no profile keeps the one it has: a probe that failed this run
+    is not a reason to discard what an earlier run measured.
+    """
+    _set_column_property(
+        table_id,
+        {
+            name: dumped
+            for name, profile in profiles.items()
+            if (dumped := dump_profile(profile)) is not None
+        },
+        "profile",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Metadata writes
 # ---------------------------------------------------------------------------
@@ -849,6 +867,24 @@ def fetch_tables_for_schema(
     return rows
 
 
+def fetch_tables_for_database(database_name: str) -> list[dict[str, Any]]:
+    """Every table of one catalog database, by name."""
+    return [
+        dict(r)
+        for r in store().query_read(
+            select(
+                s.catalog_table.c.id,
+                s.catalog_table.c.name,
+                s.catalog_table.c.description,
+                s.catalog_schema.c.name.label("schema_name"),
+            )
+            .select_from(_table_join())
+            .where(s.catalog_database.c.name == database_name)
+            .order_by(s.catalog_table.c.name)
+        )
+    ]
+
+
 def fetch_all_tables_without_term(
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -992,6 +1028,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
+                s.catalog_column.c.profile,
             )
             .select_from(
                 _table_join().join(
@@ -1036,6 +1073,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
+                    "profile": parse_profile(row["profile"]),
                 }
             )
     return list(tables.values())

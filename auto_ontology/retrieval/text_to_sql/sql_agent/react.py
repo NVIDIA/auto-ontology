@@ -47,6 +47,7 @@ from auto_ontology.retrieval.text_to_sql.sql_agent.deep import (
     _merge_leading_system,
     _normalise,
     build_tools,
+    has_analyses,
     protocol_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.sql_agent.loop import (
@@ -107,7 +108,7 @@ def run_react_sql_agent(
         toolbox,
         tool_schemas=schemas,
         handlers=handlers,
-        protocol=protocol_prompt(),
+        protocol=protocol_prompt(include_analyses=has_analyses(state)),
         normalise=lambda sql: _normalise(sql, toolbox),
         tool_choice="required",
         submit_tool=_ANSWER_TOOL,

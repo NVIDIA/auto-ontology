@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from auto_ontology.utils.column_profile import parse_profile
 from auto_ontology.utils.embedding import EmbedParams, batch_embed
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
@@ -203,6 +204,17 @@ def _format_sample_values(raw: Any, data_type: str | None = None) -> str:
     return " Sample values: " + ", ".join(values) + "."
 
 
+def _profile_summary(raw: Any) -> str:
+    """The profile's model-written sentence, as embedding text; empty without one.
+
+    Only the sentence: the measured counts would pull every column with a
+    similar row count towards each other rather than towards what it means.
+    """
+    profile = parse_profile(raw)
+    summary = str((profile or {}).get("summary") or "").strip()
+    return f" {summary}" if summary else ""
+
+
 def _build_rows(
     database_name: str,
     term: dict[str, Any],
@@ -246,6 +258,7 @@ def _build_rows(
         text = (
             f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
             f"{a.get('description') or ''}"
+            f"{_profile_summary(a.get('profile'))}"
             f"{sample_block}"
         ).strip()
         path = (

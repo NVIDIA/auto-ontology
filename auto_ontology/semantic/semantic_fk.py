@@ -35,6 +35,7 @@ from sqlglot import exp
 from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
+    delete_semantic_fk,
     fetch_semantic_fk_join_groups,
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
@@ -50,6 +51,7 @@ from auto_ontology.utils.llm_invoke import (
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.retriever import Retriever
 from auto_ontology.utils.sample_values import stringify_sample_values
+from auto_ontology.utils.sql_identifiers import quoted_identifier
 from auto_ontology.semantic.models import (
     FkHitSelection,
     SemanticFkJoinDefaultSelection,
@@ -93,8 +95,61 @@ def resolve_semantic_fks(database_name: str) -> int:
     Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
+    created -= prune_disjoint_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created
+
+
+def prune_disjoint_semantic_fks(database_name: str) -> int:
+    """Delete semantic FKs whose column shares no value with its target.
+
+    An inferred edge is a guess from names and descriptions; a seven-digit
+    school code read as the fourteen-digit CDS code it sits beside is one.
+    No overlap at all is the only test applied: real references in loaded
+    data can still miss most of their target, so a low share is no proof.
+    Returns the number of edges deleted.
+    """
+    connector = _resolve_connector(database_name)
+    if connector is None:
+        return 0
+    dialect = getattr(connector, "dialect", None)
+    pruned = 0
+    for row in fetch_semantic_fk_join_groups(database_name):
+        source = connector.qualify(
+            row.get("source_schema_name"), row["source_table_name"]
+        )
+        target = connector.qualify(
+            row.get("target_schema_name"), row["target_table_name"]
+        )
+        sc = quoted_identifier(row["source_column_name"], dialect)
+        tc = quoted_identifier(row["target_column_name"], dialect)
+        sql = (
+            f"SELECT COUNT(*) AS n FROM (SELECT {sc} FROM {source} "
+            f"WHERE {sc} IS NOT NULL LIMIT 1) AS present "
+            f"UNION ALL SELECT COUNT(*) FROM (SELECT {sc} FROM {source} "
+            f"WHERE {sc} IN (SELECT {tc} FROM {target}) LIMIT 1) AS shared"
+        )
+        try:
+            present, shared = (int(v) for v in connector.execute(sql).iloc[:, 0])
+        except Exception:
+            logger.info(
+                "semantic FK overlap check skipped for %s.%s",
+                row["source_table_name"],
+                row["source_column_name"],
+                exc_info=True,
+            )
+            continue
+        if present and not shared:
+            delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
+            pruned += 1
+            logger.info(
+                "semantic FK removed, no shared values: %s.%s -> %s.%s",
+                row["source_table_name"],
+                row["source_column_name"],
+                row["target_table_name"],
+                row["target_column_name"],
+            )
+    return pruned
 
 
 def _resolve_semantic_fks(database_name: str) -> int:

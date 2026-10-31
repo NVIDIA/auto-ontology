@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from typing import Any
 
 # Controls how many entity noun phrases are extracted for SQL generation.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
@@ -101,10 +102,8 @@ create_sql_user_prompt = (
     "Do NOT invent tables, schemas, or columns.\n\n"
     "{tables}\n\n"
     "{important_columns_block}"
-    "## Example SQL Queries\n"
-    "{queries}\n\n"
-    "## Conversation History\n"
-    "{qa_from_conversations}\n\n"
+    "{example_queries_block}"
+    "{conversation_block}"
     "{custom_analyses}"
     "## Rules\n\n"
     "**Correctness**\n"
@@ -139,9 +138,7 @@ create_sql_user_prompt = (
     "- Integer division truncates. Cast to REAL before dividing wherever the "
     "result can be fractional — CAST(SUM(x) AS REAL) / COUNT(y) — including "
     "inside HAVING and before scaling a ratio by 100.\n\n"
-    "**Example Queries**\n"
-    "- Review example queries for WHERE values that match the question's intent. "
-    "If a value or filter condition is relevant to what is being asked, include it in your SQL.\n\n"
+    "{example_queries_rule}"
     "**Dialect & Syntax**\n"
     "- Never use :: casts, QUALIFY, DISTINCT ON, GROUP BY ALL, PIVOT, UNPIVOT, "
     "CROSS JOIN LATERAL, LATERAL JOIN, NATURAL JOIN, implicit comma joins, "
@@ -178,6 +175,30 @@ create_sql_user_prompt = (
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
 )
+
+
+def format_context_sections(queries: Any, conversations: Any) -> dict[str, str]:
+    """The example-query and conversation slots of ``create_sql_user_prompt``.
+
+    Each heading, and the rule that refers to the examples, is emitted only when
+    there is something under it.
+    """
+    return {
+        "example_queries_block": (
+            f"## Example SQL Queries\n{queries}\n\n" if queries else ""
+        ),
+        "example_queries_rule": (
+            "**Example Queries**\n"
+            "- Review example queries for WHERE values that match the question's "
+            "intent. If a value or filter condition is relevant to what is being "
+            "asked, include it in your SQL.\n\n"
+            if queries
+            else ""
+        ),
+        "conversation_block": (
+            f"## Conversation History\n{conversations}\n\n" if conversations else ""
+        ),
+    }
 
 
 # Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
@@ -292,8 +313,13 @@ def create_sql_from_candidates_prompt(
     dialect: str | None = None,
     target_db: str | None = None,
     has_sql_examples: bool = False,
+    has_custom_analyses: bool = False,
+    has_sql_attributes: bool = False,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates.
+
+    The rules for custom analyses and SQL attributes are included only when the
+    request carries them, so a prompt never explains a section it lacks.
 
     Table naming is gated on the **dialect**, not on ``target_db``: schema-less
     dialects (SQLite/DuckDB) use bare table names, while schema
@@ -351,15 +377,33 @@ def create_sql_from_candidates_prompt(
         else ""
     )
 
+    snippets_rule = (
+        "- When SQL snippets are provided as reference, do NOT copy their aliases.\n"
+        "  Define your own aliases in FROM/JOIN and use only those.\n"
+        if has_custom_analyses
+        else ""
+    )
+    custom_analyses_rule = (
+        "- DOMAIN-SPECIFIC CUSTOM ANALYSES: use one that matches to locate the tables,\n"
+        "  columns, joins and formulas this question needs, and to see how they are meant\n"
+        "  to be combined. It shows how the data is laid out, not what to return: let the\n"
+        "  question decide the output columns and the filters. Do NOT copy its aliases.\n"
+        if has_custom_analyses
+        else ""
+    )
+    sql_attributes_rule = (
+        "- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.\n"
+        "  If one matches the question's intent, incorporate its expression or SQL pattern\n"
+        "  into your query. Treat them like reusable building blocks for calculations.\n"
+        if has_sql_attributes
+        else ""
+    )
+
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
 {sql_examples_block} Key rules:
 {table_name_rule}
-- When SQL snippets are provided as reference, do NOT copy their aliases.
-  Define your own aliases in FROM/JOIN and use only those.
-- File contents (if present) are inputs only — use them as literals, filters,
-  or CASE logic within the SQL.
-- SEMANTIC HINT (if present) shows a likely starting table and suggested join
+{snippets_rule}- SEMANTIC HINT (if present) shows a likely starting table and suggested join
   paths derived from the semantic model. Treat it as a strong hint: prefer it
   when it fits. Never force the semantic hint if it doesn't match the question.
 - SUGGESTED JOIN PATHS show verified column-level join conditions:
@@ -367,14 +411,7 @@ def create_sql_from_candidates_prompt(
   Follow hops in order when the path spans more than one table. Once you choose
   a path, every intermediate/bridge table and every listed hop is mandatory.
   Never shorten the path or join its endpoints directly.
-- DOMAIN-SPECIFIC CUSTOM ANALYSES: use one that matches to locate the tables,
-  columns, joins and formulas this question needs, and to see how they are meant
-  to be combined. It shows how the data is laid out, not what to return: let the
-  question decide the output columns and the filters. Do NOT copy its aliases.
-- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
-  If one matches the question's intent, incorporate its expression or SQL pattern
-  into your query. Treat them like reusable building blocks for calculations.
-- Never match a human name/label against an id or foreign-key column (`*_id`,
+{custom_analyses_rule}{sql_attributes_rule}- Never match a human name/label against an id or foreign-key column (`*_id`,
   `link_to_*`). To filter by a name, join to the table holding the name columns
   (first_name/last_name/*_name) and filter there. Join each foreign key to the
   primary key it actually references (e.g. `expense.link_to_member` =
