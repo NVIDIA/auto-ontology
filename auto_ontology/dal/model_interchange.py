@@ -31,6 +31,7 @@ from auto_ontology.dal import schema as s
 from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
+from auto_ontology.dal.datasources import set_symmetric_column_pairs
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_attributes import detach_existing_sql_edges, link_to_term
 from auto_ontology.semantic.constants import (
@@ -164,6 +165,7 @@ def _export_catalog(database_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.description.label("table_description"),
                 s.catalog_table.c.pk,
                 s.catalog_table.c.table_type,
+                s.catalog_table.c.symmetric_column_pairs,
                 s.catalog_column.c.id.label("column_id"),
                 # The same column twice: `column_id` is what the document is
                 # keyed by, `column_live_id` is what the SQL parser resolves to.
@@ -638,6 +640,7 @@ def _assemble_databases(
                 "description": row.get("table_description") or "",
                 "pk": row.get("pk") or [],
                 "type": row.get("table_type") or "",
+                "symmetric_column_pairs": row.get("symmetric_column_pairs") or [],
                 "columns": [],
             },
         )
@@ -1087,6 +1090,13 @@ def _import_catalog(
     for table_id, (live_id, was_created) in table_results.items():
         id_map[table_id] = live_id
         (created if was_created else skipped)["tables"] += 1
+    for db in databases:
+        for schema in db.schemas:
+            for table in schema.tables:
+                if table.id in table_results:
+                    set_symmetric_column_pairs(
+                        table_results[table.id][0], table.symmetric_column_pairs
+                    )
 
     column_items: list[tuple[str, dict[str, Any]]] = []
     for db in databases:

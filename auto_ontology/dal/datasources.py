@@ -557,6 +557,37 @@ def mark_table_as_junction(table_id: str) -> None:
     )
 
 
+def set_symmetric_column_pairs(table_id: str, pairs: list[list[str]]) -> None:
+    """Record the column pairs a data probe proved symmetric on *table_id*.
+
+    An empty *pairs* writes nothing: a run that found no pair (or could not
+    probe) must not erase what an earlier run proved. A non-empty one replaces
+    the stored value, since it comes from probing the data again.
+    """
+    if not pairs:
+        return
+    store().query_write(
+        update(s.catalog_table)
+        .where(s.catalog_table.c.id == table_id)
+        .values(symmetric_column_pairs=[list(pair) for pair in pairs])
+    )
+
+
+def fetch_symmetric_column_pairs(table_ids: list[str]) -> dict[str, list[list[str]]]:
+    """``{table_id: pairs}`` for the given tables that have any."""
+    if not table_ids:
+        return {}
+    return {
+        str(row["id"]): row["symmetric_column_pairs"]
+        for row in store().query_read(
+            select(
+                s.catalog_table.c.id, s.catalog_table.c.symmetric_column_pairs
+            ).where(s.catalog_table.c.id.in_(list(table_ids)))
+        )
+        if row["symmetric_column_pairs"]
+    }
+
+
 def apply_metadata_batch(
     database_name: str,
     table_rows: list[dict],
@@ -866,6 +897,7 @@ def fetch_all_tables_without_term(
             s.catalog_table.c.id,
             s.catalog_table.c.name,
             s.catalog_table.c.description,
+            s.catalog_table.c.pk,
             s.catalog_schema.c.name.label("schema_name"),
         )
         .select_from(_table_join())
@@ -1027,6 +1059,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.name,
                 s.catalog_table.c.description,
                 s.catalog_table.c.pk,
+                s.catalog_table.c.symmetric_column_pairs,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
@@ -1066,6 +1099,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 # which costs it every edge and makes it unusable in
                 # `FOR EACH`. It has to survive every path to relevant_tables.
                 "pk": row.get("pk") or [],
+                "symmetric_column_pairs": row.get("symmetric_column_pairs") or [],
                 "columns": [],
             },
         )

@@ -497,6 +497,40 @@ def test_nullability_survives_the_whole_round_trip(world) -> None:
         _cleanup(f"{world.prefix}-copy")
 
 
+def test_symmetric_column_pairs_survive_the_whole_round_trip(world) -> None:
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.orders)
+        .values(symmetric_column_pairs=[["id", "customer_id"]])
+    )
+    target = f"{world.prefix}-copy"
+    document = _reid(_document(world), target)
+    document.data_layer.databases[0].schemas[0].database_name = target
+    exported = {
+        table.name: table.symmetric_column_pairs
+        for table in document.data_layer.databases[0].schemas[0].tables
+    }
+    assert exported == {"orders": [["id", "customer_id"]], "customers": []}
+
+    try:
+        mi.apply_import_model(document, replace=False)
+        copied_id = store().query_read(
+            select(s.catalog_database.c.id).where(s.catalog_database.c.name == target)
+        )[0]["id"]
+        reexported = mi.assemble_export_document(
+            mi.fetch_export_rows([copied_id]),
+            dialect_by_db_name={},
+            sql_column_resolver=lambda sql, database_name: [],
+        )
+        pairs = {
+            table.name: table.symmetric_column_pairs
+            for table in reexported.data_layer.databases[0].schemas[0].tables
+        }
+        assert pairs == {"orders": [["id", "customer_id"]], "customers": []}
+    finally:
+        _cleanup(f"{world.prefix}-copy")
+
+
 def test_an_unresolvable_reference_is_rejected(world) -> None:
     """A payload naming an id it does not carry must fail, not half-apply."""
     document = _document(world)

@@ -41,7 +41,11 @@ from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
 )
-from auto_ontology.dal.datasources import fetch_tables_by_ids, find_table_id_by_name
+from auto_ontology.dal.datasources import (
+    fetch_symmetric_column_pairs,
+    fetch_tables_by_ids,
+    find_table_id_by_name,
+)
 from auto_ontology.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
@@ -200,6 +204,25 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
                 base_by_id[tid] = len(result)
             result.append(tbl)
     return result
+
+
+def _attach_symmetric_column_pairs(tables: list[dict]) -> None:
+    """Set ``symmetric_column_pairs`` on each table that has any, in place.
+
+    Vector-index hits arrive without catalog table fields, and the column
+    back-fill only runs for tables missing column metadata, so this is read
+    for every candidate table.
+    """
+    table_ids = [str(table["id"]) for table in tables if table.get("id")]
+    try:
+        pairs_by_id = fetch_symmetric_column_pairs(table_ids)
+    except Exception:
+        logger.warning("Could not read symmetric column pairs", exc_info=True)
+        return
+    for table in tables:
+        pairs = pairs_by_id.get(str(table.get("id") or ""))
+        if pairs:
+            table["symmetric_column_pairs"] = pairs
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
@@ -626,6 +649,7 @@ class CandidatePreparationAgent(BaseAgent):
                 len(enriched),
                 len(metadata_incomplete_ids),
             )
+        _attach_symmetric_column_pairs(relevant_tables)
 
         # Snapshot the candidate pool BEFORE the relevance filter runs. §5c's
         # bridge reconciliation must only ever restore a table that was

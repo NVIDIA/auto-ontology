@@ -571,6 +571,46 @@ def test_mark_table_as_junction_is_idempotent_and_promote_only(world) -> None:
     assert after[0]["is_junction_table"] is True
 
 
+def test_symmetric_pairs_survive_a_run_that_does_not_detect_them(world) -> None:
+    table_id = world.tables["order_tag"]
+    assert d.fetch_symmetric_column_pairs([table_id]) == {}
+
+    d.set_symmetric_column_pairs(table_id, [["order_id", "tag_id"]])
+    d.set_symmetric_column_pairs(table_id, [])
+
+    assert d.fetch_symmetric_column_pairs([table_id]) == {
+        table_id: [["order_id", "tag_id"]]
+    }
+    row = d.fetch_tables_by_ids([table_id])[0]
+    assert row["symmetric_column_pairs"] == [["order_id", "tag_id"]]
+
+
+def test_a_new_probe_replaces_the_symmetric_pairs(world) -> None:
+    table_id = world.tables["order_tag"]
+    d.set_symmetric_column_pairs(table_id, [["order_id", "tag_id"]])
+    d.set_symmetric_column_pairs(table_id, [["tag_id", "order_id"]])
+
+    assert d.fetch_symmetric_column_pairs([table_id])[table_id] == [
+        ["tag_id", "order_id"]
+    ]
+
+
+def test_tables_without_symmetric_pairs_read_as_empty(world) -> None:
+    row = d.fetch_tables_by_ids([world.tables["orders"]])[0]
+    assert row["symmetric_column_pairs"] == []
+
+
+def test_a_semantic_reset_clears_the_symmetric_pairs(world) -> None:
+    from auto_ontology.dal.reset import _delete_semantic_rows
+
+    table_id = world.tables["order_tag"]
+    d.set_symmetric_column_pairs(table_id, [["order_id", "tag_id"]])
+
+    _delete_semantic_rows(world.prefix)
+
+    assert d.fetch_symmetric_column_pairs([table_id]) == {}
+
+
 def test_a_pure_junction_table_is_a_candidate(world) -> None:
     rows = d.fetch_bridge_table_candidates(world.prefix)
     assert [r["table_name"] for r in rows] == ["order_tag"]

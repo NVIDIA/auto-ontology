@@ -24,6 +24,7 @@ from auto_ontology.connectors.db_errors import is_infrastructure_error
 from auto_ontology.dal.attributes import merge_column_attribute
 from auto_ontology.dal.datasources import (
     mark_table_as_junction,
+    set_symmetric_column_pairs,
     store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
@@ -38,6 +39,7 @@ from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from auto_ontology.semantic.fk_suggester import suggest_potential_foreign_keys
 from auto_ontology.semantic.models import ColumnAttributeSpec, ProcessTableResult
+from auto_ontology.semantic.symmetric_links import detect_symmetric_column_pairs
 from auto_ontology.semantic.term_extractor import (
     apply_display_names_to_specs,
     extract_term,
@@ -836,6 +838,23 @@ def process_table(
             table_name,
             fk_suggestions.junction_table_rationale or "LLM table-grain decision",
         )
+
+    if connector is not None and not _sampling_breaker.is_open(connector):
+        symmetric_pairs = detect_symmetric_column_pairs(
+            table,
+            ctx.get("columns", []),
+            declared_fks,
+            suggested_fk_names,
+            connector,
+            _execute_capped,
+        )
+        if symmetric_pairs:
+            set_symmetric_column_pairs(table_id, symmetric_pairs)
+            logger.info(
+                "[%s] stores links in both directions on %s",
+                table_name,
+                symmetric_pairs,
+            )
 
     # --- Build attribute specs for non-FK columns ---
     specs = column_attribute_specs(
