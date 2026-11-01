@@ -6,12 +6,13 @@ import json
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from auto_ontology.retrieval.text_to_sql.agents import sql_execution
 
 
 def test_duplicate_result_columns_are_deduplicated_before_serialization(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     frame = pd.DataFrame([[1, 2, 3]], columns=["ID", "ID", "ID__2"])
     monkeypatch.setattr(
@@ -31,7 +32,9 @@ def test_duplicate_result_columns_are_deduplicated_before_serialization(
     assert list(frame.columns) == ["ID", "ID", "ID__2"]
 
 
-def test_unique_result_columns_remain_unchanged(monkeypatch) -> None:
+def test_unique_result_columns_remain_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     frame = pd.DataFrame([[1, "Ada"]], columns=["ID", "Name"])
     monkeypatch.setattr(
         sql_execution, "execute_chat_sql", lambda _connector, _sql: frame
@@ -46,7 +49,9 @@ def test_unique_result_columns_remain_unchanged(monkeypatch) -> None:
     assert json.loads(response.result[0]) == [{"ID": 1, "Name": "Ada"}]
 
 
-def test_metadata_errors_are_returned_as_query_errors(monkeypatch) -> None:
+def test_metadata_errors_are_returned_as_query_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     frame = pd.DataFrame([[1]], columns=["ID"])
     monkeypatch.setattr(
         sql_execution, "execute_chat_sql", lambda _connector, _sql: frame
