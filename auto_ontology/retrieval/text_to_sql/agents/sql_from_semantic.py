@@ -36,10 +36,13 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
     get_custom_analyses_ids,
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
+from auto_ontology.dal.attributes import fetch_semantic_fks_from_tables
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
+    format_role_links,
     format_semantic_context,
     format_tables_for_prompt,
+    role_links_enabled,
 )
 from auto_ontology.retrieval.text_to_sql.message_utils import (
     message_contents,
@@ -128,6 +131,18 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
             return False
         return True
+
+    def _role_links(self, relevant_tables: list[dict]) -> str:
+        """The ROLE LINKS block for *relevant_tables*; empty when off or none apply."""
+        if not role_links_enabled():
+            return ""
+        table_ids = {str(t["id"]) for t in relevant_tables if t.get("id")}
+        try:
+            rows = fetch_semantic_fks_from_tables(sorted(table_ids))
+        except Exception:
+            self.logger.warning("role links unavailable", exc_info=True)
+            return ""
+        return format_role_links(rows, table_ids)
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         """
@@ -280,6 +295,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                     )
                     + "\n\n"
                 )
+            role_links = self._role_links(relevant_tables)
+            if role_links:
+                join_paths += role_links + "\n"
 
             # Build the available-tables schema section.
             tables_section = (

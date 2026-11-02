@@ -206,13 +206,26 @@ class SQLiteDatabase(SQLDatabase):
         return pd.DataFrame(rows)
 
     def get_fks(self) -> pd.DataFrame:
+        """Declared foreign keys, resolved the way SQLite itself resolves them.
+
+        SQLite matches the referenced table case-insensitively and reads a
+        reference with no column list (``REFERENCES customers``) as one to the
+        primary key, so both are normalised here; otherwise the catalog has no
+        table or column to attach the edge to and silently drops it.
+        """
         tables = self.get_tables()
+        by_lower = {str(name).lower(): str(name) for name in tables["table_name"]}
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
             fks = self._conn.execute(
                 f'PRAGMA foreign_key_list("{table_name}")'
             ).fetchall()
             for _id, _seq, ref_table, from_col, ref_col, *_rest in fks:
+                ref_table = by_lower.get(str(ref_table).lower(), ref_table)
+                if ref_col is None:
+                    ref_col = self._primary_key_column(ref_table, _seq)
+                if ref_col is None:
+                    continue
                 rows.append(
                     {
                         "table_schema": "main",
@@ -224,6 +237,12 @@ class SQLiteDatabase(SQLDatabase):
                     }
                 )
         return pd.DataFrame(rows)
+
+    def _primary_key_column(self, table_name: str, position: int) -> str | None:
+        """The *position*-th (0-based) primary-key column of *table_name*."""
+        info = self._conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+        keys = sorted((pk, name) for _cid, name, _t, _nn, _d, pk in info if pk > 0)
+        return keys[position][1] if position < len(keys) else None
 
     def close(self) -> None:
         with self._conns_lock:
