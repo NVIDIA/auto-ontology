@@ -69,6 +69,36 @@ logger = logging.getLogger(__name__)
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
 
 
+SAME_KEY_JOIN_RULE = (
+    "Keep a chain of joins on the same key when you can. When a table is joined "
+    "on one identifier and the next listed join can continue on that same "
+    "identifier, use it instead of switching to a different column partway "
+    "through. For example, if rooms join an organization table on "
+    "organization_key, join the next organization table on organization_key "
+    "too, not on organization_id. Switch keys only when no listed join "
+    "continues on the same one."
+)
+
+
+def format_join_paths_section(
+    attribute_join_paths: list[dict],
+    *,
+    target_db: str | None,
+    dialect: str | None,
+) -> str:
+    """The prompt's Join Paths section, or ``""`` when there are no paths."""
+    if not attribute_join_paths:
+        return ""
+    return (
+        "## Join Paths\n"
+        f"{SAME_KEY_JOIN_RULE}\n\n"
+        + format_semantic_context(
+            attribute_join_paths, target_db=target_db, dialect=dialect
+        )
+        + "\n\n"
+    )
+
+
 def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
     """Render the intent subtype's SQL example as structural guidance only."""
     sql_template = (path_state.get("sql_template") or "").strip()
@@ -264,17 +294,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            join_paths = ""
-            if attribute_join_paths:
-                join_paths = (
-                    "## Join Paths\n"
-                    + format_semantic_context(
-                        attribute_join_paths,
-                        target_db=target_db,
-                        dialect=dialect,
-                    )
-                    + "\n\n"
-                )
+            join_paths = format_join_paths_section(
+                attribute_join_paths, target_db=target_db, dialect=dialect
+            )
 
             # Build the available-tables schema section.
             tables_section = (

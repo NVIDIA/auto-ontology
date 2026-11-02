@@ -92,6 +92,30 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     )
 
 
+def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
+    hop = {
+        "source_schema": "dw",
+        "source_table": "FCLT_ROOMS",
+        "source_column": "FCLT_ORGANIZATION_KEY",
+        "target_schema": "dw",
+        "target_table": "FAC_ORGANIZATION",
+        "target_column": "ORGANIZATION_KEY",
+    }
+
+    section = sql_from_semantic.format_join_paths_section(
+        [{"path": [hop]}], target_db=None, dialect="mysql"
+    )
+
+    assert section.startswith("## Join Paths\n")
+    assert sql_from_semantic.SAME_KEY_JOIN_RULE in section
+    assert "not on organization_id" in section
+    assert "FCLT_ORGANIZATION_KEY" in section
+    assert (
+        sql_from_semantic.format_join_paths_section([], target_db=None, dialect="mysql")
+        == ""
+    )
+
+
 def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
     assert "Do not add `IS NOT NULL` solely because" in create_sql_user_prompt
     assert "question or evidence requires the requested value" in (
