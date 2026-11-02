@@ -107,6 +107,8 @@ def prune_disjoint_semantic_fks(database_name: str) -> int:
     school code read as the fourteen-digit CDS code it sits beside is one.
     No overlap at all is the only test applied: real references in loaded
     data can still miss most of their target, so a low share is no proof.
+    An all-NULL source column is pruned too: joining through it returns no
+    rows, yet it would still be offered as a join path.
     Returns the number of edges deleted.
     """
     connector = _resolve_connector(database_name)
@@ -139,11 +141,12 @@ def prune_disjoint_semantic_fks(database_name: str) -> int:
                 exc_info=True,
             )
             continue
-        if present and not shared:
+        if not shared:
             delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
             pruned += 1
             logger.info(
-                "semantic FK removed, no shared values: %s.%s -> %s.%s",
+                "semantic FK removed, %s: %s.%s -> %s.%s",
+                "no shared values" if present else "empty source column",
                 row["source_table_name"],
                 row["source_column_name"],
                 row["target_table_name"],
