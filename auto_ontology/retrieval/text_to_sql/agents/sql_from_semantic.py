@@ -36,10 +36,17 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
     get_custom_analyses_ids,
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
+from auto_ontology.dal.attributes import fetch_semantic_fks_from_tables
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
+    format_role_links,
     format_semantic_context,
     format_tables_for_prompt,
+    role_links_enabled,
+)
+from auto_ontology.retrieval.text_to_sql.message_utils import (
+    message_contents,
+    single_turn_messages,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -124,6 +131,18 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
             return False
         return True
+
+    def _role_links(self, relevant_tables: list[dict]) -> str:
+        """The ROLE LINKS block for *relevant_tables*; empty when off or none apply."""
+        if not role_links_enabled():
+            return ""
+        table_ids = {str(t["id"]) for t in relevant_tables if t.get("id")}
+        try:
+            rows = fetch_semantic_fks_from_tables(sorted(table_ids))
+        except Exception:
+            self.logger.warning("role links unavailable", exc_info=True)
+            return ""
+        return format_role_links(rows, table_ids)
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         """
@@ -276,6 +295,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                     )
                     + "\n\n"
                 )
+            role_links = self._role_links(relevant_tables)
+            if role_links:
+                join_paths += role_links + "\n"
 
             # Build the available-tables schema section.
             tables_section = (
@@ -318,34 +340,33 @@ class SQLFromCandidatesAgent(BaseAgent):
                 has_sql_examples=bool(sql_examples_section),
             )
 
-            messages = state["messages"] + [SystemMessage(content=system_prompt)]
-            if authoritative_evidence_section:
-                messages.append(SystemMessage(content=authoritative_evidence_section))
-            if calculation_template_section:
-                messages.append(SystemMessage(content=calculation_template_section))
-            # Before the query patterns: anchors state what this database
-            # contains, which constrains the SQL more tightly than precedent
-            # from another database does.
-            if value_anchors_section:
-                messages.append(SystemMessage(content=value_anchors_section))
-            # After evidence, so that on any conflict the authoritative block is
-            # the one the model read first and the advisory one qualifies it.
-            if sql_examples_section:
-                messages.append(SystemMessage(content=sql_examples_section))
-            messages.append(HumanMessage(content=user_prompt))
-
-            # Add calendar time window reminder if needed
+            calendar_reminder = ""
             if any(
                 phrase in sanitized_question.lower()
                 for phrase in ["last week", "last month", "last year"]
             ):
-                messages.append(
-                    SystemMessage(
-                        content="Apply only calendar time windows. DO NOT apply rolling time windows."
-                    )
+                calendar_reminder = (
+                    "Apply only calendar time windows. DO NOT apply rolling time "
+                    "windows."
                 )
 
-            return messages
+            return single_turn_messages(
+                system_parts=[
+                    *message_contents(state["messages"], SystemMessage),
+                    system_prompt,
+                    authoritative_evidence_section,
+                    calculation_template_section,
+                    # Anchors precede query patterns because database facts
+                    # constrain SQL more tightly than advisory precedent.
+                    value_anchors_section,
+                    sql_examples_section,
+                    calendar_reminder,
+                ],
+                user_parts=[
+                    *message_contents(state["messages"], HumanMessage),
+                    user_prompt,
+                ],
+            )
 
         # Choose schema based on context
         # Use SQLGenerationModel for new flow (without formatting)

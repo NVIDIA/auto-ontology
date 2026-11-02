@@ -21,6 +21,7 @@ from sqlalchemy import (
     any_,
     bindparam,
     case,
+    delete,
     func,
     literal,
     or_,
@@ -552,20 +553,141 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     return True
 
 
+def delete_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
+    """Remove one ``SEMANTIC_FK`` edge; a no-op when it is not there."""
+    store().query_write(
+        delete(s.column__semantic_fk).where(
+            s.column__semantic_fk.c.column_id == src_column_id,
+            s.column__semantic_fk.c.attribute_id == tgt_attr_id,
+        )
+    )
+
+
 def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
     """Return semantic FKs with the context needed to choose one join default."""
+    return _semantic_fk_join_rows(database_name=database_name)
+
+
+def fetch_semantic_fks_from_tables(table_ids: list[str]) -> list[dict[str, Any]]:
+    """The rows of :func:`fetch_semantic_fk_join_groups` whose source is in *table_ids*."""
+    if not table_ids:
+        return []
+    return _semantic_fk_join_rows(table_ids=table_ids)
+
+
+def find_semantic_fk_neighbor_table_ids(table_ids: list[str]) -> list[str]:
+    """Tables one semantic FK away from any of *table_ids*, in either direction.
+
+    Every edge counts, not only join-path defaults: a non-default role column
+    still names a table the question may need. *table_ids* themselves are left
+    out of the result.
+    """
+    if not table_ids:
+        return []
+    source_column = s.catalog_column.alias("neighbor_source_column")
+    target_column = s.catalog_column.alias("neighbor_target_column")
+    statement = (
+        select(
+            source_column.c.table_id.label("source_table_id"),
+            target_column.c.table_id.label("target_table_id"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                source_column,
+                source_column.c.id == s.column__semantic_fk.c.column_id,
+            )
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                target_column,
+                target_column.c.id == s.column__has_attribute.c.column_id,
+            )
+        )
+        .where(
+            or_(
+                source_column.c.table_id.in_(table_ids),
+                target_column.c.table_id.in_(table_ids),
+            )
+        )
+    )
+    given = set(table_ids)
+    neighbors: dict[str, None] = {}
+    for row in store().query_read(statement):
+        for table_id in (row["source_table_id"], row["target_table_id"]):
+            if table_id and table_id not in given:
+                neighbors[table_id] = None
+    return sorted(neighbors)
+
+
+def fetch_attribute_columns_named(
+    database_name: str, column_names: list[str]
+) -> list[dict[str, Any]]:
+    """Columns of *database_name* named like any of *column_names*, with their attribute.
+
+    Names compare case-insensitively; only columns carrying a semantic
+    ColumnAttribute are returned, since only those can be a semantic FK target.
+    """
+    if not column_names:
+        return []
+    statement = (
+        select(
+            s.column__has_attribute.c.attribute_id,
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.column__has_attribute.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+            func.lower(s.catalog_column.c.name).in_(
+                sorted({name.lower() for name in column_names})
+            ),
+        )
+        .order_by(s.catalog_table.c.name, s.catalog_column.c.id)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def _semantic_fk_join_rows(
+    *, database_name: str | None = None, table_ids: list[str] | None = None
+) -> list[dict[str, Any]]:
     source_column = s.catalog_column.alias("join_default_source_column")
     source_table = s.catalog_table.alias("join_default_source_table")
     source_schema = s.catalog_schema.alias("join_default_source_schema")
     source_database = s.catalog_database.alias("join_default_source_database")
     target_column = s.catalog_column.alias("join_default_target_column")
     target_table = s.catalog_table.alias("join_default_target_table")
+    target_schema = s.catalog_schema.alias("join_default_target_schema")
 
     statement = (
         select(
             source_table.c.id.label("source_table_id"),
             source_table.c.name.label("source_table_name"),
             source_table.c.description.label("source_table_description"),
+            source_schema.c.name.label("source_schema_name"),
             source_column.c.id.label("source_column_id"),
             source_column.c.name.label("source_column_name"),
             source_column.c.description.label("source_column_description"),
@@ -575,6 +697,7 @@ def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
             target_table.c.id.label("target_table_id"),
             target_table.c.name.label("target_table_name"),
             target_table.c.description.label("target_table_description"),
+            target_schema.c.name.label("target_schema_name"),
             target_column.c.id.label("target_column_id"),
             target_column.c.name.label("target_column_name"),
             target_column.c.description.label("target_column_description"),
@@ -605,8 +728,13 @@ def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
                 target_column.c.id == s.column__has_attribute.c.column_id,
             )
             .join(target_table, target_table.c.id == target_column.c.table_id)
+            .join(target_schema, target_schema.c.id == target_table.c.schema_id)
         )
-        .where(source_database.c.name == database_name)
+        .where(
+            source_database.c.name == database_name
+            if table_ids is None
+            else source_table.c.id.in_(table_ids)
+        )
         .order_by(
             source_table.c.id,
             s.column__semantic_fk.c.attribute_id,

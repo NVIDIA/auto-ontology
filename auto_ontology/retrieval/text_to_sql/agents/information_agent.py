@@ -10,7 +10,7 @@ import json
 from enum import StrEnum
 from typing import Any, Dict
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage
 from pydantic import Field, model_validator
 
 from auto_ontology.retrieval.text_to_sql.agents.information_tools import (
@@ -18,6 +18,7 @@ from auto_ontology.retrieval.text_to_sql.agents.information_tools import (
     run_information_tool,
 )
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
@@ -290,7 +291,13 @@ class InformationAgent(BaseAgent):
             try:
                 action = invoke_with_structured_output(
                     state["llm"],
-                    [SystemMessage(content=prompt)],
+                    single_turn_messages(
+                        system_parts=[
+                            "You are an information-retrieval agent. Follow the "
+                            "tool-use policy and return the requested structured action."
+                        ],
+                        user_parts=[prompt],
+                    ),
                     InformationAgentAction,
                 )
             except Exception:

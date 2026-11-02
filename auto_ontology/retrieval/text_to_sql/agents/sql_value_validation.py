@@ -13,7 +13,6 @@ from enum import StrEnum
 from typing import Any
 
 import sqlglot
-from langchain_core.messages import SystemMessage
 from pydantic import Field, model_validator
 from sqlglot import exp
 
@@ -28,6 +27,7 @@ from auto_ontology.retrieval.text_to_sql.db_probe.executor import (
     ProbeExecutor,
     is_read_only_select,
 )
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
@@ -642,10 +642,10 @@ class SQLValueValidationAgent(BaseAgent):
             try:
                 action = invoke_with_structured_output(
                     state["llm"],
-                    [
-                        SystemMessage(content=_SYSTEM_PROMPT),
-                        SystemMessage(content=prompt),
-                    ],
+                    single_turn_messages(
+                        system_parts=[_SYSTEM_PROMPT],
+                        user_parts=[prompt],
+                    ),
                     ValueValidationAction,
                 )
             except Exception:

@@ -28,6 +28,10 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.message_utils import (
+    message_contents,
+    single_turn_messages,
+)
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -147,12 +151,17 @@ class SQLFromTablesAgent(BaseAgent):
             custom_analyses="",
         )
 
-        messages = state["messages"] + [SystemMessage(content=system_prompt)]
-        if evidence:
-            messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
-            )
-        messages.append(HumanMessage(content=user_prompt))
+        messages = single_turn_messages(
+            system_parts=[
+                *message_contents(state["messages"], SystemMessage),
+                system_prompt,
+                format_authoritative_evidence(evidence) if evidence else "",
+            ],
+            user_parts=[
+                *message_contents(state["messages"], HumanMessage),
+                user_prompt,
+            ],
+        )
 
         response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 

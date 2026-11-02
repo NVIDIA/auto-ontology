@@ -9,8 +9,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from langchain_core.messages import SystemMessage
-
 from auto_ontology.retrieval.entity_coverage.models import (
     QuestionExtractionLiteModel,
     QuestionExtractionModel,
@@ -19,6 +17,7 @@ from auto_ontology.retrieval.entity_coverage.prompts import (
     create_question_extraction_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
@@ -77,16 +76,20 @@ class QuestionExtractionAgent(BaseAgent):
         result: Dict[str, Any] = {"path_state": path_state, "glossary": []}
 
         try:
-            messages = [
-                SystemMessage(
-                    content=create_question_extraction_prompt(
+            messages = single_turn_messages(
+                system_parts=[
+                    "You extract schema-search entities from a user question and "
+                    "return only the requested structured result."
+                ],
+                user_parts=[
+                    create_question_extraction_prompt(
                         original_question,
                         glossary,
                         evidence=evidence,
                         include_subject=self._include_subject,
                     )
-                )
-            ]
+                ],
+            )
             schema = (
                 QuestionExtractionModel
                 if self._include_subject

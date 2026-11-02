@@ -6,9 +6,76 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from auto_ontology.utils.sample_values import stringify_sample_values
+
+
+#: Above this many roles a group is listed by name only: twenty-two lineup
+#: slots with a sentence each would outweigh the rest of the schema.
+_MAX_DESCRIBED_ROLES = 6
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def role_links_enabled() -> bool:
+    """Whether the prompt lists every role a table has towards another.
+
+    On by default; ``SQL_ROLE_LINKS=false`` hides it for an A/B.
+    """
+    return _env_flag("SQL_ROLE_LINKS")
+
+
+def format_role_links(rows: list[dict[str, Any]], table_ids: set[str]) -> str:
+    """Columns of one table that all point at the same column of another.
+
+    *rows* are semantic FK rows (see ``fetch_semantic_fks_from_tables``). The
+    join paths show only one of these columns, the stored default, so without
+    this the model joins ``posts`` to ``users`` through whichever role was
+    chosen at ingest rather than the one the question names.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if str(row.get("target_table_id")) not in table_ids:
+            continue
+        key = (str(row["source_table_id"]), str(row["target_column_id"]))
+        groups.setdefault(key, []).append(row)
+    blocks = []
+    for members in groups.values():
+        columns = {str(m["source_column_id"]): m for m in members}
+        if len(columns) < 2:
+            continue
+        first = members[0]
+        lines = [
+            f"{first['source_table_name']} -> "
+            f"{first['target_table_name']}.{first['target_column_name']}:"
+        ]
+        if len(columns) > _MAX_DESCRIBED_ROLES:
+            names = ", ".join(str(m["source_column_name"]) for m in columns.values())
+            lines.append(f"  - {first['source_table_name']}: {names}")
+        else:
+            for m in columns.values():
+                description = _plain_cell(m.get("source_column_description"))
+                line = f"  - {m['source_table_name']}.{m['source_column_name']}"
+                lines.append(f"{line}: {description}" if description else line)
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "ROLE LINKS (several columns point at the same target; each is a "
+        "different role):\n"
+        + "\n".join(blocks)
+        + "\nJoin on the column whose role the question means, even where a "
+        "join path above shows another of them.\n"
+    )
 
 
 def _format_sample_values(raw: Any) -> str:

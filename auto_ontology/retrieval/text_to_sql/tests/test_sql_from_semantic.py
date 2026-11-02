@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
@@ -194,6 +196,9 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert result["decision"] == "constructable"
     assert invoked_with == [reasoning_llm]
     evidence = "Active means accounts.status = 'active'."
+    assert len(invoked_messages) == 2
+    assert isinstance(invoked_messages[0], SystemMessage)
+    assert isinstance(invoked_messages[1], HumanMessage)
     assert sum(evidence in message.content for message in invoked_messages) == 2
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
@@ -261,3 +266,15 @@ def test_important_columns_include_full_details_and_ignore_structural_paths() ->
     assert "Semantic match: District Name" in rendered
     assert "Removed Table Value" not in rendered
     assert "structural bridge" not in rendered
+
+
+def test_the_sql_tool_description_does_not_ask_for_the_models_reasoning() -> None:
+    # The docstring is the tool description the model reads. Claude Opus 5.5
+    # refused every SQL-generation call while it said ``thought`` was there
+    # "to drain reasoning".
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    description = convert_to_openai_tool(SQLGenerationModel)["function"]["description"]
+
+    assert "reasoning" not in description.lower()
+    assert "drain" not in description.lower()

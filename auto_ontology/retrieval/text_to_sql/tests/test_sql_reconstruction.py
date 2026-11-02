@@ -187,14 +187,14 @@ def test_reconstruction_drops_prior_repair_turns(
     result = SQLReconstructionAgent().execute(state)
 
     assert "messages" not in result
-    assert captured_messages[:2] == [constructor_system, constructor_human]
-    repair_turns = [
-        message
-        for message in captured_messages
-        if isinstance(message, HumanMessage)
-        and message.content.startswith("The following SQL contains an ERROR:")
-    ]
-    assert repair_turns == [captured_messages[-1]]
+    assert len(captured_messages) == 2
+    assert isinstance(captured_messages[0], SystemMessage)
+    assert isinstance(captured_messages[1], HumanMessage)
+    assert captured_messages[0].content == constructor_system.content
+    assert captured_messages[1].content.startswith(constructor_human.content)
+    assert (
+        captured_messages[1].content.count("The following SQL contains an ERROR:") == 1
+    )
     assert prior_repair not in captured_messages
     assert "SELECT bad" in captured_messages[-1].content
     assert "column missing" in captured_messages[-1].content
@@ -247,7 +247,7 @@ def test_dictionary_error_is_normalized_before_classification(
     assert result["path_state"]["error"] == normalized
     assert result["path_state"]["error_details"] == structured_error
     assert result["path_state"]["failed_attempts"][0]["error"] == normalized
-    assert normalized in captured_messages[0][0].content
+    assert any(normalized in m.content for m in captured_messages[0])
     assert normalized in captured_messages[1][-1].content
 
 

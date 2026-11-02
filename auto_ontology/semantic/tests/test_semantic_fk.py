@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from auto_ontology.semantic import semantic_fk
@@ -489,3 +490,143 @@ def test_resolution_always_normalizes_join_defaults() -> None:
         assert semantic_fk.resolve_semantic_fks("database") == 3
 
     select_defaults.assert_called_once_with("database")
+
+
+@pytest.mark.parametrize(
+    ("present", "shared", "pruned"),
+    [(1, 1, False), (1, 0, True), (0, 0, True)],
+    ids=["shared", "disjoint", "empty-source"],
+)
+def test_prune_removes_disjoint_and_empty_source_fks(
+    present: int, shared: int, pruned: bool
+) -> None:
+    connector = MagicMock(dialect="mysql")
+    connector.qualify.side_effect = lambda schema, table: table
+    connector.execute.return_value = pd.DataFrame({"n": [present, shared]})
+    row = {
+        "source_column_id": "col",
+        "target_attribute_id": "attr",
+        "source_table_name": "orders",
+        "source_column_name": "customer_id",
+        "target_table_name": "customers",
+        "target_column_name": "id",
+    }
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[row],
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+    ):
+        assert semantic_fk.prune_disjoint_semantic_fks("database") == int(pruned)
+
+    assert delete.called is pruned
+
+
+def test_merge_keeps_one_of_identical_columns_and_distinct_roles() -> None:
+    connector = MagicMock(dialect="mysql")
+    connector.qualify.side_effect = lambda schema, table: table
+    identical = {frozenset({"`SUBJECT_ID`", "`SO_SUBJECT_ID`"})}
+
+    def execute(sql: str) -> pd.DataFrame:
+        pair = frozenset(
+            col
+            for col in ("`SUBJECT_ID`", "`SO_SUBJECT_ID`", "`SOURCE_SUBJECT_ID`")
+            if f"WHERE {col} <>" in sql or f"<> {col} OR" in sql
+        )
+        return pd.DataFrame({"n": [0 if pair in identical else 1]})
+
+    connector.execute.side_effect = execute
+    rows = [
+        {
+            "source_table_id": "catalog",
+            "source_table_name": "CATALOG",
+            "source_column_id": name.lower(),
+            "source_column_name": name,
+            "target_attribute_id": "subject",
+            "target_table_name": "SUBJECT_SUMMARY",
+            "target_column_name": "SUBJECT_ID",
+        }
+        for name in ("SO_SUBJECT_ID", "SOURCE_SUBJECT_ID", "SUBJECT_ID")
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=rows,
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+    ):
+        assert semantic_fk.merge_duplicate_semantic_fks("database") == 1
+
+    delete.assert_called_once_with("so_subject_id", "subject")
+
+
+@pytest.mark.parametrize(
+    ("alt_found", "alt_unique", "moved"),
+    [(45, True, True), (38, True, False), (45, False, False)],
+    ids=["better-coverage", "within-margin", "not-unique"],
+)
+def test_retarget_moves_edge_to_key_holding_more_values(
+    alt_found: int, alt_unique: bool, moved: bool
+) -> None:
+    connector = MagicMock(dialect="mysql")
+    connector.qualify.side_effect = lambda schema, table: table
+
+    def execute(sql: str) -> pd.DataFrame:
+        if sql.startswith("SELECT COUNT(`DEPARTMENT_CODE`)"):
+            return pd.DataFrame({"n": [127], "d": [127 if alt_unique else 120]})
+        found = alt_found if "FROM SIS_DEPARTMENT" in sql else 36
+        return pd.DataFrame({"n": [47, found]})
+
+    connector.execute.side_effect = execute
+    row = {
+        "source_table_id": "cis",
+        "source_table_name": "CIS_COURSE_CATALOG",
+        "source_column_id": "cis-dept",
+        "source_column_name": "DEPARTMENT_CODE",
+        "target_attribute_id": "student-dept",
+        "target_table_id": "student",
+        "target_table_name": "STUDENT_DEPARTMENT",
+        "target_column_name": "DEPARTMENT_CODE",
+    }
+    alternatives = [
+        {
+            "attribute_id": "sis-dept",
+            "column_id": "sis-dept-col",
+            "column_name": "DEPARTMENT_CODE",
+            "table_id": "sis",
+            "table_name": "SIS_DEPARTMENT",
+            "schema_name": None,
+        }
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[row],
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_attribute_columns_named",
+            return_value=alternatives,
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+        patch("auto_ontology.semantic.semantic_fk.merge_semantic_fk") as merge,
+    ):
+        assert semantic_fk.retarget_semantic_fks_by_coverage("database") == int(moved)
+
+    if moved:
+        delete.assert_called_once_with("cis-dept", "student-dept")
+        merge.assert_called_once_with("cis-dept", "sis-dept")
+    else:
+        delete.assert_not_called()

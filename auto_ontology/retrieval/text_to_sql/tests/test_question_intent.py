@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from auto_ontology.retrieval.text_to_sql.agents import question_intent
@@ -360,7 +361,10 @@ def test_calculation_only_skips_type_selection_but_keeps_subtype_and_evidence(
 
     def invoke(_llm: object, messages: list, model: type) -> object:
         requested_models.append(model)
-        prompt = str(messages[0].content)
+        assert len(messages) == 2
+        assert isinstance(messages[0], SystemMessage)
+        assert isinstance(messages[1], HumanMessage)
+        prompt = str(messages[1].content)
         assert "Perform four tasks" in prompt
         assert "Do not select a top-level question type" in prompt
         assert "## Question types" not in prompt

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.retrieval.entity_coverage.agents import question_extraction
 from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (
@@ -83,7 +84,10 @@ def test_agent_forwards_state_evidence_without_changing_original_question(
 
     result = QuestionExtractionAgent(include_subject=False).execute(state)
 
-    assert "Points earned refers to loyalty_points." in captured_messages[0].content
+    assert len(captured_messages) == 2
+    assert isinstance(captured_messages[0], SystemMessage)
+    assert isinstance(captured_messages[1], HumanMessage)
+    assert "Points earned refers to loyalty_points." in captured_messages[1].content
     assert state["initial_question"] == "Show points earned by customers"
     assert result["path_state"]["normalized_question"] == (
         "Show loyalty points earned by customers"
@@ -135,7 +139,10 @@ def test_intent_rewrite_and_evidence_feed_question_extraction(
 
     result = QuestionExtractionAgent(include_subject=False).execute(state)
 
-    prompt = captured_messages[0].content
+    assert len(captured_messages) == 2
+    assert isinstance(captured_messages[0], SystemMessage)
+    assert isinstance(captured_messages[1], HumanMessage)
+    prompt = captured_messages[1].content
     assert "## Input\n\nfind revenue" in prompt
     assert "Revenue means gross_sales minus refunds." in prompt
     assert "Use the test_dataset dataset." not in prompt

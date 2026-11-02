@@ -23,8 +23,6 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
-from langchain_core.messages import SystemMessage
-
 from auto_ontology.catalog.constants import Labels
 
 from auto_ontology.semantic.constants import (
@@ -38,6 +36,7 @@ from auto_ontology.dal.custom_analyses import custom_analysis_exists
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.models import (
     CandidateFilterModel,
     ColumnAttributeSpec,
@@ -226,15 +225,16 @@ def _llm_filter(llm, question: str, entity: str, candidates: list[dict]) -> list
         f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id")
     )
 
-    messages = [
-        SystemMessage(
-            content=_FILTER_PROMPT_TEMPLATE.format(
+    messages = single_turn_messages(
+        system_parts=["You select database candidates by semantic relevance."],
+        user_parts=[
+            _FILTER_PROMPT_TEMPLATE.format(
                 question=question,
                 entity=entity,
                 candidates_block=candidates_block,
             )
-        )
-    ]
+        ],
+    )
 
     result = invoke_with_structured_output(llm, messages, CandidateFilterModel)
     if result is None or not result.best_id:
@@ -287,15 +287,16 @@ def _llm_filter_candidates(
         f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id")
     )
 
-    messages = [
-        SystemMessage(
-            content=_CANDIDATE_FILTER_PROMPT.format(
+    messages = single_turn_messages(
+        system_parts=["You filter database candidates by semantic relevance."],
+        user_parts=[
+            _CANDIDATE_FILTER_PROMPT.format(
                 candidate_type=candidate_type,
                 question=question,
                 candidates_block=candidates_block,
             )
-        )
-    ]
+        ],
+    )
 
     result = invoke_with_structured_output(llm, messages, CustomAnalysisFilterModel)
     if result is None:
@@ -334,15 +335,16 @@ def _llm_filter_both(
         ]
         return "\n".join(lines) if lines else "(none)"
 
-    messages = [
-        SystemMessage(
-            content=_COMBINED_FILTER_PROMPT.format(
+    messages = single_turn_messages(
+        system_parts=["You filter database candidates by semantic relevance."],
+        user_parts=[
+            _COMBINED_FILTER_PROMPT.format(
                 question=question,
                 custom_block=_fmt(custom_hits),
                 sql_attr_block=_fmt(sql_attr_hits),
             )
-        )
-    ]
+        ],
+    )
 
     result = invoke_with_structured_output(llm, messages, CombinedCandidateFilterModel)
     if result is None:
