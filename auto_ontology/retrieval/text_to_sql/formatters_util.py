@@ -215,7 +215,10 @@ def format_semantic_context(
         "because it is listed. When a path is needed, use its exact join "
         "conditions. A selected path is indivisible: keep every intermediate "
         "bridge table and every hop. Never shorten it or join its endpoints "
-        "directly:"
+        "directly, with one exception: a hop marked [same key] links two "
+        "copies of one identifier, so the table it passes through adds no "
+        "rows. Where a Shortcut is listed under a path, use it instead and "
+        "skip that table, unless the question needs one of its columns:"
     ]
     for entry in attribute_join_paths:
         path = entry.get("path") or []
@@ -230,9 +233,36 @@ def format_semantic_context(
             for hop in path:
                 left = _hop_column(hop, "source", target_db, dialect)
                 right = _hop_column(hop, "target", target_db, dialect)
-                lines.append(f"      {left} = {right}")
+                marker = "  [same key]" if hop.get("same_key") else ""
+                lines.append(f"      {left} = {right}{marker}")
+            for before, after in _same_key_shortcuts(path):
+                skipped = _hop_table(before, "target", target_db, dialect)
+                left = _hop_column(before, "source", target_db, dialect)
+                right = _hop_column(after, "target", target_db, dialect)
+                lines.append(f"    Shortcut (skips {skipped}): {left} = {right}")
 
     return "\n".join(lines)
+
+
+def _same_key_shortcuts(path: list[dict]) -> list[tuple[dict, dict]]:
+    """Each pair of consecutive hops whose middle table a same-key hop lets skip.
+
+    Two consecutive hops ``A.a = M.m`` and ``M.m = C.c`` meet on one column of
+    ``M``. When either is a same-key link, ``M.m`` and the column across it hold
+    the same identifier, so ``A.a = C.c`` joins the same rows without ``M``.
+    """
+    shortcuts = []
+    for before, after in zip(path, path[1:]):
+        if not (before.get("same_key") or after.get("same_key")):
+            continue
+        meets = (
+            before.get("target_table") == after.get("source_table")
+            and str(before.get("target_column")).casefold()
+            == str(after.get("source_column")).casefold()
+        )
+        if meets and before.get("source_table") != after.get("target_table"):
+            shortcuts.append((before, after))
+    return shortcuts
 
 
 _TABLE_HEADERS = ["table", "label", "description", "primary key"]

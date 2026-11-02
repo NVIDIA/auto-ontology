@@ -103,7 +103,10 @@ create_sql_user_prompt = (
     "- A listed join path is indivisible. If it contains intermediate or bridge "
     "tables, include every table and every hop exactly as listed. Removing a "
     "bridge table, skipping a hop, or replacing the path with a direct endpoint "
-    "join is forbidden, even when the bridge contributes no projected column.\n\n"
+    "join is forbidden, even when the bridge contributes no projected column. "
+    "The one exception is a Shortcut listed under a path: it skips a table that "
+    "a [same key] hop passes through, so use the Shortcut unless the question "
+    "needs a column of the skipped table.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
@@ -433,7 +436,10 @@ ORDER BY total_sales DESC;"""
 {join_template}
   Follow hops in order when the path spans more than one table. Once you choose
   a path, every intermediate/bridge table and every listed hop is mandatory.
-  Never shorten the path or join its endpoints directly.
+  Never shorten the path or join its endpoints directly, except through a
+  Shortcut listed under it: a [same key] hop links two copies of one
+  identifier, so use the Shortcut and skip the table between them unless the
+  question needs one of its columns.
 - NEVER invent a join. Every join condition must come from the JOIN PATHS or
   from a column's foreign key reference in AVAILABLE TABLES. If the tables you
   need cannot be connected that way, do not join them.

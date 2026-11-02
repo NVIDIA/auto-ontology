@@ -95,11 +95,11 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
 def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
     hop = {
         "source_schema": "dw",
-        "source_table": "FCLT_ROOMS",
-        "source_column": "FCLT_ORGANIZATION_KEY",
+        "source_table": "orders",
+        "source_column": "account_key",
         "target_schema": "dw",
-        "target_table": "FAC_ORGANIZATION",
-        "target_column": "ORGANIZATION_KEY",
+        "target_table": "accounts",
+        "target_column": "key",
     }
 
     section = sql_from_semantic.format_join_paths_section(
@@ -108,8 +108,8 @@ def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
 
     assert section.startswith("## Join Paths\n")
     assert sql_from_semantic.SAME_KEY_JOIN_RULE in section
-    assert "not on organization_id" in section
-    assert "FCLT_ORGANIZATION_KEY" in section
+    assert "not on a different id column" in section
+    assert "orders.account_key = dw.accounts.key" in section
     assert (
         sql_from_semantic.format_join_paths_section([], target_db=None, dialect="mysql")
         == ""

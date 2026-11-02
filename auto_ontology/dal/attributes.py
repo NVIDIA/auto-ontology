@@ -1148,24 +1148,54 @@ def _hop_dicts(hop_pairs: list[tuple[str, str]]) -> list[dict]:
     col_ids = list(dict.fromkeys(col_id for pair in hop_pairs for col_id in pair))
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
+    same_key = _same_key_pairs(col_ids)
 
     hops: list[dict] = []
     for source_id, target_id in hop_pairs:
         source_context = contexts.get(source_id, {})
         target_context = contexts.get(target_id, {})
-        hops.append(
-            {
-                "source_database": source_context.get("database_name", ""),
-                "source_schema": source_context.get("schema_name", ""),
-                "source_table": source_context.get("table_name", ""),
-                "source_column": names.get(source_id, ""),
-                "target_database": target_context.get("database_name", ""),
-                "target_schema": target_context.get("schema_name", ""),
-                "target_table": target_context.get("table_name", ""),
-                "target_column": names.get(target_id, ""),
-            }
-        )
+        hop = {
+            "source_database": source_context.get("database_name", ""),
+            "source_schema": source_context.get("schema_name", ""),
+            "source_table": source_context.get("table_name", ""),
+            "source_column": names.get(source_id, ""),
+            "target_database": target_context.get("database_name", ""),
+            "target_schema": target_context.get("schema_name", ""),
+            "target_table": target_context.get("table_name", ""),
+            "target_column": names.get(target_id, ""),
+        }
+        if frozenset((source_id, target_id)) in same_key:
+            hop["same_key"] = True
+        hops.append(hop)
     return hops
+
+
+def _same_key_pairs(col_ids: list[str]) -> set[frozenset[str]]:
+    """Pairs among *col_ids* whose semantic FKs point at each other.
+
+    Two columns that reference each other's attribute store the same key, as
+    the same-key pass links them, so either can stand in for the other.
+    """
+    rows = store().query_read(
+        select(
+            s.column__semantic_fk.c.column_id,
+            s.column__has_attribute.c.column_id.label("owner_id"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+        )
+        .where(
+            s.column__semantic_fk.c.column_id.in_(col_ids),
+            s.column__has_attribute.c.column_id.in_(col_ids),
+            s.column__semantic_fk.c.use_in_join_paths.is_(True),
+        )
+    )
+    links = {(row["column_id"], row["owner_id"]) for row in rows}
+    return {frozenset(link) for link in links if link[::-1] in links}
 
 
 def find_table_join_paths(table_ids: list[str]) -> list[dict]:

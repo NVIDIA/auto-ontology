@@ -409,6 +409,75 @@ def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
     assert "public.accounts.id = public.accounts.region_id" not in rendered
 
 
+def _hop(source: str, target: str, **extra: bool) -> dict:
+    source_table, source_column = source.split(".")
+    target_table, target_column = target.split(".")
+    return {
+        "source_schema": "dw",
+        "source_table": source_table,
+        "source_column": source_column,
+        "target_schema": "dw",
+        "target_table": target_table,
+        "target_column": target_column,
+        **extra,
+    }
+
+
+def test_semantic_context_offers_a_shortcut_across_a_same_key_hop() -> None:
+    rendered = format_semantic_context(
+        [
+            {
+                "pair": True,
+                "path": [
+                    _hop("rooms.fclt_org_key", "fac_org.org_key"),
+                    _hop("fac_org.org_key", "fclt_org.fclt_org_key", same_key=True),
+                ],
+            }
+        ],
+    )
+
+    assert "dw.fac_org.org_key = dw.fclt_org.fclt_org_key  [same key]" in rendered
+    assert (
+        "Shortcut (skips dw.fac_org): dw.rooms.fclt_org_key = dw.fclt_org.fclt_org_key"
+        in rendered
+    )
+
+
+def test_semantic_context_offers_no_shortcut_without_a_same_key_hop() -> None:
+    rendered = format_semantic_context(
+        [
+            {
+                "pair": True,
+                "path": [
+                    _hop("rooms.org_key", "fac_org.org_key"),
+                    _hop("fac_org.org_key", "fclt_org.fclt_org_key"),
+                ],
+            }
+        ],
+    )
+
+    assert "dw.fclt_org.fclt_org_key  [same key]" not in rendered
+    assert "Shortcut (skips" not in rendered
+
+
+def test_semantic_context_offers_no_shortcut_when_hops_meet_on_different_columns() -> (
+    None
+):
+    rendered = format_semantic_context(
+        [
+            {
+                "pair": True,
+                "path": [
+                    _hop("rooms.org_id", "fac_org.org_id"),
+                    _hop("fac_org.org_key", "fclt_org.fclt_org_key", same_key=True),
+                ],
+            }
+        ],
+    )
+
+    assert "Shortcut (skips" not in rendered
+
+
 def _pair_path(database: str | None = None) -> list[dict]:
     hop = {
         "source_schema": "lakehouse",

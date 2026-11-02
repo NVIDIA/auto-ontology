@@ -73,10 +73,12 @@ SAME_KEY_JOIN_RULE = (
     "Keep a chain of joins on the same key when you can. When a table is joined "
     "on one identifier and the next listed join can continue on that same "
     "identifier, use it instead of switching to a different column partway "
-    "through. For example, if rooms join an organization table on "
-    "organization_key, join the next organization table on organization_key "
-    "too, not on organization_id. Switch keys only when no listed join "
-    "continues on the same one."
+    "through. For example, if table A joins table B on B's key column, join "
+    "table C to B on that key column too, not on a different id column of B. "
+    "Switch keys only when no listed join continues on the same one. When the "
+    "next join is a [same key] hop, B and C hold the same identifier, so take "
+    "the listed Shortcut: join A straight to C and leave out B unless the "
+    "question needs its columns."
 )
 
 

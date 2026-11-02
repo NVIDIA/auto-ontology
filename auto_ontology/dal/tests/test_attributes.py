@@ -355,6 +355,28 @@ def test_table_join_paths_count_mutual_semantic_fks_once(world) -> None:
     assert _pair_routes(paths) == [[("fac_org", "org_key", "fclt_org", "fclt_org_key")]]
 
 
+def test_table_join_paths_mark_only_mutual_hops_as_same_key(world) -> None:
+    world.table("fac_org")
+    world.column("fac_org", "org_key")
+    world.attribute("fac-key", owner="fac_org.org_key")
+    world.table("fclt_org")
+    world.column("fclt_org", "fclt_org_key")
+    world.attribute("fclt-key", owner="fclt_org.fclt_org_key")
+    world.references("fac_org.org_key", "fclt-key")
+    world.references("fclt_org.fclt_org_key", "fac-key")
+    world.table("rooms")
+    world.column("rooms", "fclt_org_key")
+    world.references("rooms.fclt_org_key", "fac-key")
+
+    paths = a.find_table_join_paths([world.tables["rooms"], world.tables["fclt_org"]])
+
+    [path] = [entry["path"] for entry in paths]
+    assert [(hop["source_table"], hop.get("same_key", False)) for hop in path] == [
+        ("rooms", False),
+        ("fac_org", True),
+    ]
+
+
 def test_table_join_paths_need_two_tables(joined) -> None:
     assert a.find_table_join_paths([joined.tables["orders"]]) == []
 
