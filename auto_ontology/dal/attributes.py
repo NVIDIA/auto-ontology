@@ -575,6 +575,53 @@ def fetch_semantic_fks_from_tables(table_ids: list[str]) -> list[dict[str, Any]]
     return _semantic_fk_join_rows(table_ids=table_ids)
 
 
+def find_semantic_fk_neighbor_table_ids(table_ids: list[str]) -> list[str]:
+    """Tables one semantic FK away from any of *table_ids*, in either direction.
+
+    Every edge counts, not only join-path defaults: a non-default role column
+    still names a table the question may need. *table_ids* themselves are left
+    out of the result.
+    """
+    if not table_ids:
+        return []
+    source_column = s.catalog_column.alias("neighbor_source_column")
+    target_column = s.catalog_column.alias("neighbor_target_column")
+    statement = (
+        select(
+            source_column.c.table_id.label("source_table_id"),
+            target_column.c.table_id.label("target_table_id"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                source_column,
+                source_column.c.id == s.column__semantic_fk.c.column_id,
+            )
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                target_column,
+                target_column.c.id == s.column__has_attribute.c.column_id,
+            )
+        )
+        .where(
+            or_(
+                source_column.c.table_id.in_(table_ids),
+                target_column.c.table_id.in_(table_ids),
+            )
+        )
+    )
+    given = set(table_ids)
+    neighbors: dict[str, None] = {}
+    for row in store().query_read(statement):
+        for table_id in (row["source_table_id"], row["target_table_id"]):
+            if table_id and table_id not in given:
+                neighbors[table_id] = None
+    return sorted(neighbors)
+
+
 def fetch_attribute_columns_named(
     database_name: str, column_names: list[str]
 ) -> list[dict[str, Any]]:

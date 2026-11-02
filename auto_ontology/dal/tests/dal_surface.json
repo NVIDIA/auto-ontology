@@ -13,6 +13,7 @@
     "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
     "find_kept_table_bridges": "(table_ids: 'list[str]', allowed_table_ids: 'set[str] | None' = None, max_bridge_tables: 'int' = 5) -> 'tuple[list[dict], list[list[dict]], int]'",
+    "find_semantic_fk_neighbor_table_ids": "(table_ids: 'list[str]') -> 'list[str]'",
     "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",
     "find_table_bridge": "(table_a_id: 'str', table_b_id: 'str', allowed_table_ids: 'set[str] | None' = None) -> 'tuple[list[dict], list[dict]]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",

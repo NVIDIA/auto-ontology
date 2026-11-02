@@ -36,6 +36,7 @@ from auto_ontology.dal.attributes import (
     find_connected_junction_tables,
     find_join_path,
     find_kept_table_bridges,
+    find_semantic_fk_neighbor_table_ids,
 )
 from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
@@ -122,6 +123,14 @@ _RELEVANCE_FILTER_MAX_COLS = int(os.environ.get("RELEVANCE_FILTER_MAX_COLS", "25
 # without an explicit choice.
 _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
     "HUB_SIBLING_EXPANSION_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes")
+
+# Off by default. Adds every table one semantic FK away from a candidate
+# before the relevance filter, so a needed table that shares a key with a
+# retrieved one is offered even when no search hit names it. On BEAVER dw
+# this lifts gold-table recall from 72% to 99% at ~2.6x the candidate pool.
+_FK_NEIGHBOR_TABLE_EXPANSION_ENABLED = os.environ.get(
+    "FK_NEIGHBOR_TABLE_EXPANSION_ENABLED", "false"
 ).strip().lower() in ("1", "true", "yes")
 
 # Pools this size or smaller skip the relevance filter. Default 2 is the
@@ -605,6 +614,21 @@ class CandidatePreparationAgent(BaseAgent):
                 len(relevant_tables) - prev_len,
                 [t["name"] for t in anchor_tables],
             )
+
+        # --- 4d'. Add the tables one semantic FK away ---
+        if _FK_NEIGHBOR_TABLE_EXPANSION_ENABLED:
+            neighbor_ids = find_semantic_fk_neighbor_table_ids(
+                [str(t["id"]) for t in relevant_tables if t.get("id")]
+            )
+            if neighbor_ids:
+                neighbor_tables = fetch_tables_by_ids(neighbor_ids)
+                prev_len = len(relevant_tables)
+                relevant_tables = _merge_tables(relevant_tables, neighbor_tables)
+                self.logger.info(
+                    "Added %d table(s) one semantic FK away: %s",
+                    len(relevant_tables) - prev_len,
+                    [t["name"] for t in neighbor_tables],
+                )
 
         # Term rows are global (no database_name), so a Term shared across two
         # databases (e.g. the same domain ingested as both a full DB and a
