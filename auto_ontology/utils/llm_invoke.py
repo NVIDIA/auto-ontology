@@ -415,6 +415,40 @@ def _ensure_non_system_message(messages: list[BaseMessage]) -> list[BaseMessage]
     return converted
 
 
+def _is_claude(llm: BaseChatModel) -> bool:
+    """True when *llm* serves an Anthropic/Claude model, matched by name."""
+    model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
+    lowered = model.lower()
+    return "anthropic" in lowered or "claude" in lowered
+
+
+def _system_messages_first(
+    llm: BaseChatModel, messages: list[BaseMessage]
+) -> list[BaseMessage]:
+    """Move every system message ahead of the conversation for Claude models.
+
+    Claude takes a single system prompt ahead of the conversation, but agents
+    interleave them: ``sql_from_semantic`` sends system, user, system, system,
+    user, and a validation retry appends a system message after the user turn.
+    On the inference-api gateway, ``azure/anthropic/*`` rejects every request
+    with a system message after a user message, because the gateway attaches
+    prompt-cache markers in an order Anthropic refuses::
+
+        messages.1.content.0.cache_control.ttl: a ttl='1h' cache_control block
+        must not come after a ttl='5m' cache_control block.
+
+    Measured against the live endpoint: system, user, system, user fails every
+    time on ``azure/anthropic/claude-opus-5-5`` and succeeds once the system
+    messages lead. Relative order within each group is kept. Other models keep
+    the order they were given.
+    """
+    if not _is_claude(llm):
+        return messages
+    system = [m for m in messages if isinstance(m, SystemMessage)]
+    rest = [m for m in messages if not isinstance(m, SystemMessage)]
+    return system + rest
+
+
 def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     """Pick the ``with_structured_output`` method for *llm*.
 
@@ -438,9 +472,7 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     omitting it succeeds. The model still calls the tool without being forced to, and
     the caller retries if it ever answers without one.
     """
-    model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
-    lowered = model.lower()
-    if "anthropic" in lowered or "claude" in lowered:
+    if _is_claude(llm):
         return {"method": "function_calling", "tool_choice": None}
     return {}
 
@@ -535,7 +567,7 @@ def safe_invoke_with_structured_output(
         try:
             model_llm = llm.with_structured_output(schema, **structured_kwargs)
             with _inflight_guard():
-                result = model_llm.invoke(current_messages)
+                result = model_llm.invoke(_system_messages_first(llm, current_messages))
         except _requests.exceptions.ReadTimeout:
             logger.error(
                 "LLM invoke timed out after %ds on attempt %d/%d for %s",
