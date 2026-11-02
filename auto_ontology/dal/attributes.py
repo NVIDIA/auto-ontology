@@ -555,6 +555,59 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     return True
 
 
+def fetch_columns_with_attribute(database_name: str) -> list[dict[str, Any]]:
+    """Every column of *database_name* with its table and semantic ColumnAttribute.
+
+    ``attribute_id`` is ``None`` for a column that owns none; with several it
+    is the lowest id, the same choice as :func:`find_column_attribute_by_column_id`.
+    """
+    attribute_id = (
+        select(func.min(s.column_attribute.c.id))
+        .select_from(
+            s.column__has_attribute.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+        )
+        .where(
+            s.column__has_attribute.c.column_id == s.catalog_column.c.id,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+        )
+        .scalar_subquery()
+    )
+    statement = (
+        select(
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_table.c.pk.label("table_pk"),
+            s.catalog_table.c.is_junction_table,
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.name.label("column_name"),
+            attribute_id.label("attribute_id"),
+        )
+        .select_from(
+            s.catalog_column.join(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(
+            s.catalog_table.c.id,
+            s.catalog_column.c.ordinal_position,
+            s.catalog_column.c.id,
+        )
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
 def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
     """Return semantic FKs with the context needed to choose one join default."""
     source_column = s.catalog_column.alias("join_default_source_column")

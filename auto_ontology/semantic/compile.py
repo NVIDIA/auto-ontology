@@ -17,6 +17,7 @@ from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.description_enrichment import enrich_descriptions
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
+from auto_ontology.semantic.same_key_peers import link_same_key_peers
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
@@ -103,6 +104,12 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
+
+    logger.info("=" * 60)
+    logger.info("Linking tables that store the same primary key…")
+    logger.info("=" * 60)
+    peer_count = link_same_key_peers(database_name)
+    logger.info("Same-key table pairs linked: %d", peer_count)
 
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 

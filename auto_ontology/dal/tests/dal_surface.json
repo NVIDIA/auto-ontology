@@ -9,6 +9,7 @@
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
+    "fetch_columns_with_attribute": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
