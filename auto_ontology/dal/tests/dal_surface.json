@@ -6,6 +6,7 @@
     "fetch_attribute_columns_named": "(database_name: 'str', column_names: 'list[str]') -> 'list[dict[str, Any]]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
+    "fetch_columns_with_attribute": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fks_from_tables": "(table_ids: 'list[str]') -> 'list[dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
