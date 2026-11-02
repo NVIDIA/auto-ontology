@@ -567,3 +567,66 @@ def test_merge_keeps_one_of_identical_columns_and_distinct_roles() -> None:
         assert semantic_fk.merge_duplicate_semantic_fks("database") == 1
 
     delete.assert_called_once_with("so_subject_id", "subject")
+
+
+@pytest.mark.parametrize(
+    ("alt_found", "alt_unique", "moved"),
+    [(45, True, True), (38, True, False), (45, False, False)],
+    ids=["better-coverage", "within-margin", "not-unique"],
+)
+def test_retarget_moves_edge_to_key_holding_more_values(
+    alt_found: int, alt_unique: bool, moved: bool
+) -> None:
+    connector = MagicMock(dialect="mysql")
+    connector.qualify.side_effect = lambda schema, table: table
+
+    def execute(sql: str) -> pd.DataFrame:
+        if sql.startswith("SELECT COUNT(`DEPARTMENT_CODE`)"):
+            return pd.DataFrame({"n": [127], "d": [127 if alt_unique else 120]})
+        found = alt_found if "FROM SIS_DEPARTMENT" in sql else 36
+        return pd.DataFrame({"n": [47, found]})
+
+    connector.execute.side_effect = execute
+    row = {
+        "source_table_id": "cis",
+        "source_table_name": "CIS_COURSE_CATALOG",
+        "source_column_id": "cis-dept",
+        "source_column_name": "DEPARTMENT_CODE",
+        "target_attribute_id": "student-dept",
+        "target_table_id": "student",
+        "target_table_name": "STUDENT_DEPARTMENT",
+        "target_column_name": "DEPARTMENT_CODE",
+    }
+    alternatives = [
+        {
+            "attribute_id": "sis-dept",
+            "column_id": "sis-dept-col",
+            "column_name": "DEPARTMENT_CODE",
+            "table_id": "sis",
+            "table_name": "SIS_DEPARTMENT",
+            "schema_name": None,
+        }
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[row],
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_attribute_columns_named",
+            return_value=alternatives,
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+        patch("auto_ontology.semantic.semantic_fk.merge_semantic_fk") as merge,
+    ):
+        assert semantic_fk.retarget_semantic_fks_by_coverage("database") == int(moved)
+
+    if moved:
+        delete.assert_called_once_with("cis-dept", "student-dept")
+        merge.assert_called_once_with("cis-dept", "sis-dept")
+    else:
+        delete.assert_not_called()

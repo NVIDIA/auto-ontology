@@ -36,6 +36,7 @@ from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
     delete_semantic_fk,
+    fetch_attribute_columns_named,
     fetch_semantic_fk_join_groups,
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
@@ -95,10 +96,125 @@ def resolve_semantic_fks(database_name: str) -> int:
     Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
+    retarget_semantic_fks_by_coverage(database_name)
     created -= prune_disjoint_semantic_fks(database_name)
     created -= merge_duplicate_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created
+
+
+#: How much more of the source's distinct values another target must hold
+#: before an inferred edge is moved to it.
+_RETARGET_MARGIN = 0.05
+
+
+def retarget_semantic_fks_by_coverage(database_name: str) -> int:
+    """Move each semantic FK to the same-named key that holds most of its values.
+
+    Several tables can carry a key with one name -- a full department list
+    and a narrower lookup of some departments -- and the vector search sees
+    only a few of them. Every unique column named like the chosen target is
+    scored by the share of the source column's distinct values it contains;
+    the edge moves only when another one beats the current target by
+    ``_RETARGET_MARGIN``. Returns the number of edges moved.
+    """
+    connector = _resolve_connector(database_name)
+    if connector is None:
+        return 0
+    dialect = getattr(connector, "dialect", None)
+    rows = fetch_semantic_fk_join_groups(database_name)
+    alternatives: dict[str, list[dict[str, Any]]] = {}
+    for alt in fetch_attribute_columns_named(
+        database_name, sorted({row["target_column_name"] for row in rows})
+    ):
+        alternatives.setdefault(alt["column_name"].casefold(), []).append(alt)
+
+    moved = 0
+    for row in rows:
+        others = [
+            alt
+            for alt in alternatives.get(row["target_column_name"].casefold(), [])
+            if alt["attribute_id"] != row["target_attribute_id"]
+            and alt["table_id"] not in (row["source_table_id"], row["target_table_id"])
+        ]
+        if not others:
+            continue
+        source = connector.qualify(
+            row.get("source_schema_name"), row["source_table_name"]
+        )
+        sc = quoted_identifier(row["source_column_name"], dialect)
+
+        def coverage(schema: str | None, table: str, column: str) -> float | None:
+            target = connector.qualify(schema, table)
+            tc = quoted_identifier(column, dialect)
+            sql = (
+                f"SELECT COUNT(DISTINCT {sc}) AS n FROM {source} "
+                f"WHERE {sc} IS NOT NULL UNION ALL "
+                f"SELECT COUNT(DISTINCT {sc}) FROM {source} "
+                f"WHERE {sc} IN (SELECT {tc} FROM {target})"
+            )
+            try:
+                total, found = (int(v) for v in connector.execute(sql).iloc[:, 0])
+            except Exception:
+                logger.info(
+                    "semantic FK coverage check skipped for %s.%s -> %s.%s",
+                    row["source_table_name"],
+                    row["source_column_name"],
+                    table,
+                    column,
+                    exc_info=True,
+                )
+                return None
+            return found / total if total else None
+
+        current = coverage(
+            row.get("target_schema_name"),
+            row["target_table_name"],
+            row["target_column_name"],
+        )
+        if current is None:
+            continue
+        best, best_coverage = None, current + _RETARGET_MARGIN
+        for alt in others:
+            share = coverage(alt["schema_name"], alt["table_name"], alt["column_name"])
+            if (
+                share is not None
+                and share >= best_coverage
+                and _is_unique_column(connector, alt, dialect)
+            ):
+                best, best_coverage = alt, share
+        if best is None:
+            continue
+        delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
+        merge_semantic_fk(row["source_column_id"], best["attribute_id"])
+        moved += 1
+        logger.info(
+            "semantic FK retargeted by coverage: %s.%s -> %s.%s (%.0f%%) "
+            "instead of %s.%s (%.0f%%)",
+            row["source_table_name"],
+            row["source_column_name"],
+            best["table_name"],
+            best["column_name"],
+            100 * best_coverage,
+            row["target_table_name"],
+            row["target_column_name"],
+            100 * current,
+        )
+    return moved
+
+
+def _is_unique_column(
+    connector: SQLDatabase, column: dict[str, Any], dialect: str | None
+) -> bool:
+    """Whether *column* holds values and no value twice -- a usable join key."""
+    table = connector.qualify(column["schema_name"], column["table_name"])
+    col = quoted_identifier(column["column_name"], dialect)
+    sql = f"SELECT COUNT({col}) AS n, COUNT(DISTINCT {col}) AS d FROM {table}"
+    try:
+        counts = connector.execute(sql).iloc[0]
+        return int(counts.iloc[0]) > 0 and int(counts.iloc[0]) == int(counts.iloc[1])
+    except Exception:
+        return False
 
 
 def prune_disjoint_semantic_fks(database_name: str) -> int:

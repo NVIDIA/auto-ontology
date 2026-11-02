@@ -575,6 +575,55 @@ def fetch_semantic_fks_from_tables(table_ids: list[str]) -> list[dict[str, Any]]
     return _semantic_fk_join_rows(table_ids=table_ids)
 
 
+def fetch_attribute_columns_named(
+    database_name: str, column_names: list[str]
+) -> list[dict[str, Any]]:
+    """Columns of *database_name* named like any of *column_names*, with their attribute.
+
+    Names compare case-insensitively; only columns carrying a semantic
+    ColumnAttribute are returned, since only those can be a semantic FK target.
+    """
+    if not column_names:
+        return []
+    statement = (
+        select(
+            s.column__has_attribute.c.attribute_id,
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.column__has_attribute.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+            func.lower(s.catalog_column.c.name).in_(
+                sorted({name.lower() for name in column_names})
+            ),
+        )
+        .order_by(s.catalog_table.c.name, s.catalog_column.c.id)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
 def _semantic_fk_join_rows(
     *, database_name: str | None = None, table_ids: list[str] | None = None
 ) -> list[dict[str, Any]]:
