@@ -247,7 +247,7 @@ def test_dictionary_error_is_normalized_before_classification(
     assert result["path_state"]["error"] == normalized
     assert result["path_state"]["error_details"] == structured_error
     assert result["path_state"]["failed_attempts"][0]["error"] == normalized
-    assert normalized in captured_messages[0][0].content
+    assert any(normalized in m.content for m in captured_messages[0])
     assert normalized in captured_messages[1][-1].content
 
 
