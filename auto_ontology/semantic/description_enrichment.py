@@ -4,8 +4,8 @@
 
 """Write the semantic description of every ColumnAttribute once compilation is done.
 
-The taxonomy pass generates no descriptions: the catalog keeps only what a
-source supplied, in ``description`` and ``value_description``. This pass runs
+The taxonomy pass describes only catalog columns the source left without a
+description (:mod:`auto_ontology.semantic.catalog_descriptions`). This pass runs
 last, after FK resolution and the bridge-table stage, when every join a table
 takes part in is known. One LLM call per table writes the description of each
 non-FK column's ColumnAttribute, given:

@@ -99,10 +99,10 @@ def column_attribute_specs(
 ) -> list[ColumnAttributeSpec]:
     """Non-FK columns mapped 1:1 to ColumnAttribute candidates.
 
-    Only a description the column already carries is used; columns without one
-    are described after compilation by
+    Only the column's catalog description is used. The attribute's own
+    description is written after compilation by
     :mod:`auto_ontology.semantic.description_enrichment`, which can see the
-    tables they join to.
+    tables the column joins to.
     """
     fk_cols = fk_source_columns(fks)
     if suggested_fk_columns:

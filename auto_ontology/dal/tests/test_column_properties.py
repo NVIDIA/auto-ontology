@@ -176,6 +176,53 @@ def test_store_column_date_formats_is_a_noop_for_empty_input(world) -> None:
 
 
 # --------------------------------------------------------------------------
+# store_generated_column_descriptions
+# --------------------------------------------------------------------------
+
+
+def _description(column_id: str) -> str | None:
+    return store().query_read(
+        select(s.catalog_column.c.description).where(s.catalog_column.c.id == column_id)
+    )[0]["description"]
+
+
+def test_generated_descriptions_spare_certified_columns(world) -> None:
+    world.table("orders")
+    world.column("orders", "status")
+    world.column("orders", "code", position=2)
+    world.column("orders", "note", position=3)
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.code"])
+        .values(description="Code", description_certified=True)
+    )
+
+    written = d.store_generated_column_descriptions(
+        world.tables["orders"],
+        {"status": "Lifecycle state.", "code": "Order code.", "note": ""},
+    )
+
+    assert written == {"status"}
+    assert _description(world.columns["orders.status"]) == "Lifecycle state."
+    assert _description(world.columns["orders.code"]) == "Code"
+    assert _description(world.columns["orders.note"]) is None
+
+
+def test_generated_descriptions_scope_to_the_given_table(world) -> None:
+    world.table("orders")
+    world.column("orders", "status")
+    world.table("returns")
+    world.column("returns", "status")
+
+    d.store_generated_column_descriptions(
+        world.tables["orders"], {"status": "Lifecycle state."}
+    )
+
+    assert _description(world.columns["returns.status"]) is None
+    assert d.store_generated_column_descriptions(world.tables["orders"], {}) == set()
+
+
+# --------------------------------------------------------------------------
 # _set_column_property -- shared scoping behavior
 # --------------------------------------------------------------------------
 

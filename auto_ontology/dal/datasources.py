@@ -541,6 +541,39 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
     )
 
 
+def store_generated_column_descriptions(
+    table_id: str, descriptions: dict[str, str]
+) -> set[str]:
+    """Write generated descriptions onto a table's columns, sparing certified ones.
+
+    The caller only generates for columns whose description is blank or just
+    repeats the column name; a certified description is a curator's decision
+    and is never replaced, whatever it says. Returns the names written.
+    """
+    values = {name: text for name, text in descriptions.items() if text}
+    if not values:
+        return set()
+    rows = store().query_write(
+        update(s.catalog_column)
+        .where(
+            and_(
+                s.catalog_column.c.table_id == table_id,
+                s.catalog_column.c.name.in_(list(values)),
+                s.catalog_column.c.description_certified.is_(False),
+            )
+        )
+        .values(
+            description=case(
+                {name: literal(text, Text) for name, text in values.items()},
+                value=s.catalog_column.c.name,
+                else_=s.catalog_column.c.description,
+            )
+        )
+        .returning(s.catalog_column.c.name)
+    )
+    return {row["name"] for row in rows}
+
+
 # ---------------------------------------------------------------------------
 # Metadata writes
 # ---------------------------------------------------------------------------

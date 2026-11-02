@@ -536,6 +536,102 @@ def test_process_table_writes_term_and_attributes(
     )
 
 
+@patch("auto_ontology.semantic.visit_enter.store_generated_column_descriptions")
+@patch("auto_ontology.semantic.visit_enter.describe_catalog_columns")
+@patch("auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("auto_ontology.semantic.visit_enter.extract_term")
+def test_generated_catalog_descriptions_reach_the_later_prompts(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_describe: MagicMock,
+    mock_store: MagicMock,
+) -> None:
+    """Written before FK detection, so its prompt and the Term prompt see them.
+
+    A column the store declined to write (a certified description) keeps the
+    text it had.
+    """
+    from auto_ontology.semantic.models import PotentialFkResult, TableTermsResult
+
+    seen: list[dict[str, str | None]] = []
+
+    def _fk(_table: dict, ctx: dict, _samples: dict) -> PotentialFkResult:
+        seen.append({c["name"]: c.get("description") for c in ctx["columns"]})
+        return PotentialFkResult()
+
+    mock_fk_suggest.side_effect = _fk
+    mock_term.return_value = TableTermsResult(terms=[])
+    mock_describe.return_value = {
+        "amount": "Order total in dollars.",
+        "code": "Order code.",
+    }
+    mock_store.return_value = {"amount"}
+
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {"name": "amount", "data_type": "numeric", "description": None},
+            {"name": "code", "data_type": "text", "description": "Code"},
+            {"name": "note", "data_type": "text", "description": "Free text."},
+        ],
+        "fks": [],
+    }
+
+    process_table(table, ctx, domain_summary=None)
+
+    mock_store.assert_called_once_with("t1", mock_describe.return_value)
+    assert seen == [
+        {"amount": "Order total in dollars.", "code": "Code", "note": "Free text."}
+    ]
+
+
+@patch("auto_ontology.semantic.visit_enter.describe_catalog_columns")
+@patch("auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("auto_ontology.semantic.visit_enter.extract_term")
+def test_described_tables_skip_the_catalog_description_step(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_describe: MagicMock,
+) -> None:
+    from auto_ontology.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(terms=[])
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {"name": "amount", "data_type": "numeric", "description": "Total."}
+        ],
+        "fks": [],
+    }
+
+    process_table(table, ctx, domain_summary=None)
+
+    mock_describe.assert_not_called()
+
+
+@patch("auto_ontology.semantic.visit_enter.describe_catalog_columns")
+@patch("auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("auto_ontology.semantic.visit_enter.extract_term")
+def test_a_failed_description_step_does_not_stop_the_table(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_describe: MagicMock,
+) -> None:
+    from auto_ontology.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(terms=[])
+    mock_describe.side_effect = RuntimeError("llm down")
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+
+    process_table(table, ctx, domain_summary=None)
+
+    mock_fk_suggest.assert_called_once()
+    assert ctx["columns"][0].get("description") is None
+
+
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
 @patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
 @patch("auto_ontology.semantic.visit_enter.store_column_sample_values")

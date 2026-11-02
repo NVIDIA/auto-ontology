@@ -84,7 +84,8 @@
     "set_symmetric_column_pairs": "(table_id: 'str', pairs: 'list[list[str]]') -> 'None'",
     "store_column_date_formats": "(table_id: 'str', date_formats: 'dict[str, str]') -> 'None'",
     "store_column_sample_values": "(table_id: 'str', samples: 'dict[str, list]') -> 'None'",
-    "store_column_uniqueness": "(table_id: 'str', uniqueness: 'dict[str, bool]') -> 'None'"
+    "store_column_uniqueness": "(table_id: 'str', uniqueness: 'dict[str, bool]') -> 'None'",
+    "store_generated_column_descriptions": "(table_id: 'str', descriptions: 'dict[str, str]') -> 'set[str]'"
   },
   "descriptions": {
     "fetch_neighbour_tables": "(table_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",

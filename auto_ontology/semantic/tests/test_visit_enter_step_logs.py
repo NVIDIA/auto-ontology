@@ -105,6 +105,7 @@ def test_steps_are_logged_in_pipeline_order(
     starts = [m for m in (r.getMessage() for r in caplog.records) if m.endswith("…")]
     order = [
         "Sampling column values (2 columns)",
+        "Describing 2 catalog column(s)",
         "Detecting foreign keys",
         "Generating terms (1 columns)",
         "Writing 1 term(s) to the graph",

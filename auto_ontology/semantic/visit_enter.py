@@ -28,6 +28,11 @@ from auto_ontology.dal.datasources import (
     store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
+    store_generated_column_descriptions,
+)
+from auto_ontology.semantic.catalog_descriptions import (
+    describe_catalog_columns,
+    needs_description,
 )
 from auto_ontology.semantic.date_format import infer_date_format, is_date_type
 from auto_ontology.dal.terms import (
@@ -752,6 +757,47 @@ def calculate_columns_profiling(
     return profiling
 
 
+def _describe_undescribed_columns(
+    table: dict[str, Any],
+    ctx: dict[str, Any],
+    columns_profiling_samples: dict[str, dict[str, Any]],
+) -> None:
+    """Generate catalog descriptions for columns the source left without one.
+
+    Written to the store and patched into ``ctx`` so the FK and Term prompts,
+    and the ColumnAttribute embedding, all read them. A failure leaves the
+    columns undescribed and the table compiles on.
+    """
+    columns = ctx.get("columns", [])
+    pending = [c for c in columns if needs_description(c)]
+    if not pending:
+        return
+    table_name = table["name"]
+    try:
+        with _step(table_name, f"Describing {len(pending)} catalog column(s)"):
+            descriptions = describe_catalog_columns(
+                table, columns, columns_profiling_samples
+            )
+            written = store_generated_column_descriptions(table["id"], descriptions)
+    except Exception:
+        logger.warning(
+            "[%s] catalog column descriptions failed — continuing without them",
+            table_name,
+            exc_info=True,
+        )
+        return
+    for column in columns:
+        if column.get("name") in written:
+            column["description"] = descriptions[column["name"]]
+    if len(written) < len(pending):
+        logger.warning(
+            "[%s] described %d of %d catalog column(s)",
+            table_name,
+            len(written),
+            len(pending),
+        )
+
+
 def process_table(
     table: dict[str, Any],
     ctx: dict[str, Any],
@@ -811,6 +857,8 @@ def process_table(
             table_name,
             database_name,
         )
+
+    _describe_undescribed_columns(table, ctx, columns_profiling_samples)
 
     # --- FK detection (LLM + declared); results not written to the store ---
     declared_fks = ctx.get("fks", [])
