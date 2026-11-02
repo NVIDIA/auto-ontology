@@ -1169,13 +1169,15 @@ def _hop_dicts(hop_pairs: list[tuple[str, str]]) -> list[dict]:
 
 
 def find_table_join_paths(table_ids: list[str]) -> list[dict]:
-    """The shortest semantic join route between every pair of *table_ids*.
+    """The semantic join routes between every pair of *table_ids*.
 
-    Returns one ``{"table_ids": (a, b), "path": hops}`` per connected pair,
-    hops shaped like :func:`find_join_path`'s. Each pair is searched from both
-    ends, since an owner table is only enterable through its declared PK (see
-    :func:`_semantic_table_adjacency`). Pairs in different databases, or with
-    no route either way, are left out.
+    Returns ``{"table_ids": (a, b), "path": hops}`` entries, hops shaped like
+    :func:`find_join_path`'s. Two tables joined directly get one single-hop
+    entry per distinct column pair that joins them, since each can be a
+    different role; any other connected pair gets its one shortest route.
+    Each pair is searched from both ends, since an owner table is only
+    enterable through its declared PK (see :func:`_semantic_table_adjacency`).
+    Pairs in different databases, or with no route either way, are left out.
     """
     unique_ids = list(dict.fromkeys(tid for tid in table_ids if tid))
     database_ids = {tid: _table_database_id(tid) for tid in unique_ids}
@@ -1189,10 +1191,14 @@ def find_table_join_paths(table_ids: list[str]) -> list[dict]:
             if database_id not in adjacencies:
                 adjacencies[database_id] = _semantic_table_adjacency(database_id)
             adjacency = adjacencies[database_id]
-            hop_pairs = _shortest_table_hops(
-                adjacency, a_id, b_id
-            ) or _shortest_table_hops(adjacency, b_id, a_id)
-            hops = _hop_dicts(hop_pairs)
+            direct = _direct_table_hops(adjacency, a_id, b_id)
+            if direct:
+                routes = [[hop] for hop in _hop_dicts(direct)]
+            else:
+                hop_pairs = _shortest_table_hops(
+                    adjacency, a_id, b_id
+                ) or _shortest_table_hops(adjacency, b_id, a_id)
+                routes = [_hop_dicts(hop_pairs)]
         except Exception:
             logger.warning(
                 "find_table_join_paths: query failed for %s <-> %s",
@@ -1201,9 +1207,31 @@ def find_table_join_paths(table_ids: list[str]) -> list[dict]:
                 exc_info=True,
             )
             continue
-        if hops:
-            paths.append({"table_ids": (a_id, b_id), "path": hops})
+        paths.extend(
+            {"table_ids": (a_id, b_id), "path": hops} for hops in routes if hops
+        )
     return paths
+
+
+def _direct_table_hops(
+    adjacency: _Adjacency, a_id: str, b_id: str
+) -> list[tuple[str, str]]:
+    """Every distinct ``(a_col, b_col)`` edge joining *a_id* and *b_id* directly.
+
+    Read from both ends and oriented from *a_id*, so an edge walkable in both
+    directions -- or two semantic FKs pointing at each other -- counts once.
+    """
+    pairs = [
+        (source, target)
+        for nxt, source, target in adjacency.get(a_id, [])
+        if nxt == b_id
+    ]
+    pairs += [
+        (target, source)
+        for nxt, source, target in adjacency.get(b_id, [])
+        if nxt == a_id
+    ]
+    return list(dict.fromkeys(pairs))
 
 
 def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:

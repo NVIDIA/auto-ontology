@@ -296,6 +296,65 @@ def test_table_join_paths_connect_every_reachable_pair(world) -> None:
     }
 
 
+def _pair_routes(paths: list[dict]) -> list[list[tuple[str, str, str, str]]]:
+    return sorted(
+        [
+            (
+                h["source_table"],
+                h["source_column"],
+                h["target_table"],
+                h["target_column"],
+            )
+            for h in p["path"]
+        ]
+        for p in paths
+    )
+
+
+def test_table_join_paths_return_every_direct_join_of_a_pair(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id", 1)
+    world.column("customers", "last_order_id", 2)
+    world.attribute("customer-id", owner="customers.id")
+    world.table("orders", pk=["id"])
+    world.column("orders", "id", 1)
+    world.column("orders", "customer_id", 2)
+    world.attribute("order-id", owner="orders.id")
+    world.references("orders.customer_id", "customer-id")
+    world.references("customers.last_order_id", "order-id")
+    # Longer route through a third table: never offered once a direct one exists.
+    world.table("visits")
+    world.column("visits", "customer_id", 1)
+    world.column("visits", "order_id", 2)
+    world.references("visits.customer_id", "customer-id")
+    world.references("visits.order_id", "order-id")
+
+    paths = a.find_table_join_paths([world.tables["orders"], world.tables["customers"]])
+
+    assert {p["table_ids"] for p in paths} == {
+        (world.tables["orders"], world.tables["customers"])
+    }
+    assert _pair_routes(paths) == [
+        [("orders", "customer_id", "customers", "id")],
+        [("orders", "id", "customers", "last_order_id")],
+    ]
+
+
+def test_table_join_paths_count_mutual_semantic_fks_once(world) -> None:
+    world.table("fac_org")
+    world.column("fac_org", "org_key")
+    world.attribute("fac-key", owner="fac_org.org_key")
+    world.table("fclt_org")
+    world.column("fclt_org", "fclt_org_key")
+    world.attribute("fclt-key", owner="fclt_org.fclt_org_key")
+    world.references("fac_org.org_key", "fclt-key")
+    world.references("fclt_org.fclt_org_key", "fac-key")
+
+    paths = a.find_table_join_paths([world.tables["fac_org"], world.tables["fclt_org"]])
+
+    assert _pair_routes(paths) == [[("fac_org", "org_key", "fclt_org", "fclt_org_key")]]
+
+
 def test_table_join_paths_need_two_tables(joined) -> None:
     assert a.find_table_join_paths([joined.tables["orders"]]) == []
 
