@@ -96,6 +96,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     """
     created = _resolve_semantic_fks(database_name)
     created -= prune_disjoint_semantic_fks(database_name)
+    created -= merge_duplicate_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created
 
@@ -153,6 +154,90 @@ def prune_disjoint_semantic_fks(database_name: str) -> int:
                 row["target_column_name"],
             )
     return pruned
+
+
+def merge_duplicate_semantic_fks(database_name: str) -> int:
+    """Keep one semantic FK per set of identical columns referencing one target.
+
+    Two columns of a table that hold the same value on every row are copies,
+    not two roles; leaving both linked offers the model a choice that does not
+    exist. The kept column is the one named like the target column, otherwise
+    the first by name. Returns the number of edges deleted.
+    """
+    connector = _resolve_connector(database_name)
+    if connector is None:
+        return 0
+    dialect = getattr(connector, "dialect", None)
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in fetch_semantic_fk_join_groups(database_name):
+        key = (row["source_table_id"], row["target_attribute_id"])
+        grouped.setdefault(key, []).append(row)
+
+    merged = 0
+    for group in grouped.values():
+        if len(group) < 2:
+            continue
+        target_name = str(group[0].get("target_column_name") or "").casefold()
+        ordered = sorted(
+            group,
+            key=lambda row: (
+                str(row.get("source_column_name") or "").casefold() != target_name,
+                str(row.get("source_column_name") or "").casefold(),
+                str(row["source_column_id"]),
+            ),
+        )
+        source = connector.qualify(
+            group[0].get("source_schema_name"), group[0]["source_table_name"]
+        )
+        kept: list[dict[str, Any]] = []
+        for row in ordered:
+            copy_of = next(
+                (
+                    k
+                    for k in kept
+                    if _columns_identical(
+                        connector,
+                        source,
+                        quoted_identifier(k["source_column_name"], dialect),
+                        quoted_identifier(row["source_column_name"], dialect),
+                    )
+                ),
+                None,
+            )
+            if copy_of is None:
+                kept.append(row)
+                continue
+            delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
+            merged += 1
+            logger.info(
+                "semantic FK merged, %s.%s duplicates %s -> %s.%s",
+                row["source_table_name"],
+                row["source_column_name"],
+                copy_of["source_column_name"],
+                row["target_table_name"],
+                row["target_column_name"],
+            )
+    return merged
+
+
+def _columns_identical(connector: SQLDatabase, table: str, a: str, b: str) -> bool:
+    """Whether columns *a* and *b* of *table* agree on every row, NULLs included."""
+    sql = (
+        f"SELECT COUNT(*) AS n FROM (SELECT 1 AS x FROM {table} "
+        f"WHERE {a} <> {b} OR ({a} IS NULL AND {b} IS NOT NULL) "
+        f"OR ({a} IS NOT NULL AND {b} IS NULL) LIMIT 1) AS differing"
+    )
+    try:
+        return int(connector.execute(sql).iloc[0, 0]) == 0
+    except Exception:
+        logger.info(
+            "semantic FK duplicate check skipped for %s: %s, %s",
+            table,
+            a,
+            b,
+            exc_info=True,
+        )
+        return False
 
 
 def _resolve_semantic_fks(database_name: str) -> int:

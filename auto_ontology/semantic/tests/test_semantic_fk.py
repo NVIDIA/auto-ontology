@@ -525,3 +525,45 @@ def test_prune_removes_disjoint_and_empty_source_fks(
         assert semantic_fk.prune_disjoint_semantic_fks("database") == int(pruned)
 
     assert delete.called is pruned
+
+
+def test_merge_keeps_one_of_identical_columns_and_distinct_roles() -> None:
+    connector = MagicMock(dialect="mysql")
+    connector.qualify.side_effect = lambda schema, table: table
+    identical = {frozenset({"`SUBJECT_ID`", "`SO_SUBJECT_ID`"})}
+
+    def execute(sql: str) -> pd.DataFrame:
+        pair = frozenset(
+            col
+            for col in ("`SUBJECT_ID`", "`SO_SUBJECT_ID`", "`SOURCE_SUBJECT_ID`")
+            if f"WHERE {col} <>" in sql or f"<> {col} OR" in sql
+        )
+        return pd.DataFrame({"n": [0 if pair in identical else 1]})
+
+    connector.execute.side_effect = execute
+    rows = [
+        {
+            "source_table_id": "catalog",
+            "source_table_name": "CATALOG",
+            "source_column_id": name.lower(),
+            "source_column_name": name,
+            "target_attribute_id": "subject",
+            "target_table_name": "SUBJECT_SUMMARY",
+            "target_column_name": "SUBJECT_ID",
+        }
+        for name in ("SO_SUBJECT_ID", "SOURCE_SUBJECT_ID", "SUBJECT_ID")
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=rows,
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+    ):
+        assert semantic_fk.merge_duplicate_semantic_fks("database") == 1
+
+    delete.assert_called_once_with("so_subject_id", "subject")
