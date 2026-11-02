@@ -11,9 +11,14 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel
 
 from auto_ontology.utils import llm_invoke
-from auto_ontology.utils.llm_invoke import _structured_output_kwargs
+from auto_ontology.utils.llm_invoke import (
+    _structured_output_kwargs,
+    _system_messages_first,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +75,70 @@ def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:
         model: Any = "aws/anthropic/bedrock-claude-opus-4-8"
 
     assert _structured_output_kwargs(_AltModel())["tool_choice"] is None
+
+
+def _interleaved() -> list[BaseMessage]:
+    """The shape sql_from_semantic sends: system, user, system, system, user."""
+    return [
+        SystemMessage(content="role"),
+        HumanMessage(content="question"),
+        SystemMessage(content="evidence"),
+        SystemMessage(content="anchors"),
+        HumanMessage(content="prompt"),
+    ]
+
+
+def test_claude_gets_its_system_messages_ahead_of_the_conversation() -> None:
+    """azure/anthropic/* on the gateway 400s on a system message after a user one."""
+    ordered = _system_messages_first(
+        _Model("azure/anthropic/claude-opus-5-5"), _interleaved()
+    )
+
+    assert [m.content for m in ordered] == [
+        "role",
+        "evidence",
+        "anchors",
+        "question",
+        "prompt",
+    ]
+
+
+def test_other_models_keep_their_message_order() -> None:
+    messages = _interleaved()
+
+    assert (
+        _system_messages_first(_Model("nvidia/nemotron-3-nano-30b-a3b"), messages)
+        == messages
+    )
+
+
+class _SystemCheckModel(BaseModel):
+    answer: str
+
+
+def test_validation_retry_note_reaches_claude_ahead_of_the_conversation() -> None:
+    """The retry appends a system message after the user turn; it must not stay there."""
+    sent: list[list[BaseMessage]] = []
+
+    class _Structured:
+        def invoke(self, messages: list[BaseMessage]) -> _SystemCheckModel:
+            sent.append(messages)
+            if len(sent) == 1:
+                _SystemCheckModel.model_validate({})
+            return _SystemCheckModel(answer="ok")
+
+    class _Claude(_Model):
+        def with_structured_output(self, *_args: Any, **_kwargs: Any) -> _Structured:
+            return _Structured()
+
+    llm_invoke.safe_invoke_with_structured_output(
+        _Claude("azure/anthropic/claude-opus-5-5"),  # type: ignore[arg-type]
+        [SystemMessage(content="role"), HumanMessage(content="question")],
+        _SystemCheckModel,
+    )
+
+    roles = [m.type for m in sent[1]]
+    assert roles == ["system", "system", "human"]
 
 
 def _bound() -> int | None:
