@@ -552,7 +552,9 @@ class SQLReconstructionAgent(BaseAgent):
                 path_state, sql_code, corrected, incorrect_response
             )
 
-        llm = state["llm"]
+        # Rewriting SQL is the same task as writing it, so it gets the same
+        # model as sql_from_semantic rather than the fast non-reasoning one.
+        llm = state.get("reasoning_llm") or state["llm"]
         error = path_state.get("error", "")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)

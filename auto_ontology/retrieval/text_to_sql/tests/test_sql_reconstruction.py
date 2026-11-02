@@ -11,6 +11,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.retrieval.text_to_sql.agents import sql_reconstruction
 from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
+    ErrorAnalysis,
+    ErrorType,
     SQLReconstructionAgent,
 )
 from auto_ontology.retrieval.text_to_sql.numeric_types import SQL_CORRECTION_ERROR
@@ -195,3 +197,41 @@ def test_reconstruction_drops_prior_repair_turns(
     assert prior_repair not in captured_messages
     assert "SELECT bad" in captured_messages[-1].content
     assert "column missing" in captured_messages[-1].content
+
+
+def test_the_rewrite_uses_the_reasoning_model_and_triage_the_fast_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fast, reasoning = MagicMock(name="fast"), MagicMock(name="reasoning")
+    used: dict[str, object] = {}
+
+    def fake_invoke(llm: object, _messages: list, model: object):
+        if model is ErrorAnalysis:
+            used["triage"] = llm
+            return ErrorAnalysis(error_type=ErrorType.FIXABLE, explanation="logic")
+        used["rewrite"] = llm
+        return SimpleNamespace(sql_code="SELECT 2", thought="fixed", response="ok")
+
+    monkeypatch.setattr(
+        sql_reconstruction, "invoke_with_structured_output", fake_invoke
+    )
+    state = cast(
+        AgentState,
+        {
+            "llm": fast,
+            "reasoning_llm": reasoning,
+            "initial_question": "How many accounts?",
+            "evidence": "",
+            "messages": [],
+            "path_state": {
+                "error": "empty result",
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT 1", thought=""
+                ),
+            },
+        },
+    )
+
+    SQLReconstructionAgent().execute(state)
+
+    assert used == {"triage": fast, "rewrite": reasoning}
