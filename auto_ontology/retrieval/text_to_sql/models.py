@@ -2,6 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Annotated, Literal
 
@@ -268,3 +270,48 @@ class SQLGenerationModel(StrictModel):
                 "sql_code must be the full executable statement; response must be a real explanation."
             )
         return v
+
+    @classmethod
+    def from_text_reply(cls, text: str) -> "SQLGenerationModel | None":
+        """Read the answer out of a reply that wrote the fields as text.
+
+        The model sometimes writes the three fields out instead of calling the
+        tool: as ``<sql_code>`` tags, as a fenced SQL block, or as a bare
+        ``sql_code:`` label. The query is taken from the first of those found;
+        the text before and after it become ``thought`` and ``response``. None
+        when no query starting with SELECT or WITH can be found.
+        """
+        for pattern in (_SQL_TAG, _SQL_FENCE, _SQL_LABEL):
+            matches = [m for m in pattern.finditer(text) if m.group(1).strip()]
+            if matches:
+                break
+        else:
+            return None
+        last = matches[-1]
+        sql = _SQL_FENCE.sub(lambda m: m.group(1), last.group(1)).strip()
+        if not _SQL_START.match(sql):
+            return None
+        thought = _strip_field_labels(text[: last.start()])
+        response = _strip_field_labels(text[last.end() :])
+        return cls(
+            thought=thought or "Recovered from a text reply.",
+            sql_code=sql,
+            response=response or thought or "Recovered from a text reply.",
+        )
+
+
+_SQL_TAG = re.compile(r"<sql_code>(.*?)</sql_code>", re.DOTALL | re.IGNORECASE)
+_SQL_FENCE = re.compile(r"```(?:sql)?[ \t]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+_SQL_LABEL = re.compile(
+    r"^\s*\**\s*sql(?:_code)?\s*\**\s*:\s*\**(.*?)(?=^\s*\**\s*response\s*\**\s*:|\Z)",
+    re.DOTALL | re.IGNORECASE | re.MULTILINE,
+)
+_SQL_START = re.compile(r"\s*(?:select|with|\()", re.IGNORECASE)
+_FIELD_LABEL = re.compile(
+    r"^\s*\**\s*(?:thought|sql_code|sql|response)\s*\**\s*:\s*\**|</?(?:thought|response|result)>",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _strip_field_labels(text: str) -> str:
+    return _FIELD_LABEL.sub("", text).strip()

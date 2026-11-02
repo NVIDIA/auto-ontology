@@ -11,6 +11,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import BaseModel, ValidationError
 
 from auto_ontology.utils import llm_invoke
 from auto_ontology.utils.llm_invoke import _structured_output_kwargs
@@ -44,6 +46,17 @@ def test_claude_uses_function_calling_without_a_tool_choice() -> None:
     default (naming the tool) all hit it; only omitting the choice succeeds.
     """
     kwargs = _structured_output_kwargs(_Model("aws/anthropic/bedrock-claude-opus-4-8"))
+
+    assert kwargs == {
+        "method": "function_calling",
+        "tool_choice": None,
+        "include_raw": True,
+    }
+
+
+def test_raw_replies_are_only_requested_from_chat_openai_clients() -> None:
+    """ChatNVIDIA raises on ``include_raw``; only gateway prefixes get ChatOpenAI."""
+    kwargs = _structured_output_kwargs(_Model("claude-3-5-sonnet"))
 
     assert kwargs == {"method": "function_calling", "tool_choice": None}
 
@@ -426,3 +439,115 @@ def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -
     monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
 
     assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
+
+
+class _Answer(BaseModel):
+    sql_code: str
+
+    @classmethod
+    def from_text_reply(cls, text: str) -> "_Answer | None":
+        return cls(sql_code=text.split("SQL=", 1)[1]) if "SQL=" in text else None
+
+
+class _ScriptedClient:
+    """Claude-named client whose structured invocations return scripted replies."""
+
+    model_name = "aws/anthropic/bedrock-claude-sonnet-5-5"
+
+    def __init__(self, *replies: dict) -> None:
+        self.replies = list(replies)
+        self.prompts: list[list] = []
+
+    def with_structured_output(
+        self, _schema: object, **_kwargs: object
+    ) -> "_ScriptedClient":
+        return self
+
+    def invoke(self, messages: list) -> dict:
+        self.prompts.append(list(messages))
+        return self.replies.pop(0)
+
+
+def _text_reply(text: str) -> dict:
+    return {"raw": AIMessage(content=text), "parsed": None, "parsing_error": None}
+
+
+@pytest.fixture
+def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(llm_invoke.time, "sleep", lambda _s: None)
+
+
+def test_a_text_reply_the_schema_can_read_is_used(_no_sleep: None) -> None:
+    client = _ScriptedClient(_text_reply("Here it is. SQL=SELECT 1"))
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="q")], _Answer
+    )
+
+    assert result == _Answer(sql_code="SELECT 1")
+    assert len(client.prompts) == 1
+
+
+def test_an_unreadable_text_reply_is_retried_with_a_nudge(_no_sleep: None) -> None:
+    """The identical prompt mostly gets the identical (cached) text back."""
+    answer = _Answer(sql_code="SELECT 2")
+    client = _ScriptedClient(
+        _text_reply("I would select two."),
+        {"raw": AIMessage(content=""), "parsed": answer, "parsing_error": None},
+    )
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="q")], _Answer
+    )
+
+    assert result is answer
+    retry = client.prompts[1]
+    assert [type(m) for m in retry] == [HumanMessage, AIMessage, HumanMessage]
+    assert retry[1].content == "I would select two."
+    assert "calling the _Answer tool" in retry[2].content
+
+
+def test_the_nudge_is_added_only_once(_no_sleep: None) -> None:
+    client = _ScriptedClient(*(_text_reply("no sql here") for _ in range(3)))
+
+    with pytest.raises(RuntimeError, match="No _Answer after 3 attempts"):
+        llm_invoke.safe_invoke_with_structured_output(
+            client, [HumanMessage(content="q")], _Answer
+        )
+
+    assert len(client.prompts[1]) == len(client.prompts[2]) == 3
+
+
+def test_exhausted_attempts_raise_so_the_reasoning_fallback_runs(
+    monkeypatch: pytest.MonkeyPatch, _no_sleep: None
+) -> None:
+    primary = _ScriptedClient(*(_text_reply("no sql here") for _ in range(3)))
+    llm_invoke._remember_non_reasoning(primary)
+    answer = _Answer(sql_code="SELECT 3")
+    reasoning = _ScriptedClient({"raw": None, "parsed": answer, "parsing_error": None})
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+
+    result = llm_invoke.invoke_with_structured_output(
+        primary, [HumanMessage(content="q")], _Answer
+    )
+
+    assert result is answer
+
+
+def test_a_raw_parsing_error_still_gets_the_validation_retry(_no_sleep: None) -> None:
+    try:
+        _Answer.model_validate({})
+    except ValidationError as exc:
+        error = exc
+    answer = _Answer(sql_code="SELECT 4")
+    client = _ScriptedClient(
+        {"raw": AIMessage(content=""), "parsed": None, "parsing_error": error},
+        {"raw": AIMessage(content=""), "parsed": answer, "parsing_error": None},
+    )
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="q")], _Answer
+    )
+
+    assert result is answer
+    assert "did not validate" in client.prompts[1][-1].content
