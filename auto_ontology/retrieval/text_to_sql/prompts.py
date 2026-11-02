@@ -94,7 +94,10 @@ create_sql_user_prompt = (
     "'when to use' note says which one the question needs; follow it.\n"
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
-    "present in SELECT/GROUP BY.\n\n"
+    "present in SELECT/GROUP BY.\n"
+    "- You may use WITH (common table expressions) and subqueries whenever you "
+    "find them useful, for example to compute an intermediate result once or to "
+    "keep a multi-step query readable.\n\n"
     "**Joins**\n"
     "- When evidence rules map to columns in different tables, include the joins "
     "that connect those tables using the listed paths. Choose the join type "
@@ -460,6 +463,9 @@ ORDER BY total_sales DESC;"""
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
+- You may use WITH (common table expressions) and subqueries whenever you
+  find them useful, for example to compute an intermediate result once or to
+  keep a multi-step query readable.
 - If the question filters by a single constant value on a column,
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
