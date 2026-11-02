@@ -15,7 +15,7 @@ from typing import Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from auto_ontology.utils.model_config import resolve
@@ -45,6 +45,9 @@ class StrictLLMOutputModel(BaseModel):
 
 
 RETRY_MAX_ATTEMPTS = 3
+
+# Model-name prefixes served through ``ChatOpenAI``; everything else gets ``ChatNVIDIA``.
+_OPENAI_CLIENT_PREFIXES = ("openai/", "azure/", "aws/")
 LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
@@ -225,7 +228,7 @@ def _build_client(
     ``ChatOpenAI``, which supports structured output. Everything else uses
     ``ChatNVIDIA``.
     """
-    if model.startswith(("openai/", "azure/", "aws/")):
+    if model.startswith(_OPENAI_CLIENT_PREFIXES):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
@@ -435,13 +438,18 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
 
     Measured against the live endpoint: every explicit value ("auto", "any",
     "required", and langchain's default of naming the tool) hits that conflict, and only
-    omitting it succeeds. The model still calls the tool without being forced to, and
-    the caller retries if it ever answers without one.
+    omitting it succeeds. Unforced, the model sometimes answers in text instead, so
+    ``include_raw`` keeps that text for :func:`_from_text_reply`. It is asked for
+    only on the gateway prefixes that get a ``ChatOpenAI`` client, because
+    ``ChatNVIDIA`` raises on it.
     """
     model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
     lowered = model.lower()
     if "anthropic" in lowered or "claude" in lowered:
-        return {"method": "function_calling", "tool_choice": None}
+        kwargs: dict = {"method": "function_calling", "tool_choice": None}
+        if model.startswith(_OPENAI_CLIENT_PREFIXES):
+            kwargs["include_raw"] = True
+        return kwargs
     return {}
 
 
@@ -521,21 +529,65 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
         return _safe_invoke_text(fallback, prompt)
 
 
+def _raw_text(raw: object) -> str:
+    content = getattr(raw, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def _from_text_reply(schema: Type[T], raw: object) -> T | None:
+    """The schema's own reading of a reply that answered in text, if it has one.
+
+    A model asked to call a tool sometimes writes the answer as prose instead
+    (Claude Sonnet 5.5 did so on about 60% of SQL repair prompts). A schema that
+    can recognise its answer in text opts in by defining ``from_text_reply``.
+    """
+    parse = getattr(schema, "from_text_reply", None)
+    text = _raw_text(raw)
+    if parse is None or not text.strip():
+        return None
+    try:
+        return parse(text)
+    except (ValidationError, ValueError):
+        return None
+
+
+def _unpack_structured(result: object) -> tuple[object, object]:
+    """``(parsed, raw)`` from an ``include_raw`` result; re-raises its parse error."""
+    if isinstance(result, dict) and "parsed" in result and "raw" in result:
+        if result.get("parsing_error") is not None:
+            raise result["parsing_error"]
+        return result["parsed"], result["raw"]
+    return result, None
+
+
 def safe_invoke_with_structured_output(
     llm: BaseChatModel,
     messages: list[BaseMessage],
     schema: Type[T],
 ) -> T:
-    """LLM structured call with retry."""
+    """LLM structured call with retry.
+
+    Raises once every attempt has come back without a usable object, so that
+    :func:`invoke_with_structured_output` can still try the reasoning model.
+    """
     current_messages = _ensure_non_system_message(messages.copy())
     schema_name = getattr(schema, "__name__", str(schema))
     structured_kwargs = _structured_output_kwargs(llm)
+    nudged = False
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             model_llm = llm.with_structured_output(schema, **structured_kwargs)
             with _inflight_guard():
-                result = model_llm.invoke(current_messages)
+                result, raw = _unpack_structured(model_llm.invoke(current_messages))
         except _requests.exceptions.ReadTimeout:
             logger.error(
                 "LLM invoke timed out after %ds on attempt %d/%d for %s",
@@ -602,6 +654,16 @@ def safe_invoke_with_structured_output(
             raise
 
         if result is None:
+            recovered = _from_text_reply(schema, raw)
+            if recovered is not None:
+                logger.warning(
+                    "LLM answered %s in text instead of calling the tool on "
+                    "attempt %d/%d — using the answer parsed from the text.",
+                    schema_name,
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                )
+                return recovered
             logger.warning(
                 "LLM returned None for %s on attempt %d/%d — retrying.",
                 schema_name,
@@ -609,12 +671,32 @@ def safe_invoke_with_structured_output(
                 RETRY_MAX_ATTEMPTS,
             )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
+                reply_text = _raw_text(raw).strip()
+                if reply_text and not nudged:
+                    # Resending the identical prompt mostly gets the identical
+                    # text reply back, from the provider's prompt cache.
+                    nudged = True
+                    current_messages = [
+                        *current_messages,
+                        AIMessage(content=reply_text),
+                        HumanMessage(
+                            content=(
+                                f"Answer by calling the {schema_name} tool. "
+                                "Do not reply in plain text."
+                            )
+                        ),
+                    ]
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 time.sleep(wait)
             continue
         if isinstance(result, schema):
             return result
         return schema.model_validate(result)
+
+    raise RuntimeError(
+        f"No {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: the model never "
+        "called the tool"
+    )
 
 
 def invoke_with_structured_output(
