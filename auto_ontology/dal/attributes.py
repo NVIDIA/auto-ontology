@@ -21,6 +21,7 @@ from sqlalchemy import (
     any_,
     bindparam,
     case,
+    delete,
     func,
     literal,
     or_,
@@ -705,6 +706,119 @@ def set_semantic_fk_join_default(
             raise ValueError(
                 "Selected semantic FK column does not belong to the requested group"
             )
+
+
+def fetch_semantic_fks_missing_exact_name(database_name: str) -> list[dict[str, Any]]:
+    """Inferred semantic FKs whose target table has a column of the FK's own name.
+
+    One row per FK column linked to ``T.x`` while ``T`` also has ``y``, named
+    like the FK column, unique, and owning a semantic attribute. Declared FKs
+    are left out: the constraint names the target column.
+    """
+    source = s.catalog_column.alias("exact_name_source")
+    current = s.catalog_column.alias("exact_name_current")
+    exact = s.catalog_column.alias("exact_name_target")
+    owner = s.column__has_attribute.alias("exact_name_owner")
+    exact_attribute = s.column_attribute.alias("exact_name_attribute")
+    target_table = s.catalog_table.alias("exact_name_table")
+    target_schema = s.catalog_schema.alias("exact_name_schema")
+    source_table = s.catalog_table.alias("exact_name_source_table")
+    source_schema = s.catalog_schema.alias("exact_name_source_schema")
+    statement = (
+        select(
+            source.c.id.label("source_column_id"),
+            source.c.name.label("source_column_name"),
+            source.c.sample_values,
+            source_table.c.name.label("source_table_name"),
+            s.column__semantic_fk.c.attribute_id.label("current_attribute_id"),
+            current.c.name.label("current_column_name"),
+            func.min(exact_attribute.c.id).label("exact_attribute_id"),
+            exact.c.name.label("exact_column_name"),
+            target_table.c.name.label("target_table_name"),
+            target_schema.c.name.label("target_schema_name"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                source, source.c.id == s.column__semantic_fk.c.column_id
+            )
+            .join(source_table, source_table.c.id == source.c.table_id)
+            .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == source_schema.c.database_id,
+            )
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(current, current.c.id == s.column__has_attribute.c.column_id)
+            .join(target_table, target_table.c.id == current.c.table_id)
+            .join(target_schema, target_schema.c.id == target_table.c.schema_id)
+            .join(
+                exact,
+                and_(
+                    exact.c.table_id == current.c.table_id,
+                    exact.c.id != current.c.id,
+                    func.lower(exact.c.name) == func.lower(source.c.name),
+                ),
+            )
+            .join(owner, owner.c.column_id == exact.c.id)
+            .join(exact_attribute, exact_attribute.c.id == owner.c.attribute_id)
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            source.c.table_id != current.c.table_id,
+            exact.c.is_unique.is_(True),
+            exact_attribute.c.source == SEMANTIC_SOURCE,
+            ~select(s.column__foreign_key.c.source_column_id)
+            .where(s.column__foreign_key.c.source_column_id == source.c.id)
+            .exists(),
+        )
+        .group_by(
+            source.c.id,
+            source.c.name,
+            source.c.sample_values,
+            source_table.c.name,
+            s.column__semantic_fk.c.attribute_id,
+            current.c.name,
+            exact.c.name,
+            target_table.c.name,
+            target_schema.c.name,
+        )
+        .order_by(source_table.c.name, source.c.name)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def retarget_semantic_fk(
+    column_id: str, old_attribute_id: str, new_attribute_id: str
+) -> bool:
+    """Move a column's semantic FK from one attribute to another, atomically.
+
+    Returns ``False`` and changes nothing when the new edge would cross a
+    database boundary (see :func:`merge_semantic_fk`).
+    """
+    if not _same_database(column_id, new_attribute_id):
+        logger.warning(
+            "retarget_semantic_fk: refusing cross-database edge %s -> %s",
+            column_id,
+            new_attribute_id,
+        )
+        return False
+    with write_transaction():
+        store().query_write(
+            delete(s.column__semantic_fk).where(
+                s.column__semantic_fk.c.column_id == column_id,
+                s.column__semantic_fk.c.attribute_id == old_attribute_id,
+            )
+        )
+        store().query_write(
+            insert(s.column__semantic_fk)
+            .values(column_id=column_id, attribute_id=new_attribute_id)
+            .on_conflict_do_nothing()
+        )
+    return True
 
 
 def _column_path_select(link_table):

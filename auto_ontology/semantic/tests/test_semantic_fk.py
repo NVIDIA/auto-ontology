@@ -483,9 +483,72 @@ def test_resolution_always_normalizes_join_defaults() -> None:
             return_value=3,
         ),
         patch(
+            "auto_ontology.semantic.semantic_fk.prefer_exact_name_targets"
+        ) as prefer_exact,
+        patch(
             "auto_ontology.semantic.semantic_fk.select_semantic_fk_join_defaults"
         ) as select_defaults,
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 3
 
+    prefer_exact.assert_called_once_with("database")
     select_defaults.assert_called_once_with("database")
+
+
+def _exact_name_row(samples: str | None = '["A1", "B2"]') -> dict:
+    return {
+        "source_column_id": "rooms-code",
+        "source_column_name": "SPACE_UNIT_CODE",
+        "sample_values": samples,
+        "source_table_name": "ROOMS",
+        "current_attribute_id": "unit-key-attr",
+        "current_column_name": "SPACE_UNIT_KEY",
+        "exact_attribute_id": "unit-code-attr",
+        "exact_column_name": "SPACE_UNIT_CODE",
+        "target_table_name": "SPACE_UNIT",
+        "target_schema_name": "dw",
+    }
+
+
+def _run_prefer_exact(row: dict, connector, probe_rows: list[dict] | None = None):
+    executor = MagicMock()
+    executor.run.return_value = {"ok": True, "rows": probe_rows or []}
+    probe = MagicMock()
+    probe.return_value.__enter__.return_value = executor
+    with (
+        patch.object(
+            semantic_fk, "fetch_semantic_fks_missing_exact_name", return_value=[row]
+        ),
+        patch.object(semantic_fk, "_resolve_connector", return_value=connector),
+        patch.object(semantic_fk, "ProbeExecutor", probe),
+        patch.object(semantic_fk, "retarget_semantic_fk", return_value=True) as move,
+    ):
+        moved = semantic_fk.prefer_exact_name_targets("dw")
+    return moved, move
+
+
+def test_exact_name_target_wins_when_its_values_hold_the_samples() -> None:
+    moved, move = _run_prefer_exact(
+        _exact_name_row(),
+        MagicMock(dialect="mysql"),
+        [{"matched_value": "A1"}, {"matched_value": "B2"}],
+    )
+
+    assert moved == 1
+    move.assert_called_once_with("rooms-code", "unit-key-attr", "unit-code-attr")
+
+
+def test_exact_name_target_is_refused_when_a_sample_is_missing() -> None:
+    moved, move = _run_prefer_exact(
+        _exact_name_row(), MagicMock(dialect="mysql"), [{"matched_value": "A1"}]
+    )
+
+    assert moved == 0
+    move.assert_not_called()
+
+
+def test_exact_name_target_wins_on_name_alone_without_a_probe() -> None:
+    moved, move = _run_prefer_exact(_exact_name_row(samples=None), None)
+
+    assert moved == 1
+    move.assert_called_once()

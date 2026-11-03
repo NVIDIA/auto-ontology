@@ -21,6 +21,8 @@ Algorithm
       database for a candidate whose sample values match when the LLM
       abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id
       directly — no additional lookup needed.
+3. Move every inferred edge whose target table also has a unique column named
+   exactly like the FK column onto that column (``prefer_exact_name_targets``).
 """
 
 from __future__ import annotations
@@ -36,9 +38,11 @@ from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
     fetch_semantic_fk_join_groups,
+    fetch_semantic_fks_missing_exact_name,
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
+    retarget_semantic_fk,
     set_semantic_fk_join_default,
 )
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
@@ -93,8 +97,77 @@ def resolve_semantic_fks(database_name: str) -> int:
     Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
+    prefer_exact_name_targets(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created
+
+
+def prefer_exact_name_targets(database_name: str) -> int:
+    """Move inferred FKs onto the target-table column that has the FK's own name.
+
+    Inference picks a unique column of the right table but not always the right
+    one: ``ZPM_ROOMS_LOAD.SPACE_UNIT_CODE`` landed on ``SPACE_UNIT.SPACE_UNIT_KEY``
+    though ``SPACE_UNIT.SPACE_UNIT_CODE`` exists. The exact name wins unless a
+    live probe shows the FK's sample values are missing from it. Returns the
+    number of edges moved.
+    """
+    rows = fetch_semantic_fks_missing_exact_name(database_name)
+    if not rows:
+        return 0
+    connector = _resolve_connector(database_name)
+    moved = 0
+    for row in rows:
+        if _samples_missing_from_exact(row, connector):
+            continue
+        if retarget_semantic_fk(
+            row["source_column_id"],
+            row["current_attribute_id"],
+            row["exact_attribute_id"],
+        ):
+            moved += 1
+            logger.info(
+                "resolve_semantic_fks [exact-name]: %s.%s moved from %s.%s to %s.%s",
+                row["source_table_name"],
+                row["source_column_name"],
+                row["target_table_name"],
+                row["current_column_name"],
+                row["target_table_name"],
+                row["exact_column_name"],
+            )
+    return moved
+
+
+def _samples_missing_from_exact(
+    row: dict[str, Any], connector: SQLDatabase | None
+) -> bool:
+    """Whether a live probe shows some FK sample value absent from the exact column.
+
+    ``False`` when nothing can be probed: the name match then stands alone.
+    """
+    samples = _distinct_samples(row.get("sample_values"))
+    if connector is None or not samples:
+        return False
+    sql = _sample_match_sql(
+        {
+            "schema_name": row["target_schema_name"],
+            "table_name": row["target_table_name"],
+            "source_column": row["exact_column_name"],
+        },
+        samples,
+        getattr(connector, "dialect", None),
+    )
+    if not sql:
+        return False
+    with ProbeExecutor(connector, max_calls=1) as executor:
+        result = executor.run(sql, purpose="semantic FK exact-name check")
+    if not result["ok"]:
+        return False
+    found = {
+        str(next(iter(r.values())))
+        for r in (result.get("rows") or [])
+        if r and next(iter(r.values())) is not None
+    }
+    return not set(samples).issubset(found)
 
 
 def _resolve_semantic_fks(database_name: str) -> int:

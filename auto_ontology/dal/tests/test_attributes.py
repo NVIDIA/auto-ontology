@@ -377,6 +377,73 @@ def test_table_join_paths_mark_only_mutual_hops_as_same_key(world) -> None:
     ]
 
 
+def _unique(world, column: str) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns[column])
+        .values(is_unique=True)
+    )
+
+
+@pytest.fixture
+def code_and_key(world):
+    world.table("space_unit")
+    world.column("space_unit", "space_unit_key", 1)
+    world.column("space_unit", "space_unit_code", 2)
+    world.attribute("unit-key", owner="space_unit.space_unit_key")
+    world.attribute("unit-code", owner="space_unit.space_unit_code")
+    _unique(world, "space_unit.space_unit_key")
+    world.table("rooms")
+    world.column("rooms", "space_unit_code")
+    world.references("rooms.space_unit_code", "unit-key")
+    return world
+
+
+def test_exact_name_finds_a_fk_on_a_different_suffix(code_and_key) -> None:
+    world = code_and_key
+    database = f"{world.prefix}-shopdb"
+    assert a.fetch_semantic_fks_missing_exact_name(database) == []
+
+    _unique(world, "space_unit.space_unit_code")
+    [row] = a.fetch_semantic_fks_missing_exact_name(database)
+
+    assert row["source_column_id"] == world.columns["rooms.space_unit_code"]
+    assert row["current_attribute_id"] == world.attributes["unit-key"]
+    assert row["exact_attribute_id"] == world.attributes["unit-code"]
+    assert (row["target_table_name"], row["exact_column_name"]) == (
+        "space_unit",
+        "space_unit_code",
+    )
+
+
+def test_exact_name_skips_declared_foreign_keys(code_and_key) -> None:
+    world = code_and_key
+    _unique(world, "space_unit.space_unit_code")
+    _link(
+        s.column__foreign_key,
+        source_column_id=world.columns["rooms.space_unit_code"],
+        target_column_id=world.columns["space_unit.space_unit_key"],
+    )
+
+    assert a.fetch_semantic_fks_missing_exact_name(f"{world.prefix}-shopdb") == []
+
+
+def test_retarget_moves_the_semantic_fk(code_and_key) -> None:
+    world = code_and_key
+    column = world.columns["rooms.space_unit_code"]
+
+    assert a.retarget_semantic_fk(
+        column, world.attributes["unit-key"], world.attributes["unit-code"]
+    )
+
+    rows = store().query_read(
+        select(s.column__semantic_fk.c.attribute_id).where(
+            s.column__semantic_fk.c.column_id == column
+        )
+    )
+    assert [row["attribute_id"] for row in rows] == [world.attributes["unit-code"]]
+
+
 def test_table_join_paths_need_two_tables(joined) -> None:
     assert a.find_table_join_paths([joined.tables["orders"]]) == []
 
