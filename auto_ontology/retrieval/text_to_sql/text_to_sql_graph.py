@@ -70,6 +70,11 @@ from auto_ontology.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_jsonb_path_check,
     is_db_probe_join_path_check,
 )
+from auto_ontology.retrieval.text_to_sql.react.agent import (
+    NODE_NAME as REACT_NODE_NAME,
+    ReactSQLAgent,
+)
+from auto_ontology.retrieval.text_to_sql.react.config import is_react_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +331,22 @@ def _entry_router_fn(state):
     return state["path_state"].get("_resume_from", "question_intent")
 
 
+def _react_entry_router_fn(state):
+    """With the ReAct agent on, a fresh question goes to it instead of intent.
+
+    A resume keeps its own target, so a run the fixed pipeline started still
+    finishes there.
+    """
+    return state["path_state"].get("_resume_from", REACT_NODE_NAME)
+
+
+def route_react(state: AgentState) -> str:
+    """An answered episode is formatted; anything else is reported as unanswerable."""
+    if state.get("decision") == "valid_sql":
+        return "format_and_respond"
+    return "unconstructable_sql_response"
+
+
 def create_graph():
 
     # KumoRFM prediction is wired in only when configured — decided once here at
@@ -434,14 +455,32 @@ def create_graph():
     # -----------------    ENTRY POINT   ------------------
     graph.add_node("_entry_router", lambda state: state)
     graph.set_entry_point("_entry_router")
+    react_enabled = is_react_enabled()
+    logger.info("Text-to-SQL graph: ReAct agent %s", react_enabled)
+    entry_targets = {
+        "question_intent": "question_intent",
+        "reconstruct_sql": "reconstruct_sql",
+    }
+    if react_enabled:
+        entry_targets[REACT_NODE_NAME] = REACT_NODE_NAME
     graph.add_conditional_edges(
         "_entry_router",
-        _entry_router_fn,
-        {
-            "question_intent": "question_intent",
-            "reconstruct_sql": "reconstruct_sql",
-        },
+        _react_entry_router_fn if react_enabled else _entry_router_fn,
+        entry_targets,
     )
+    if react_enabled:
+        graph.add_node(
+            REACT_NODE_NAME,
+            _make_node(REACT_NODE_NAME, agent_wrapper(ReactSQLAgent())),
+        )
+        graph.add_conditional_edges(
+            REACT_NODE_NAME,
+            route_react,
+            {
+                "format_and_respond": "format_and_respond",
+                "unconstructable_sql_response": "unconstructable_sql_response",
+            },
+        )
 
     # Add only nodes instantiated above.
     graph.add_node("question_intent", question_intent_node)

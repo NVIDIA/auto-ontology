@@ -18,6 +18,7 @@ blank thinking step.
 from __future__ import annotations
 
 NODE_LABELS: dict[str, str] = {
+    "react_sql_agent": "Searching the data and writing SQL",
     "question_intent": "Classifying the question",
     "question_extraction": "Understanding the question",
     "prepare_prediction_graph": "Preparing prediction",

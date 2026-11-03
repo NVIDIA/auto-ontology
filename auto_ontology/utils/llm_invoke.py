@@ -541,6 +541,42 @@ def _safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
     raise RuntimeError("safe_invoke_text exhausted retries")
 
 
+def invoke_with_retry(
+    llm: BaseChatModel,
+    messages: list[BaseMessage],
+    *,
+    max_attempts: int = RETRY_MAX_ATTEMPTS,
+    base_wait: float = 2.0,
+    max_wait: float = 60.0,
+):
+    """``llm.invoke(messages)``, retried with exponential backoff on transient errors.
+
+    For a caller whose call sits in the middle of a longer conversation, where
+    giving up means losing everything said so far. The waits double from
+    *base_wait* up to *max_wait*, which is how long a saturated or
+    rate-limited endpoint needs; the shorter waits of the other helpers here
+    do not outlast it. An error that is not transient is raised at once, and
+    so is the last one once the attempts run out.
+    """
+    for attempt in range(max(max_attempts, 1)):
+        try:
+            with _inflight_guard():
+                return llm.invoke(messages)
+        except Exception as e:
+            if not _is_retryable(e) or attempt >= max_attempts - 1:
+                raise
+            wait = min(max_wait, base_wait * 2**attempt) + random.uniform(0, 1)
+            logger.warning(
+                "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                attempt + 1,
+                max_attempts,
+                wait,
+                str(e)[:120],
+            )
+            time.sleep(wait)
+    raise RuntimeError("invoke_with_retry exhausted its attempts")
+
+
 def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
     """invoke_text with retry/backoff, then the reasoning model if this client is non-reasoning."""
     try:
