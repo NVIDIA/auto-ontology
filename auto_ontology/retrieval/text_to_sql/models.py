@@ -210,11 +210,17 @@ class SQLGenerationModel(StrictModel):
 
     This model is used by SQL generation agents to return structured SQL data.
     Formatting is handled separately by SQLResponseFormattingAgent.
-
-    Field order matters: the LLM fills fields sequentially, so ``thought``
-    comes first to drain reasoning before it writes the clean output fields.
     """
 
+    # Field order matters: the LLM fills fields sequentially, so ``thought``
+    # comes first and settles the approach before the clean output fields.
+    #
+    # This note is a comment, not part of the docstring, because the docstring
+    # is the tool description the model reads. Worded as "``thought`` comes
+    # first to drain reasoning", it asked the model to write its reasoning out,
+    # and Claude Opus 5.5, which thinks before it answers, refused every such
+    # request (finish_reason content_filter, no tool call), so SQL generation
+    # never returned a query.
     thought: str = Field(
         ...,
         description=(
