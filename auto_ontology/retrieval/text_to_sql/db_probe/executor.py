@@ -14,13 +14,13 @@ Probes run **inline on the calling thread**. The pipeline's connectors are
 shared and long-lived, and thread-affine connectors (e.g. SQLite binds each
 connection to its creating thread) reuse the calling thread's existing
 connection — so inline execution avoids leaking a fresh connection per probe.
-Bounding therefore relies on ``LIMIT`` + the call budget rather than a hard
-wall-clock timeout; per-dialect statement timeouts (Postgres ``statement_timeout``,
-SQLite ``set_progress_handler``) are the right tool once Phase 2 runs arbitrary
-model-authored SQL.
+``LIMIT`` plus the call budget do most of the bounding. A caller that wants a
+wall-clock cap as well passes ``timeout_s``, but only connectors advertising
+``supports_statement_timeout`` (Databricks, Kyuubi, ClickHouse) can honour it;
+on SQLite and Postgres a probe still falls back to the chat-level cap.
 
-The same executor backs both the Phase-1 deterministic probes and any future
-Phase-2 LLM-driven exploration loop, so all live access inherits these guards.
+The same executor backs both the deterministic probes and the agentic SQL
+construction loop, so all live access inherits these guards.
 """
 
 from __future__ import annotations
@@ -49,6 +49,44 @@ _FORBIDDEN = re.compile(
     re.IGNORECASE,
 )
 _LIMIT_RE = re.compile(r"\blimit\b", re.IGNORECASE)
+
+#: Dialects with no notion of a catalog above the schema, where a name like
+#: ``mydb.main.votes`` is a syntax error rather than a valid reference.
+_NO_CATALOG_DIALECTS = frozenset({"sqlite", "duckdb"})
+
+
+def _strip_catalog(sql: str, dialect: str | None) -> str:
+    """Drop catalog and schema qualifiers the dialect cannot parse.
+
+    The schema is rendered to the model fully qualified, so it writes the
+    names it was shown -- ``codebase_community.main.votes``. SQLite rejects
+    that outright with ``near ".": syntax error``, which cost 202 executions
+    across 18% of questions on a full BIRD run before this existed.
+
+    Fixed here rather than in the rendered schema because the prompt is the
+    one input whose every edit has flipped questions unrelated to the change.
+    Rewriting at the point of execution leaves the model's context untouched.
+    """
+    if not sql or (dialect or "").lower() not in _NO_CATALOG_DIALECTS:
+        return sql
+    try:
+        import sqlglot
+        from sqlglot import exp
+
+        tree = sqlglot.parse_one(sql, read=dialect or None)
+        if tree is None:
+            return sql
+        touched = False
+        for table in tree.find_all(exp.Table):
+            if table.args.get("catalog") or table.args.get("db"):
+                table.set("catalog", None)
+                table.set("db", None)
+                touched = True
+        return tree.sql(dialect=dialect or None) if touched else sql
+    except Exception:
+        # A rewrite that cannot be done is not worth failing the probe over;
+        # the query goes through untouched and errors as it did before.
+        return sql
 
 
 def is_read_only_select(sql: str) -> bool:
@@ -92,11 +130,19 @@ class ProbeExecutor:
     connector:
         The resolved :class:`SQLDatabase` to probe (may be ``None`` — every
         ``run`` then fails gracefully).
+    timeout_s:
+        Per-statement wall-clock cap. ``None`` leaves the chat-level default in
+        place, which is what the deterministic probes want: they issue a
+        handful of narrow queries and a tighter cap would only turn a slow
+        catalog into a spurious failure. Callers that hand the budget to a
+        model — where a single bad predicate can scan a whole table — pass
+        :data:`DB_PROBE_TIMEOUT_S`.
     """
 
     connector: Optional[SQLDatabase]
     max_calls: int = DB_PROBE_MAX_CALLS
     max_rows: int = DB_PROBE_MAX_ROWS
+    timeout_s: Optional[float] = None
     calls: int = field(default=0, init=False)
     log: list[dict[str, Any]] = field(default_factory=list, init=False)
 
@@ -147,13 +193,21 @@ class ProbeExecutor:
             self.log.append(entry)
             return entry
 
+        sql = _strip_catalog(sql, getattr(self.connector, "dialect", None))
         bounded_sql = _ensure_limit(sql, self.max_rows)
         entry["sql"] = bounded_sql
         self.calls += 1
 
         start = time.perf_counter()
         try:
-            df = execute_chat_sql(self.connector, bounded_sql, kind="probe SQL")
+            df = execute_chat_sql(
+                self.connector,
+                bounded_sql,
+                kind="probe SQL",
+                timeout_s=(
+                    None if self.timeout_s is None else max(1, int(self.timeout_s))
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 — probes must never break the pipeline
             entry["error"] = str(exc)
             entry["elapsed_ms"] = int((time.perf_counter() - start) * 1000)
