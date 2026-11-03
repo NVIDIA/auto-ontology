@@ -218,6 +218,21 @@ class FkHitSelection(BaseModel):
     rationale: str = Field(default="")
 
 
+class LegacyTableJudgement(BaseModel):
+    """LLM output: which of two near-identical tables is the outdated copy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    legacy_table_id: str | None = Field(
+        ...,
+        description=(
+            "The exact table_id of the outdated table, as shown in the prompt, "
+            "or null when the evidence does not show either one is outdated."
+        ),
+    )
+    reason: str = Field(default="", description="Brief reason for the decision.")
+
+
 class SemanticFkJoinDefaultSelection(BaseModel):
     """LLM output selecting one FK column as the default join relationship."""
 

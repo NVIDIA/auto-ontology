@@ -235,6 +235,115 @@ def _delete_semantic_vectors(database_name: str | None) -> int:
     return semantic_deleted
 
 
+def purge_semantic_entities_for_tables(table_ids: list[str]) -> int:
+    """Delete the compiled semantic entities of *table_ids* and their embeddings.
+
+    Removes, for those tables:
+
+    * their ``table__term`` links, and each Term no other table represents;
+    * the ColumnAttributes they own (their HAS_ATTRIBUTE, SEMANTIC_FK and
+      PROPERTY_OF links follow by cascade, including semantic FKs that other
+      tables' columns aimed at them);
+    * HAS_ATTRIBUTE and SEMANTIC_FK links from their columns to attributes other
+      tables own;
+    * compiled SqlAttributes whose SQL reads any of them. ``manual`` ones are
+      user-authored and survive, as do CustomAnalyses.
+
+    The catalog rows stay. Returns the number of semantic rows deleted.
+    """
+    if not table_ids:
+        return 0
+    column_ids = select(s.catalog_column.c.id).where(
+        s.catalog_column.c.table_id.in_(table_ids)
+    )
+    vector_ids: list[str] = []
+    deleted = 0
+    with write_transaction():
+        attribute_ids = [
+            row["id"]
+            for row in store().query_write(
+                delete(s.column_attribute)
+                .where(s.column_attribute.c.table_id.in_(table_ids))
+                .returning(s.column_attribute.c.id)
+            )
+        ]
+        vector_ids += attribute_ids
+        deleted += len(attribute_ids)
+
+        for link in (s.column__has_attribute, s.column__semantic_fk):
+            deleted += len(
+                store().query_write(
+                    delete(link)
+                    .where(link.c.column_id.in_(column_ids))
+                    .returning(link.c.column_id)
+                )
+            )
+
+        touching = (
+            select(s.sql_attribute__sql.c.attribute_id)
+            .select_from(
+                s.sql_attribute__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.sql_attribute__sql.c.sql_query_id,
+                )
+            )
+            .where(s.sql_query__table.c.table_id.in_(table_ids))
+        )
+        sql_attribute_ids = [
+            row["id"]
+            for row in store().query_write(
+                delete(s.sql_attribute)
+                .where(
+                    s.sql_attribute.c.id.in_(touching),
+                    s.sql_attribute.c.source.is_distinct_from("manual"),
+                )
+                .returning(s.sql_attribute.c.id)
+            )
+        ]
+        vector_ids += sql_attribute_ids
+        deleted += len(sql_attribute_ids)
+
+        unlinked_terms = [
+            row["term_id"]
+            for row in store().query_write(
+                delete(s.table__term)
+                .where(s.table__term.c.table_id.in_(table_ids))
+                .returning(s.table__term.c.term_id)
+            )
+        ]
+        deleted += len(unlinked_terms)
+        if unlinked_terms:
+            term_ids = [
+                row["id"]
+                for row in store().query_write(
+                    delete(s.term)
+                    .where(
+                        s.term.c.id.in_(unlinked_terms),
+                        ~select(s.table__term.c.table_id)
+                        .where(s.table__term.c.term_id == s.term.c.id)
+                        .exists(),
+                    )
+                    .returning(s.term.c.id)
+                )
+            ]
+            vector_ids += term_ids
+            deleted += len(term_ids)
+
+    if vector_ids:
+        semantic_vdb = get_semantic_vdb()
+        for node_id in vector_ids:
+            semantic_vdb.delete_by_id(node_id)
+    logger.info(
+        "purge_semantic_entities_for_tables: removed %d semantic rows and "
+        "%d embedded entities for %d tables",
+        deleted,
+        len(vector_ids),
+        len(table_ids),
+    )
+    return deleted
+
+
 def _delete_orphaned_statements(candidate_ids: list[str] | None = None) -> int:
     """Delete ``sql_query`` rows nothing references any more.
 

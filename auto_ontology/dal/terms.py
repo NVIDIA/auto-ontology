@@ -917,7 +917,24 @@ def fetch_terms_with_sqls(
     ``props`` is the statement row itself. There are no per-month counters —
     they were measured as unread by anything, and the schema does not carry
     them.
+
+    A statement that reads any legacy table is left out as well: an expression
+    learned from it would teach the semantic layer the outdated table.
     """
+    legacy_link = s.sql_query__table.alias("legacy_link")
+    legacy_table = s.catalog_table.alias("legacy_table")
+    reads_legacy = (
+        select(literal(1))
+        .select_from(
+            legacy_link.join(legacy_table, legacy_table.c.id == legacy_link.c.table_id)
+        )
+        .where(
+            legacy_link.c.sql_query_id == s.sql_query.c.id,
+            legacy_table.c.is_legacy,
+        )
+        .correlate(s.sql_query)
+        .exists()
+    )
     owned = (
         select(literal(1))
         .where(s.sql_attribute__sql.c.sql_query_id == s.sql_query.c.id)
@@ -945,7 +962,7 @@ def fetch_terms_with_sqls(
             )
             .join(s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id)
         )
-        .where(s.term.c.source == source, ~owned)
+        .where(s.term.c.source == source, ~owned, ~reads_legacy)
         .distinct()
         .order_by(s.term.c.id, s.sql_query.c.id)
     )

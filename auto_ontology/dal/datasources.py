@@ -557,6 +557,119 @@ def mark_table_as_junction(table_id: str) -> None:
     )
 
 
+def _database_table_ids(database_name: str):
+    """The ids of one database's tables, as a subquery."""
+    return (
+        select(s.catalog_table.c.id)
+        .select_from(_table_join())
+        .where(s.catalog_database.c.name == database_name)
+    )
+
+
+def fetch_tables_for_legacy_detection(database_name: str) -> list[dict[str, Any]]:
+    """Every table of one database with its columns and observed query usage.
+
+    ``query_count`` sums ``total_counter`` over the logged statements that
+    reference the table, so a table no workload touches reads ``0``.
+    """
+    usage = (
+        select(
+            s.sql_query__table.c.table_id,
+            func.coalesce(func.sum(s.sql_query.c.total_counter), 0).label(
+                "query_count"
+            ),
+        )
+        .select_from(
+            s.sql_query__table.join(
+                s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id
+            )
+        )
+        .group_by(s.sql_query__table.c.table_id)
+        .subquery("usage")
+    )
+    tables = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_table.c.pk,
+            s.catalog_schema.c.name.label("schema_name"),
+            func.coalesce(usage.c.query_count, 0).label("query_count"),
+        )
+        .select_from(
+            _table_join().outerjoin(usage, usage.c.table_id == s.catalog_table.c.id)
+        )
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(s.catalog_schema.c.name, s.catalog_table.c.name)
+    )
+    columns = store().query_read(
+        select(
+            s.catalog_column.c.table_id,
+            s.catalog_column.c.name,
+            s.catalog_column.c.data_type,
+        )
+        .where(s.catalog_column.c.table_id.in_(_database_table_ids(database_name)))
+        .order_by(s.catalog_column.c.table_id, s.catalog_column.c.ordinal_position)
+    )
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for row in columns:
+        by_table.setdefault(row["table_id"], []).append(
+            {"name": row["name"], "data_type": row["data_type"]}
+        )
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "schema_name": row["schema_name"],
+            "pk": list(row["pk"] or []),
+            "query_count": int(row["query_count"] or 0),
+            "columns": by_table.get(row["id"], []),
+        }
+        for row in tables
+    ]
+
+
+def set_legacy_tables(database_name: str, decisions: list[dict[str, Any]]) -> None:
+    """Replace one database's legacy flags with *decisions*.
+
+    Each decision carries ``table_id``, ``replacement_table_id`` and ``reason``.
+    Every table of the database is cleared first, so a table a later compile no
+    longer judges legacy gets its semantic entities back on the next pass.
+    """
+    with write_transaction():
+        store().query_write(
+            update(s.catalog_table)
+            .where(s.catalog_table.c.id.in_(_database_table_ids(database_name)))
+            .values(
+                is_legacy=False,
+                legacy_replacement_table_id=None,
+                legacy_reason=None,
+            )
+        )
+        for decision in decisions:
+            store().query_write(
+                update(s.catalog_table)
+                .where(
+                    s.catalog_table.c.id == decision["table_id"],
+                    s.catalog_table.c.id.in_(_database_table_ids(database_name)),
+                )
+                .values(
+                    is_legacy=True,
+                    legacy_replacement_table_id=decision.get("replacement_table_id"),
+                    legacy_reason=decision.get("reason"),
+                )
+            )
+
+
+def fetch_legacy_table_ids(database_name: str | None = None) -> set[str]:
+    """Ids of the tables marked legacy, in one database or in every one."""
+    statement = select(s.catalog_table.c.id).where(s.catalog_table.c.is_legacy)
+    if database_name is not None:
+        statement = statement.where(
+            s.catalog_table.c.id.in_(_database_table_ids(database_name))
+        )
+    return {row["id"] for row in store().query_read(statement)}
+
+
 def apply_metadata_batch(
     database_name: str,
     table_rows: list[dict],
@@ -859,7 +972,8 @@ def fetch_all_tables_without_term(
     so an unscoped pass would attribute one database's tables to another.
 
     Note this reads the table's *own* description, not the fallback: a table
-    with no Term has no Term description to fall back to.
+    with no Term has no Term description to fall back to. Legacy tables are
+    left out: they get no semantic entities at all.
     """
     statement = (
         select(
@@ -870,9 +984,10 @@ def fetch_all_tables_without_term(
         )
         .select_from(_table_join())
         .where(
+            ~s.catalog_table.c.is_legacy,
             ~select(s.table__term.c.term_id)
             .where(s.table__term.c.table_id == s.catalog_table.c.id)
-            .exists()
+            .exists(),
         )
         .order_by(s.catalog_table.c.name)
     )

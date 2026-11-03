@@ -45,6 +45,7 @@ def test_get_relevant_tables_uses_default_limit_when_k_is_omitted(
         ]
 
     monkeypatch.setattr(relevant_tables, "search_semantic_index", fake_search)
+    monkeypatch.setattr(relevant_tables, "fetch_legacy_table_ids", lambda _db: set())
 
     result = relevant_tables.get_relevant_tables(
         object(),
@@ -55,6 +56,31 @@ def test_get_relevant_tables_uses_default_limit_when_k_is_omitted(
     assert captured["per_label_k"] == 1
     assert captured["label_filter"] == [Labels.TABLE]
     assert result[0]["name"] == "orders"
+
+
+def test_get_relevant_tables_skips_legacy_tables_and_still_returns_k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_search(_retriever: object, _question: str, **kwargs: Any) -> list[dict]:
+        captured.update(kwargs)
+        return [
+            {"id": tid, "name": tid, "label": Labels.TABLE, "text": tid}
+            for tid in ("legacy-orders", "orders", "customers")
+        ]
+
+    monkeypatch.setattr(relevant_tables, "search_semantic_index", fake_search)
+    monkeypatch.setattr(
+        relevant_tables, "fetch_legacy_table_ids", lambda _db: {"legacy-orders"}
+    )
+
+    result = relevant_tables.get_relevant_tables(
+        object(), "show orders", k=1, database_name="retail"
+    )
+
+    assert captured["per_label_k"] == 2
+    assert [t["id"] for t in result] == ["orders"]
 
 
 def test_normalize_keeps_the_key_when_applied_twice() -> None:

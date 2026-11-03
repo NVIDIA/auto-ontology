@@ -21,6 +21,7 @@ import re
 from typing import TYPE_CHECKING
 
 from auto_ontology.catalog.constants import Labels
+from auto_ontology.dal.datasources import fetch_legacy_table_ids
 from auto_ontology.retrieval.data_access.semantic_search import (
     search_semantic_index,
 )
@@ -259,13 +260,23 @@ def get_relevant_tables(
     database_name: str | None = None,
     schema_name: str | None = None,
 ) -> list[dict]:
-    """Semantic search over the same vector index as candidate retrieval, label ``table`` only."""
+    """Semantic search over the same vector index as candidate retrieval, label ``table`` only.
+
+    Legacy tables are dropped: they have no semantic entities, so a SQL built
+    on one could not be grounded. The search over-fetches by their number so
+    the caller still receives up to *k* tables.
+    """
+    try:
+        legacy_ids = fetch_legacy_table_ids(database_name)
+    except Exception:
+        logger.warning("get_relevant_tables: legacy table lookup failed", exc_info=True)
+        legacy_ids = set()
     try:
         raw_rows = search_semantic_index(
             retriever,
             initial_question,
             label_filter=[Labels.TABLE],
-            per_label_k=k,
+            per_label_k=k + len(legacy_ids),
             database_name=database_name,
             schema_name=schema_name,
         )
@@ -275,11 +286,15 @@ def get_relevant_tables(
 
     relevant_tables_list = []
     for row in raw_rows:
+        if len(relevant_tables_list) >= k:
+            break
         if not isinstance(row, dict):
             continue
         text = str(row.get("text") or "")
         name = row.get("name")
         tid = row.get("id")
+        if tid is not None and str(tid) in legacy_ids:
+            continue
         lab = row.get("label") or Labels.TABLE
         if name is None and tid is None:
             continue

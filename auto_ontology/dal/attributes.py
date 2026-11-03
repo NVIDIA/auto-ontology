@@ -495,6 +495,7 @@ def find_unlinked_fk_columns(
             )
         )
         .where(
+            ~s.catalog_table.c.is_legacy,
             ~select(s.column__semantic_fk.c.attribute_id)
             .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
             .exists(),
@@ -526,6 +527,26 @@ def _same_database(src_column_id: str, tgt_attr_id: str) -> bool:
     return bool(col_db) and col_db == attr_db
 
 
+def _touches_legacy_table(src_column_id: str, tgt_attr_id: str) -> bool:
+    """Whether the source column's table or the attribute's table is legacy."""
+    source_table = select(s.catalog_column.c.table_id).where(
+        s.catalog_column.c.id == src_column_id
+    )
+    target_table = select(s.column_attribute.c.table_id).where(
+        s.column_attribute.c.id == tgt_attr_id
+    )
+    return bool(
+        store().query_read(
+            select(s.catalog_table.c.id)
+            .where(
+                s.catalog_table.c.is_legacy,
+                s.catalog_table.c.id.in_(source_table.union(target_table)),
+            )
+            .limit(1)
+        )
+    )
+
+
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     """Point a column at the attribute it references. Idempotent.
 
@@ -537,10 +558,20 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     it here, rather than in each caller, means every writer — compilation,
     test fixtures, dev tooling — gets the guarantee for free instead of having
     to remember to check first.
+
+    Refuses as well when either side lives on a legacy table: those tables are
+    kept out of the semantic layer, so no join path may route through them.
     """
     if not _same_database(src_column_id, tgt_attr_id):
         logger.warning(
             "merge_semantic_fk: refusing cross-database edge %s -> %s",
+            src_column_id,
+            tgt_attr_id,
+        )
+        return False
+    if _touches_legacy_table(src_column_id, tgt_attr_id):
+        logger.info(
+            "merge_semantic_fk: refusing edge on a legacy table %s -> %s",
             src_column_id,
             tgt_attr_id,
         )

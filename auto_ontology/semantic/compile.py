@@ -10,10 +10,13 @@ import logging
 import os
 import time
 
+from auto_ontology.dal.datasources import fetch_legacy_table_ids
+from auto_ontology.dal.reset import purge_semantic_entities_for_tables
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
+from auto_ontology.semantic.legacy_tables import detect_legacy_tables
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
@@ -60,6 +63,21 @@ def _run_semantic_compilation(
         database_name,
     )
     logger.info("=" * 60)
+
+    logger.info("Detecting legacy tables…")
+    legacy_count = detect_legacy_tables(database_name)
+    purged = purge_semantic_entities_for_tables(
+        sorted(fetch_legacy_table_ids(database_name))
+    )
+    logger.info(
+        "Legacy tables marked: %d (%d semantic row(s) purged)", legacy_count, purged
+    )
+    if is_cancelled():
+        logger.info(
+            "Semantic compilation cancelled (database=%r) after legacy detection",
+            database_name,
+        )
+        return 0
 
     count = compile_semantic_layer(
         database_name,

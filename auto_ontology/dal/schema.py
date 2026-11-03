@@ -245,6 +245,20 @@ catalog_table = Table(
     # association between entity roles. Compilation deliberately never clears
     # the flag: a later uncertain LLM response must not erase prior evidence.
     Column("is_junction_table", Boolean, nullable=False, server_default=text("false")),
+    # Set by semantic compilation when the table is an outdated copy of another
+    # table in the same database (`auto_ontology.semantic.legacy_tables`). Unlike
+    # `is_junction_table`, every compile recomputes it: a legacy table gets no
+    # semantic entities, so a stale flag would hide a table for good.
+    Column("is_legacy", Boolean, nullable=False, server_default=text("false")),
+    # The current table that replaces this one. SET NULL rather than CASCADE:
+    # dropping the replacement must not delete the legacy table's catalog row.
+    Column(
+        "legacy_replacement_table_id",
+        Text,
+        ForeignKey("catalog_table.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("legacy_reason", Text, nullable=True),
     _imported_id(),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
 )
