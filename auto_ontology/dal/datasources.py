@@ -31,9 +31,11 @@ from sqlalchemy import (
     distinct,
     func,
     literal,
+    or_,
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import values as sa_values
 
 from auto_ontology.dal import schema as s
@@ -554,6 +556,69 @@ def mark_table_as_junction(table_id: str) -> None:
             ~s.catalog_table.c.is_junction_table,
         )
         .values(is_junction_table=True)
+    )
+
+
+def fetch_own_key_column_ids(database_name: str) -> dict[str, str]:
+    """Map each non-legacy table's own key column name to its column id.
+
+    An own key is named ``{table}_KEY``, ``{table}_ID``, or ``{table}_CODE``.
+    Keys are casefolded. A name that belongs to two tables is omitted: the
+    caller cannot tell which table a same-named column would reference.
+
+    This is catalog structure only. Semantic compilation calls it before terms
+    exist, to recognize a copy of the key on another table as a foreign key.
+    """
+    table_name = func.upper(s.catalog_table.c.name)
+    column_name = func.upper(s.catalog_column.c.name)
+    rows = store().query_read(
+        select(s.catalog_column.c.id, s.catalog_column.c.name)
+        .select_from(s.catalog_column.join(_table_join()))
+        .where(
+            s.catalog_database.c.name == database_name,
+            ~s.catalog_table.c.is_legacy,
+            or_(
+                column_name == func.concat(table_name, "_KEY"),
+                column_name == func.concat(table_name, "_ID"),
+                column_name == func.concat(table_name, "_CODE"),
+            ),
+        )
+    )
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["name"]).casefold(), []).append(row["id"])
+    own_keys: dict[str, str] = {}
+    for name, column_ids in grouped.items():
+        distinct_ids = set(column_ids)
+        if len(distinct_ids) == 1:
+            own_keys[name] = column_ids[0]
+        else:
+            logger.warning(
+                "Own key column %s belongs to %d tables; not using it as a "
+                "foreign-key target",
+                name,
+                len(distinct_ids),
+            )
+    return own_keys
+
+
+def merge_unconstrained_foreign_key(
+    source_column_id: str, target_column_id: str
+) -> None:
+    """Record a column-to-column foreign key the warehouse did not declare.
+
+    ``last_seen`` stays null. Ingest removes only keys it stamped itself, so a
+    later ingest keeps this edge. An existing pair is left unchanged.
+    """
+    if not source_column_id or source_column_id == target_column_id:
+        return
+    store().query_write(
+        insert(s.column__foreign_key)
+        .values(
+            source_column_id=source_column_id,
+            target_column_id=target_column_id,
+        )
+        .on_conflict_do_nothing()
     )
 
 

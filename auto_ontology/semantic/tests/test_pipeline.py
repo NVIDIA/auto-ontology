@@ -10,8 +10,19 @@ import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from auto_ontology.semantic.models import ProcessTableResult
 from auto_ontology.semantic.pipeline import compile_semantic_layer
+
+
+@pytest.fixture(autouse=True)
+def _no_catalog_own_keys() -> Any:
+    """Compilation reads catalog key names before terms exist. Tests have no catalog."""
+    with patch(
+        "auto_ontology.semantic.pipeline.fetch_own_key_column_ids", return_value={}
+    ):
+        yield
 
 
 @patch("auto_ontology.semantic.pipeline.process_table")

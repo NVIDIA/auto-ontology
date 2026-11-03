@@ -24,6 +24,7 @@ from auto_ontology.connectors.db_errors import is_infrastructure_error
 from auto_ontology.dal.attributes import merge_column_attribute
 from auto_ontology.dal.datasources import (
     mark_table_as_junction,
+    merge_unconstrained_foreign_key,
     store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
@@ -36,7 +37,11 @@ from auto_ontology.dal.terms import (
 from auto_ontology.semantic.deterministic import column_attribute_specs
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
-from auto_ontology.semantic.fk_suggester import suggest_potential_foreign_keys
+from auto_ontology.semantic.fk_suggester import (
+    _pk_column_names,
+    named_table_key_links,
+    suggest_potential_foreign_keys,
+)
 from auto_ontology.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from auto_ontology.semantic.term_extractor import (
     apply_display_names_to_specs,
@@ -759,6 +764,7 @@ def process_table(
     database_name: str | None = None,
     probe_distinct_values: bool = True,
     commit_slot: AbstractContextManager[None] | None = None,
+    own_key_column_ids: dict[str, str] | None = None,
 ) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes.
 
@@ -769,6 +775,11 @@ def process_table(
 
     ``commit_slot`` lets the parallel pipeline impose canonical table ordering
     only on persistence. Direct callers fall back to the process-local lock.
+
+    ``own_key_column_ids`` maps a catalog column named ``{table}_key``,
+    ``{table}_id``, or ``{table}_code`` to that column's id. It is how a
+    same-named column on this table is recognized as a foreign key before any
+    term exists. Empty when the caller has no catalog list.
     """
     table_id = table["id"]
     table_name = table["name"]
@@ -810,17 +821,31 @@ def process_table(
             database_name,
         )
 
-    # --- FK detection (LLM + declared); results not written to the store ---
+    # --- FK detection (LLM + declared). A column named for another table's
+    # key is stored as a foreign key here; terms do not exist yet. ---
     declared_fks = ctx.get("fks", [])
     with _step(table_name, "Detecting foreign keys"):
         fk_suggestions = suggest_potential_foreign_keys(
-            table, ctx, columns_profiling_samples
+            table,
+            ctx,
+            columns_profiling_samples,
+            own_key_column_names=own_key_column_ids,
         )
     suggested_fk_names = {s.column_name for s in fk_suggestions.suggestions}
     declared_fk_names = {
         fk["source_column"] for fk in declared_fks if fk.get("source_column")
     }
     all_fk_names = declared_fk_names | suggested_fk_names
+    # Column-to-column, not column-to-attribute: the target table may not have
+    # a term yet. Ingest leaves the edge alone because last_seen stays null.
+    for source_id, target_id in named_table_key_links(
+        table_name,
+        ctx.get("columns", []),
+        own_key_column_ids or {},
+        declared_fk_names,
+        _pk_column_names(table),
+    ):
+        merge_unconstrained_foreign_key(source_id, target_id)
 
     # Payload-bearing junctions are wider than the pure two-key shape handled
     # by the later bridge pass. Require both the conservative LLM decision and

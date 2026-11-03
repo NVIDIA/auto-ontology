@@ -305,6 +305,47 @@ def test_sample_match_sql_quotes_location_and_compares_as_text() -> None:
     assert sql.endswith("LIMIT 2")
 
 
+def test_unlinked_column_named_for_another_table_is_linked_without_a_term() -> None:
+    """The target attribute may be missing. The column is still a foreign key."""
+    candidates = [
+        {
+            "id": "org-on-bridge",
+            "name": "FCLT_ORGANIZATION_KEY",
+            "table_id": "bridge",
+            "table_name": "FCLT_ORG_DLC_KEY",
+            "fk_target_col_id": None,
+        }
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_own_key_column_ids",
+            return_value={"fclt_organization_key": "org-key-column"},
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_unconstrained_foreign_key"
+        ) as merge_fk,
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_column_attribute_by_column_id",
+            return_value=None,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._build_retriever",
+            return_value=None,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
+    ):
+        assert semantic_fk.resolve_semantic_fks("dw") == 0
+
+    merge_fk.assert_called_once_with("org-on-bridge", "org-key-column")
+
+
 def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) -> None:
     candidates = [
         {"id": "col-1", "name": "customer_id", "table_name": "orders"},
@@ -316,6 +357,10 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
         patch(
             "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
             return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_own_key_column_ids",
+            return_value={},
         ),
         patch(
             "auto_ontology.semantic.semantic_fk._build_retriever",

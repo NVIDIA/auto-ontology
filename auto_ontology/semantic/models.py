@@ -185,8 +185,10 @@ class FkAndPkResult(BaseModel):
     pk_column_names: list[str] = Field(
         default_factory=list,
         description=(
-            "Column names that appear to be the table's own primary key "
-            "even if not declared as such. Usually empty or one entry."
+            "Columns that identify this table's own records: a bare id or uuid, "
+            "or a column named exactly <this_table>_id, <this_table>_key, or "
+            "<this_table>_code. Never a column named for a different table, "
+            "even when that column is unique. Usually empty or one entry."
         ),
     )
     is_junction_table: bool = Field(

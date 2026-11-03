@@ -9,12 +9,16 @@ Algorithm
 1. Find every Column node that has no SEMANTIC_FK edge and no HAS_ATTRIBUTE
    edge (i.e. a FK column that the taxonomy pass skipped).
 2. For each such column:
-   a. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
+   a. **Named table key** — a column named ``{other_table}_key``, ``_id``, or
+      ``_code`` is linked to that table's column. Catalog names are enough;
+      the target table may not have a term yet.
+   b. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
       graph, look up the ColumnAttribute attached to the target Column and
       create SEMANTIC_FK directly. A declared FK that targets a column on the
       *same* table is rejected — that's a self-reference, never the entity
-      the FK points to.
-   b. **LLM / VDB fallback** — if there is no declared FK, embed the column
+      the FK points to. When the target has no attribute yet, the column
+      stays a foreign key and the semantic edge waits.
+   c. **LLM / VDB fallback** — if there is no declared FK, embed the column
       context, search the *semantic* VDB for the top-5 most similar
       ColumnAttribute records (excluding candidates on the FK's own table),
       ask the LLM to pick the best match, and fall back to probing the live
@@ -42,6 +46,11 @@ from auto_ontology.dal.attributes import (
     merge_semantic_fk,
     set_semantic_fk_join_default,
 )
+from auto_ontology.dal.datasources import (
+    fetch_own_key_column_ids,
+    merge_unconstrained_foreign_key,
+)
+from auto_ontology.semantic.fk_suggester import named_table_key_links
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.llm_invoke import (
@@ -161,6 +170,11 @@ def _resolve_semantic_fks(database_name: str) -> int:
     if not candidates:
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
         return 0
+
+    # A previous visit may have left the column with neither an attribute nor
+    # an edge. The name match uses catalog columns, not terms: the target
+    # table's term may not exist, and this column must still be a foreign key.
+    _link_columns_named_for_another_table(database_name, candidates)
 
     logger.info(
         "resolve_semantic_fks: %d candidate column(s) to process", len(candidates)
@@ -416,6 +430,38 @@ def _deterministic_join_default(group: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _link_columns_named_for_another_table(
+    database_name: str, candidates: list[dict[str, Any]]
+) -> None:
+    """Point a copied ``{table}_key`` / ``_id`` / ``_code`` at that table's column.
+
+    Sets ``fk_target_col_id`` on the candidate so the declared-key path can
+    attach a semantic edge when the target column already has an attribute.
+    The column-to-column edge is written either way.
+    """
+    own_keys = fetch_own_key_column_ids(database_name)
+    if not own_keys:
+        return
+    for col in candidates:
+        if col.get("fk_target_col_id"):
+            continue
+        links = named_table_key_links(
+            str(col.get("table_name") or ""),
+            [{"id": col.get("id"), "name": col.get("name")}],
+            own_keys,
+            (),
+        )
+        for source_id, target_id in links:
+            merge_unconstrained_foreign_key(source_id, target_id)
+            col["fk_target_col_id"] = target_id
+            logger.info(
+                "resolve_semantic_fks [named key]: %s.%s -> column %s",
+                col.get("table_name"),
+                col.get("name"),
+                target_id,
+            )
 
 
 def _resolve_connector(database_name: str) -> SQLDatabase | None:

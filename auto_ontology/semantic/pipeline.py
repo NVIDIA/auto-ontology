@@ -13,6 +13,7 @@ from types import TracebackType
 
 from auto_ontology.dal.datasources import (
     fetch_all_tables_without_term,
+    fetch_own_key_column_ids,
     fetch_table_context,
 )
 from auto_ontology.infra.feature_flags import is_distinct_value_probing_enabled
@@ -149,6 +150,9 @@ def compile_semantic_layer(
     # tables are processed in parallel, so a per-table read would be hundreds
     # of connections and could also change mid-run.
     is_probe_distinct_values = is_distinct_value_probing_enabled()
+    # Read once. Terms are assigned during this pass, so foreign-key detection
+    # can only use catalog column names, and every table has to see the same list.
+    own_key_column_ids = fetch_own_key_column_ids(database_name)
     if not is_probe_distinct_values:
         logger.info(
             "Distinct value probing is disabled in settings — sampling rows as "
@@ -201,6 +205,7 @@ def compile_semantic_layer(
                 database_name=database_name,
                 probe_distinct_values=is_probe_distinct_values,
                 commit_slot=commit_slot,
+                own_key_column_ids=own_key_column_ids,
             )
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)

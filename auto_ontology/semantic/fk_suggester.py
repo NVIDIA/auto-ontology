@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -25,6 +26,10 @@ from auto_ontology.semantic.models import (
 
 logger = logging.getLogger(__name__)
 
+# A table's own key is named for that table. The same name on any other table
+# points at it. Terms do not exist yet when this runs.
+_OWN_KEY_SUFFIXES = ("_key", "_id", "_code")
+
 _SYSTEM = """\
 You review relational table metadata and produce three outputs:
 
@@ -32,9 +37,14 @@ You review relational table metadata and produce three outputs:
    FOREIGN_KEY or primary-key columns.
 
    A likely foreign key typically:
-   - ends with _id or Id and has a meaningful prefix naming a different entity (e.g. customer_id,
-     orderId) — NOT a bare "id"/"_id"/"Id" column or one whose prefix matches the table name,
-     unless it is marked is_unique: false
+   - ends with _id, _key, or _code and has a meaningful prefix naming a different entity
+     (e.g. customer_id, FCLT_ORGANIZATION_KEY) — NOT a bare "id"/"key" column, and NOT a
+     column named exactly <this_table>_id, <this_table>_key, or <this_table>_code, unless
+     it is marked is_unique: false
+   - is another table's own key: the same name as a column {that_table}_id, {that_table}_key,
+     or {that_table}_code on a different table. This is a foreign key even when is_unique
+     is true. Uniqueness means one row here per referenced key, which is normal on a
+     bridge; it does not make the column this table's primary key
    - has a description that contains words like "references", "identifier of", or names another table
    - has an integer or string type consistent with identifiers
    - semantically points to a row in another table
@@ -46,10 +56,10 @@ You review relational table metadata and produce three outputs:
    otherwise unlikely to reference another table. Return an empty list when
    none qualify.
 
-2. pk_column_names — columns that appear to be the table's own primary key even if not
-   explicitly declared as such. These are typically a bare "id", "uuid", or "<table_name>_id"
-   column of integer or UUID type whose description or name conveys it identifies the table's
-   own records. Usually empty or one entry. Only list columns from the candidate list.
+2. pk_column_names — columns that identify this table's own records even if not declared.
+   A bare "id" or "uuid", or a column named exactly <this_table>_id, <this_table>_key, or
+   <this_table>_code. Never a column named for a different table, even when is_unique is
+   true. Usually empty or one entry. Only list columns from the candidate list.
 
 3. is_junction_table and junction_table_rationale — classify the table's row grain.
    Set is_junction_table true ONLY when each row represents an association between at least
@@ -72,6 +82,98 @@ contains repeated values, so it cannot be the table's own primary key. Never inc
 pk_column_names. If it is identifier-like, including a bare "id", evaluate it as a possible
 foreign key using its name, type, description, and samples. Non-uniqueness alone does not prove
 that a non-identifier attribute is a foreign key."""
+
+
+def references_other_table_key(
+    column_name: str,
+    table_name: str,
+    own_key_column_names: Collection[str],
+) -> bool:
+    """Whether *column_name* is another table's own key, not this table's.
+
+    An own key is a column named ``{table}_key``, ``{table}_id``, or
+    ``{table}_code``. ``own_key_column_names`` lists those columns from the
+    catalog. Uniqueness is irrelevant: a bridge often has one row per
+    referenced key, and that still references the other table.
+    """
+    column = column_name.casefold()
+    if column not in {name.casefold() for name in own_key_column_names}:
+        return False
+    table = table_name.casefold()
+    return not any(
+        column.endswith(suffix) and column[: -len(suffix)] == table
+        for suffix in _OWN_KEY_SUFFIXES
+    )
+
+
+def named_table_key_links(
+    table_name: str,
+    columns: list[dict[str, Any]],
+    own_key_column_ids: Mapping[str, str],
+    declared_fk_columns: Collection[str],
+    declared_pk_columns: Collection[str] = (),
+) -> list[tuple[str, str]]:
+    """Column-id pairs for keys that name another table.
+
+    The target id comes from the catalog column of the table the name belongs
+    to. Declared keys are left as the warehouse recorded them. A column with
+    no id, or one that is itself that key, is skipped.
+    """
+    folded = {
+        name.casefold(): column_id for name, column_id in own_key_column_ids.items()
+    }
+    declared = {name.casefold() for name in declared_fk_columns}
+    declared_pk = {name.casefold() for name in declared_pk_columns}
+    links: list[tuple[str, str]] = []
+    for column in columns:
+        name = str(column.get("name") or "")
+        source_id = column.get("id")
+        if (
+            not name
+            or not source_id
+            or name.casefold() in declared
+            or name.casefold() in declared_pk
+        ):
+            continue
+        if not references_other_table_key(name, table_name, folded):
+            continue
+        target_id = folded.get(name.casefold())
+        if not target_id or target_id == source_id:
+            continue
+        links.append((str(source_id), target_id))
+    return links
+
+
+def _other_table_key_suggestions(
+    candidates: list[dict[str, Any]],
+    table_name: str,
+    own_key_column_names: Collection[str],
+    seen: set[str],
+) -> list[PotentialFkSuggestion]:
+    """FK suggestions the catalog name proves, whatever the model answered.
+
+    ``seen`` holds names already suggested for this table. It is not a record
+    of tables already visited: the other table's key id comes from the catalog
+    and is known before either table is compiled.
+    """
+    suggestions: list[PotentialFkSuggestion] = []
+    for col in candidates:
+        name = str(col.get("name") or "")
+        if not name or name in seen:
+            continue
+        if not references_other_table_key(name, table_name, own_key_column_names):
+            continue
+        seen.add(name)
+        suggestions.append(
+            PotentialFkSuggestion(
+                column_name=name,
+                rationale=(
+                    "column name is another table's key; uniqueness does not "
+                    "make it this table's primary key"
+                ),
+            )
+        )
+    return suggestions
 
 
 def _pk_column_names(table: dict[str, Any]) -> set[str]:
@@ -118,6 +220,7 @@ def suggest_potential_foreign_keys(
     table: dict[str, Any],
     ctx: dict[str, Any],
     columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
+    own_key_column_names: Collection[str] | None = None,
 ) -> PotentialFkResult:
     """Ask the LLM which non-PK, non-declared-FK columns may be foreign keys.
 
@@ -125,6 +228,12 @@ def suggest_potential_foreign_keys(
     (``{"sample_values": [...], "is_unique": bool}``) when a live sample was
     available. Columns referenced by declared foreign keys are not candidates:
     they identify rows in this table rather than referencing another table.
+
+    *own_key_column_names* are catalog columns named ``{table}_key``,
+    ``{table}_id``, or ``{table}_code``. A candidate with one of those names,
+    on a different table, is a foreign key even when the model calls it this
+    table's primary key. The names come from the catalog; terms are not
+    available yet.
     """
     columns = ctx.get("columns", [])
     fks = ctx.get("fks", [])
@@ -170,6 +279,22 @@ def suggest_potential_foreign_keys(
         or "  (none)"
     )
 
+    table_name = str(table.get("name") or "")
+    other_table_keys = [
+        col["name"]
+        for col in candidates
+        if references_other_table_key(
+            str(col.get("name") or ""), table_name, own_key_column_names or ()
+        )
+    ]
+    other_table_key_block = (
+        (
+            "Columns that name another table's key, so they are foreign keys "
+            "even when is_unique is true: " + ", ".join(other_table_keys) + "\n"
+        )
+        if other_table_keys
+        else ""
+    )
     prompt = (
         f"Table: {table_header}\n"
         f"Description: {table.get('description') or ''}\n"
@@ -178,6 +303,7 @@ def suggest_potential_foreign_keys(
         f"Known foreign key roles:\n{known_fk_lines}\n"
         f"All table columns:\n{all_column_lines}\n"
         f"Candidate columns:\n{candidate_lines}\n"
+        f"{other_table_key_block}"
     )
 
     result = invoke_with_structured_output(
@@ -186,7 +312,12 @@ def suggest_potential_foreign_keys(
         FkAndPkResult,
     )
     if result is None:
-        return PotentialFkResult()
+        seen: set[str] = set()
+        return PotentialFkResult(
+            suggestions=_other_table_key_suggestions(
+                candidates, table_name, own_key_column_names or (), seen
+            )
+        )
 
     llm_pk_names = {
         name
@@ -225,6 +356,11 @@ def suggest_potential_foreign_keys(
                     ),
                 )
             )
+    filtered.extend(
+        _other_table_key_suggestions(
+            candidates, table_name, own_key_column_names or (), seen
+        )
+    )
 
     return PotentialFkResult(
         suggestions=filtered,

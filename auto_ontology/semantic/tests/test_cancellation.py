@@ -32,6 +32,14 @@ def _clean_flag() -> Iterator[None]:
     clear_cancel()
 
 
+@pytest.fixture(autouse=True)
+def _no_catalog_own_keys() -> Iterator[None]:
+    with patch(
+        "auto_ontology.semantic.pipeline.fetch_own_key_column_ids", return_value={}
+    ):
+        yield
+
+
 def test_flag_round_trips() -> None:
     assert is_cancelled() is False
     request_cancel()
