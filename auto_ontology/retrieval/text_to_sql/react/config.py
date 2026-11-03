@@ -82,6 +82,16 @@ def max_tables_per_retrieve() -> int:
     return _int_env("TEXT_TO_SQL_REACT_MAX_TABLES_PER_RETRIEVE", 6)
 
 
+def siblings_enabled() -> bool:
+    """Whether ``retrieve`` names the near-copies of each table it shows.
+
+    On by default; ``TEXT_TO_SQL_REACT_SIBLINGS=false`` turns it off so the
+    two can be compared on the same questions.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_SIBLINGS", "").strip().lower()
+    return value in _TRUTHY or not value
+
+
 def max_columns_per_table() -> int:
     """Columns shown per table when the table is wider than this.
 

@@ -4,9 +4,11 @@
 
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from auto_ontology.retrieval.text_to_sql.react import retrieve as tool
+from auto_ontology.retrieval.text_to_sql.react import siblings
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 
 ORDERS = {
@@ -113,6 +115,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     monkeypatch.setattr(tool, "find_join_path", join_path)
     monkeypatch.setattr(tool, "fetch_attr_column_contexts", lambda ids, **_: {})
     monkeypatch.setattr(tool, "fetch_term_table_pairs", lambda **_: [])
+    monkeypatch.setattr(siblings, "fetch_table_column_names", lambda _db: [])
     return seen
 
 
@@ -282,3 +285,101 @@ def test_a_table_the_limit_cut_comes_back_in_full(
     assert "TABLE crm.customers" not in cut
     assert "shown earlier" not in again
     assert "status TEXT — values: 'ACTIVE', 'CHURNED', 'PENDING'" in again
+
+
+ORDERS_ARCHIVE = {
+    "id": "t-orders-archive",
+    "name": "orders_archive",
+    "schema_name": "sales",
+    "database_name": "shop",
+    "columns": ["order_id", "cust_ref", "amount", "discount", "archived_at"],
+}
+
+
+class CountingConnector:
+    database_name = "shop"
+    dialect = "mysql"
+
+    def __init__(self, counts: dict[str, int]):
+        self.counts = counts
+        self.sql: list[str] = []
+
+    def execute(self, sql: str) -> pd.DataFrame:
+        self.sql.append(sql)
+        table = sql.rsplit(".", 1)[-1].strip("`")
+        return pd.DataFrame([[self.counts[table]]])
+
+
+@pytest.fixture
+def with_siblings(calls: dict, monkeypatch: pytest.MonkeyPatch) -> CountingConnector:
+    catalog = [
+        {**ORDERS, "columns": [c["name"] for c in ORDERS["columns"]]},
+        ORDERS_ARCHIVE,
+        {**CUSTOMERS, "columns": ["customer_id", "status"]},
+        {**ORDERS_ARCHIVE, "id": "t-elsewhere", "database_name": "other"},
+    ]
+    monkeypatch.setattr(siblings, "fetch_table_column_names", lambda _db: catalog)
+    return CountingConnector({"orders": 120, "orders_archive": 950})
+
+
+def test_a_near_copy_is_named_with_rows_and_differences(
+    with_siblings: CountingConnector,
+) -> None:
+    ctx = ToolContext(
+        retriever=object(), connectors=[with_siblings], database_name="shop"
+    )
+    text = tool.retrieve(ctx, "how is revenue calculated")
+
+    assert (
+        "SIMILAR sales.orders (120 rows) ~ sales.orders_archive (950 rows): "
+        "4 shared columns; sales.orders has no columns of its own; "
+        "only sales.orders_archive has archived_at"
+    ) in text
+    assert "customers (" not in text
+    assert text.count("SIMILAR") == 1
+
+
+def test_a_near_copy_is_named_once_per_episode(
+    with_siblings: CountingConnector,
+) -> None:
+    ctx = ToolContext(
+        retriever=object(), connectors=[with_siblings], database_name="shop"
+    )
+    tool.retrieve(ctx, "how is revenue calculated")
+    ctx.seen_tables.clear()
+    again = tool.retrieve(ctx, "how is revenue calculated")
+
+    assert "SIMILAR" not in again
+    assert len(with_siblings.sql) == 2
+
+
+def test_without_a_database_the_line_has_no_counts(with_siblings: None) -> None:
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert "SIMILAR sales.orders ~ sales.orders_archive: 4 shared columns" in text
+
+
+def test_siblings_can_be_turned_off(
+    with_siblings: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_SIBLINGS", "false")
+
+    assert "SIMILAR" not in tool.retrieve(_ctx(), "how is revenue calculated")
+
+
+def test_tables_sharing_only_a_few_columns_are_not_siblings() -> None:
+    table = {"id": "a", "columns": ["id", "name", "x1", "x2", "x3", "x4"]}
+    other = {"id": "b", "columns": ["id", "name", "y1", "y2", "y3", "y4"]}
+
+    assert siblings.find_siblings(table, [other]) == []
+
+
+def test_a_lookup_copied_into_a_wide_table_is_not_a_sibling() -> None:
+    lookup = {"id": "a", "columns": ["dept_code", "dept_name", "school", "head"]}
+    wide = {
+        "id": "b",
+        "columns": ["dept_code", "dept_name", "school", "head"]
+        + [f"measure_{i}" for i in range(10)],
+    }
+
+    assert siblings.find_siblings(lookup, [wide]) == []

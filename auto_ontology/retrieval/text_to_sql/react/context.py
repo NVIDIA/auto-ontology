@@ -35,5 +35,8 @@ class ToolContext:
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
     anchor_column_ids: dict[str, str | None] = field(default_factory=dict)
+    sibling_pairs: set[frozenset[str]] = field(default_factory=set)
+    catalog_tables: list[dict[str, Any]] | None = None
+    row_counts: dict[str, int | None] = field(default_factory=dict)
     schemas: dict[str, Any] | None = None
     sql_runs: int = 0

@@ -22,7 +22,8 @@ One call does three things, all through existing data-access functions:
    stored values and semantic FKs (:func:`fetch_tables_by_ids`), an attribute's
    owning column (:func:`fetch_attr_column_contexts`), a term's tables
    (:func:`fetch_term_table_pairs`), and the join route from every new table to
-   the tables earlier calls already showed (:func:`find_join_path`).
+   the tables earlier calls already showed (:func:`find_join_path`), and the
+   near-copies of every new table (:mod:`.siblings`).
 
 The result is rendered as text and capped in size. The same query against the
 same catalog returns the same text.
@@ -46,6 +47,7 @@ from auto_ontology.dal.terms import fetch_term_table_pairs
 from auto_ontology.retrieval.data_access.candidates import _get_candidates_information
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.siblings import sibling_lines
 from auto_ontology.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
@@ -452,6 +454,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     }
     blocks = list(new_blocks.values())
     blocks += _join_lines(ctx, new_tables)
+    if config.siblings_enabled():
+        blocks += sibling_lines(ctx, new_tables)
     blocks += [
         b
         for label, b in definitions

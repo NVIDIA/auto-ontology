@@ -27,7 +27,9 @@ stored values before filtering on them, and to test a draft.
 - submit: give your final query. It is checked and run; if it fails you get \
 the error and can keep working.
 
-Use only tables and columns a retrieve result showed you."""
+Use only tables and columns a retrieve result showed you. A SIMILAR line names \
+tables that hold nearly the same data; compare them with run_sql before you \
+choose one."""
 
 USER_TEMPLATE = """\
 QUESTION
@@ -47,8 +49,9 @@ RETRIEVE_TOOL = {
         "description": (
             "Search tables, columns, attributes, terms and analyses by meaning "
             "and by name. Returns matching tables with their columns, stored "
-            "values and references, definitions with their SQL, and how new "
-            "tables join to ones already found."
+            "values and references, definitions with their SQL, how new "
+            "tables join to ones already found, and tables that are near "
+            "copies of them."
         ),
         "parameters": {
             "type": "object",
