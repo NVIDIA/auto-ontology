@@ -66,8 +66,7 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
 
 
 main_system_prompt_template = (
-    "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
-    "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
+    "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day} }}.\n\n"
     "{custom_prompts}"
 )
 
