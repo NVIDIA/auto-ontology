@@ -13,12 +13,13 @@ result) it is a single boolean check — no probes, no LLM call.
 This is the last node before the response, so when the result is still empty and
 neither this check nor the empty-LIKE one found anything to fix, it sends the
 query back for one undiagnosed regeneration rather than returning nothing. The
-measured causes of a surviving empty result are not literal typos: a filter
-naming a column that doesn't hold that value, a join dropping the rows, or a
-date compared in the wrong format. None are repairable from a probe, and all are
-things a fresh derivation can get right — so unlike the targeted paths above,
-this one deliberately omits ``error_known_fixable`` and lets reconstruction's
-classifier reach for different tables if it judges the data to be elsewhere.
+measured causes of a surviving empty result are not literal typos: an extra
+join predicate the question does not state, a date compared in the wrong format,
+or a filter on the wrong column of the same table. None are repairable from a
+probe. Unlike the targeted paths above, this retry omits ``error_known_fixable``
+so a genuinely absent concept can still be searched. It must not treat a sibling
+table — a summary, a current-only subset, or a similarly named process — as that
+missing concept.
 
 An empty result can legitimately be the correct answer, so the retry is
 one-shot and never rejects the regenerated query for also coming back empty —
@@ -49,24 +50,26 @@ from auto_ontology.retrieval.text_to_sql.state import AgentState
 def build_empty_result_retry_error() -> str:
     """Instruction for an empty result no check could diagnose.
 
-    Deliberately names the causes that actually produce one (wrong column for
-    the value, over-restrictive join, format mismatch) instead of asking for a
-    generic retry, and asks for a re-derivation rather than an edit — a patch of
-    the existing SQL tends to preserve the very table choice that is wrong.
+    Names the causes that empty a query whose literals are real: an extra join
+    predicate, a format mismatch, or a filter on the wrong column of the same
+    table. A same-named column on a sibling table is a different population and
+    is not a repair.
     """
     return (
         "SQL executed successfully but returned an empty result set. The query "
         "is valid and its filter literals were checked against the database, so "
-        "this is not a typo in a value — the query is asking the wrong question "
-        "of the data. Re-derive it from the schema rather than editing it, and "
+        "this is not a typo in a value. Re-derive it from the schema, and "
         "reconsider in particular:\n"
-        "- whether each filtered value is stored in the column being filtered, "
-        "or actually lives in a different column or table;\n"
-        "- whether a join is dropping the rows of interest (a row that exists "
-        "in one table may have no counterpart in another);\n"
+        "- whether a join predicate the question does not state is dropping "
+        "every row. Remove that predicate. Do not add a new one;\n"
         "- whether a date, time, or number is compared in the format and units "
-        "the column really uses.\n"
-        "If the question can be answered from different tables, prefer those."
+        "the column really uses;\n"
+        "- whether the filtered value is stored in a different column of the "
+        "SAME table.\n"
+        "Do not move the filter onto a same-named column of another table. A "
+        "summary, a current-only subset, a short name, or a similarly named "
+        "process is a different population. An empty result is not evidence "
+        "that the value lives there."
     )
 
 

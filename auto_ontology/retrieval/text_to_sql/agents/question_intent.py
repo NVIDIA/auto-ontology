@@ -384,7 +384,10 @@ extracted_evidence. Keep actual business filters, dates, entities, requested mea
 grouping, ranking, and output constraints in rewritten_question.
 
 Do not invent evidence. If no evidence is embedded in the question, return an empty
-string. The rewritten question must remain understandable on its own.
+string. The rewritten question must remain understandable on its own. Do not drop
+a word that distinguishes which copy of a thing is meant — current versus all,
+offered versus a summary, a catalog versus a reserve, a full name versus a short
+name. Those words stay in rewritten_question.
 
 Examples:
 - "find revenue in test_dataset dataset"

@@ -374,7 +374,7 @@ def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
 
 
 def test_semantic_context_matches_table_section_spelling() -> None:
-    """The hint and the schema context must name the same table identically."""
+    """The hint names one matched column and does not license dropping siblings."""
     table = {
         "name": "clusters",
         "database_name": "lakehouse",
@@ -396,6 +396,8 @@ def test_semantic_context_matches_table_section_spelling() -> None:
 
     assert "lakehouse.lakehouse.clusters" in tables_section
     assert "Table: lakehouse.lakehouse.clusters" in hint
+    assert "not the only table to use" in hint
+    assert "different population" in hint
 
 
 def test_prompt_falls_back_to_target_db_when_table_has_no_database() -> None:

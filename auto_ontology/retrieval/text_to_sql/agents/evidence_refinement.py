@@ -89,40 +89,6 @@ logical connectors, ordering, grouping, or projection instructions. Never add or
 remove evidence. If a repair is uncertain, return no patch for it. An empty repair
 list is the correct answer whenever the evidence may already be valid."""
 
-_GROUNDING_SYSTEM_PROMPT = """\
-Ground field references before value correction. Use only the supplied relevant
-tables section and exact qualified-column list.
-
-Return the complete grounded_question and grounded_evidence, ready for SQL
-generation. Replace field references with the exact dialect-quoted physical
-references supplied in the prompt. Copy those references verbatim.
-
-STRICT SCOPE:
-- Replace ONLY fields that are described or mapped in the Evidence section.
-- Treat the natural-language phrase before evidence cues such as "refers to",
-  "means", "is defined as", or "corresponds to" as the concept label for the
-  physical field on the right-hand side.
-- In grounded_question, search case-insensitively for that concept label or its
-  semantic equivalent. If present, you MUST replace the minimal matching question
-  phrase with the complete grounded rule from evidence: the physical column AND
-  its operator, value, formula, or condition. Copy those rule inputs unchanged at
-  this phase; value correction happens later. Never leave that question concept in
-  natural language after grounding its evidence.
-  The question phrase does NOT need to match the evidence wording exactly:
-  account for capitalization, singular/plural forms, inflections, and ordinary
-  paraphrases. Preserve surrounding qualifiers and all unrelated wording. If the
-  evidence-defined concept is not semantically present in the question, leave the
-  question unchanged. Do not ground any other question field or phrase.
-- In grounded_evidence, replace only the evidence's own field references.
-- A field appearing in the tables section but not described by evidence MUST remain
-  untouched in both outputs.
-
-Preserve every scalar value, operator, formula, arithmetic expression, filter,
-grouping, ordering, projection, and unrelated word exactly. Explicit
-quoted/backticked column names in evidence are authoritative and must map to that
-exact catalog column, never to a semantically similar column. If an
-evidence-described field is uncertain, leave it unchanged."""
-
 
 class EvidenceGroundingResult(StrictLLMOutputModel):
     """Structured schema-grounding response produced before value repair."""
@@ -622,80 +588,12 @@ class EvidenceRefinementAgent(BaseAgent):
             target_db=target_db,
             dialect=dialect,
         )
-        catalog_columns = _catalog_columns(tables, target_db, dialect, connector)
-        qualified_columns_block = (
-            "\n".join(
-                (
-                    f"- {entry['physical']}"
-                    + (
-                        f" | table: {entry['table_description']}"
-                        if entry["table_description"]
-                        else ""
-                    )
-                    + (
-                        f" | column: {entry['column_description']}"
-                        if entry["column_description"]
-                        else ""
-                    )
-                )
-                for entry in catalog_columns
-            )
-            or "(none)"
-        )
-
-        grounding_prompt = (
-            f"Question:\n{question}\n\n"
-            f"Evidence:\n{evidence}\n\n"
-            "Relevant dialect-quoted columns (the only allowed mapping targets; "
-            "copy references verbatim):\n"
-            f"{qualified_columns_block}"
-        )
-        grounding_result = safe_invoke_structured_nr(
-            [
-                SystemMessage(content=_GROUNDING_SYSTEM_PROMPT),
-                HumanMessage(content=grounding_prompt),
-            ],
-            EvidenceGroundingResult,
-        )
-        if grounding_result is None:
-            grounded_question, grounded_evidence, grounding_applied = (
-                question,
-                evidence,
-                False,
-            )
-        else:
-            grounded_question, grounded_evidence, grounding_applied = (
-                validate_schema_grounding(
-                    question,
-                    evidence,
-                    grounding_result,
-                    tables,
-                    target_db=target_db,
-                    dialect=dialect,
-                    connector=connector,
-                )
-            )
-        if grounding_result is None:
-            self.logger.warning(
-                "Evidence schema grounding failed — keeping question and evidence "
-                "unchanged"
-            )
-        elif grounding_result.reasoning.strip():
-            grounding_reasoning = grounding_result.reasoning.strip()
-            record_thought(path_state, _GRAPH_NODE_NAME, grounding_reasoning)
-        if grounding_applied:
-            path_state["normalized_question"] = grounded_question
-            self.logger.info("Applied LLM-grounded question and evidence")
-        else:
-            self.logger.info("No certain evidence schema groundings found")
-
-        # Value correction is deliberately phase 2. It receives already-grounded
-        # field references, and apply_evidence_repairs enforces that those field
-        # references cannot change.
+        # Schema replacement is disabled. Question and evidence field references
+        # stay as written. Value correction below may change literals only, and
+        # apply_evidence_repairs rejects any change to those field references.
         value_anchors = list(state.get("value_anchors") or [])
         numbered_evidence = "\n".join(
-            f"{index}| {line}"
-            for index, line in enumerate(grounded_evidence.splitlines(), 1)
+            f"{index}| {line}" for index, line in enumerate(evidence.splitlines(), 1)
         )
         anchors_block = _format_value_anchors(value_anchors)
         values_context = (
@@ -704,7 +602,7 @@ class EvidenceRefinementAgent(BaseAgent):
             else ""
         )
         prompt = (
-            f"Sanitized question:\n{grounded_question}\n\n"
+            f"Sanitized question:\n{question}\n\n"
             f"Evidence (line numbers are metadata only):\n{numbered_evidence}\n\n"
             f"{values_context}"
             f"Relevant tables, columns, and fallback sample values:\n{tables_block}"
@@ -716,19 +614,19 @@ class EvidenceRefinementAgent(BaseAgent):
         )
         if result is None:
             self.logger.warning(
-                "Evidence value refinement failed — keeping schema-grounded evidence"
+                "Evidence value refinement failed — keeping the original evidence"
             )
-            return {"evidence": grounded_evidence, "path_state": path_state}
+            return {"evidence": evidence, "path_state": path_state}
 
         refined, accepted = apply_evidence_repairs(
-            grounded_evidence,
+            evidence,
             result.repairs,
-            grounded_question,
+            question,
             tables,
             value_anchors,
         )
         final_question = _validate_corrected_question(
-            grounded_question,
+            question,
             result.corrected_question,
             accepted,
             tables,
