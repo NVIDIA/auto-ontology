@@ -4,7 +4,8 @@
 
 import os
 
-# Controls how many entity noun phrases are extracted for SQL generation.
+# Extra-table retrieval budget, split across the question and its extracted
+# entities; entity extraction itself is not capped.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
 _PROJECTION_RULES = (
@@ -1077,7 +1078,7 @@ Provide your analysis."""
 
 def create_entity_extraction_prompt(question: str) -> str:
     return f"""You are a database schema analyst. Given a question, populate the field \
-"required_entity_name" with 1–{SQL_GEN_MAX_ENTITIES} noun phrases that correspond to database tables, \
+"required_entity_name" with every noun phrase that corresponds to database tables, \
 columns, or relationships.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,
