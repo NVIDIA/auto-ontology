@@ -41,9 +41,9 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
         "REASONING_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "REASONING_MODEL": "nvidia/nemotron-3-nano-30b-a3b",
+        "REASONING_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "NON_REASONING_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "NON_REASONING_MODEL": "nvidia/nemotron-3-nano-30b-a3b",
+        "NON_REASONING_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "EMBED_ENDPOINT": "https://integrate.api.nvidia.com/v1",
         "EMBED_MODEL": "nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": (
