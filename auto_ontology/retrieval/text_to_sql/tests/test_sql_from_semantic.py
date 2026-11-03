@@ -129,6 +129,8 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert combined_aggregate_rule in format_projection_rules(True)
     assert "Do not add a key or id to GROUP BY" in format_projection_rules(True)
     assert "Do not add a key or id to GROUP BY" not in format_projection_rules(False)
+    assert "Do not add a key or id" in create_sql_user_prompt
+    assert "group by the entity" not in create_sql_user_prompt
 
 
 def test_derived_formula_nulls_stay_inside_the_calculation() -> None:
