@@ -1025,7 +1025,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
             select(
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
-                s.catalog_table.c.description,
+                table_description_expr().label("description"),
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
