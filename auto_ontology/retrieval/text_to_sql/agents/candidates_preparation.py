@@ -1258,7 +1258,13 @@ class CandidatePreparationAgent(BaseAgent):
                     "Return the id of the single column attribute that best represents "
                     "the primary subject of the question. Map evidence concepts to "
                     "the listed schema.table.column physical references, not to "
-                    "semantic attribute names."
+                    "semantic attribute names. When several attributes are the same "
+                    "concept on different tables, they are different populations. "
+                    "Prefer the table whose name matches the set of rows the question "
+                    "describes. Do not prefer a summary, a current-only subset, or an "
+                    "abbreviated copy merely because its column name matches, when a "
+                    "more specific table is listed and the question does not ask for "
+                    "that summary or subset."
                 )
             ),
         ]

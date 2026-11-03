@@ -100,7 +100,9 @@ create_sql_user_prompt = (
     "- Treat constraints stated in their descriptions, formats, and sample values "
     "as requirements when using those columns.\n"
     "- This is a strong hint, not a mandate; use a different available column when "
-    "it more clearly matches the question.\n\n"
+    "it more clearly matches the question.\n"
+    "- A matched column does not replace another available table that stores the "
+    "same concept for a different population.\n\n"
     "{important_columns}\n\n"
     "## Example SQL Queries\n"
     "{queries}\n\n"
@@ -150,6 +152,21 @@ create_sql_user_prompt = (
     "bridge table, skipping a hop, or replacing the path with a direct endpoint "
     "join is forbidden, even when the bridge contributes no projected column.\n\n"
     "{join_paths}\n\n"
+    "**Sibling tables**\n"
+    "- Several tables may store one concept for different populations: a detail "
+    "table and a summary, a complete list and a current-only subset, a full name "
+    "and a short or abbreviated name, or two processes with similar columns. "
+    "They are not interchangeable. A shared column name is not a reason to use "
+    "one and drop the other.\n"
+    "- Use the table whose name and description match the set of rows the "
+    "question describes. Do not substitute a summary, a current-only subset, or "
+    "an abbreviated copy because it also has the column.\n"
+    "- A name column whose name adds a qualifier (short, long, abbreviated, "
+    "booklet, code) is a different string. Project and filter the column whose "
+    "description matches the label in the question.\n"
+    "- Do not add a join predicate the question does not state, and do not drop "
+    "one it does. Equating an extra term, date, or status on a relationship the "
+    "question describes by one key changes which rows match.\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
     "Use CASE WHEN inside aggregates instead: "
@@ -475,9 +492,14 @@ ORDER BY total_sales DESC;"""
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
   or CASE logic within the SQL.
-- SEMANTIC HINT (if present) shows a likely starting table and suggested join
-  paths derived from the semantic model. Treat it as a strong hint: prefer it
-  when it fits. Never force the semantic hint if it doesn't match the question.
+- SEMANTIC HINT (if present) names one matched column and its table, plus
+  suggested join paths. Prefer that column when its meaning fits. Never force
+  it when it does not match the question. It does not replace other available
+  tables. When two tables store the same concept for different populations — a
+  detail table and a summary, all rows and a current-only subset, a full name
+  and a short name, two similarly named processes — use the table whose name
+  matches the population the question describes. Do not drop the other because
+  this hint's table already has a similar column.
 - SUGGESTED JOIN PATHS show verified column-level join conditions:
 {join_template}
   Follow hops in order when the path spans more than one table. Once you choose
@@ -880,12 +902,12 @@ def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
         "question would have to refer to it: a qualifier in the name must also "
         "be present in the question to pick that column, and an unqualified "
         "mention means the plain column. A row count, where one is given, says "
-        "only how many rows hold that value: where one phrase sits in several "
-        "tables, the larger count tends to mark the table the value principally "
-        "belongs to. A small count is not itself a reason to distrust a match — "
-        "a value held by a single row is often the very entity the question names."
-        + never_invent
-        + " Evidence "
+        "only how many rows hold that value. Where the same phrase sits in several "
+        "tables, choose the table whose name matches the population the question "
+        "describes. A larger row count does not make a summary, a current-only "
+        "subset, or a similarly named process the right table. A small count is "
+        "not itself a reason to distrust a match — a value held by a single row "
+        "is often the very entity the question names." + never_invent + " Evidence "
         "still outranks these lines, and a phrase absent from this list is not "
         "thereby absent from the database — only the listed phrases were looked up."
     )
@@ -932,6 +954,8 @@ Rules:
 - Remove personal background, narrative fluff, and filler.
 - Preserve every factual constraint: numbers, product names, brands, categories, and qualifiers
   such as "similar", "natural ingredients", or "expensive is okay".
+- Preserve words that distinguish which population or copy is meant, such as current, all,
+  offered, catalog, reserve, summary, full, or short.
 - Do NOT invent constraints that are not in the original text.
 - Output one concise question or search intent, not a paragraph.
 
@@ -1097,6 +1121,10 @@ Guidelines for what to include in required_entity_name:
   (e.g. a subject entity and a time dimension still get separate entries when appropriate).
 - Keep names and descriptive text that identify something: brand names, product names,
   vendor names, categories, and other named constants (e.g. "Salomon Speedcross", "Grip Rx").
+- Population rule: keep a word that distinguishes which copy of a thing is meant
+  (current versus all, offered versus a summary, a catalog versus a reserve, a full
+  name versus a short name, one named process versus another). Do not reduce that
+  phrase to the bare noun.
 - For interrogative words (who/what/which/whose), resolve to the implied entity type
   AND, if the question contains a qualifying descriptor, include it twice: once alone
   and once combined with the resolved type.
@@ -1171,6 +1199,12 @@ Rules:
 - Before removing a table, confirm BOTH: (a) it supplies no column the answer
   needs, AND (b) removing it cannot change the set of rows that qualify.
   Report both per table — a table stays unless both hold.
+- Sibling tables are different populations, not duplicates. A summary and a
+  detail table, a complete list and a current-only subset, or two similarly
+  named processes can share a column and still hold different rows. "Another
+  table already provides this column" does not satisfy check (b): removing the
+  sibling changes which rows qualify. Keep every sibling unless the question
+  explicitly excludes that population.
 - If table A must be joined through tables B and C to reach table D, do NOT
   remove any table in the join chain (A, B, C, or D). The join paths below
   show real table connections. Keep the full bridges between tables that

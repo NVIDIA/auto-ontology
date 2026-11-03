@@ -16,6 +16,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    TABLE_RELEVANCE_FILTER_PROMPT,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_dialect_rules,
@@ -115,6 +116,17 @@ def test_mysql_rules_lift_the_division_cast_and_forbid_rounding_casts() -> None:
     # Other dialects keep their own rules.
     for dialect in ("sqlite", "postgres", "snowflake", None):
         assert "MySQL" not in format_dialect_rules(dialect)
+
+
+def test_prompt_keeps_sibling_tables_as_different_populations() -> None:
+    system_prompt = create_sql_from_candidates_prompt()
+
+    assert "different populations" in create_sql_user_prompt
+    assert "Do not substitute a summary" in create_sql_user_prompt
+    assert "different populations" in system_prompt
+    assert "already has a similar column" in system_prompt
+    assert "already provides this column" in TABLE_RELEVANCE_FILTER_PROMPT
+    assert "different populations" in TABLE_RELEVANCE_FILTER_PROMPT
 
 
 def test_projection_strictness_is_configured_per_request() -> None:

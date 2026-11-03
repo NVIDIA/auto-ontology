@@ -378,7 +378,12 @@ the missing concepts in our ontology database (focus on entity names and \
 relationships, NOT SQL syntax).
 - fixable: the SQL can be corrected using the SAME tables (syntax error, \
 wrong column reference, wrong aggregation, bad logic, etc.). Leave \
-search_queries empty."""
+search_queries empty.
+An empty result is not missing_data when the tables already include the \
+filtered concept. Do not search for a sibling that stores the same concept \
+for a different population — a summary beside a detail table, all rows beside \
+a current-only subset, a full name beside a short name, or two similarly \
+named processes."""
 
 
 # ------------------------------------------------------------------
@@ -750,6 +755,10 @@ class SQLReconstructionAgent(BaseAgent):
             f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
             "it is invalid.\n"
+            "If the query returned no rows, that is not evidence the value lives "
+            "on a different table. Do not move a predicate onto a same-named "
+            "column of another table, and do not replace a table with a sibling "
+            "that stores the same concept for a different population.\n"
             "Fix what the error requires while preserving every still-valid "
             "user-intent assumption. Do not silently reinterpret an ambiguous "
             "term merely because you're rewriting the query. In `thought`, "
