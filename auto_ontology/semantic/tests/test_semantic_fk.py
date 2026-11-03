@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from auto_ontology.semantic import semantic_fk
@@ -489,3 +490,38 @@ def test_resolution_always_normalizes_join_defaults() -> None:
         assert semantic_fk.resolve_semantic_fks("database") == 3
 
     select_defaults.assert_called_once_with("database")
+
+
+@pytest.mark.parametrize(
+    ("present", "shared", "pruned"),
+    [(1, 1, False), (1, 0, True), (0, 0, True)],
+    ids=["shared", "disjoint", "empty-source"],
+)
+def test_prune_removes_disjoint_and_empty_source_fks(
+    present: int, shared: int, pruned: bool
+) -> None:
+    connector = MagicMock(dialect="mysql")
+    connector.qualify.side_effect = lambda schema, table: table
+    connector.execute.return_value = pd.DataFrame({"n": [present, shared]})
+    row = {
+        "source_column_id": "col",
+        "target_attribute_id": "attr",
+        "source_table_name": "orders",
+        "source_column_name": "customer_id",
+        "target_table_name": "customers",
+        "target_column_name": "id",
+    }
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[row],
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+    ):
+        assert semantic_fk.prune_disjoint_semantic_fks("database") == int(pruned)
+
+    assert delete.called is pruned
