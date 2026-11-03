@@ -34,6 +34,11 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- GROUP BY only the columns the question asks to list or break down. "
+        "Do not add a key or id to GROUP BY, in the outer query or inside a "
+        "CTE, unless the question explicitly asks for one row per key. An "
+        "unrequested key splits one name into several groups and changes the "
+        "aggregate and any average of those groups.\n"
         "- When the question or evidence requests one aggregate over two "
         "alternative categories joined by 'and' (for example, a count for X and Y), "
         "return ONE aggregate and combine the category predicates with OR in the "
@@ -117,8 +122,8 @@ create_sql_user_prompt = (
     "per-entity value compared with an overall average, a ratio of two counts, "
     "a filter on one measure while another is reported — build the query in "
     "steps with WITH: one named block per set or measure the question defines, "
-    "then a final SELECT that combines the blocks on the entity's key. Name "
-    "each block after what it holds.\n"
+    "then a final SELECT that combines the blocks. Name each block after what "
+    "it holds.\n"
     "- Define each set of rows once and reuse it. When later words refer back "
     "to an earlier set ('such', 'those', 'these', 'them'), compute every "
     "measure of that set from the same block; never rebuild it with a "
