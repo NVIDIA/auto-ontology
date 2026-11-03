@@ -45,6 +45,9 @@ You review relational table metadata and produce three outputs:
      or {that_table}_code on a different table. This is a foreign key even when is_unique
      is true. Uniqueness means one row here per referenced key, which is normal on a
      bridge; it does not make the column this table's primary key
+   - is the other column of a two-column table whose first column is already a foreign
+     key. Both columns reference an entity. The exception is a column that is this
+     table's own key
    - has a description that contains words like "references", "identifier of", or names another table
    - has an integer or string type consistent with identifiers
    - semantically points to a row in another table
@@ -58,8 +61,11 @@ You review relational table metadata and produce three outputs:
 
 2. pk_column_names — columns that identify this table's own records even if not declared.
    A bare "id" or "uuid", or a column named exactly <this_table>_id, <this_table>_key, or
-   <this_table>_code. Never a column named for a different table, even when is_unique is
-   true. Usually empty or one entry. Only list columns from the candidate list.
+   <this_table>_code. A column named *_key, *_id, or *_code can also be this table's own
+   key when it identifies this table's rows: the primary key itself uses that suffix, as
+   DLC_KEY does on the department table. Never list another table's own key, even when
+   is_unique is true, and never list a column marked is_unique: false. Usually empty or
+   one entry. Only list columns from the candidate list.
 
 3. is_junction_table and junction_table_rationale — classify the table's row grain.
    Set is_junction_table true ONLY when each row represents an association between at least
@@ -142,6 +148,79 @@ def named_table_key_links(
             continue
         links.append((str(source_id), target_id))
     return links
+
+
+def _is_this_tables_own_key(column_name: str, table_name: str) -> bool:
+    """Whether *column_name* is ``{table}_key``, ``_id``, or ``_code``."""
+    column = column_name.casefold()
+    table = table_name.casefold()
+    return any(
+        column.endswith(suffix) and column[: -len(suffix)] == table
+        for suffix in _OWN_KEY_SUFFIXES
+    )
+
+
+def _proven_fk_names(
+    candidates: list[dict[str, Any]],
+    table_name: str,
+    declared_fk_names: Collection[str],
+    own_key_column_names: Collection[str],
+) -> set[str]:
+    """Foreign keys known before the model's opinion of the other columns.
+
+    Declared foreign keys, plus columns named ``{other_table}_key``. A model
+    guess is not enough to decide the remaining column of a two-column table.
+    """
+    proven = {name for name in declared_fk_names if name}
+    for col in candidates:
+        name = str(col.get("name") or "")
+        if references_other_table_key(name, table_name, own_key_column_names):
+            proven.add(name)
+    return proven
+
+
+def _paired_fk_suggestions(
+    columns: list[dict[str, Any]],
+    table_name: str,
+    proven_fk_names: Collection[str],
+    declared_pk_names: Collection[str],
+    seen: set[str],
+) -> list[PotentialFkSuggestion]:
+    """The remaining column of a two-column table that already has one FK.
+
+    A bridge stores one association per row, so the second column references
+    an entity too. This uses foreign keys already known from the warehouse or
+    from a ``{table}_key`` name, not a guess about the other column. The
+    table's own key is left as its identifier.
+    """
+    if len(columns) != 2:
+        return []
+    proven = {name.casefold() for name in proven_fk_names if name}
+    if not proven:
+        return []
+    pk_names = {name.casefold() for name in declared_pk_names}
+    suggestions: list[PotentialFkSuggestion] = []
+    for col in columns:
+        name = str(col.get("name") or "")
+        if (
+            not name
+            or name in seen
+            or name.casefold() in proven
+            or name.casefold() in pk_names
+            or col.get("is_foreign_key_target")
+            or _is_this_tables_own_key(name, table_name)
+        ):
+            continue
+        seen.add(name)
+        suggestions.append(
+            PotentialFkSuggestion(
+                column_name=name,
+                rationale=(
+                    "two-column table whose other column is already a foreign key"
+                ),
+            )
+        )
+    return suggestions
 
 
 def _other_table_key_suggestions(
@@ -234,6 +313,11 @@ def suggest_potential_foreign_keys(
     on a different table, is a foreign key even when the model calls it this
     table's primary key. The names come from the catalog; terms are not
     available yet.
+
+    A table with exactly two columns and one foreign key already known keeps
+    the other column as a foreign key too. The known key is a declared foreign
+    key or another table's ``{table}_key`` name, not a guess. This table's own
+    key stays its identifier.
     """
     columns = ctx.get("columns", [])
     fks = ctx.get("fks", [])
@@ -280,12 +364,11 @@ def suggest_potential_foreign_keys(
     )
 
     table_name = str(table.get("name") or "")
+    own_keys = own_key_column_names or ()
     other_table_keys = [
         col["name"]
         for col in candidates
-        if references_other_table_key(
-            str(col.get("name") or ""), table_name, own_key_column_names or ()
-        )
+        if references_other_table_key(str(col.get("name") or ""), table_name, own_keys)
     ]
     other_table_key_block = (
         (
@@ -293,6 +376,17 @@ def suggest_potential_foreign_keys(
             "even when is_unique is true: " + ", ".join(other_table_keys) + "\n"
         )
         if other_table_keys
+        else ""
+    )
+    already_foreign_keys = sorted(known_fk_names | set(other_table_keys))
+    pair_block = (
+        (
+            "This table has two columns and "
+            + ", ".join(already_foreign_keys)
+            + " is already a foreign key, so the other column is a foreign "
+            "key unless it is this table's own key.\n"
+        )
+        if len(columns) == 2 and already_foreign_keys
         else ""
     )
     prompt = (
@@ -304,6 +398,7 @@ def suggest_potential_foreign_keys(
         f"All table columns:\n{all_column_lines}\n"
         f"Candidate columns:\n{candidate_lines}\n"
         f"{other_table_key_block}"
+        f"{pair_block}"
     )
 
     result = invoke_with_structured_output(
@@ -313,11 +408,19 @@ def suggest_potential_foreign_keys(
     )
     if result is None:
         seen: set[str] = set()
-        return PotentialFkResult(
-            suggestions=_other_table_key_suggestions(
-                candidates, table_name, own_key_column_names or (), seen
+        suggestions = _other_table_key_suggestions(
+            candidates, table_name, own_keys, seen
+        )
+        suggestions.extend(
+            _paired_fk_suggestions(
+                columns,
+                table_name,
+                _proven_fk_names(candidates, table_name, known_fk_names, own_keys),
+                pk_names,
+                seen,
             )
         )
+        return PotentialFkResult(suggestions=suggestions)
 
     llm_pk_names = {
         name
@@ -330,7 +433,17 @@ def suggest_potential_foreign_keys(
     seen: set[str] = set()
     for item in result.fk_suggestions:
         name = item.column_name.strip()
-        if not name or name in seen or name not in allowed:
+        # A column the model names as this table's key keeps its attribute.
+        # Another table's own key stays a foreign key; that case is added below.
+        if (
+            not name
+            or name in seen
+            or name not in allowed
+            or (
+                name in llm_pk_names
+                and not references_other_table_key(name, table_name, own_keys)
+            )
+        ):
             continue
         seen.add(name)
         filtered.append(
@@ -357,8 +470,18 @@ def suggest_potential_foreign_keys(
                 )
             )
     filtered.extend(
-        _other_table_key_suggestions(
-            candidates, table_name, own_key_column_names or (), seen
+        _other_table_key_suggestions(candidates, table_name, own_keys, seen)
+    )
+    # Only a foreign key the warehouse declared, or one named for another
+    # table, makes the second column a foreign key. A model guess about one
+    # column must not pull the other column in with it.
+    filtered.extend(
+        _paired_fk_suggestions(
+            columns,
+            table_name,
+            _proven_fk_names(candidates, table_name, known_fk_names, own_keys),
+            pk_names,
+            seen,
         )
     )
 

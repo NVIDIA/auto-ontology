@@ -187,8 +187,10 @@ class FkAndPkResult(BaseModel):
         description=(
             "Columns that identify this table's own records: a bare id or uuid, "
             "or a column named exactly <this_table>_id, <this_table>_key, or "
-            "<this_table>_code. Never a column named for a different table, "
-            "even when that column is unique. Usually empty or one entry."
+            "<this_table>_code. A *_key, *_id, or *_code column can also be this "
+            "table's own key when it identifies this table's rows; the primary "
+            "key itself uses that suffix. Never another table's own key, and "
+            "never a column marked is_unique false. Usually empty or one entry."
         ),
     )
     is_junction_table: bool = Field(

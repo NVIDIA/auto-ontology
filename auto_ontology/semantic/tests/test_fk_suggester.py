@@ -317,7 +317,10 @@ def test_unique_column_named_for_another_table_is_a_foreign_key(
         table, ctx, profiling, own_key_column_names=_OWN_KEYS
     )
 
-    assert [suggestion.column_name for suggestion in result.suggestions] == [_ORG_KEY]
+    assert [suggestion.column_name for suggestion in result.suggestions] == [
+        _ORG_KEY,
+        "DLC_KEY",
+    ]
     prompt = mock_invoke.call_args.args[1][1].content
     assert (
         "Columns that name another table's key, so they are foreign keys "
@@ -442,7 +445,10 @@ def test_referencing_table_is_classified_before_the_owning_table(
         {_ORG_KEY: {"is_unique": True}},
         own_key_column_names=_OWN_KEYS,
     )
-    assert [item.column_name for item in bridge_result.suggestions] == [_ORG_KEY]
+    assert [item.column_name for item in bridge_result.suggestions] == [
+        _ORG_KEY,
+        "DLC_KEY",
+    ]
     assert named_table_key_links(
         "FCLT_ORG_DLC_KEY", bridge_columns, _OWN_KEYS, declared_fk_columns=()
     ) == [("org-on-bridge", "org-key-column")]
@@ -487,3 +493,100 @@ def test_referencing_table_is_classified_before_the_owning_table(
         _ORG_KEY,
         "ORGANIZATION_NAME",
     ]
+
+
+_DLC_KEY = "DLC_KEY"
+
+
+@patch(
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
+    return_value=MagicMock(),
+)
+@patch(
+    "auto_ontology.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(fk_suggestions=[], pk_column_names=[]),
+)
+def test_the_other_column_of_a_two_column_table_is_a_foreign_key(
+    mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    """FCLT_ORGANIZATION_KEY names another table. DLC_KEY is the other column."""
+    table = {"id": "bridge", "name": "FCLT_ORG_DLC_KEY", "schema_name": "dw"}
+    ctx = {
+        "columns": [
+            {"id": "org-on-bridge", "name": _ORG_KEY, "data_type": "varchar"},
+            {"id": "dlc-on-bridge", "name": _DLC_KEY, "data_type": "varchar"},
+        ],
+        "fks": [],
+    }
+
+    result = suggest_potential_foreign_keys(table, ctx, own_key_column_names=_OWN_KEYS)
+
+    assert [item.column_name for item in result.suggestions] == [_ORG_KEY, _DLC_KEY]
+    assert "is already a foreign key, so the other column is a foreign key" in (
+        mock_invoke.call_args.args[1][1].content
+    )
+
+
+@patch(
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
+    return_value=MagicMock(),
+)
+@patch(
+    "auto_ontology.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(
+        fk_suggestions=[
+            PotentialFkSuggestion(column_name=_DLC_KEY, rationale="ends with _key")
+        ],
+        pk_column_names=[],
+    ),
+)
+def test_a_model_guess_does_not_make_the_other_column_a_foreign_key(
+    _mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    """ROLES_FIN_PA has two columns and no known foreign key. USERNAME stays."""
+    result = suggest_potential_foreign_keys(
+        {"id": "roles", "name": "ROLES_FIN_PA", "schema_name": "dw"},
+        {
+            "columns": [
+                {"name": _DLC_KEY, "data_type": "varchar"},
+                {"name": "USERNAME", "data_type": "varchar"},
+            ],
+            "fks": [],
+        },
+    )
+
+    assert [item.column_name for item in result.suggestions] == [_DLC_KEY]
+
+
+@patch(
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
+    return_value=MagicMock(),
+)
+@patch(
+    "auto_ontology.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(
+        fk_suggestions=[
+            PotentialFkSuggestion(column_name="CUSTOMER_ID", rationale="parent")
+        ],
+        pk_column_names=["EMPLOYEE_ID"],
+    ),
+)
+def test_a_two_column_tables_own_key_is_not_forced_to_a_foreign_key(
+    _mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    result = suggest_potential_foreign_keys(
+        {"id": "employees", "name": "EMPLOYEE", "schema_name": "public"},
+        {
+            "columns": [
+                {"name": "EMPLOYEE_ID", "data_type": "varchar"},
+                {"name": "CUSTOMER_ID", "data_type": "varchar"},
+            ],
+            "fks": [{"source_column": "CUSTOMER_ID", "target_table": "customers"}],
+        },
+        {"EMPLOYEE_ID": {"is_unique": True}},
+    )
+
+    assert result.suggestions == []
