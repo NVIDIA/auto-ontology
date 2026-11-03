@@ -492,7 +492,7 @@ def test_agent_records_accepted_repairs(
     assert captured["schema"] is EvidenceRefinementResult
 
 
-def test_agent_keeps_evidence_refs_and_repairs_values(
+def test_agent_grounds_schema_before_value_anchor_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     schemas: list[type] = []
@@ -501,23 +501,38 @@ def test_agent_keeps_evidence_refs_and_repairs_values(
         "premium accounts refers to `Premium Account (Y/N)` = 0 "
         "in the table account_flags"
     )
-    corrected_line = original_evidence.replace("= 0", "= 1")
+    grounded_line = (
+        'premium accounts refers to "main"."account_flags".'
+        '"Premium Account (Y/N)" = 0 in the table account_flags'
+    )
 
     def _invoke(messages, schema):
         schemas.append(schema)
         prompts.append("\n".join(message.content for message in messages))
+        if schema is EvidenceGroundingResult:
+            return EvidenceGroundingResult(
+                reasoning="The evidence names the exact physical column.",
+                grounded_question=(
+                    'How many accounts have "main"."account_flags".'
+                    '"Premium Account (Y/N)" = 0 enabled?'
+                ),
+                grounded_evidence=grounded_line,
+            )
         return EvidenceRefinementResult(
             repairs=[
                 _repair(
-                    original_line=original_evidence,
-                    corrected_line=corrected_line,
+                    original_line=grounded_line,
+                    corrected_line=grounded_line.replace("= 0", "= 1"),
                     corrected_value="1",
                     kind="constant_value",
                     table_name="main.account_flags",
                     column_name="Premium Account (Y/N)",
                 )
             ],
-            corrected_question="How many accounts have premium membership enabled?",
+            corrected_question=(
+                'How many accounts have "main"."account_flags".'
+                '"Premium Account (Y/N)" = 1 enabled?'
+            ),
         )
 
     monkeypatch.setattr(evidence_refinement, "safe_invoke_structured_nr", _invoke)
@@ -538,12 +553,20 @@ def test_agent_keeps_evidence_refs_and_repairs_values(
 
     result = EvidenceRefinementAgent().execute(state)
 
-    assert schemas == [EvidenceRefinementResult]
-    assert "Verified database value anchors" in prompts[0]
-    assert "the only allowed mapping targets" not in prompts[0]
-    assert result["evidence"] == corrected_line
-    assert "`Premium Account (Y/N)`" in result["evidence"]
-    assert "normalized_question" not in result["path_state"]
+    assert schemas == [EvidenceGroundingResult, EvidenceRefinementResult]
+    assert "Verified database value anchors" not in prompts[0]
+    assert "Verified database value anchors" in prompts[1]
+    assert "the only allowed mapping targets" in prompts[0]
+    assert "Replace ONLY fields that are described or mapped" in prompts[0]
+    assert "not described by evidence MUST remain" in prompts[0]
+    assert "does NOT need to match the evidence wording exactly" in prompts[0]
+    assert "Treat the natural-language phrase before evidence cues" in prompts[0]
+    assert "you MUST replace the minimal matching question" in prompts[0]
+    assert result["evidence"] == grounded_line.replace("= 0", "= 1")
+    assert result["path_state"]["normalized_question"] == (
+        'How many accounts have "main"."account_flags".'
+        '"Premium Account (Y/N)" = 1 enabled?'
+    )
     assert len(result["path_state"]["evidence_repairs_applied"]) == 1
 
 

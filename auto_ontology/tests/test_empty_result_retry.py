@@ -48,14 +48,12 @@ def test_undiagnosed_empty_result_is_regenerated_once():
 
 def test_undiagnosed_retry_lets_reconstruction_classify_the_error():
     """Unlike the literal repair, this has no probe evidence behind it, so
-    reconstruction may still classify a genuinely absent concept as missing
-    data. The instruction forbids treating a sibling table as that concept.
+    reconstruction must stay free to decide the data lives elsewhere and search
+    for other tables (see sql_reconstruction's missing_data path).
     """
     out = EmptyResultValueRepairAgent().execute(_state([]))
 
     assert "error_known_fixable" not in out["path_state"]
-    assert "different population" in out["path_state"]["error"]
-    assert "same-named column of another table" in out["path_state"]["error"]
 
 
 def test_retry_happens_at_most_once():

@@ -177,11 +177,9 @@ def format_semantic_context(
     anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
 
     lines: list[str] = [
-        "SEMANTIC HINT — one matched column, not the only table to use:",
+        "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
         f"  Table: {anchor_full}",
         f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
-        "  Other available tables may store this same concept for a different "
-        "population. Do not drop one because this table also has the column.",
     ]
 
     if attribute_join_paths:
