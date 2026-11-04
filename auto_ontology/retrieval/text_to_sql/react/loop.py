@@ -113,6 +113,11 @@ def _call_key(name: str, args: dict) -> str:
     return f"{name}:{json.dumps(args, sort_keys=True, default=str)}"
 
 
+def _with_cost_status(ctx: ToolContext, text: str) -> str:
+    status = ctx.cost_status() if ctx.cost_status else None
+    return f"{text}\n\n{status}" if status else text
+
+
 def _dispatch(ctx: ToolContext, name: str, args: dict) -> tuple[str, Submission | None]:
     handlers: dict[str, Callable[..., str]] = {
         "retrieve": lambda query="", kinds=None: retrieve(ctx, query, kinds),
@@ -149,7 +154,9 @@ def run_episode(
         system_prompt = f"{system_prompt}\n\n{dialect_rules}"
     messages: list[BaseMessage] = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=prompts.user_message(question, evidence)),
+        HumanMessage(
+            content=_with_cost_status(ctx, prompts.user_message(question, evidence))
+        ),
     ]
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
@@ -211,6 +218,8 @@ def run_episode(
                 made.add(key)
                 calls += 1
                 observation, submission = _dispatch(ctx, name, args)
+            if submission is None:
+                observation = _with_cost_status(ctx, observation)
             messages.append(
                 ToolMessage(content=observation, tool_call_id=call.get("id") or name)
             )

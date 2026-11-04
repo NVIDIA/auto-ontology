@@ -61,6 +61,10 @@ class ReactSQLAgent(BaseAgent):
             numeric_type_alignment=bool(state.get("numeric_type_alignment")),
         )
         connector = connector_for(ctx)
+        # A connector that charges for queries says so through cost_status.
+        cost_status = getattr(connector, "cost_status", None)
+        if callable(cost_status):
+            ctx.cost_status = cost_status
         result = run_episode(
             state.get("reasoning_llm") or state["llm"],
             ctx,

@@ -12,7 +12,7 @@ the same calls — which is what an RL environment needs from them.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -26,6 +26,10 @@ class ToolContext:
     tables the model already has in view. ``schemas`` is the catalog the SQL
     checks resolve names against, loaded on first use because a question that
     never drafts SQL should not pay for it.
+
+    ``cost_status`` is for callers that charge for queries: it returns what the
+    model has left to spend and what each action costs, read fresh each time
+    because every query changes it. ``None`` when queries are free.
     """
 
     retriever: Any
@@ -40,3 +44,4 @@ class ToolContext:
     row_counts: dict[str, int | None] = field(default_factory=dict)
     schemas: dict[str, Any] | None = None
     sql_runs: int = 0
+    cost_status: Callable[[], str | None] | None = None

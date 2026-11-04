@@ -72,6 +72,32 @@ def test_search_check_and_submit(ctx: ToolContext) -> None:
     assert "ACTIVE" in tool_results[1]
 
 
+def test_cost_status_follows_the_question_and_each_tool_result(ctx: ToolContext) -> None:
+    left = iter([9, 8])
+    ctx.cost_status = lambda: f"BUDGET: {next(left)} coins left."
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][1].content.endswith("BUDGET: 9 coins left.")
+    tool_result = [m.content for m in model.seen[-1] if isinstance(m, ToolMessage)][0]
+    assert "ACTIVE" in tool_result
+    assert tool_result.endswith("BUDGET: 8 coins left.")
+
+
+def test_no_cost_status_leaves_messages_unchanged(ctx: ToolContext) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][1].content == prompts.user_message("q", None)
+
+
 def test_rejected_submission_lets_the_model_fix_it(ctx: ToolContext) -> None:
     model = ScriptedModel(
         [
