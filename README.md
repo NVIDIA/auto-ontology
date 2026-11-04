@@ -17,17 +17,20 @@ Agents can retrieve documents and query databases, but reliability is what gates
 agentic analytics: a revenue figure delivered faster is worth nothing if it's
 wrong. Before an agent queries, it needs to know where the data lives, what it
 means, whether to use it, how to use it, where it came from, and what is
-similar. Auto-Ontology builds that context layer from your database metadata
-and serves it to any agent harness. It complements the semantic models you
-already own.
+similar.
+
+Auto-Ontology is a service you run next to your databases to give agents that
+context. It compiles their metadata into an ontology: business terms mapped to
+columns, reviewed SQL for measures, and the relationships between tables. Agents
+query through the ontology, and people review it in a web UI. It complements the
+semantic models you already own.
 
 With Auto-Ontology, developers can:
 
 - **Discover.** Generate an ontology from database metadata, import existing
   semantic models, and explore the result as a semantic graph.
-- **Ground.** Give agents business terms mapped to columns across tables and
-  databases, plus reviewed SQL for metrics and the relationships between
-  tables.
+- **Ground.** Give agents one definition per business concept, mapped across
+  tables and databases.
 - **Certify.** Review, edit, and certify definitions in the UI or through the
   API.
 - **Validate.** Check whether a question is answerable before querying, and
@@ -36,7 +39,7 @@ With Auto-Ontology, developers can:
   a REST API.
 
 The usual shortcut is to paste the schema into the agent's context window.
-Auto-Ontology gives the agent tools instead:
+Auto-Ontology gives the agent tools over the ontology:
 
 |                        | Schema in the context window            | Auto-Ontology tools                                 |
 | ---------------------- | --------------------------------------- | --------------------------------------------------- |
@@ -53,13 +56,17 @@ ontology performance on benchmarks and evals.
 
 For BIRD, BEAVER, FDABench-Lite, and Wide World Importers, each eval item pairs
 a question with gold SQL, and a run asks every question of the same model
-twice. The control gives the model the database schema in its prompt. The
-treatment runs the agent that answers questions in Chat, without the UI, over
-the compiled ontology. A deterministic verifier scores only the
-SQL, by execution match, using each benchmark's official rule where it has one.
-The report gives the accuracy difference and lists the questions the ontology
-fixed and the ones it broke. BIRD-Interact, a multi-turn benchmark where the
-agent asks clarifying questions, runs on its own harness.
+twice:
+
+- **Control.** The model gets the database schema in its prompt.
+- **Treatment.** Auto-Ontology's question-answering agent, the one behind Chat,
+  works from the compiled ontology.
+
+A deterministic verifier scores the SQL from each arm by execution match, using
+each benchmark's official rule where it has one. The report gives the accuracy
+difference and lists the questions the ontology fixed and the ones it broke.
+BIRD-Interact, a multi-turn benchmark where the agent asks clarifying
+questions, runs on its own harness.
 
 To run the comparison on BIRD, follow the auto-ontology-eval setup, then run:
 
@@ -157,7 +164,7 @@ Microsoft's sample sales database. You need Docker with Compose v2,
 6. Ask something the data can't answer. Wide World Importers has no
    advertising data, so a question about ad spend has nothing to resolve
    against. An agent connected through [MCP](#mcp-server) checks answerability
-   first and asks you instead of guessing:
+   first and asks you to clarify:
 
    ```text
    You:    What was return on ad spend for the sushi roll flash drive in June 2015?
@@ -179,23 +186,33 @@ again. For other setup failures, see the
 <img src="./docs/assets/arch.png" alt="Auto-Ontology architecture" width="800">
 </p>
 
-Auto-Ontology builds the ontology in two stages.
+Auto-Ontology works in three stages: it generates an ontology, people certify
+it, and the agent answers questions from it.
+
+The ontology holds three kinds of definition:
+
+- **Terms.** Business concepts such as *Customer* or *Invoice Line*, each with a
+  description and synonyms, mapped to the columns that hold them.
+- **SQL attributes.** Reviewed SQL expressions under a term, such as a margin or
+  a rolling total. The agent reuses them, so answers compute each measure the
+  same way.
+- **Relationships.** How tables join, including bridge tables, inferred from
+  keys and from the data.
 
 **Generate.** The ingestion service builds a first draft from the source
 databases:
 
 1. Read sources: extract schemas, profile columns, and sample values into the
    catalog.
-2. Name entities: extract business terms table by table and map each to
-   columns.
-3. Resolve relationships: infer semantic foreign keys and bridge tables, and
+2. Name entities: extract terms table by table and map each to columns.
+3. Resolve relationships: infer joins between tables and bridge tables, and
    suggest SQL attributes from query history.
 4. Write the ontology: store terms, relationships, and SQL attributes in
-   Postgres, with embeddings in pgvector.
+   Postgres, with embeddings in pgvector for retrieval.
 
 The result is a semantic graph you can explore in the UI. In this example, one
-compilation of Wide World Importers produced 31 terms; selecting **Order** shows its
-description, related terms, mapped columns, and SQL attributes:
+compilation of Wide World Importers produced 31 terms; selecting **Order** shows
+its description, related terms, mapped columns, and SQL attributes:
 
 <p>
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
@@ -207,6 +224,19 @@ description, related terms, mapped columns, and SQL attributes:
    `ask_question` over MCP.
 2. Refine terms, descriptions, and SQL attributes in the UI or through the API.
 3. Certify names, descriptions, and SQL attributes once they're correct.
+
+**Answer.** For each question, the agent:
+
+1. Classifies the intent and extracts the entities the question names.
+2. Retrieves candidate terms, columns, and SQL attributes by embedding search.
+3. Writes SQL from those candidates.
+4. Checks the filter values and the query against the database, repairing the
+   SQL when a check fails.
+5. Runs the query and returns the answer with its SQL and the steps it took.
+
+When the candidates can't support a query, the agent reports that the question
+can't be answered from this data. Predictive questions go to KumoRFM when it's
+configured (see [Predictions](#predictions)).
 
 Auto-Ontology is compatible with [Apache Ossie](https://ossie.apache.org/), the
 open standard for exchanging semantic models. Ossie includes a
@@ -378,7 +408,8 @@ Set `KUMO_RFM_API_KEY` and the agent routes predictive questions to KumoRFM.
 
 ## Integrate with us
 
-To integrate an agent platform, application, or storage provider with Auto-Ontology,
+To integrate an agent platform, application, or storage provider with
+Auto-Ontology,
 [open an integration request](https://github.com/NVIDIA/auto-ontology/issues/new?template=integration.yml).
 
 The Auto-Ontology team maintains the code and doesn't accept external pull
