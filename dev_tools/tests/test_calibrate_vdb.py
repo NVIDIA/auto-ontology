@@ -93,6 +93,20 @@ def test_a_cosine_gate_accepts_at_or_below_the_threshold() -> None:
     assert loose.negative_accept_rate == 1.0
 
 
+def test_the_hybrid_gate_accepts_a_row_named_after_the_entity() -> None:
+    named = {"id": "x", "name": "rental_rate", "rrf": 1.0, "semantic_distance": 0.9}
+    outcomes = [
+        (_entity("rental rate"), [{**named, "query_entity": "rental rate"}], {"x"}),
+        (_entity("film fee"), [{**named, "query_entity": "film fee"}], {"x"}),
+    ]
+
+    [named_gate] = gate_sweep(outcomes, "name-or-distance", [0.65])
+    [distance_gate] = gate_sweep(outcomes, "vector-distance", [0.65])
+
+    assert (named_gate.correct, named_gate.accepted) == (1, 1)
+    assert distance_gate.accepted == 0
+
+
 def test_an_rrf_gate_accepts_at_or_above_the_threshold() -> None:
     [loose, mid, tight] = gate_sweep(_outcomes(), "rrf", [0.4, 0.6, 0.9])
 
@@ -194,6 +208,6 @@ def test_a_run_reports_every_mode_and_the_semantic_modes_agree(
     assert set(report["ranking"]) == {"postgres", "es-semantic", "es-hybrid"}
     assert report["parity"]["top1_agreement"] == 1.0
     assert report["parity"]["max_distance_diff"] < 0.02
-    assert report["gates"]["es-hybrid"]["gate"] == "vector-distance"
-    assert "es-hybrid, rrf" in report["gates"]
+    assert report["gates"]["es-hybrid"]["gate"] == "name-or-distance"
+    assert {"es-hybrid, vector-distance", "es-hybrid, rrf"} <= set(report["gates"])
     assert "## Gates" in render(report)

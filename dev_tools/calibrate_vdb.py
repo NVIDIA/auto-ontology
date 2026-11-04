@@ -23,10 +23,11 @@ The report has three parts:
 * **Parity** -- whether the two semantic modes agree, as they must: same
   model, same rows, so the same neighbours at the same distances.
 * **Gate sweep** -- for each mode, the relevance gate swept across thresholds
-  (``max_distance``, read off the vector distance in every mode). An entity is
-  *accepted* when its top hit passes; accepting a wrong row or any row for an
-  entity with no right answer is a false accept. The threshold with the best
-  F1 is the recommendation, set against the one configured today.
+  (``max_distance``, read off the vector distance in every mode; hybrid also
+  passes a hit named exactly like the entity). An entity is *accepted* when
+  its top hit passes; accepting a wrong row or any row for an entity with no
+  right answer is a false accept. The threshold with the best F1 is the
+  recommendation, set against the one configured today.
 
 The numbers are only as good as the labels and only as broad as the fixture:
 260-odd rows and ~70 entities say which way to move a threshold, not where it
@@ -58,6 +59,8 @@ from typing import Any, Callable, Iterator, Literal
 
 import yaml
 
+from auto_ontology.retrieval.data_access.hit_scores import cosine_distance, names_entity
+
 logger = logging.getLogger("dev_tools.calibrate_vdb")
 
 ENTITIES_PATH = Path(__file__).parent / "fixtures" / "calibration_entities.yaml"
@@ -69,9 +72,17 @@ Mode = Literal["postgres", "es-semantic", "es-hybrid"]
 GATES: dict[str, tuple[str, Callable[[dict], float], bool]] = {
     # name, value read off the top row, higher-is-better
     "cosine": ("max_distance", lambda row: float(row.get("score", math.inf)), False),
-    # How hybrid is gated: its vector branch's cosine distance.
+    # How hybrid is gated: its vector branch's cosine distance, or a name that
+    # is the entity's (hit_scores.passes_relevance_gate).
+    "name-or-distance": (
+        "max_distance on the vector branch, or an exact name",
+        lambda row: -math.inf if names_entity(row) else cosine_distance(row),
+        False,
+    ),
+    # Not a gate the app uses: hybrid's gate without the exact-name rule,
+    # swept to show what that rule adds.
     "vector-distance": (
-        "max_distance on the vector branch",
+        "max_distance on the vector branch (comparison only)",
         lambda row: (
             math.inf
             if row.get("semantic_distance") is None
@@ -91,7 +102,12 @@ GATES: dict[str, tuple[str, Callable[[dict], float], bool]] = {
 COSINE_THRESHOLDS = [round(0.30 + 0.05 * i, 2) for i in range(15)]  # 0.30-1.00
 RRF_THRESHOLDS = [round(0.30 + 0.05 * i, 2) for i in range(15)]  # 0.30-1.00
 #: Today's settings, marked in the sweep.
-CURRENT = {"cosine": (0.65, 0.75), "vector-distance": (0.65, 0.75), "rrf": ()}
+CURRENT = {
+    "cosine": (0.65, 0.75),
+    "name-or-distance": (0.65, 0.75),
+    "vector-distance": (0.65, 0.75),
+    "rrf": (),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -335,19 +351,24 @@ def _elasticsearch_stores(run: Run, corpus: dict) -> Iterator[dict[Layer, Any]]:
 
 
 def search(store: Any, run: Run, entity: Entity) -> list[dict]:
-    """*entity*'s rows, as the app would retrieve them."""
+    """*entity*'s rows, as the app would retrieve them.
+
+    Each row is tagged with ``query_entity``, as candidate retrieval tags it,
+    so the gates can tell whether a row is named after the entity.
+    """
     from auto_ontology.retrieval.data_access.semantic_search import (
         search_semantic_index,
     )
     from auto_ontology.utils.retriever import Retriever
 
-    return search_semantic_index(
+    rows = search_semantic_index(
         Retriever(store, run.embed_params),
         entity.entity,
         label_filter=[entity.label],
         per_label_k=run.top_k,
         database_name=entity.database,
     )
+    return [{**row, "query_entity": entity.entity} for row in rows]
 
 
 def first_correct_rank(rows: list[dict], expected: set[str]) -> int | None:
@@ -536,12 +557,16 @@ def calibrate(run: Run, entities: list[Entity]) -> dict[str, Any]:
             )
         report["ranking"][mode] = ranking
 
-        gates = ["vector-distance", "rrf"] if mode == "es-hybrid" else ["cosine"]
+        gates = (
+            ["name-or-distance", "vector-distance", "rrf"]
+            if mode == "es-hybrid"
+            else ["cosine"]
+        )
         for gate in gates:
             thresholds = RRF_THRESHOLDS if gate == "rrf" else COSINE_THRESHOLDS
             points = gate_sweep(outcomes, gate, thresholds)
             best = best_point(points, GATES[gate][2])
-            key = mode if gate in ("vector-distance", "cosine") else f"{mode}, {gate}"
+            key = mode if gate in ("name-or-distance", "cosine") else f"{mode}, {gate}"
             report["gates"][key] = {
                 "gate": gate,
                 "setting": GATES[gate][0],

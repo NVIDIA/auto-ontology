@@ -7,7 +7,8 @@
 The cosine cases pin that nothing changed for ``VDB_SEARCH_MODE=semantic``;
 the hybrid cases pin that the gate and the cosine-tuned cutoffs read a hybrid
 hit's vector distance rather than its RRF ordering -- a hit only BM25 found
-must never look "close" -- and the branch-agreement tie rule.
+must never look "close" -- the exact-name exception to the hybrid gate, and
+the branch-agreement tie rule.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import pytest
 from auto_ontology.retrieval.data_access.hit_scores import (
     ambiguous_pair,
     cosine_distance,
+    names_entity,
     passes_relevance_gate,
 )
 from auto_ontology.retrieval.entity_coverage.agents.coverage import _filter_by_distance
@@ -77,14 +79,69 @@ def test_a_hybrid_hits_rrf_does_not_get_it_past_the_gate() -> None:
     assert not passes_relevance_gate(hit, max_distance=0.65)
 
 
-def test_a_hit_only_bm25_found_never_passes_the_gate() -> None:
+def test_a_hit_only_bm25_found_does_not_pass_the_gate_on_distance() -> None:
     assert not passes_relevance_gate(_hybrid(0.5, lexical=9.0), max_distance=10.0)
 
 
-def test_coverage_filters_hybrid_hits_on_vector_distance() -> None:
-    hits = [_hybrid(0.6, None, 0.9, id="near"), _hybrid(1.0, 5.0, 0.5, id="far")]
+@pytest.mark.parametrize(
+    "name, entity",
+    [
+        ("rental_rate", "rental_rate"),
+        ("rental_rate", "Rental Rate"),
+        ("rental_rate", "rental-rate"),
+        ("MediaTypeId", "media type id"),
+        ("MediaTypeId", "media_type_id"),
+        ("rentalRate", "RENTAL_RATE"),
+    ],
+)
+def test_names_ignore_case_separators_and_camel_case(name: str, entity: str) -> None:
+    assert names_entity({"name": name}, entity)
 
-    assert [h["id"] for h in _filter_by_distance(hits, max_distance=0.65)] == ["near"]
+
+@pytest.mark.parametrize(
+    "name, entity",
+    [("rental_rate", "rental"), ("rental_rate", "rental rates"), ("", "x")],
+)
+def test_a_partial_name_is_not_the_entity(name: str, entity: str) -> None:
+    assert not names_entity({"name": name}, entity)
+
+
+def test_names_read_the_entities_the_hit_was_retrieved_for() -> None:
+    assert names_entity({"name": "rental_rate", "query_entity": "rental rate"})
+    assert names_entity(
+        {"name": "rental_rate", "query_entities": ["film budget", "rental rate"]}
+    )
+    assert not names_entity({"name": "rental_rate", "query_entity": "film budget"})
+
+
+def test_a_hybrid_hit_that_names_the_entity_passes_the_gate_at_any_distance() -> None:
+    far = _hybrid(0.9, lexical=8.0, semantic=0.5, name="rental_rate")
+    bm25_only = _hybrid(0.5, lexical=8.0, name="rental_rate")
+
+    for hit in (far, bm25_only):
+        assert passes_relevance_gate({**hit, "query_entity": "rental rate"}, 0.65)
+        assert not passes_relevance_gate({**hit, "query_entity": "film fee"}, 0.65)
+
+
+def test_a_cosine_hit_gets_no_exact_name_exception() -> None:
+    hit = _cosine(0.9, name="rental_rate", query_entity="rental_rate")
+
+    assert not passes_relevance_gate(hit, 0.65)
+
+
+def test_coverage_filters_hybrid_hits_on_vector_distance_or_name() -> None:
+    hits = [
+        _hybrid(0.6, None, 0.9, id="near"),
+        _hybrid(1.0, 5.0, 0.5, id="far"),
+        _hybrid(
+            1.0, 5.0, 0.5, id="named", name="rental_rate", query_entity="rental rate"
+        ),
+    ]
+
+    assert [h["id"] for h in _filter_by_distance(hits, max_distance=0.65)] == [
+        "near",
+        "named",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +208,23 @@ def test_hybrid_hits_neither_search_can_separate_are_a_tie() -> None:
     assert ambiguous_pair(hit, dict(hit), max_gap=0.0)
 
 
+def test_a_hybrid_hit_that_alone_names_the_entity_decides_the_pair() -> None:
+    # The searches disagree (vector prefers *other*), but *named* is the entity.
+    named = _hybrid(0.99, lexical=5.0, semantic=0.7, name="rental_rate")
+    other = _hybrid(0.98, lexical=4.0, semantic=0.9, name="replacement_cost")
+
+    assert not ambiguous_pair(named, other, max_gap=1.0, entity="rental rate")
+    assert ambiguous_pair(other, named, max_gap=1.0, entity="rental rate")
+
+
+def test_hybrid_hits_that_both_name_the_entity_fall_back_to_the_searches() -> None:
+    # The same column name in two tables.
+    a = _hybrid(0.99, lexical=5.0, semantic=0.8, name="last_update")
+    b = _hybrid(0.98, lexical=4.0, semantic=0.9, name="last_update")
+
+    assert ambiguous_pair(a, b, max_gap=1.0, entity="last_update")
+
+
 # ---------------------------------------------------------------------------
 # The clarification flow's ambiguity check
 # ---------------------------------------------------------------------------
@@ -180,6 +254,10 @@ def test_ambiguity_check_reads_branch_agreement_for_hybrid_hits() -> None:
         # Second hit too far by vector distance: not a contender.
         _hybrid(0.99, lexical=5.0, semantic=0.80, query_entity="lone"),
         _hybrid(0.98, lexical=4.0, semantic=0.55, query_entity="lone"),
+        # Searches disagree on the top two, but the best is the entity by
+        # name: not a tie.
+        _hybrid(0.99, 5.0, 0.85, query_entity="rental_rate", name="rental_rate"),
+        _hybrid(0.98, 4.0, 0.90, query_entity="rental_rate", name="amount"),
     ]
 
     assert _ambiguity_check({"retrieved_column_attributes": hits}) == {"tie"}
