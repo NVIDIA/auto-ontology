@@ -13,8 +13,6 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
 )
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
-    TableRelevanceModel,
-    TableRemovalModel,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
@@ -123,10 +121,9 @@ def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk()
 
 
 @pytest.mark.parametrize("source", ["custom_analysis", "sql_attribute"])
-def test_linked_tables_are_backfilled_before_relevance_filter(
+def test_linked_tables_are_backfilled_before_sql_generation(
     monkeypatch, source: str
 ) -> None:
-    captured_tables: list[dict] = []
     linked_table = {
         "id": "linked",
         "name": "orders",
@@ -156,20 +153,6 @@ def test_linked_tables_are_backfilled_before_relevance_filter(
         lambda self, retriever, question, entities, target_db: [],
     )
 
-    def capture_filter(
-        self,
-        state,
-        question,
-        tables,
-        custom_analyses=None,
-        attribute_join_paths=None,
-    ):
-        captured_tables.extend(tables)
-        return tables, ""
-
-    monkeypatch.setattr(
-        CandidatePreparationAgent, "_filter_tables_by_relevance", capture_filter
-    )
     monkeypatch.setattr(
         candidates_preparation,
         "fetch_custom_analyses_with_sql",
@@ -229,9 +212,9 @@ def test_linked_tables_are_backfilled_before_relevance_filter(
         },
     )
 
-    CandidatePreparationAgent().execute(state)
+    tables = CandidatePreparationAgent().execute(state)["path_state"]["relevant_tables"]
 
-    assert captured_tables[0]["columns"][0]["semantic_fk"] == "public.customers.id"
+    assert tables[0]["columns"][0]["semantic_fk"] == "public.customers.id"
 
 
 def test_retrieve_additional_tables_searches_question_and_entities(
@@ -323,14 +306,6 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     )
     monkeypatch.setattr(CandidatePreparationAgent, "_identify_anchor", fake_anchor)
     monkeypatch.setattr(
-        CandidatePreparationAgent,
-        "_filter_tables_by_relevance",
-        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
-            tables,
-            "",
-        ),
-    )
-    monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
     )
     monkeypatch.setattr(
@@ -413,14 +388,6 @@ def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> 
         lambda self, retriever, question, entities, target_db: [],
     )
     monkeypatch.setattr(
-        CandidatePreparationAgent,
-        "_filter_tables_by_relevance",
-        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
-            tables,
-            "",
-        ),
-    )
-    monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
     )
     monkeypatch.setattr(
@@ -500,14 +467,6 @@ def test_every_direct_join_between_final_tables_is_added_once(monkeypatch) -> No
         lambda self, retriever, question, entities, target_db: [],
     )
     monkeypatch.setattr(
-        CandidatePreparationAgent,
-        "_filter_tables_by_relevance",
-        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
-            tables,
-            "",
-        ),
-    )
-    monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
     )
     monkeypatch.setattr(
@@ -573,14 +532,6 @@ def test_anchors_naming_a_column_in_scope_are_dropped(monkeypatch) -> None:
         lambda self, retriever, question, entities, target_db: [],
     )
     monkeypatch.setattr(
-        CandidatePreparationAgent,
-        "_filter_tables_by_relevance",
-        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
-            tables,
-            "",
-        ),
-    )
-    monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
     )
     monkeypatch.setattr(
@@ -617,7 +568,7 @@ def test_anchors_naming_a_column_in_scope_are_dropped(monkeypatch) -> None:
     assert CandidatePreparationAgent().execute(state)["value_anchors"] == [region]
 
 
-def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
+def test_the_table_an_anchor_points_at_reaches_sql_generation(
     monkeypatch,
 ) -> None:
     """q758's shape: the anchor found 'Human' in a table retrieval never saw."""
@@ -642,28 +593,12 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
         "col": "race",
         "stored_value": "Human",
     }
-    judged: list[list[str]] = []
-
     monkeypatch.setattr(
         CandidatePreparationAgent,
         "_retrieve_additional_tables",
         lambda self, retriever, question, entities, target_db: [],
     )
 
-    def record_and_keep(
-        self,
-        state,
-        question,
-        tables,
-        custom_analyses=None,
-        attribute_join_paths=None,
-    ):
-        judged.append([table["name"] for table in tables])
-        return tables, ""
-
-    monkeypatch.setattr(
-        CandidatePreparationAgent, "_filter_tables_by_relevance", record_and_keep
-    )
     monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
     )
@@ -711,101 +646,11 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
 
     result = CandidatePreparationAgent().execute(state)
 
-    assert judged == [["superhero", "race"]]
     assert bridge_calls == [["superhero", "race"]]
-    assert "race" in [t["name"] for t in result["path_state"]["relevant_tables"]]
+    assert [t["name"] for t in result["path_state"]["relevant_tables"]] == [
+        "superhero",
+        "race",
+    ]
     # The anchor still names data, so §6 keeps it: the table arriving in scope
     # is not what the schema-naming check looks at.
     assert result["value_anchors"] == [human]
-
-
-# --------------------------------------------------------------------------
-# Relevance filter: a removal is applied only when both checks hold
-# --------------------------------------------------------------------------
-
-
-def _table(name: str) -> dict:
-    return {
-        "id": name,
-        "name": name,
-        "schema_name": "main",
-        "database_name": "db",
-        "description": f"the {name} table",
-    }
-
-
-def _removal(
-    table: str,
-    *,
-    no_column: bool = True,
-    cannot_change_rows: bool = True,
-) -> TableRemovalModel:
-    return TableRemovalModel(
-        table=table,
-        supplies_no_needed_column=no_column,
-        cannot_change_qualifying_rows=cannot_change_rows,
-        justification="checked both",
-    )
-
-
-def _stub_filter_llm(monkeypatch, result: TableRelevanceModel) -> None:
-    monkeypatch.setattr(
-        candidates_preparation,
-        "invoke_with_structured_output",
-        lambda llm, messages, model: result,
-    )
-
-
-def _run_filter(tables: list[dict]) -> list[dict]:
-    kept, _ = CandidatePreparationAgent()._filter_tables_by_relevance(
-        cast(AgentState, {"llm": object(), "domain_rules": []}), "q", tables
-    )
-    return kept
-
-
-def test_removal_is_applied_when_both_checks_hold(monkeypatch) -> None:
-    _stub_filter_llm(
-        monkeypatch,
-        TableRelevanceModel(
-            reasoning="drop b", tables_to_remove=[_removal("db.main.b")]
-        ),
-    )
-
-    kept = _run_filter([_table(n) for n in ("a", "b", "c")])
-
-    assert [t["name"] for t in kept] == ["a", "c"]
-
-
-def test_removal_is_declined_when_the_table_may_restrict_rows(monkeypatch) -> None:
-    """The 70% case: no column of it is projected, but it scopes the row set."""
-    _stub_filter_llm(
-        monkeypatch,
-        TableRelevanceModel(
-            reasoning="frpm supplies no output column",
-            tables_to_remove=[
-                _removal("db.main.frpm", no_column=True, cannot_change_rows=False)
-            ],
-        ),
-    )
-
-    kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
-
-    assert "frpm" in [t["name"] for t in kept]
-
-
-def test_removal_is_declined_when_the_table_supplies_a_needed_column(
-    monkeypatch,
-) -> None:
-    _stub_filter_llm(
-        monkeypatch,
-        TableRelevanceModel(
-            reasoning="only used for scoping",
-            tables_to_remove=[
-                _removal("db.main.frpm", no_column=False, cannot_change_rows=True)
-            ],
-        ),
-    )
-
-    kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
-
-    assert "frpm" in [t["name"] for t in kept]

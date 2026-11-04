@@ -30,9 +30,8 @@ The same comparison read the other way finds tables. An anchor names the
 table its value was matched in, and a table outside the scope retrieval built
 cannot be referenced at all — so an anchor can report where a filter value
 lives while the table holding it stays unreachable, which is a question lost
-for want of a table already identified. Those tables belong in the candidate
-pool the relevance filter judges, not in the answer: most of them are not
-wanted, and the filter is what separates them.
+for want of a table already identified. Those tables are added to the
+candidate pool, so SQL generation can reach them.
 """
 
 from __future__ import annotations

@@ -19,7 +19,6 @@ Design Decisions:
 - Runs before SQL generation to separate data fetching from SQL construction logic
 - Stores fetched data in path_state for reusability across multiple SQL agents
 - Handles embeddings and conversation history lookup
-- LLM relevance filter removes noise tables before SQL construction
 - Extra table retrieve runs in parallel with the anchor-column LLM
 """
 
@@ -59,17 +58,14 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import qualify_table
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
-    TableRelevanceModel,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
     CUSTOM_ANALYSIS_RELEVANCE_FILTER_PROMPT,
     SQL_GEN_MAX_ENTITIES,
-    TABLE_RELEVANCE_FILTER_PROMPT,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
-    rules_to_text,
 )
 from auto_ontology.retrieval.text_to_sql.value_anchors import (
     anchor_tables_missing_from_scope,
@@ -86,8 +82,8 @@ def _qualified_name(t: dict) -> str:
     dedup and silently merge into one.
 
     Deliberately dialect-blind, unlike the prompt formatters: these names are
-    identity keys that get matched back against what the relevance filter
-    returns, never interpolated into SQL, so only self-consistency matters.
+    identity keys for deduplication and logging, never interpolated into SQL,
+    so only self-consistency matters.
     """
     return qualify_table(
         t.get("database_name", ""),
@@ -95,20 +91,6 @@ def _qualified_name(t: dict) -> str:
         t.get("name", ""),
     )
 
-
-# The relevance filter sees each table's columns, with sample values for
-# JSONB columns specifically, since their key names alone (e.g. "Res_Scr")
-# can decoy-match unrelated tables. Flat columns get their description when
-# one is present. JSONB sample values are already stored on the Column row
-# and reach here via fetch_tables_by_ids's nested `columns`, so this adds no
-# extra DB round trip, only extra prompt tokens.
-#
-# Truncation is silent and costs the answer when the cut column is the one
-# that justified the table: on BIRD dev, 5 wrong drops all named a column
-# past position 25 in a 44-column table. Env-overridable because the right
-# value is schema-dependent — it has to exceed the widest table the filter
-# must reason about, not the median one.
-_RELEVANCE_FILTER_MAX_COLS = int(os.environ.get("RELEVANCE_FILTER_MAX_COLS", "25"))
 
 # Off by default. find_anchor_hub_siblings() pulls in tables that share a
 # hub with the anchor's own table via FK — see its docstring for why. Opt-in
@@ -118,16 +100,6 @@ _RELEVANCE_FILTER_MAX_COLS = int(os.environ.get("RELEVANCE_FILTER_MAX_COLS", "25
 _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
     "HUB_SIBLING_EXPANSION_ENABLED", "false"
 ).strip().lower() in ("1", "true", "yes")
-
-# Pools this size or smaller skip the relevance filter. Default 2 is the
-# long-standing behaviour. The filter drops a uniquely-needed table at a
-# near-constant rate whatever the pool size (BIRD dev: 2.0% at 2-4 candidates,
-# 2.5% at 5-7, 2.2% at 8+), so raising this buys recoveries and perturbations
-# in roughly equal measure — 4 was the only value measured to recover more
-# than it risks, and every larger bypass lands at the same break-even.
-_RELEVANCE_FILTER_BYPASS_MAX_TABLES = int(
-    os.environ.get("RELEVANCE_FILTER_BYPASS_MAX_TABLES", "2")
-)
 
 # How many siblings per hub survive the cap — see _rank_and_cap_hub_siblings.
 # Raised from 5 (find_anchor_hub_siblings' old built-in default) to 6 after
@@ -146,37 +118,6 @@ _HUB_SIBLING_RANK_K = 30
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
 #: wide candidate set cannot starve the rest of the request.
 _JOIN_PATH_WORKERS = 4
-
-
-def _format_relevance_filter_column(c: dict) -> str:
-    name = c.get("name", "")
-    ctype = c.get("data_type") or "unknown"
-    desc = c.get("description")
-    sv = c.get("sample_values")
-    extra = ""
-    # sample_values is already normalized to list[str] | None by
-    # fetch_tables_by_ids (via parse_sample_values) — no JSON decoding here.
-    if sv and "json" in str(ctype).lower():
-        extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
-    if desc:
-        extra = (extra + f" | {desc}") if extra else f" | {desc}"
-    return f"    - {name} ({ctype}){extra}"
-
-
-def _build_relevance_tables_summary(tables: list[dict]) -> str:
-    lines = []
-    for t in tables:
-        lines.append(
-            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
-        )
-        cols = t.get("columns") or []
-        if cols:
-            lines.append("  Columns:")
-            lines.extend(
-                _format_relevance_filter_column(c)
-                for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
-            )
-    return "\n".join(lines)
 
 
 def _hop_key(hop: dict) -> frozenset[tuple[str, ...]]:
@@ -270,7 +211,7 @@ class CandidatePreparationAgent(BaseAgent):
     - path_state["candidates"]: Flat list of candidate dicts (same as retrieved, enriched)
     - path_state["relevant_tables"]: Deduplicated list of relevant table dicts
         (same per-table dict shape as ``get_relevant_tables``), including the
-        tables value anchors point at, which the relevance filter then judges
+        tables value anchors point at
     - path_state["relevant_queries"]: Relevant queries for context
     - path_state["similar_questions"]: Similar questions from history
     - path_state["custom_analyses"]: Filtered complex candidates
@@ -445,13 +386,9 @@ class CandidatePreparationAgent(BaseAgent):
                     # Looser, discovery-only signal: find_join_path above cannot
                     # reach a sibling table that shares a hub with the anchor
                     # (forward-only, by design — see its docstring). Surface
-                    # those siblings (and the hub itself) separately so the
-                    # relevance filter doesn't drop a structurally-connected
-                    # table it has no other way to recognize. Scoped to the
-                    # anchor's own outgoing FKs only. These are also force-kept
-                    # in relevant_tables below (§5b-§5c) rather than merely shown to
-                    # the relevance filter, since it's unreliable at preserving
-                    # structurally-connected tables even when given this info.
+                    # those siblings (and the hub itself) separately and
+                    # force-keep them in relevant_tables below (§5b-§5c).
+                    # Scoped to the anchor's own outgoing FKs only.
                     anchor_table_id = anchor_ctx.get("table_id")
                     if anchor_table_id and _HUB_SIBLING_EXPANSION_ENABLED:
                         # Uncapped here (max_siblings=None) — capping now happens
@@ -599,9 +536,7 @@ class CandidatePreparationAgent(BaseAgent):
         # --- 4d. Add the tables value anchors point at ---
         # An anchor reports the table its value was matched in, and retrieval
         # reaches that table by its own route or not at all — §6 below can only
-        # discard anchors, never act on one. Added here rather than beside §5c's
-        # force-include so the relevance filter sees them as candidates: most
-        # anchor tables are not wanted, and deciding that is the filter's job.
+        # discard anchors, never act on one.
         incoming_anchors = list(state.get("value_anchors") or [])
         anchor_table_ids = [
             table_id
@@ -626,9 +561,8 @@ class CandidatePreparationAgent(BaseAgent):
         # Term rows are global (no database_name), so a Term shared across two
         # databases (e.g. the same domain ingested as both a full DB and a
         # "_template" variant) can pull wrong-DB tables into relevant_tables via
-        # the subject-Term/candidate expansion above. Drop them before the
-        # relevance filter and bridge reconciliation ever see them, rather than
-        # relying on those steps to notice a table that doesn't belong.
+        # the subject-Term/candidate expansion above. Drop them before bridge
+        # reconciliation ever sees them.
         if target_db:
             relevant_tables = [
                 table
@@ -640,7 +574,7 @@ class CandidatePreparationAgent(BaseAgent):
         # Tables retrieved from the vector index, custom analyses, or SQL
         # attributes may carry only name/data_type/description. Fetch rich rows
         # whenever samples, nullability, or semantic-FK targets are incomplete,
-        # then merge per-column before the relevance filter reads the summaries.
+        # then merge per-column before SQL generation reads them.
         metadata_incomplete_ids = [
             str(table["id"])
             for table in relevant_tables
@@ -655,35 +589,12 @@ class CandidatePreparationAgent(BaseAgent):
                 len(metadata_incomplete_ids),
             )
 
-        # Snapshot the candidate pool BEFORE the relevance filter runs. §5c's
-        # bridge reconciliation must only ever restore a table that was
-        # already a candidate here (and that the filter had a chance to see)
-        # — never surface a table the filter was never shown, which would be
-        # discovering new information rather than enforcing the filter's own
-        # "don't remove a needed bridge" rule.
-        pre_filter_candidate_ids = {t["id"] for t in relevant_tables if t.get("id")}
-
-        # --- 5. Filter tables by relevance ---
-        relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
-            state,
-            question,
-            relevant_tables,
-            custom_analyses,
-            attribute_join_paths,
-        )
-        self.logger.debug(
-            "Kept %d relevant tables (after relevance filter): %s",
-            len(relevant_tables),
-            [_qualified_name(t) for t in relevant_tables],
-        )
-        if table_relevance_reasoning:
-            record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
+        candidate_ids = {t["id"] for t in relevant_tables if t.get("id")}
 
         # --- 5b. One-hop junction-table expansion ---
-        # Junction tables are join structure, not relevance candidates: once
-        # the filter has chosen a table, include every catalog-classified
-        # junction whose FK columns point into it. This intentionally discovers
-        # tables that were not in the pre-filter candidate pool.
+        # Junction tables are join structure, not retrieval candidates: include
+        # every catalog-classified junction whose FK columns point into a
+        # candidate. This intentionally discovers tables outside the pool.
         kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
         connected_junctions, connected_junction_paths = find_connected_junction_tables(
             kept_ids
@@ -704,21 +615,14 @@ class CandidatePreparationAgent(BaseAgent):
                 len(connected_junction_paths),
             )
 
-        # --- 5c. Deterministic bridge-table reconciliation ---
-        # The relevance filter is unreliable at preserving join-chain bridge
-        # tables even when its prompt shows it the exact connection, so force
-        # these back in by code instead of relying on it. Two sources:
-        #   (a) the anchor's hub + capped siblings, already computed above
-        #       and collected into forced_table_ids;
-        #   (b) any bridge table needed to connect pairs of tables the
-        #       filter itself decided to KEEP — this only ever restores
-        #       connectivity between tables the filter already judged
-        #       relevant, it never second-guesses which tables matter, and
-        #       (via pre_filter_candidate_ids) never introduces a table the
-        #       filter was never shown in the first place.
+        # --- 5c. Bridge tables between candidates ---
+        # Two sources of forced tables: the anchor's hub + capped siblings,
+        # already collected into forced_table_ids, and any candidate bridge
+        # table connecting two other candidates, whose FK chain is surfaced
+        # below so SQL generation can join through it.
         kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
         bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
-            kept_ids, pre_filter_candidate_ids
+            kept_ids, candidate_ids
         )
         if bridge_tables:
             forced_table_ids.update(t["id"] for t in bridge_tables)
@@ -749,8 +653,7 @@ class CandidatePreparationAgent(BaseAgent):
             forced_tables = fetch_tables_by_ids(list(forced_table_ids))
             relevant_tables = _merge_tables(relevant_tables, forced_tables)
             self.logger.info(
-                "Force-included %d table(s) after relevance filter (deterministic "
-                "reconciliation, not the LLM's choice): %s",
+                "Force-included %d table(s) by deterministic reconciliation: %s",
                 len(forced_tables),
                 [t["name"] for t in forced_tables],
             )
@@ -806,7 +709,6 @@ class CandidatePreparationAgent(BaseAgent):
                 "custom_analyses_str": custom_analyses_str,
                 "sql_attributes": sql_attributes,
                 "sql_attributes_str": sql_attributes_str,
-                "table_relevance_reasoning": table_relevance_reasoning,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
                 "term_synonyms": term_synonyms,
@@ -1042,210 +944,6 @@ class CandidatePreparationAgent(BaseAgent):
             return analyses
 
         return filtered
-
-    def _filter_tables_by_relevance(
-        self,
-        state: AgentState,
-        question: str,
-        tables: list[dict],
-        custom_analyses: list[dict] | None = None,
-        attribute_join_paths: list[dict] | None = None,
-    ) -> tuple[list[dict], str]:
-        """Use the LLM to decide which candidate tables are actually needed."""
-        if len(tables) <= _RELEVANCE_FILTER_BYPASS_MAX_TABLES:
-            self.logger.info(
-                "Relevance filter bypassed: %d candidate table(s) <= bypass max %d",
-                len(tables),
-                _RELEVANCE_FILTER_BYPASS_MAX_TABLES,
-            )
-            return tables, ""
-
-        try:
-            llm = state["llm"]
-        except KeyError:
-            self.logger.warning("No LLM in state — skipping relevance filter")
-            return tables, ""
-
-        tables_summary = _build_relevance_tables_summary(tables)
-
-        domain_rules_text = rules_to_text(state.get("domain_rules", []))
-        domain_rules_section = ""
-        if domain_rules_text:
-            domain_rules_section = (
-                "Domain-specific rules (use these to decide relevance):\n"
-                f"{domain_rules_text}\n"
-            )
-
-        ca_section = ""
-        if custom_analyses:
-            ca_lines = []
-            for a in custom_analyses:
-                line = f"- {a.get('name', '(unnamed)')}"
-                desc = (a.get("description") or "").strip()
-                if desc:
-                    line += f": {desc}"
-                sql = (a.get("sql") or "").strip()
-                if sql:
-                    line += f"  SQL: {sql}"
-                ca_lines.append(line)
-            ca_section = (
-                "Selected custom analyses (their SQL references tables that MUST be kept):\n"
-                + "\n".join(ca_lines)
-                + "\n\n"
-            )
-
-        join_paths_section = ""
-        chains: set[str] = set()
-        if attribute_join_paths:
-            for entry in attribute_join_paths:
-                for hop in entry.get("path") or []:
-                    src = hop.get("source_table")
-                    tgt = hop.get("target_table")
-                    if src and tgt and src != tgt:
-                        chains.add(f"{src} <-> {tgt}")
-            if chains:
-                join_paths_section = (
-                    "Known join paths between candidate tables:\n"
-                    + "\n".join(sorted(chains))
-                    + "\n\n"
-                )
-            self.logger.debug(
-                "Relevance filter join_paths_section: %s",
-                sorted(chains) if chains else "(no cross-table chains found)",
-            )
-
-        # Optional and not specific to any one caller — only present when an
-        # upstream flow (e.g. interactive clarification) populated
-        # state["enriched_question"]. Deliberately NOT the full
-        # state["evidence"] blob: that also carries sort/scalar/output-shape
-        # hints and a raw Phase 1 SQL reference, which are noise for a
-        # table-relevance decision. Guard sentence lives inside this block
-        # (not a standalone Rules bullet) so the prompt is byte-identical to
-        # before when no enriched question is present.
-        enriched_question_text = (state.get("enriched_question") or "").strip()
-        enriched_question_section = ""
-        if enriched_question_text:
-            enriched_question_section = (
-                "The expanded question below is the same question with all formulas, "
-                "thresholds, and terms resolved. Use it for context when deciding "
-                "which tables are relevant.\n"
-                "Expanded question:\n"
-                f"{enriched_question_text}\n\n"
-            )
-
-        prompt_text = TABLE_RELEVANCE_FILTER_PROMPT.format(
-            question=question,
-            tables_summary=tables_summary,
-            domain_rules=domain_rules_section,
-            custom_analyses=ca_section,
-            join_paths=join_paths_section,
-            enriched_question=enriched_question_section,
-        )
-
-        messages = [
-            SystemMessage(
-                content="You are a database schema expert that filters candidate tables."
-            ),
-            HumanMessage(content=prompt_text),
-        ]
-
-        try:
-            result = invoke_with_structured_output(llm, messages, TableRelevanceModel)
-        except Exception as e:
-            top_n = tables[:10]
-            self.logger.warning(
-                "Table relevance LLM call failed: %s — falling back to top %d/%d tables",
-                e,
-                len(top_n),
-                len(tables),
-            )
-            return top_n, ""
-
-        if result is None:
-            top_n = tables[:10]
-            self.logger.warning(
-                "Table relevance filter returned None (LLM parsing failed). "
-                "Falling back to top %d/%d tables by retrieval order. "
-                "Check ERROR logs above for parsing/validation details.",
-                len(top_n),
-                len(tables),
-            )
-            return top_n, ""
-
-        reasoning = (result.reasoning or "").strip()
-
-        # A removal needs both checks to hold, and the model answers them per
-        # table (see TableRemovalModel). Enforcing them here rather than
-        # trusting the prose is the point of asking: the failure mode being
-        # targeted is a model that is confident, not uncertain, so it will
-        # state a clean column-provenance case for a table the query needs to
-        # restrict rows. Declining such a removal costs one extra table in the
-        # prompt; honouring it costs the answer.
-        names_to_remove: set[str] = set()
-        unjustified: list[str] = []
-        for removal in result.tables_to_remove:
-            name = (removal.table or "").strip()
-            if not name:
-                continue
-            if removal.supplies_no_needed_column and (
-                removal.cannot_change_qualifying_rows
-            ):
-                names_to_remove.add(name.lower())
-            else:
-                unjustified.append(
-                    f"{name} (no_needed_column="
-                    f"{removal.supplies_no_needed_column}, "
-                    f"cannot_change_rows={removal.cannot_change_qualifying_rows}: "
-                    f"{(removal.justification or '').strip()})"
-                )
-        if unjustified:
-            self.logger.info(
-                "Relevance filter proposed %d removal(s) it could not justify on "
-                "both checks — keeping them: %s",
-                len(unjustified),
-                unjustified,
-            )
-
-        filtered = [
-            t for t in tables if _qualified_name(t).lower() not in names_to_remove
-        ]
-        removed = [
-            _qualified_name(t)
-            for t in tables
-            if _qualified_name(t).lower() in names_to_remove
-        ]
-
-        self.logger.info(
-            "Relevance filter reasoning: %s", reasoning if reasoning else "(empty)"
-        )
-        if removed:
-            self.logger.info("Relevance filter removed tables: %s", removed)
-
-        # Cross-reference the join-chain facts we showed the LLM (computed in
-        # full before the call, above) against what it actually kept — lets
-        # us measure whether the prompt wording is doing anything, rather
-        # than assume it from a handful of manually-inspected runs.
-        if chains:
-            kept_names = {(t.get("name") or "").lower() for t in filtered}
-            preserved, broken = [], []
-            for chain in sorted(chains):
-                a, b = (part.strip().lower() for part in chain.split("<->"))
-                (preserved if a in kept_names and b in kept_names else broken).append(
-                    chain
-                )
-            self.logger.debug(
-                "Relevance filter join-chain outcome — preserved: %s | broken "
-                "(a table on this chain was removed, before §5c reconciliation "
-                "restores it): %s",
-                preserved if preserved else "(none)",
-                broken if broken else "(none)",
-            )
-
-        if not filtered:
-            self.logger.warning("Relevance filter removed ALL tables — keeping all")
-            return tables, reasoning
-
-        return filtered, reasoning
 
     def _identify_anchor(
         self,

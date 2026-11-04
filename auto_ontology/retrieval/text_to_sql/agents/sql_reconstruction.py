@@ -208,8 +208,8 @@ def _format_known_columns_for_classification(
     context feeds a root-cause judgment call: is the data missing, or is the
     SQL just wrong? The anchor/join-path resolution that produces this data
     is itself a best-effort LLM+graph process that has been wrong before
-    (see candidates_preparation.py's anchor-selection fallback path and its
-    "relevance filter has repeatedly proven unreliable" note) — so this must
+    (see candidates_preparation.py's anchor-selection fallback path) — so
+    this must
     NOT be framed as ground truth, or the classifier could be biased toward
     "fixable" even when the resolution itself picked the wrong table/column
     and a real missing_data rediscovery is needed.

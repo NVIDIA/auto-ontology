@@ -1380,9 +1380,9 @@ def find_anchor_hub_siblings(
     This is a discovery/relevance signal, not a verified join path — it
     does NOT claim the anchor and sibling should be joined directly (they
     usually should each join the shared hub instead). Callers must not feed
-    this into SQL-generation join instructions; it exists only to stop the
-    relevance filter from dropping a structurally-connected table it has no
-    other way to recognize.
+    this into SQL-generation join instructions; it exists only to bring a
+    structurally-connected table into scope that retrieval has no other way
+    to recognize.
 
     Returns ``(results, truncated_count)``. Each result dict has
     ``{source_table, target_table, id, hub_table, is_hub}`` — the first two
@@ -1511,12 +1511,11 @@ def find_table_bridge(
     anchor isn't guaranteed reachable as the destination, or vice versa.
 
     IMPORTANT: an unrestricted traversal can find a real but coincidental
-    path through a table that was never presented to (or judged by) the
-    relevance filter at all — e.g. two tables that both happen to FK into an
-    unrelated "preferences" table for reasons having nothing to do with the
-    actual question. That's not "the filter missed a bridge it should have
-    kept", it's introducing information the filter never had a chance to
-    accept or reject. So when *allowed_table_ids* is given, a found path is
+    path through a table that was never a candidate at all — e.g. two tables
+    that both happen to FK into an unrelated "preferences" table for reasons
+    having nothing to do with the actual question. That is introducing a
+    table retrieval never surfaced, not restoring a needed bridge. So when
+    *allowed_table_ids* is given, a found path is
     only returned if every intermediate table on it is a member of that set
     (typically: the tables that were candidates *before* the relevance
     filter ran) — this keeps the function to "restore a bridge the filter
@@ -1612,16 +1611,13 @@ def find_kept_table_bridges(
     """Find bridge tables AND their join hops needed to connect pairs of
     already-kept tables.
 
-    Runs *after* the relevance filter has already narrowed candidates down
-    — kept sets are consistently small in practice (2-4 tables), so
-    checking every pair is cheap by construction. Stops early once
-    *max_bridge_tables* distinct bridge tables have been found regardless,
-    as a hard safety cap for the rare case a kept set is larger than usual.
+    Checks every pair of kept tables. Stops early once *max_bridge_tables*
+    distinct bridge tables have been found, as a hard safety cap for a large
+    kept set.
 
     *allowed_table_ids*, if given, is passed through to
     :func:`find_table_bridge` to restrict results to tables that were
-    already candidates before the relevance filter ran — see its docstring
-    for why this matters.
+    already candidates — see its docstring for why this matters.
 
     If the LLM already kept a genuine bridge table C alongside A and B, the
     A-C and C-B pairs would otherwise "rediscover" C as if it were new,

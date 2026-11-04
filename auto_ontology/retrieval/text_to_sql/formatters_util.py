@@ -273,8 +273,8 @@ def format_important_columns_for_prompt(
             ),
             None,
         )
-        # The relevance filter may have removed an attribute's table after join
-        # paths were built. Do not reintroduce a column from a table absent from
+        # An attribute's table may not be among the tables in scope. Do not
+        # introduce a column from a table absent from
         # AVAILABLE TABLES, where the model is explicitly forbidden to use it.
         if matching_table is None:
             continue
