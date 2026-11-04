@@ -144,3 +144,34 @@ def test_nullability_is_a_real_boolean(pagila) -> None:
     # The real assertion: a mix, not a column of all-True. The bug's signature
     # was every column agreeing.
     assert 0 < int(columns.is_nullable.sum()) < len(columns)
+
+
+def test_foreign_key_into_another_schema_is_reported(pagila) -> None:
+    """``analytics.film_performance.film_id`` references ``public.film``.
+
+    ``constraint_column_usage.table_schema`` is the *referenced* table's schema,
+    so joining it to the constraint's own schema dropped every foreign key that
+    crosses a schema boundary, and with it the join path between the schemas.
+    """
+    fks = pagila.get_fks()
+    film_performance = fks[
+        (fks.table_schema == "analytics") & (fks.table_name == "film_performance")
+    ]
+    assert film_performance[
+        ["column_name", "referenced_schema", "referenced_table", "referenced_column"]
+    ].values.tolist() == [["film_id", "public", "film", "film_id"]]
+
+
+def test_cross_and_same_schema_foreign_keys_on_one_table(pagila) -> None:
+    """``analytics.category_rollup`` has one of each: ``category_id`` into
+    ``public.category`` and the ``parent_rollup_id`` self-reference."""
+    fks = pagila.get_fks()
+    rollup = fks[
+        (fks.table_schema == "analytics") & (fks.table_name == "category_rollup")
+    ]
+    assert rollup[
+        ["column_name", "referenced_schema", "referenced_table"]
+    ].values.tolist() == [
+        ["category_id", "public", "category"],
+        ["parent_rollup_id", "analytics", "category_rollup"],
+    ]
