@@ -7,8 +7,8 @@
 Every limit here bounds an episode, which is what makes the agent both safe to
 serve and usable as an RL environment: a policy that can spend unbounded turns
 or unbounded context has no reward signal worth learning from. All are
-environment-driven, and the agent itself is off unless ``TEXT_TO_SQL_REACT``
-turns it on.
+environment-driven, and the agent itself is on unless ``TEXT_TO_SQL_REACT`` is
+set to something other than a true value.
 """
 
 from __future__ import annotations
@@ -28,10 +28,11 @@ def _int_env(name: str, default: int) -> int:
 def is_react_enabled() -> bool:
     """Whether the graph routes every question through the ReAct agent.
 
-    Off by default, so an unconfigured deployment keeps the fixed pipeline and
-    the two can be compared on the same questions by flipping one variable.
+    On when ``TEXT_TO_SQL_REACT`` is unset. Any value other than 1/true/yes/on,
+    including an empty one, falls back to the fixed pipeline, so the two can be
+    compared on the same questions by flipping one variable.
     """
-    return os.environ.get("TEXT_TO_SQL_REACT", "").strip().lower() in _TRUTHY
+    return os.environ.get("TEXT_TO_SQL_REACT", "true").strip().lower() in _TRUTHY
 
 
 def max_tool_calls() -> int:

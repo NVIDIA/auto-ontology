@@ -90,6 +90,12 @@ def test_flag_routes_fresh_questions_to_the_agent(
 
 
 def test_flag_off_keeps_the_fixed_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TEXT_TO_SQL_REACT", raising=False)
+    monkeypatch.setenv("TEXT_TO_SQL_REACT", "false")
 
     assert "react_sql_agent" not in text_to_sql_graph.create_graph().nodes
+
+
+def test_agent_is_on_when_flag_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TEXT_TO_SQL_REACT", raising=False)
+
+    assert "react_sql_agent" in text_to_sql_graph.create_graph().nodes
