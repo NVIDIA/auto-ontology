@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Integration request
+description: Integrate a platform, application, or storage provider with Auto-Ontology.
+title: "[Integration]: "
+labels: ["integration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you want to connect. Do not include credentials, internal
+        hostnames, or customer data. Report security issues through
+        [SECURITY.md](https://github.com/NVIDIA/auto-ontology/blob/main/SECURITY.md).
+  - type: input
+    id: organization
+    attributes:
+      label: Organization
+      description: Company or project name.
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Integration type
+      options:
+        - Agent platform or harness
+        - Application
+        - Data platform or storage provider
+        - Semantic model or catalog
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What should an agent be able to do once this integration exists?
+    validations:
+      required: true
+  - type: textarea
+    id: surface
+    attributes:
+      label: Integration surface
+      description: Which Auto-Ontology surface you expect to use (MCP, REST API, agent skills, model import/export, a new connector), and anything missing.
+  - type: input
+    id: contact
+    attributes:
+      label: Contact
+      description: How we should reach you, if not through this issue.
