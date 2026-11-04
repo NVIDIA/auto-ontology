@@ -2,11 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Turn embedded rows into the records :meth:`PostgresVDB.run` writes.
+"""Turn embedded rows into the records :meth:`VectorStore.run` writes.
 
 An embedded row is the dict the row builders produce (``text``, ``path``,
 ``page_number``, ``metadata``) after the embed step has set
-``metadata["embedding"]``. The record keeps every top-level metadata key --
+``metadata["embedding"]`` -- or, for a store that embeds server-side (see
+:func:`~auto_ontology.vdb.backend.embeds_server_side`), the same row without
+one. The record keeps every top-level metadata key --
 retrieval reads hits' ``metadata["id"]``, ``label``, ``name`` and so on from
 there -- and adds ``content``, ``content_metadata`` and ``source_metadata``.
 
@@ -20,12 +22,14 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable
 
+from auto_ontology.vdb.backend import embeds_server_side
+
 if TYPE_CHECKING:
     import pandas as pd
 
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.base import VectorStore
 
-__all__ = ["to_vdb_records", "write_embedded_rows"]
+__all__ = ["ready_to_write", "to_vdb_records", "write_embedded_rows"]
 
 
 def _text(row: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -46,11 +50,19 @@ def _page_number(row: dict[str, Any], content_metadata: dict[str, Any]) -> int |
     return max(pages) if pages else None
 
 
+def ready_to_write(row: dict[str, Any]) -> bool:
+    """Whether *row* has what the configured store needs to index it.
+
+    An embedding, unless the store embeds server-side. An empty list is what
+    a failed request leaves behind, so it is as absent as a missing key:
+    writing it would store a row no search can reach.
+    """
+    return embeds_server_side() or bool((row.get("metadata") or {}).get("embedding"))
+
+
 def _record(row: dict[str, Any]) -> dict[str, Any] | None:
     metadata = dict(row.get("metadata") or {})
-    # An empty list is what a failed request leaves behind, so it is as absent
-    # as a missing key: writing it would store a row no search can reach.
-    if not metadata.get("embedding"):
+    if not ready_to_write(row):
         return None
     text = _text(row, metadata)
     if not text:
@@ -102,7 +114,7 @@ def to_vdb_records(
 
 
 def write_embedded_rows(
-    vdb: "PostgresVDB", rows: "Iterable[dict[str, Any]] | pd.DataFrame"
+    vdb: "VectorStore", rows: "Iterable[dict[str, Any]] | pd.DataFrame"
 ) -> int:
     """Write the embedded *rows* to *vdb*; returns the number of rows written."""
     records = to_vdb_records(rows)

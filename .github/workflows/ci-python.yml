@@ -122,6 +122,8 @@ jobs:
       POSTGRES_USER: auto_ontology
       POSTGRES_PASSWORD: auto_ontology
       POSTGRES_DATABASE: auto_ontology
+      # The Elasticsearch half of auto_ontology/vdb/tests/test_contract.py.
+      ES_URL: http://localhost:9200
 
     steps:
       - name: Checkout
@@ -167,6 +169,31 @@ jobs:
       - name: Fail if the schema has drifted from the models
         run: uv run --no-sync alembic check
 
+      # For the vector-store contract tests, which run every case against both
+      # backends. Started with `docker run` rather than as a service container:
+      # its inference endpoint calls back into the fake embedder that the tests
+      # run on this runner, and only `docker run` can add the host-gateway
+      # alias it calls through. Security off and a trial license because the
+      # cluster lives for one job; the trial is what enables third-party
+      # inference services on a self-managed node. Serverless, which the
+      # backend also targets, is not available as a public image.
+      - name: Start Elasticsearch
+        run: |
+          docker run -d --name elasticsearch -p 9200:9200 \
+            --add-host=host.docker.internal:host-gateway \
+            -e discovery.type=single-node \
+            -e xpack.security.enabled=false \
+            -e xpack.license.self_generated.type=trial \
+            -e ES_JAVA_OPTS="-Xms1g -Xmx1g" \
+            docker.elastic.co/elasticsearch/elasticsearch:9.5.6
+          for _ in $(seq 1 60); do
+            curl -sf "localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" \
+              >/dev/null && exit 0
+            sleep 2
+          done
+          docker logs elasticsearch
+          exit 1
+
       # `-p no:randomly` is not set and no `-x`: the point of this job is the
       # whole picture, including how many of the fixture-backed tests ran.
       - name: Run the test suite
@@ -175,16 +202,17 @@ jobs:
       # A skip guard naming the wrong dependency turns a suite off silently and
       # still reports green -- which is how the golden replay and the live
       # connector tests sat unrun. Only the two live-warehouse tests
-      # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) may skip here.
+      # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) and the live
+      # NVIDIA embedding test (AUTO_ONTOLOGY_LIVE_NVIDIA_ES) may skip here.
       - name: Fail if the fixture-backed tests silently skipped
         run: |
           skipped=$(uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
             | grep -c '^SKIPPED' || true)
           echo "skipped: $skipped"
-          if [ "$skipped" -gt 2 ]; then
-            echo "::error::$skipped tests skipped; expected at most 2 (live" \
-                 "Databricks and MySQL). A fixture is probably unreachable, so" \
-                 "this run proved less than it appears to."
+          if [ "$skipped" -gt 3 ]; then
+            echo "::error::$skipped tests skipped; expected at most 3 (live" \
+                 "Databricks, MySQL and NVIDIA). A fixture is probably" \
+                 "unreachable, so this run proved less than it appears to."
             uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
               | grep '^SKIPPED' || true
             exit 1

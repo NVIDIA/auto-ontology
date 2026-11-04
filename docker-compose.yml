@@ -21,6 +21,25 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional: the Elasticsearch vector store (VDB_BACKEND=elasticsearch).
+  # `docker compose --profile elasticsearch up -d elasticsearch`, then set
+  # ES_URL=http://localhost:9200 (security is off; local use only). The trial
+  # license enables the third-party (nvidia) inference service.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.6
+    container_name: elasticsearch
+    profiles: ["elasticsearch"]
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.license.self_generated.type: trial
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
@@ -175,3 +194,4 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  elasticsearch_data:

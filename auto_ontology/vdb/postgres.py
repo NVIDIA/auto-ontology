@@ -154,6 +154,9 @@ class PostgresVDB:
     # straight into ``PGVectorStore.similarity_search_with_score_by_vector``.
     metadata_filter_format = "dict"
 
+    #: The app embeds rows and queries; this store only keeps the vectors.
+    embeds_server_side = False
+
     def __init__(self, *, reset: bool = False, **kwargs: Any) -> None:
         connection_string = kwargs.get("connection_string")
         if not connection_string:
