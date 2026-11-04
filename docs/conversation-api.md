@@ -26,6 +26,7 @@ event, and the stream ends with `data: [DONE]`.
 | `step`   | An agent step starting or ending (`node`, `phase`, and `thought` on end), for showing progress. |
 | `sql`    | A query that passed validation and is about to run. |
 | `result` | The final `answer`: `response` (prose), `sql_code`, `sql_response_from_db` (rows), `thoughts` (step trace). |
+| `charts` | A chart or table for the result (`content`, `sql_response`). Sent after `result` when the query ran and the request includes a `conversation_id`. |
 | `error`  | A `message` describing why the run failed. |
 
 A run makes many sequential model calls and typically takes tens of seconds, so

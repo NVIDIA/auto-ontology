@@ -6,15 +6,20 @@ SPDX-License-Identifier: Apache-2.0
 
 # Connections and credential storage
 
-Auto-Ontology reads source databases from one of two places. Only one is used at
-a time.
+Auto-Ontology reads source databases from two places: connections added in the
+UI, and the `CONNECTION_STRINGS` environment variable. Use one per deployment,
+because the two code paths order them differently:
+
+- **Answering questions** uses UI-managed connections when any exist, and falls
+  back to `CONNECTION_STRINGS`.
+- **Ingestion** uses `CONNECTION_STRINGS` whenever it's set, and reads
+  UI-managed connections only when it's empty.
 
 ## Connections added in the UI
 
 Add connections under **Settings → Connections**, or through the API
 (`POST /api/connections/test`, then `POST /api/connections`; permission
-`connection:manage`). When any UI-managed connection exists,
-`CONNECTION_STRINGS` is ignored.
+`connection:manage`).
 
 Each connection can be scoped with a schema allowlist plus
 `table_allow_regex` / `table_deny_regex`, applied at catalog extraction. Deny
@@ -31,9 +36,8 @@ Where the credentials live depends on whether Vault is configured:
 ## `CONNECTION_STRINGS`
 
 A comma- or newline-separated list of connection URLs supplied at deploy time
-(`.env` for Docker Compose, `--set connectionStrings=...` for Helm). It is a
-fallback, used only when there are no UI-managed connections, and it carries no
-schema or table filters. `GET /api/connections/source` reports whether it is set.
+(`.env` for Docker Compose, `--set connectionStrings=...` for Helm). It carries
+no schema or table filters. `GET /api/connections/source` reports whether it is set.
 
 The URL scheme selects the connector:
 

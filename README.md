@@ -103,11 +103,15 @@ Microsoft's sample sales database. You need Docker with Compose v2,
    Compose Postgres service with the default `POSTGRES_PASSWORD`; update it if
    you change that password.
 
+   Change `AUTO_ONTOLOGY_ADMIN_PASSWORD` and `PGADMIN_PASSWORD` from their
+   defaults too. Compose publishes the web app and pgAdmin on the host, so
+   anyone who can reach the machine can try the published defaults.
+
 2. Start Postgres and load the sample database. The seed script lives in
    auto-ontology-eval, whose `.env.example` matches the Compose defaults:
 
    ```bash
-   docker compose up -d postgres
+   docker compose up -d --wait postgres
    git clone https://github.com/NVIDIA/auto-ontology-eval.git ../auto-ontology-eval
    (cd ../auto-ontology-eval && uv sync && cp .env.example .env && \
      uv run python scripts/seed/seed_wwi.py --database-name wideworldimporters --drop)
@@ -254,6 +258,10 @@ Use **Settings → Import / Export**, or `POST /api/model/import` and
 | Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store  | 5432 |
 | HashiCorp Vault     | Optional                          | Connection credential storage              | n/a  |
 
+Keep port 3001 on a private network. FastAPI trusts the user identity the
+frontend forwards in the `x-auto-ontology-user-id` header, so clients go through
+the web app on port 3000.
+
 ## Use it from your agent
 
 ### MCP server
@@ -318,7 +326,8 @@ Three skills teach a coding agent to work with Auto-Ontology. Start at
 
 Ask a question with `POST /api/chat/completions` on the web app's origin. Mint
 an API token under the user menu → **API Tokens**. The response is a
-server-sent event stream that ends with a `result` event:
+server-sent event stream: a `result` event carries the answer, and
+`data: [DONE]` ends the stream.
 
 ```bash
 curl -N http://localhost:3000/api/chat/completions \
@@ -405,6 +414,10 @@ variable.
 ### Predictions
 
 Set `KUMO_RFM_API_KEY` and the agent routes predictive questions to KumoRFM.
+KumoRFM is a hosted service: to answer, the agent uploads the connected tables
+to it, capped by `KUMO_MAX_TABLES` (20 by default) and
+`KUMO_MAX_ROWS_PER_TABLE` (unlimited unless set). Review what that sends, and
+complete your organization's data review, before you enable it.
 
 ## Integrate with us
 

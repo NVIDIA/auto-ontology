@@ -56,7 +56,7 @@ session.headers["x-api-key"] = os.environ["AUTO_ONTOLOGY_API_TOKEN"]
 terms = session.get("https://auto-ontology.example.com/api/terms").json()
 ```
 
-For asking questions, which streams its response, see
+For the streaming question API, see
 [conversation-api.md](./conversation-api.md).
 
 How tokens behave:
