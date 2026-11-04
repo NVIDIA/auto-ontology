@@ -27,6 +27,8 @@ stored values before filtering on them, and to test a draft.
 - submit: give your final query. It is checked and run; if it fails you get \
 the error and can keep working.
 
+Return exactly the requested output fields and no others.
+
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
 choose one."""
