@@ -98,6 +98,76 @@ def test_column_text_drops_empty_optional_parts() -> None:
     )
 
 
+def test_table_text_carries_its_term() -> None:
+    text = build_table_text(
+        table_name="orders",
+        table_description="A purchase.",
+        columns=[],
+        schema_name="public",
+        database_name="shop",
+        term_name="Order",
+        synonyms=["Purchase", "Sale"],
+        pk=["order_id"],
+    )
+    assert text == (
+        "database_name: shop, schema_name: public, table_name: orders"
+        ", term: Order, synonyms: Purchase, Sale"
+        ", table_description: A purchase."
+        ", primary_key: order_id, columns: "
+    )
+
+
+def test_column_text_carries_its_attribute() -> None:
+    text = build_column_text(
+        column_name="cust_ref",
+        column_description="Who placed the order.",
+        data_type="int",
+        sample_values=[7],
+        table_name="orders",
+        schema_name="public",
+        database_name="shop",
+        attribute_name="Customer",
+        term_name="Order",
+        synonyms=["Purchase"],
+        column_format="digits",
+        is_unique=True,
+        references="crm.customers.customer_id",
+    )
+    assert text == (
+        "database_name: shop, schema_name: public, table_name: orders"
+        ", column_name: cust_ref, data_type: int"
+        ", attribute: Customer, of_term: Order, term_synonyms: Purchase"
+        ", column_description: Who placed the order., format: digits"
+        ", unique: yes, references: crm.customers.customer_id"
+        ", sample_values: 7"
+    )
+
+
+def test_process_falls_back_to_the_description_suggestion() -> None:
+    tables = _tables(
+        {"id": "t1", "table_name": "t", "table_schema": "s", "description": ""}
+    )
+    columns = pd.DataFrame(
+        [
+            {
+                "id": "c1",
+                "table_name": "t",
+                "table_schema": "s",
+                "column_name": "c",
+                "data_type": "int",
+                "description": None,
+                "description_suggestion": "Suggested meaning.",
+                "sample_values": None,
+                "is_unique": False,
+            }
+        ]
+    )
+    out = _op().process((tables, columns))
+    column_text = out.iloc[1]["text"]
+    assert "column_description: Suggested meaning." in column_text
+    assert "unique" not in column_text
+
+
 # ── Row shape ────────────────────────────────────────────────────────────────
 
 

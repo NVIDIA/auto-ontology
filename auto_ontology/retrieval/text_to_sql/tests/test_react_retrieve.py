@@ -113,8 +113,6 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         lambda table, column, database: f"{table}.{column}",
     )
     monkeypatch.setattr(tool, "find_join_path", join_path)
-    monkeypatch.setattr(tool, "fetch_attr_column_contexts", lambda ids, **_: {})
-    monkeypatch.setattr(tool, "fetch_term_table_pairs", lambda **_: [])
     monkeypatch.setattr(siblings, "fetch_table_column_names", lambda _db: [])
     return seen
 
@@ -188,14 +186,43 @@ def test_tables_in_another_database_are_left_out(
 
 
 def test_kinds_narrow_the_search(calls: dict) -> None:
-    tool.retrieve(_ctx(), "how is revenue calculated", kinds=["attribute"])
+    tool.retrieve(_ctx(), "how is revenue calculated", kinds=["definition"])
 
-    assert calls["meaning"][0][1] == ["ColumnAttribute", "SqlAttribute"]
+    assert calls["meaning"][0][1] == ["SqlAttribute"]
     assert calls["meaning"][0][2] == "shop"
 
 
 def test_unknown_kinds_search_everything() -> None:
     assert len(tool.resolve_kinds(["nonsense"])) == len(tool.resolve_kinds(None))
+
+
+def test_tables_and_columns_are_searched_in_the_data_collection(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data, semantic = object(), object()
+    asked: list[tuple[object, list[str]]] = []
+
+    def meaning(retriever, query, list_of_semantic, database_name, per_label_k):
+        asked.append((retriever, list_of_semantic))
+        return []
+
+    ctx = ToolContext(
+        retriever=semantic, data_retriever=data, connectors=[], database_name="shop"
+    )
+    monkeypatch.setattr(tool, "_get_candidates_information", meaning)
+    tool.retrieve(ctx, "revenue")
+
+    assert asked == [
+        (data, ["Table", "Column"]),
+        (semantic, ["SqlAttribute", "CustomAnalysis"]),
+    ]
+
+
+def test_terms_and_column_attributes_are_not_searched() -> None:
+    labels = tool.resolve_kinds(None)
+
+    assert "Term" not in labels
+    assert "ColumnAttribute" not in labels
 
 
 def test_wide_tables_show_matched_key_and_reference_columns(
@@ -222,55 +249,26 @@ def test_empty_query_is_refused(calls: dict) -> None:
     assert tool.retrieve(_ctx(), "  ").startswith("Error: query is empty")
 
 
-AMOUNT_ATTRIBUTE = {
-    "id": "a-amount",
-    "label": "ColumnAttribute",
-    "name": "Order Amount",
-}
-
-
 @pytest.fixture
-def attribute_hits(calls: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The search finds the orders table and, twice, an attribute on it."""
+def repeated_definition(calls: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The search finds the same definition twice."""
     monkeypatch.setattr(
         tool,
         "_get_candidates_information",
-        lambda *a, **k: [dict(AMOUNT_ATTRIBUTE), dict(REVENUE), dict(AMOUNT_ATTRIBUTE)],
-    )
-    monkeypatch.setattr(
-        tool,
-        "fetch_attr_column_contexts",
-        lambda ids, **_: {
-            "a-amount": {
-                "col_name": "amount",
-                "table_name": "orders",
-                "schema_name": "sales",
-                "table_id": "t-orders",
-            }
-        },
+        lambda *a, **k: [dict(REVENUE), dict(REVENUE)],
     )
 
 
-def test_attribute_line_names_its_table(attribute_hits: None) -> None:
-    text = tool.retrieve(_ctx(), "order amount")
+def test_a_repeated_line_is_shown_once(repeated_definition: None) -> None:
+    text = tool.retrieve(_ctx(), "revenue")
 
-    assert "ATTRIBUTE Order Amount\n  stored in sales.orders.amount" in text
-
-
-def test_a_repeated_line_is_shown_once(attribute_hits: None) -> None:
-    text = tool.retrieve(_ctx(), "order amount")
-
-    assert text.count("ATTRIBUTE Order Amount") == 1
+    assert text.count("ATTRIBUTE Revenue") == 1
 
 
-def test_tables_come_before_definitions_and_short_lines(attribute_hits: None) -> None:
-    text = tool.retrieve(_ctx(), "order amount")
+def test_tables_come_before_definitions(repeated_definition: None) -> None:
+    text = tool.retrieve(_ctx(), "revenue")
 
-    assert (
-        text.index("TABLE sales.orders")
-        < text.index("ATTRIBUTE Revenue")
-        < text.index("ATTRIBUTE Order Amount")
-    )
+    assert text.index("TABLE sales.orders") < text.index("ATTRIBUTE Revenue")
 
 
 def test_a_table_the_limit_cut_comes_back_in_full(

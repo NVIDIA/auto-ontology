@@ -19,11 +19,14 @@ One call does three things, all through existing data-access functions:
 2. **Search by name** — :func:`fetch_global_search`, the catalog's substring
    search, which finds codes an embedding misses (``CDSCode``, ``T-BIL``).
 3. **Expand one step along the graph** — each hit's tables with their columns,
-   stored values and semantic FKs (:func:`fetch_tables_by_ids`), an attribute's
-   owning column (:func:`fetch_attr_column_contexts`), a term's tables
-   (:func:`fetch_term_table_pairs`), and the join route from every new table to
-   the tables earlier calls already showed (:func:`find_join_path`), and the
-   near-copies of every new table (:mod:`.siblings`).
+   stored values and semantic FKs (:func:`fetch_tables_by_ids`), the join route
+   from every new table to the tables earlier calls already showed
+   (:func:`find_join_path`), and the near-copies of every new table
+   (:mod:`.siblings`).
+
+Terms and column attributes are not searched: a table's search text carries
+its term and a column's carries its attribute, so the table or column itself
+is the hit.
 
 The result is rendered as text and capped in size. The same query against the
 same catalog returns the same text.
@@ -36,23 +39,18 @@ import re
 from typing import Any
 
 from auto_ontology.catalog.constants import Labels
-from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_path
+from auto_ontology.dal.attributes import find_join_path
 from auto_ontology.dal.candidates import expand_info
 from auto_ontology.dal.datasources import (
     fetch_tables_by_ids,
     find_column_id_by_table_and_name,
 )
 from auto_ontology.dal.search import fetch_global_search, search_tokens
-from auto_ontology.dal.terms import fetch_term_table_pairs
 from auto_ontology.retrieval.data_access.candidates import _get_candidates_information
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.siblings import sibling_lines
-from auto_ontology.semantic.constants import (
-    LABEL_COLUMN_ATTRIBUTE,
-    LABEL_SQL_ATTRIBUTE,
-    LABEL_TERM,
-)
+from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 
 logger = logging.getLogger(__name__)
 
@@ -60,24 +58,20 @@ logger = logging.getLogger(__name__)
 KIND_LABELS: dict[str, list[str]] = {
     "table": [Labels.TABLE],
     "column": [Labels.COLUMN],
-    "attribute": [LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE],
+    "definition": [LABEL_SQL_ATTRIBUTE],
     "analysis": [Labels.CUSTOM_ANALYSIS],
-    "term": [LABEL_TERM],
 }
 
 #: Hits kept per label from the meaning search. Columns get the most because
 #: they are what a query is written from; definitions are few and long.
 _PER_LABEL_K: dict[str, int] = {
-    Labels.TABLE: 5,
-    Labels.COLUMN: 10,
-    LABEL_COLUMN_ATTRIBUTE: 5,
+    Labels.TABLE: 8,
+    Labels.COLUMN: 15,
     LABEL_SQL_ATTRIBUTE: 3,
     Labels.CUSTOM_ANALYSIS: 3,
-    LABEL_TERM: 3,
 }
 
 _NAME_SEARCH_LIMIT = 10
-_TERM_TABLE_LIMIT = 3
 _JOIN_PAIRS_PER_CALL = 10
 _MAX_DESCRIPTION_CHARS = 160
 _MAX_DEFINITION_CHARS = 500
@@ -101,16 +95,31 @@ def _identifier_words(query: str) -> list[str]:
     return list(dict.fromkeys(w for w in words if w and _IDENTIFIER_RE.match(w)))
 
 
+#: Labels embedded in the data collection rather than the semantic one.
+_DATA_LABELS = (Labels.TABLE, Labels.COLUMN)
+
+
 def _meaning_hits(ctx: ToolContext, query: str, labels: list[str]) -> list[dict]:
-    return list(
-        _get_candidates_information(
-            ctx.retriever,
+    """Vector hits for *labels*, each label searched in the collection it lives in."""
+    searches = [
+        (
+            ctx.data_retriever or ctx.retriever,
+            [lb for lb in labels if lb in _DATA_LABELS],
+        ),
+        (ctx.retriever, [lb for lb in labels if lb not in _DATA_LABELS]),
+    ]
+    hits: list[dict] = []
+    for retriever, group in searches:
+        if not group or retriever is None:
+            continue
+        hits += _get_candidates_information(
+            retriever,
             query,
-            list_of_semantic=labels,
+            list_of_semantic=group,
             database_name=ctx.database_name,
-            per_label_k={label: _PER_LABEL_K.get(label, 5) for label in labels},
+            per_label_k={label: _PER_LABEL_K.get(label, 5) for label in group},
         )
-    )
+    return hits
 
 
 def _name_hits(query: str, labels: list[str]) -> list[dict]:
@@ -164,49 +173,20 @@ def _hit_table_ids(hit: dict) -> list[str]:
     ]
 
 
-def _resolve_tables(
-    ctx: ToolContext, hits: list[dict]
-) -> tuple[list[str], dict[str, set[str]], dict[str, dict]]:
-    """Tables the hits live on, in hit order, plus which columns each matched.
-
-    Returns ``(table_ids, matched_columns_by_table, attribute_contexts)``.
-    """
-    attr_ids = [str(h["id"]) for h in hits if h.get("label") == LABEL_COLUMN_ATTRIBUTE]
-    attr_contexts = (
-        fetch_attr_column_contexts(attr_ids, database_name=ctx.database_name)
-        if attr_ids
-        else {}
-    )
-    term_ids = [str(h["id"]) for h in hits if h.get("label") == LABEL_TERM]
-    term_tables: dict[str, list[str]] = {}
-    if term_ids:
-        for pair in fetch_term_table_pairs(
-            term_ids=term_ids, database_name=ctx.database_name
-        ):
-            tables = term_tables.setdefault(str(pair["term_id"]), [])
-            if len(tables) < _TERM_TABLE_LIMIT:
-                tables.append(str(pair["table_id"]))
-
+def _resolve_tables(hits: list[dict]) -> tuple[list[str], dict[str, set[str]]]:
+    """Tables the hits live on, in hit order, plus which columns each matched."""
     table_ids: list[str] = []
     matched: dict[str, set[str]] = {}
     for hit in hits:
         label = hit.get("label")
-        hit_id = str(hit["id"])
         if label == Labels.TABLE:
-            ids = [hit_id]
-        elif label == LABEL_COLUMN_ATTRIBUTE:
-            context = attr_contexts.get(hit_id) or {}
-            ids = [str(context["table_id"])] if context.get("table_id") else []
-            if ids and context.get("col_name"):
-                matched.setdefault(ids[0], set()).add(context["col_name"])
-        elif label == LABEL_TERM:
-            ids = term_tables.get(hit_id, [])
+            ids = [str(hit["id"])]
         else:
             ids = _hit_table_ids(hit)
             if label == Labels.COLUMN and ids and hit.get("name"):
                 matched.setdefault(ids[0], set()).add(str(hit["name"]))
         table_ids += [tid for tid in ids if tid not in table_ids]
-    return table_ids, matched, attr_contexts
+    return table_ids, matched
 
 
 def _in_database(ctx: ToolContext, table: dict) -> bool:
@@ -298,7 +278,7 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     return "\n".join(lines)
 
 
-def _definition_block(hit: dict, attr_contexts: dict[str, dict]) -> str | None:
+def _definition_block(hit: dict) -> str | None:
     """A line for a hit that carries meaning beyond a table: a definition."""
     label = hit.get("label")
     name = hit.get("name") or hit.get("text") or ""
@@ -317,23 +297,6 @@ def _definition_block(hit: dict, attr_contexts: dict[str, dict]) -> str | None:
         if hit.get("sql"):
             line += f"\n  SQL: {_clip(hit['sql'], _MAX_DEFINITION_CHARS)}"
         return line
-    if label == LABEL_COLUMN_ATTRIBUTE:
-        context = attr_contexts.get(str(hit["id"])) or {}
-        line = f"ATTRIBUTE {name}" + (f" — {description}" if description else "")
-        if context.get("col_name"):
-            where = ".".join(
-                str(p)
-                for p in (
-                    context.get("schema_name"),
-                    context.get("table_name"),
-                    context["col_name"],
-                )
-                if p
-            )
-            line += f"\n  stored in {where}"
-        return line
-    if label == LABEL_TERM:
-        return f"TERM {name}" + (f" — {description}" if description else "")
     return None
 
 
@@ -425,7 +388,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     labels = resolve_kinds(kinds)
     hits = _merge_hits(_meaning_hits(ctx, query, labels), _name_hits(query, labels))
 
-    table_ids, matched, attr_contexts = _resolve_tables(ctx, hits)
+    table_ids, matched = _resolve_tables(hits)
     new_ids = [tid for tid in table_ids if tid not in ctx.seen_tables]
     new_ids = new_ids[: config.max_tables_per_retrieve()]
     fetched = {str(t["id"]): t for t in fetch_tables_by_ids(new_ids)}
@@ -441,13 +404,10 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     ]
 
     definitions = [
-        (hit.get("label"), block)
-        for hit in hits
-        if (block := _definition_block(hit, attr_contexts)) is not None
+        block for hit in hits if (block := _definition_block(hit)) is not None
     ]
     # Most useful first, since the limit cuts from the end: new tables, how they
-    # join, definitions that carry SQL, tables seen before, then the one-line
-    # attribute and term matches in whatever room is left.
+    # join, definitions that carry SQL, then tables seen before.
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
@@ -456,17 +416,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     blocks += _join_lines(ctx, new_tables)
     if config.siblings_enabled():
         blocks += sibling_lines(ctx, new_tables)
-    blocks += [
-        b
-        for label, b in definitions
-        if label in (LABEL_SQL_ATTRIBUTE, Labels.CUSTOM_ANALYSIS)
-    ]
+    blocks += definitions
     blocks += [_table_block(t, matched[str(t["id"])], True) for t in revisited]
-    blocks += [
-        b
-        for label, b in definitions
-        if label not in (LABEL_SQL_ATTRIBUTE, Labels.CUSTOM_ANALYSIS)
-    ]
     if not blocks:
         return (
             f"No matches for {query!r}. Try other words, an exact column or table "

@@ -49,7 +49,7 @@ RETRIEVE_TOOL = {
     "function": {
         "name": "retrieve",
         "description": (
-            "Search tables, columns, attributes, terms and analyses by meaning "
+            "Search tables, columns, definitions and analyses by meaning "
             "and by name. Returns matching tables with their columns, stored "
             "values and references, definitions with their SQL, how new "
             "tables join to ones already found, and tables that are near "
