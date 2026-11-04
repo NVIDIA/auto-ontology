@@ -18,8 +18,9 @@ in [`openapi/auto-ontology-api.json`](./openapi/auto-ontology-api.json).
 
 ## Response stream
 
-The response is a server-sent event stream. Each `data:` line holds one JSON
-event, and the stream ends with `data: [DONE]`.
+The response is a server-sent event stream. Each event's `data:` line holds one
+JSON object, and the stream ends with `data: [DONE]`, a final line that isn't
+JSON.
 
 | `type`   | Carries |
 | -------- | ------- |

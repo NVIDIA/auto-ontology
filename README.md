@@ -88,32 +88,31 @@ Microsoft's sample sales database. You need Docker with Compose v2,
    cp .env.example .env
    ```
 
-   Then set these four values in `.env`:
+   Then set these values in `.env`:
 
    ```dotenv
    DEFAULT_MODELS_API_KEY=nvapi-...
    AUTH_SECRET=<a long random string, e.g. from openssl rand -base64 32>
    APP_URL=http://localhost:3000
-   CONNECTION_STRINGS=postgresql://postgres:change-me@postgres:5432/wideworldimporters
+   POSTGRES_PASSWORD=<a new password>
+   CONNECTION_STRINGS=postgresql://postgres:<the same password>@postgres:5432/wideworldimporters
+   AUTO_ONTOLOGY_ADMIN_PASSWORD=<a new password>
+   PGADMIN_PASSWORD=<a new password>
    ```
 
-   `.env.example` also sets an API key per model role. Replace each
-   `nvapi-your-api-key-here` with your key too, or delete those lines so they
-   fall back to `DEFAULT_MODELS_API_KEY`. The connection string points at the
-   Compose Postgres service with the default `POSTGRES_PASSWORD`; update it if
-   you change that password.
-
-   Change `AUTO_ONTOLOGY_ADMIN_PASSWORD` and `PGADMIN_PASSWORD` from their
-   defaults too. Compose publishes the web app and pgAdmin on the host, so
-   anyone who can reach the machine can try the published defaults.
+   Compose publishes Postgres, pgAdmin, and the web app on the host, so replace
+   each default password before you start it. `.env.example` also sets an API
+   key per model role: replace each `nvapi-your-api-key-here` with your key, or
+   delete those lines so they fall back to `DEFAULT_MODELS_API_KEY`.
 
 2. Start Postgres and load the sample database. The seed script lives in
-   auto-ontology-eval, whose `.env.example` matches the Compose defaults:
+   auto-ontology-eval; pass it the Postgres password you set:
 
    ```bash
    docker compose up -d --wait postgres
    git clone https://github.com/NVIDIA/auto-ontology-eval.git ../auto-ontology-eval
    (cd ../auto-ontology-eval && uv sync && cp .env.example .env && \
+     POSTGRES_PASSWORD='<the same password>' \
      uv run python scripts/seed/seed_wwi.py --database-name wideworldimporters --drop)
    ```
 
@@ -258,9 +257,10 @@ Use **Settings → Import / Export**, or `POST /api/model/import` and
 | Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store  | 5432 |
 | HashiCorp Vault     | Optional                          | Connection credential storage              | n/a  |
 
-Keep port 3001 on a private network. FastAPI trusts the user identity the
-frontend forwards in the `x-auto-ontology-user-id` header, so clients go through
-the web app on port 3000.
+Keep ports 3001 and 3002 on a private network. FastAPI trusts the user identity
+the frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
+service's endpoints (ingest, delete, reset, compile) have no authentication of
+their own. Clients go through the web app on port 3000.
 
 ## Use it from your agent
 
