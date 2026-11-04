@@ -7,7 +7,9 @@
 Short on purpose. Rules about how SQL should look belong in code — the checks
 ``run_sql`` and ``submit`` apply — not here: rule blocks in the writer prompt
 lost accuracy every time they were measured, and a policy being trained should
-learn conventions from reward, not from a list.
+learn conventions from reward, not from a list. Output column order is the
+exception: no check can tell which order the question asked for, and graders
+that compare rows positionally fail a query whose columns are otherwise right.
 """
 
 from __future__ import annotations
@@ -29,7 +31,12 @@ the error and can keep working.
 
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
-choose one."""
+choose one.
+
+SELECT the requested outputs from left to right in the same order the question \
+and its clarifications name them. When a breakdown asks for counts and \
+percentages across several categories, put all the counts first and then all \
+the percentages, unless the question interleaves them."""
 
 USER_TEMPLATE = """\
 QUESTION

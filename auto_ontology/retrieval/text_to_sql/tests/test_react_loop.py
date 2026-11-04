@@ -189,6 +189,15 @@ def test_dialect_rules_reach_the_model(ctx: ToolContext, dialect: str) -> None:
     assert ("Do NOT CAST a computed value" in system) == (dialect == "mysql")
 
 
+@pytest.mark.parametrize("dialect", [None, "postgresql", "mysql", "sqlite"])
+def test_column_order_rule_reaches_the_model(ctx: ToolContext, dialect: str | None) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q", dialect=dialect)
+
+    assert "same order the question" in model.seen[0][0].content
+
+
 class InternalServerError(Exception):
     """Named like the client's error for a throttled gateway, which the retry matches by type."""
 
