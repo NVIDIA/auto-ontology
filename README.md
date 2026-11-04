@@ -4,75 +4,86 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Auto-Ontology
+# Auto Ontology
 
-An open context layer that helps agents give fewer wrong answers on enterprise data.
+Agents can retrieve documents and query databases, but reliability gates agentic analytics: a revenue metric answered faster is worth nothing if the number is wrong. Agents need a context layer that tells them where data lives, what it means, whether to use it, how to use it, where it came from, and what is similar. NVIDIA Auto Ontology is an open library that builds that layer from enterprise metadata, reconciles definitions across systems, and exposes it to any agent harness through MCP, CLI, and API. It complements the semantic models customers already own.
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![Docs](https://img.shields.io/badge/docs-docs%2F-76B900.svg)](./docs/)
+It enables developers to:
 
-## Why Auto-Ontology
+- Discover: generate enterprise ontologies from metadata; connect existing ontologies and semantic models; build AI-ready knowledge graphs.
+- Ground: give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
+- Validate: check generated queries against certified definitions and lineage; return provenance with every answer.
+- Expose: serve context to any agent harness through MCP, CLI, and API.
+Learn: fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
-Agents can retrieve documents and query databases, but reliability is what gates
-agentic analytics: a revenue figure delivered faster is worth nothing if it's
-wrong. Before an agent queries, it needs to know where the data lives, what it
-means, whether to use it, how to use it, where it came from, and what is
-similar.
+## Benchmarks
 
-Auto-Ontology is a service you run next to your databases to give agents that
-context. It compiles their metadata into an ontology: business terms mapped to
-columns, reviewed SQL for measures, and the relationships between tables. Agents
-query through the ontology, and people review it in a web UI. It complements the
-semantic models you already own.
+To run a text-to-SQL benchmark such as BIRD, refer to the
+[ontology SQL evaluation repository](https://github.com/NVIDIA/ontology-sql-eval/).
 
-With Auto-Ontology, developers can:
+> **Licensing & contributions.** Auto Ontology is distributed under the
+> [Apache License 2.0](./LICENSE). Third-party open-source components
+> bundled, linked, or otherwise used by this project are listed in
+> [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
+> is currently not accepting external contributions.**
 
-- **Discover.** Generate an ontology from database metadata, import existing
-  semantic models, and explore the result as a semantic graph.
-- **Ground.** Give agents one definition per business concept, mapped across
-  tables and databases.
-- **Certify.** Review, edit, and certify definitions in the UI or through the
-  API.
-- **Validate.** Check whether a question is answerable before querying, and
-  return the SQL and the agent's steps with each answer.
-- **Expose.** Serve context to any agent harness through MCP, agent skills, and
-  a REST API.
+<p>
+<img src="./docs/assets/arch.png" alt="Auto Ontology Architecture" width="800">
+</p>
 
-The usual shortcut is to paste the schema into the agent's context window.
-Auto-Ontology gives the agent tools over the ontology:
+## Key Features
 
-|                        | Schema in the context window            | Auto-Ontology tools                                 |
-| ---------------------- | --------------------------------------- | --------------------------------------------------- |
-| Tokens                 | Grow with every table and column        | Only the terms and tables the question touches      |
-| Meaning                | Column names; the agent infers the rest | Business terms mapped to columns and SQL            |
-| Joins and measures     | Improvised per question                 | Resolved relationships and reviewed SQL expressions |
-| Unanswerable questions | Answered confidently, often wrongly     | Answerability check, so the agent asks to clarify   |
+- **Natural-language querying** of structured data — questions are translated to
+  SQL and executed against connected databases, powered by NVIDIA NIM.
+- **Semantic catalog / ontology layer** over relational sources, stored in
+  Postgres alongside the catalog it describes.
+- **Authentication & RBAC** —using [Better Auth](https://github.com/better-auth/better-auth).
+- **Web UI** for chat, analysis, data catalog, analytics, and settings.
+- **Flexible deployment** — Helm chart for Kubernetes or Docker Compose for a
+  local stack.
 
-## Evaluation
+## Software Components
 
-The companion repository,
-[auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval), measures
-ontology performance on benchmarks and evals.
+| Component           | Technology                                                             | Role                                       | Default port |
+| ------------------- | ---------------------------------------------------------------------- | ------------------------------------------ | ------------ |
+| Frontend            | Next.js 16 (React 19, TypeScript, Tailwind CSS 4), Better Auth, Prisma | Web UI, authentication, API gateway        | 3000         |
+| Backend             | FastAPI (Python 3.12+), LangChain                                      | Chat / NL-to-SQL, catalog, datasource APIs | 3001         |
+| Ingestion worker    | FastAPI (Python 3.12+)                                                 | Ingests tabular data and writes embeddings | 3002         |
+| Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, vector store | 5432 |
+| HashiCorp Vault     | Optional                                                               | Secure storage of connection credentials   | —            |
 
-For BIRD, BEAVER, FDABench-Lite, and Wide World Importers, each eval item pairs
-a question with gold SQL, and a run asks every question of the same model
-twice:
+### NVIDIA NIM
 
-- **Control.** The model gets the database schema in its prompt.
-- **Treatment.** Auto-Ontology's question-answering agent, the one behind Chat,
-  works from the compiled ontology.
+Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted
+[NVIDIA API catalog](https://build.nvidia.com) (`integrate.api.nvidia.com`) or
+self-hosted NIMs. The defaults in `.env.example` are:
 
-A deterministic verifier scores the SQL from each arm by execution match, using
-each benchmark's official rule where it has one. The report gives the accuracy
-difference and lists the questions the ontology fixed and the ones it broke.
-BIRD-Interact, a multi-turn benchmark where the agent asks clarifying
-questions, runs on its own harness.
+- **LLM:** `nvidia/nemotron-3.5-lightning-30b-a3b`
+- **Embeddings:** `nvidia/nemotron-3-embed-1b`
+- **Reranking:** `nvidia/llama-nemotron-rerank-vl-1b-v2`
 
-To run the comparison on BIRD, follow the auto-ontology-eval setup, then run:
+The endpoints and models are configured via the `DEFAULT_MODELS_ENDPOINT`, `DEFAULT_MODELS_MODEL`,
+`EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
+`DEFAULT_MODELS_API_KEY`.
 
-```bash
-uv run python main.py --database-name bird
-```
+#### Model triplets
+
+Each model role is configured by a **triplet** of environment variables —
+`<PREFIX>_ENDPOINT` (URL), `<PREFIX>_API_KEY`, and `<PREFIX>_MODEL`:
+
+| Prefix           | Role                                                        |
+| ---------------- | ----------------------------------------------------------- |
+| `DEFAULT_MODELS` | Shared default; every field below falls back to it.         |
+| `REASONING`      | Main chat / NL-to-SQL model.                                |
+| `NON_REASONING`  | Lighter model used for entity extraction.                   |
+| `EMBED`          | Text-embedding model (must match between ingest and query). |
+| `RERANK`         | Reranker used by the retrieval flow.                        |
+
+You can set a full triplet, only some of its fields, or none at all — any field
+left unset falls back to the matching `DEFAULT_MODELS_<FIELD>`. So the simplest
+setup is to fill in `DEFAULT_MODELS_*` and override per-triplet fields only where
+they differ (e.g. `EMBED_MODEL`, `NON_REASONING_MODEL`). `*_API_KEY` also falls
+back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 
 ## Quickstart
 
