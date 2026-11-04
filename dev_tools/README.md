@@ -14,6 +14,8 @@ Local development helpers: environment setup, database seeding, and ingest.
 |---|---|
 | `setup_env.sh` | Brings the docker-compose stack up. Human-invoked. |
 | `local_ingest.py` | Ingests the local Postgres source into the pgvector store. |
+| `calibrate_vdb.py` | Compares the vector-store search modes on the labelled entities in `fixtures/calibration_entities.yaml` and sweeps each relevance gate. Needs the seeded fixture and an embedding key. |
+| `fake_embedder.py` | Deterministic stand-in for NVIDIA's `/v1/embeddings`; the vector-store contract tests embed through it on both backends. |
 | `generate_backend_openapi.py` | Dumps the FastAPI OpenAPI specs to `docs/openapi/`. Run by `ci-openapi.yml`. |
 | `release_helm_chart.py` | Packages the chart and publishes it to the NGC Helm registry. Run by `release-helm.yml`. |
 | `_add_spdx_headers.py` | One-off OSRB helper; kept so the header insertion is reproducible. |

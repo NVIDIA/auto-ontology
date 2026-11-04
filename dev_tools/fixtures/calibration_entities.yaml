@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Labelled search entities for dev_tools/calibrate_vdb.py, written against the
+# seeded fixture (pagila + chinook catalogs, and the hand-authored semantic
+# layer in dev_tools/fixtures/seed_graph_fixture.py).
+#
+# Each entry is one short phrase, as the clarification flow's entity
+# extraction would hand it to the vector store, with the rows that would be a
+# correct match:
+#
+#   entity:   the search text
+#   layer:    data (Table/Column rows) or semantic (Term/ColumnAttribute rows)
+#   label:    the label filter the app would search with
+#   database: the database filter
+#   kind:     paraphrase  -- the words differ from the column's; vector search's job
+#             identifier  -- the column name as written; BM25's job
+#             near_miss   -- sounds like something in the catalog, isn't
+#             unrelated   -- nothing like it in the catalog
+#   expect:   correct targets; any one ranked first counts. For the data layer
+#             "schema.table.column", for the semantic layer the attribute name.
+#             Empty for near_miss and unrelated: a correct gate rejects them.
+#
+# Several pagila views repeat a base column (film.length, film_list.length,
+# nicer_but_slower_film_list.length); each lists every copy, because the store
+# has no way to prefer one and either is a right answer.
+
+# --- data layer, pagila: paraphrases ----------------------------------------
+- {entity: movie length, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.length, public.film_list.length, public.nicer_but_slower_film_list.length]}
+- {entity: price to rent a movie, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.rental_rate, public.film_list.price, public.nicer_but_slower_film_list.price]}
+- {entity: cost to replace a lost dvd, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.replacement_cost]}
+- {entity: how many days a film may be kept, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.rental_duration]}
+- {entity: year the movie came out, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.release_year]}
+- {entity: MPAA rating, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.rating, public.film_list.rating, public.nicer_but_slower_film_list.rating]}
+- {entity: customer email address, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.customer.email]}
+- {entity: amount paid, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.payment.amount]}
+- {entity: when the payment was made, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.payment.payment_date]}
+- {entity: date the dvd was brought back, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.rental.return_date]}
+- {entity: actor surname, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.actor.last_name, public.actor_info.last_name]}
+- {entity: zip code, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.address.postal_code, public.customer_list.zip code, public.staff_list.zip code]}
+- {entity: movie genre, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.category.name, public.film_list.category, public.nicer_but_slower_film_list.category,
+            public.rental_by_category.category, public.sales_by_film_category.category]}
+- {entity: is the customer account active, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.customer.active, public.customer.activebool]}
+- {entity: store's total sales, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.sales_by_store.total_sales]}
+- {entity: revenue earned by a film, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [analytics.film_performance.revenue, analytics.top_films.revenue]}
+- {entity: number of times a film was rented, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [analytics.film_performance.rental_count, analytics.top_films.rental_count]}
+- {entity: staff login name, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.staff.username]}
+- {entity: bonus material on the disc, layer: data, label: Column, database: pagila, kind: paraphrase,
+   expect: [public.film.special_features]}
+
+# --- data layer, pagila: identifiers ----------------------------------------
+- {entity: rental_rate, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [public.film.rental_rate]}
+- {entity: replacement_cost, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [public.film.replacement_cost]}
+- {entity: last_rented_at, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [analytics.film_performance.last_rented_at]}
+- {entity: manager_staff_id, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [public.store.manager_staff_id]}
+- {entity: address2, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [public.address.address2]}
+- {entity: original_language_id, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [public.film.original_language_id]}
+- {entity: parent_rollup_id, layer: data, label: Column, database: pagila, kind: identifier,
+   expect: [analytics.category_rollup.parent_rollup_id]}
+
+# --- data layer, chinook: paraphrases ---------------------------------------
+- {entity: song duration, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Track.Milliseconds]}
+- {entity: song title, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Track.Name]}
+- {entity: who wrote the song, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Track.Composer]}
+- {entity: album name, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Album.Title]}
+- {entity: musician name, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Artist.Name]}
+- {entity: music style, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Genre.Name]}
+- {entity: invoice total, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Invoice.Total]}
+- {entity: country the invoice was billed to, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Invoice.BillingCountry]}
+- {entity: date the employee joined, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Employee.HireDate]}
+- {entity: employee birthday, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Employee.BirthDate]}
+- {entity: employee's manager, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Employee.ReportsTo]}
+- {entity: file size of a track, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Track.Bytes]}
+- {entity: number of units bought, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.InvoiceLine.Quantity]}
+- {entity: audio file format, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.MediaType.Name]}
+- {entity: customer's employer, layer: data, label: Column, database: chinook, kind: paraphrase,
+   expect: [main.Customer.Company]}
+
+# --- data layer, chinook: identifiers ---------------------------------------
+- {entity: BillingPostalCode, layer: data, label: Column, database: chinook, kind: identifier,
+   expect: [main.Invoice.BillingPostalCode]}
+- {entity: SupportRepId, layer: data, label: Column, database: chinook, kind: identifier,
+   expect: [main.Customer.SupportRepId]}
+- {entity: MediaTypeId, layer: data, label: Column, database: chinook, kind: identifier,
+   expect: [main.Track.MediaTypeId, main.MediaType.MediaTypeId]}
+- {entity: Milliseconds, layer: data, label: Column, database: chinook, kind: identifier,
+   expect: [main.Track.Milliseconds]}
+
+# --- data layer: no right answer --------------------------------------------
+- {entity: film budget, layer: data, label: Column, database: pagila, kind: near_miss, expect: []}
+- {entity: actor date of birth, layer: data, label: Column, database: pagila, kind: near_miss, expect: []}
+- {entity: customer age, layer: data, label: Column, database: pagila, kind: near_miss, expect: []}
+- {entity: staff salary, layer: data, label: Column, database: pagila, kind: near_miss, expect: []}
+- {entity: song tempo in beats per minute, layer: data, label: Column, database: chinook, kind: near_miss, expect: []}
+- {entity: track lyrics, layer: data, label: Column, database: chinook, kind: near_miss, expect: []}
+- {entity: record label, layer: data, label: Column, database: chinook, kind: near_miss, expect: []}
+- {entity: flight departure gate, layer: data, label: Column, database: pagila, kind: unrelated, expect: []}
+- {entity: patient blood pressure, layer: data, label: Column, database: chinook, kind: unrelated, expect: []}
+- {entity: warehouse humidity, layer: data, label: Column, database: pagila, kind: unrelated, expect: []}
+- {entity: loan interest rate, layer: data, label: Column, database: chinook, kind: unrelated, expect: []}
+
+# --- semantic layer ----------------------------------------------------------
+- {entity: movie rating, layer: semantic, label: ColumnAttribute, database: pagila, kind: paraphrase,
+   expect: [film rating]}
+- {entity: name of the movie, layer: semantic, label: ColumnAttribute, database: pagila, kind: paraphrase,
+   expect: [film title]}
+- {entity: renter email, layer: semantic, label: ColumnAttribute, database: pagila, kind: paraphrase,
+   expect: [customer email]}
+- {entity: how much was paid, layer: semantic, label: ColumnAttribute, database: pagila, kind: paraphrase,
+   expect: [payment amount]}
+- {entity: when the hire began, layer: semantic, label: ColumnAttribute, database: pagila, kind: paraphrase,
+   expect: [rental date]}
+- {entity: customer number, layer: semantic, label: ColumnAttribute, database: pagila, kind: paraphrase,
+   expect: [customer id]}
+- {entity: song name, layer: semantic, label: ColumnAttribute, database: chinook, kind: paraphrase,
+   expect: [track name]}
+- {entity: film_id, layer: semantic, label: ColumnAttribute, database: pagila, kind: identifier,
+   expect: [film id]}
+- {entity: film length, layer: semantic, label: ColumnAttribute, database: pagila, kind: near_miss, expect: []}
+- {entity: store address, layer: semantic, label: ColumnAttribute, database: pagila, kind: near_miss, expect: []}
+- {entity: album artist, layer: semantic, label: ColumnAttribute, database: chinook, kind: near_miss, expect: []}
+- {entity: aircraft tail number, layer: semantic, label: ColumnAttribute, database: pagila, kind: unrelated, expect: []}
