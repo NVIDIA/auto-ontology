@@ -21,6 +21,7 @@ from auto_ontology.utils.embedding_rows import (
 
 from auto_ontology.dal.datasources import (
     count_columns_for_table,
+    fetch_catalog_node_ids,
     fetch_parent_table_id_for_column,
     fetch_tables_and_columns_by_node_ids,
     fetch_columns_for_table,
@@ -46,6 +47,7 @@ __all__ = [
     "fetch_tables_for_schema",
     "fetch_columns_for_table",
     "fetch_parent_table_id_for_column",
+    "refresh_catalog_embeddings",
     "update_node_properties",
 ]
 
@@ -160,6 +162,19 @@ def _get_node_ids_for_embedding_update(
         return [node_id]
 
     return []
+
+
+def refresh_catalog_embeddings(database_name: str) -> int:
+    """Re-embed every Table and Column row of *database_name*.
+
+    Run after semantic compilation: the rows written at ingest predate the
+    Terms and ColumnAttributes whose names, descriptions and synonyms the
+    text now carries. Returns the number of nodes refreshed.
+    """
+    node_ids = fetch_catalog_node_ids(database_name)
+    if node_ids:
+        _refresh_vdb_embeddings(node_ids)
+    return len(node_ids)
 
 
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:

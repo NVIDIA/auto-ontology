@@ -100,6 +100,14 @@ def _run_semantic_compilation(
     )
     logger.info("Table family pairs found: %d", family_count)
 
+    from auto_ontology.server.datasources.service import refresh_catalog_embeddings
+
+    logger.info("=" * 60)
+    logger.info("Re-embedding tables and columns with their terms and attributes…")
+    logger.info("=" * 60)
+    reembedded = refresh_catalog_embeddings(database_name)
+    logger.info("Table and column rows re-embedded: %d", reembedded)
+
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 
     logger.info("=" * 60)
