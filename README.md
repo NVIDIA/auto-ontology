@@ -157,13 +157,6 @@ Microsoft's sample sales database. You need Docker with Compose v2,
             Validated the filter values against the data, then executed
    ```
 
-   Broader questions work the same way. Chat shows the SQL, and you can view
-   the rows, download them as CSV, or read them as a chart:
-
-   <p>
-   <img src="./docs/assets/qa-example.png" alt="Chat answering which products drive the most revenue and highest customer count, with the generated SQL and a revenue chart" width="550">
-   </p>
-
 6. Ask something the data can't answer. Wide World Importers has no
    advertising data, so a question about ad spend has nothing to resolve
    against. An agent connected through [MCP](#mcp-server) checks answerability
@@ -240,6 +233,13 @@ its description, related terms, mapped columns, and SQL attributes:
 When the candidates can't support a query, the agent reports that the question
 can't be answered from this data. Predictive questions go to KumoRFM when it's
 configured (see [Predictions](#predictions)).
+
+In Chat, each answer shows its SQL, and you can view the rows, download them as
+CSV, or read them as a chart:
+
+<p>
+<img src="./docs/assets/qa-example.png" alt="Chat answering which products drive the most revenue and highest customer count, with the generated SQL and a revenue chart" width="550">
+</p>
 
 Auto-Ontology is compatible with [Apache Ossie](https://ossie.apache.org/), the
 open standard for exchanging semantic models. Ossie includes a
@@ -396,12 +396,12 @@ credential storage.
 Auto-Ontology uses four model roles. With an `nvapi-` key, each defaults to an
 NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 
-| Role            | Default model                           | What it does |
-| --------------- | --------------------------------------- | ------------ |
-| `REASONING`     | `nvidia/nemotron-3-nano-30b-a3b`        | Builds the ontology (terms, relationships, SQL attributes), writes each answer's SQL and explanation, and grades answerability |
-| `NON_REASONING` | `nvidia/nemotron-3-nano-30b-a3b`        | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair |
-| `EMBED`         | `nvidia/nemotron-3-embed-1b`            | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them |
-| `RERANK`        | `nvidia/llama-nemotron-rerank-vl-1b-v2` | Ranks candidate tables when compilation builds bridge-table SQL attributes |
+| Role            | Default model                           | What it does                                                                                                                   |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes), writes each answer's SQL and explanation, and grades answerability |
+| `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
+| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
+| `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Ranks candidate tables when compilation builds bridge-table SQL attributes                                                     |
 
 To use self-hosted NIM or any OpenAI-compatible endpoint, set
 `<ROLE>_ENDPOINT`, `<ROLE>_API_KEY`, and `<ROLE>_MODEL`. Any field you leave
