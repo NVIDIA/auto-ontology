@@ -463,6 +463,87 @@ def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> 
     assert {"path": [hop]} in result["attribute_join_paths"]
 
 
+def test_every_direct_join_between_final_tables_is_added_once(monkeypatch) -> None:
+    def table(table_id: str) -> dict:
+        return {
+            "id": table_id,
+            "name": table_id,
+            "schema_name": "public",
+            "database_name": "db",
+            "columns": [],
+        }
+
+    def hop(source: str, source_col: str, target: str, target_col: str) -> dict:
+        return {
+            "source_database": "db",
+            "source_schema": "public",
+            "source_table": source,
+            "source_column": source_col,
+            "target_database": "db",
+            "target_schema": "public",
+            "target_table": target,
+            "target_column": target_col,
+        }
+
+    shown = hop("orders", "buyer_id", "people", "id")
+    seller = hop("orders", "seller_id", "people", "id")
+    asked: list[list[str]] = []
+
+    def fake_direct(ids: list[str]) -> list[list[dict]]:
+        asked.append(ids)
+        # The first is the already-shown hop written the other way round.
+        return [[hop("people", "id", "orders", "buyer_id")], [seller]]
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_filter_tables_by_relevance",
+        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
+            tables,
+            "",
+        ),
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_tables_from_custom_analyses", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "get_relevant_tables_from_candidates",
+        lambda candidates: [table("orders"), table("people")],
+    )
+    monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_connected_junction_tables",
+        lambda ids: ([], [[shown]]),
+    )
+    monkeypatch.setattr(candidates_preparation, "find_direct_table_joins", fake_direct)
+
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "orders with their buyer and seller",
+            "data_retriever": object(),
+            "path_state": {
+                "target_db": "db",
+                "retrieved_custom_analyses": [{"id": "analysis"}],
+            },
+        },
+    )
+
+    result = CandidatePreparationAgent().execute(state)["path_state"]
+
+    assert asked == [["orders", "people"]]
+    assert result["attribute_join_paths"] == [{"path": [shown]}, {"path": [seller]}]
+
+
 def test_anchors_naming_a_column_in_scope_are_dropped(monkeypatch) -> None:
     enrollment = {
         "id": "enrollment",

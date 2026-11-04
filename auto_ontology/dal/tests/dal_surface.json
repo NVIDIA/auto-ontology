@@ -9,6 +9,7 @@
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
+    "find_direct_table_joins": "(table_ids: 'list[str]') -> 'list[list[dict]]'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
     "find_kept_table_bridges": "(table_ids: 'list[str]', allowed_table_ids: 'set[str] | None' = None, max_bridge_tables: 'int' = 5) -> 'tuple[list[dict], list[list[dict]], int]'",
     "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",

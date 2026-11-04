@@ -34,6 +34,7 @@ from auto_ontology.dal.attributes import (
     fetch_attr_column_contexts,
     find_anchor_hub_siblings,
     find_connected_junction_tables,
+    find_direct_table_joins,
     find_join_path,
     find_kept_table_bridges,
 )
@@ -176,6 +177,33 @@ def _build_relevance_tables_summary(tables: list[dict]) -> str:
                 for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
             )
     return "\n".join(lines)
+
+
+def _hop_key(hop: dict) -> frozenset[tuple[str, ...]]:
+    """A hop's two column ends, without direction."""
+    return frozenset(
+        (
+            tuple(
+                str(hop.get(f"{side}_{part}") or "").casefold()
+                for part in ("database", "schema", "table", "column")
+            )
+            for side in ("source", "target")
+        )
+    )
+
+
+def _new_single_hop_paths(
+    candidates: list[list[dict]], existing: list[dict]
+) -> list[list[dict]]:
+    """*candidates* whose hop no existing join path already contains."""
+    shown = {_hop_key(hop) for entry in existing for hop in entry.get("path") or []}
+    fresh: list[list[dict]] = []
+    for path in candidates:
+        key = _hop_key(path[0])
+        if key not in shown:
+            shown.add(key)
+            fresh.append(path)
+    return fresh
 
 
 def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
@@ -732,6 +760,21 @@ class CandidatePreparationAgent(BaseAgent):
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
+
+        # --- 5d. Every direct join between the final tables ---
+        # The anchor's shortest path offers one route per destination, so a
+        # second column pair joining the same two tables -- a different role --
+        # never reached SQL generation. List every one-hop join between any two
+        # tables in scope, skipping hops an earlier step already shows.
+        direct_paths = _new_single_hop_paths(
+            find_direct_table_joins([t["id"] for t in relevant_tables if t.get("id")]),
+            attribute_join_paths,
+        )
+        if direct_paths:
+            attribute_join_paths.extend({"path": hops} for hops in direct_paths)
+            self.logger.info(
+                "Added %d direct join(s) between tables in scope", len(direct_paths)
+            )
 
         # --- 6. Drop value anchors that name schema rather than data ---
         # Anchors were matched against stored values without the schema, so a

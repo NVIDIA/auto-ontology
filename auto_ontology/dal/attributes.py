@@ -1065,6 +1065,133 @@ def find_connected_junction_tables(
     return list(junctions.values()), paths
 
 
+def find_direct_table_joins(table_ids: list[str]) -> list[list[dict]]:
+    """Every one-hop join between two of *table_ids*, as single-hop paths.
+
+    Declared ``FOREIGN_KEY`` edges and ``SEMANTIC_FK`` edges marked
+    ``use_in_join_paths`` both count. Two tables joined by several column
+    pairs get one path per pair, since each can be a different role. A pair
+    recorded in both directions, or by both edge kinds, appears once. Edges
+    within one table or across databases are left out.
+    """
+    ids = list(dict.fromkeys(table_id for table_id in table_ids if table_id))
+    if len(ids) < 2:
+        return []
+
+    source_column = s.catalog_column.alias("direct_source_column")
+    source_table = s.catalog_table.alias("direct_source_table")
+    source_schema = s.catalog_schema.alias("direct_source_schema")
+    target_column = s.catalog_column.alias("direct_target_column")
+    target_table = s.catalog_table.alias("direct_target_table")
+    target_schema = s.catalog_schema.alias("direct_target_schema")
+
+    def scoped(statement):
+        return statement.where(
+            source_table.c.id.in_(ids),
+            target_table.c.id.in_(ids),
+            source_table.c.id != target_table.c.id,
+            source_schema.c.database_id == target_schema.c.database_id,
+        )
+
+    def ends(join_from):
+        return (
+            join_from.join(source_table, source_table.c.id == source_column.c.table_id)
+            .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+            .join(target_table, target_table.c.id == target_column.c.table_id)
+            .join(target_schema, target_schema.c.id == target_table.c.schema_id)
+        )
+
+    columns = (
+        source_column.c.id.label("source_column_id"),
+        target_column.c.id.label("target_column_id"),
+    )
+    declared = scoped(
+        select(*columns).select_from(
+            ends(
+                s.column__foreign_key.join(
+                    source_column,
+                    source_column.c.id == s.column__foreign_key.c.source_column_id,
+                ).join(
+                    target_column,
+                    target_column.c.id == s.column__foreign_key.c.target_column_id,
+                )
+            )
+        )
+    )
+    semantic_owner = s.column__has_attribute.alias("direct_semantic_owner")
+    semantic = scoped(
+        select(*columns)
+        .select_from(
+            ends(
+                s.column__semantic_fk.join(
+                    source_column,
+                    source_column.c.id == s.column__semantic_fk.c.column_id,
+                )
+                .join(
+                    semantic_owner,
+                    semantic_owner.c.attribute_id
+                    == s.column__semantic_fk.c.attribute_id,
+                )
+                .join(target_column, target_column.c.id == semantic_owner.c.column_id)
+            )
+        )
+        .where(s.column__semantic_fk.c.use_in_join_paths.is_(True))
+    )
+
+    try:
+        rows = store().query_read(declared.union(semantic))
+    except Exception:
+        logger.warning(
+            "find_direct_table_joins: query failed for %d table(s)",
+            len(ids),
+            exc_info=True,
+        )
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    seen: set[frozenset[str]] = set()
+    for row in sorted(
+        rows, key=lambda r: (r["source_column_id"], r["target_column_id"])
+    ):
+        key = frozenset((row["source_column_id"], row["target_column_id"]))
+        if len(key) == 2 and key not in seen:
+            seen.add(key)
+            pairs.append((row["source_column_id"], row["target_column_id"]))
+
+    column_ids = list(dict.fromkeys(c for pair in pairs for c in pair))
+    names = _name_columns(column_ids)
+    contexts = fetch_col_table_contexts(column_ids)
+    paths: list[list[dict]] = []
+    for source_id, target_id in pairs:
+        source = contexts.get(source_id, {})
+        target = contexts.get(target_id, {})
+        if not source or not target:
+            continue
+        paths.append(
+            [
+                {
+                    "source_database": source.get("database_name", ""),
+                    "source_schema": source.get("schema_name", ""),
+                    "source_table": source.get("table_name", ""),
+                    "source_column": names.get(source_id, ""),
+                    "target_database": target.get("database_name", ""),
+                    "target_schema": target.get("schema_name", ""),
+                    "target_table": target.get("table_name", ""),
+                    "target_column": names.get(target_id, ""),
+                }
+            ]
+        )
+    paths.sort(
+        key=lambda path: (
+            path[0]["source_table"],
+            path[0]["target_table"],
+            path[0]["source_column"],
+            path[0]["target_column"],
+        )
+    )
+    return paths
+
+
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """The shortest semantic join route between the columns' tables.
 

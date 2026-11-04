@@ -222,6 +222,77 @@ def test_connected_junctions_ignore_unselected_semantic_fks(world) -> None:
     assert a.find_connected_junction_tables([world.tables["customers"]]) == ([], [])
 
 
+def _direct_joins(paths: list[list[dict]]) -> list[tuple[str, str, str, str]]:
+    return [
+        (
+            path[0]["source_table"],
+            path[0]["source_column"],
+            path[0]["target_table"],
+            path[0]["target_column"],
+        )
+        for path in paths
+    ]
+
+
+def test_direct_table_joins_offer_every_column_pair_between_two_tables(
+    world,
+) -> None:
+    world.table("people", pk=["id"])
+    world.column("people", "id")
+    world.attribute("person-id", owner="people.id")
+    world.table("orders")
+    world.column("orders", "buyer_id", 1)
+    world.column("orders", "seller_id", 2)
+    world.column("orders", "courier_id", 3)
+    world.references("orders.buyer_id", "person-id")
+    world.references("orders.seller_id", "person-id")
+    _link(
+        s.column__foreign_key,
+        source_column_id=world.columns["orders.courier_id"],
+        target_column_id=world.columns["people.id"],
+    )
+    # A semantic FK kept out of join paths stays out.
+    world.column("orders", "auditor_id", 4)
+    world.references("orders.auditor_id", "person-id", use_in_join_paths=False)
+
+    paths = a.find_direct_table_joins([world.tables["people"], world.tables["orders"]])
+
+    assert _direct_joins(paths) == [
+        ("orders", "buyer_id", "people", "id"),
+        ("orders", "courier_id", "people", "id"),
+        ("orders", "seller_id", "people", "id"),
+    ]
+
+
+def test_direct_table_joins_count_a_mutual_pair_once_and_skip_other_tables(
+    world,
+) -> None:
+    world.table("units")
+    world.column("units", "code")
+    world.attribute("unit-code", owner="units.code")
+    world.table("rooms")
+    world.column("rooms", "code")
+    world.attribute("room-code", owner="rooms.code")
+    world.references("rooms.code", "unit-code")
+    world.references("units.code", "room-code")
+    world.table("floors")
+    world.column("floors", "code")
+    world.references("floors.code", "unit-code")
+
+    paths = a.find_direct_table_joins([world.tables["units"], world.tables["rooms"]])
+
+    assert len(paths) == 1
+    assert {paths[0][0]["source_table"], paths[0][0]["target_table"]} == {
+        "units",
+        "rooms",
+    }
+
+
+def test_direct_table_joins_need_two_tables() -> None:
+    assert a.find_direct_table_joins([]) == []
+    assert a.find_direct_table_joins(["only-one"]) == []
+
+
 @pytest.fixture
 def joined(world):
     """`orders.customer_id` references the attribute `customers.id` owns."""
