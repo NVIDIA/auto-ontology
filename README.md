@@ -254,7 +254,7 @@ CSV, or read them as a chart:
 
 Auto-Ontology is compatible with [Apache Ossie](https://ossie.apache.org/), the
 open standard for exchanging semantic models. Ossie includes a
-[converter for Auto-Ontology](https://github.com/apache/ossie/tree/ef91cb61092c60f4b918016a81cfdbe483e113bc/converters/nvidia),
+[converter for Auto-Ontology](https://github.com/apache/ossie-converters/tree/main/nvidia),
 which Auto-Ontology uses to import and export model definitions as Ossie YAML.
 Use **Settings → Import / Export**, or `POST /api/model/import` and
 `POST /api/model/export`.
