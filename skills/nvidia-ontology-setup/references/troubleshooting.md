@@ -38,6 +38,13 @@ look like "nothing found."
 Confirm the triplets in `.env` (or the Helm values) are the same for the
 ingestion service and the backend.
 
+The vector store holds 2048-wide vectors. An embedding model with a different
+native size fails ingest with `expected 2048 dimensions`. If the model takes
+OpenAI's `dimensions` field (e.g. `text-embedding-3-*`), set
+`EMBED_DIMENSIONS=2048`. If ingest fails with a 400 on long inputs, the
+endpoint ignores `truncate`: set `EMBED_MAX_INPUT_CHARS` under the model's
+token limit.
+
 ## Connections: UI vs `CONNECTION_STRINGS` vs Vault
 
 Auto Ontology resolves source databases from two places:

@@ -23,6 +23,7 @@ from __future__ import annotations
 import itertools
 import logging
 import math
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -30,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 import httpx
-from openai import APIStatusError, Omit, OpenAI
+from openai import APIStatusError, Omit, OpenAI, omit
 
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.vdb.records import write_embedded_rows
@@ -56,6 +57,14 @@ _TEXT_PREFIXED_MODELS = ("nemotron-3.5-embed-1b-nvfp4",)
 _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _EMBED_API_KEY = resolve("EMBED", "API_KEY")
+# Optional output size for models that take OpenAI's ``dimensions`` field
+# (text-embedding-3-*). The vector store's column is 2048 wide, so a model
+# whose native size differs must be asked for 2048. Unset sends nothing.
+_EMBED_DIMENSIONS = int(os.environ.get("EMBED_DIMENSIONS", "") or 0) or None
+# Optional client-side cut for endpoints that ignore ``truncate`` (OpenAI's
+# reject an over-long input with a 400, and one such input fails its whole
+# batch). Characters, not tokens, so set it under the model's token limit.
+_EMBED_MAX_INPUT_CHARS = int(os.environ.get("EMBED_MAX_INPUT_CHARS", "") or 0) or None
 
 # Per-request retries inside the client, for 408/409/429/5xx and dropped
 # connections. They back off for seconds; the chunk-level retry below is the
@@ -96,6 +105,8 @@ class EmbedParams:
     inference_batch_size: int = 32
     nim_http_max_concurrent: int = 32
     request_timeout_s: float = 600.0
+    dimensions: int | None = None
+    max_input_chars: int | None = None
 
 
 def get_embed_params() -> EmbedParams:
@@ -103,6 +114,8 @@ def get_embed_params() -> EmbedParams:
         embed_invoke_url=_EMBED_ENDPOINT,
         model_name=_EMBED_MODEL,
         api_key=_EMBED_API_KEY,
+        dimensions=_EMBED_DIMENSIONS,
+        max_input_chars=_EMBED_MAX_INPUT_CHARS,
     )
 
 
@@ -173,6 +186,8 @@ def embed_texts(
     with its own retry loop passes ``retries=0`` so the two do not multiply.
     """
     stripped = [text.strip() if isinstance(text, str) else "" for text in texts]
+    if params.max_input_chars:
+        stripped = [text[: params.max_input_chars] for text in stripped]
     to_send = [i for i, text in enumerate(stripped) if text]
     vectors: list[list[float] | None] = [None] * len(texts)
     if not to_send:
@@ -189,6 +204,7 @@ def embed_texts(
             model=params.model_name,
             input=[prefix + stripped[i] for i in indices],
             encoding_format="float",
+            dimensions=params.dimensions if params.dimensions else omit,
             extra_body={
                 "input_type": input_type,
                 "truncate": "END",

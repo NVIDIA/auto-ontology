@@ -43,7 +43,7 @@ from auto_ontology.dal.attributes import (
     set_semantic_fk_join_default,
 )
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
-from auto_ontology.utils.embedding import EmbedParams
+from auto_ontology.utils.embedding import get_embed_params
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
@@ -60,8 +60,6 @@ from auto_ontology.vdb import get_semantic_vdb
 
 logger = logging.getLogger(__name__)
 
-_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
-_EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
 _SYSTEM_PROMPT = """\
@@ -433,14 +431,7 @@ def _build_retriever(database_name: str) -> Retriever | None:
     if not _NVIDIA_API_KEY:
         return None
 
-    return Retriever(
-        get_semantic_vdb(database_name=database_name),
-        EmbedParams(
-            model_name=_EMBED_MODEL,
-            embed_invoke_url=_EMBED_ENDPOINT,
-            api_key=_NVIDIA_API_KEY,
-        ),
-    )
+    return Retriever(get_semantic_vdb(database_name=database_name), get_embed_params())
 
 
 def _build_query_text(col: dict[str, Any]) -> str:
