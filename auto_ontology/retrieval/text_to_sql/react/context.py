@@ -11,7 +11,7 @@ the same calls — which is what an RL environment needs from them.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +53,10 @@ class ToolContext:
     with no SQL; it stays off wherever a grader scores the SQL.
     ``information_retrieved`` records that ``retrieve`` showed the information
     view, which such an answer has to come from; a SQL-view search does not count.
+
+    ``cost_status`` is for callers that charge for queries: it returns what the
+    model has left to spend and what each action costs, read fresh each time
+    because every query changes it. ``None`` when queries are free.
     """
 
     retriever: Any
@@ -79,6 +83,7 @@ class ToolContext:
     prediction_refusal: str = ""
     pages: list[Any] = field(default_factory=list)
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
+    cost_status: Callable[[], str | None] | None = None
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
