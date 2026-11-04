@@ -164,6 +164,14 @@ def test_an_over_long_text_is_cut_to_the_configured_length(
     assert json.loads(seen[0].content)["input"] == ["abcd", "xy"]
 
 
+@pytest.mark.parametrize("field_name", ["dimensions", "max_input_chars"])
+@pytest.mark.parametrize("value", [0, -100])
+def test_a_size_below_one_is_rejected(field_name: str, value: int) -> None:
+    """A negative cut slices from the end and drops short texts without a word."""
+    with pytest.raises(ValueError, match=field_name):
+        _params(**{field_name: value})
+
+
 @pytest.mark.parametrize(
     "configured",
     [
