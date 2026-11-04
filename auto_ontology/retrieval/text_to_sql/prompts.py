@@ -34,6 +34,11 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- GROUP BY only the columns the question asks to list or break down. "
+        "Do not add a key or id to GROUP BY, in the outer query or inside a "
+        "CTE, unless the question explicitly asks for one row per key. An "
+        "unrequested key splits one name into several groups and changes the "
+        "aggregate and any average of those groups.\n"
         "- When the question or evidence requests one aggregate over two "
         "alternative categories joined by 'and' (for example, a count for X and Y), "
         "return ONE aggregate and combine the category predicates with OR in the "
@@ -110,6 +115,28 @@ create_sql_user_prompt = (
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
+    "**Query structure**\n"
+    "- You may use WITH (common table expressions) and subqueries whenever you "
+    "find them useful.\n"
+    "- When the question combines several sets, measures or comparisons — a "
+    "per-entity value compared with an overall average, a ratio of two counts, "
+    "a filter on one measure while another is reported — build the query in "
+    "steps with WITH: one named block per set or measure the question defines, "
+    "then a final SELECT that combines the blocks. Name each block after what "
+    "it holds.\n"
+    "- Define each set of rows once and reuse it. When later words refer back "
+    "to an earlier set ('such', 'those', 'these', 'them'), compute every "
+    "measure of that set from the same block; never rebuild it with a "
+    "different filter.\n"
+    "- When the question reports a count or total for an entity and also "
+    "filters the entity on a count or total over a qualified subset of the "
+    "same rows, compute both from the qualified block unless the question "
+    "clearly asks for the unqualified number.\n"
+    "- Keep each qualifier with the clause it belongs to. Do not move a filter "
+    "from one clause to another, and do not drop one.\n"
+    "- An average 'per entity' is the average of the per-entity values: "
+    "compute the per-entity values in one block, then take AVG over that "
+    "block. Never nest aggregate functions such as AVG(COUNT(...)).\n\n"
     "**Joins**\n"
     "- When evidence rules map to columns in different tables, include the joins "
     "that connect those tables using the listed paths. Choose the join type "
@@ -463,6 +490,11 @@ ORDER BY total_sales DESC;"""
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
+- You may use WITH (common table expressions) and subqueries whenever you
+  find them useful. For a question that combines several sets, measures or
+  comparisons, build one named WITH block per set or measure and combine the
+  blocks in a final SELECT. Define each set of rows once and derive every
+  measure of it from that block.
 - If the question filters by a single constant value on a column,
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
