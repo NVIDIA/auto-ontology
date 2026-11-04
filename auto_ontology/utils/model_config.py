@@ -45,12 +45,12 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "NON_REASONING_ENDPOINT": "https://integrate.api.nvidia.com/v1",
         "NON_REASONING_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "EMBED_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "EMBED_MODEL": "nvidia/nemotron-3-embed-1b",
+        "EMBED_MODEL": "nvidia/nemotron-3.5-embed-1b",
         "RERANK_ENDPOINT": (
             "https://ai.api.nvidia.com/v1/retrieval/nvidia/"
-            "llama-nemotron-rerank-vl-1b-v2/reranking"
+            "nemotron-3.5-rerank-8b/reranking"
         ),
-        "RERANK_MODEL": "nvidia/llama-nemotron-rerank-vl-1b-v2",
+        "RERANK_MODEL": "nvidia/nemotron-3.5-rerank-8b",
     },
 }
 

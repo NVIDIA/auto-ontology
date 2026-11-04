@@ -47,8 +47,10 @@ InputType = Literal["passage", "query"]
 # Model ids (matched as substrings) whose endpoint drops ``input_type`` and
 # needs the prefix in the text instead. Without it every vector shares one
 # dominant direction and similarity ranking is close to random; models that do
-# honour ``input_type`` get slightly worse with the prefix added on top.
-_TEXT_PREFIXED_MODELS = ("nemotron-3.5-embed",)
+# honour ``input_type`` get slightly worse with the prefix added on top. Only
+# the inference-api nvfp4 deployment drops it: the hosted
+# ``nvidia/nemotron-3.5-embed-1b`` on build.nvidia.com honours ``input_type``.
+_TEXT_PREFIXED_MODELS = ("nemotron-3.5-embed-1b-nvfp4",)
 
 # Each field falls back to DEFAULT_MODELS_<field>.
 _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
