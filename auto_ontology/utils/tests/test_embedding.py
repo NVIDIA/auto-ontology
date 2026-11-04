@@ -127,7 +127,7 @@ def test_a_model_that_ignores_input_type_gets_it_as_a_text_prefix(
 
 
 def test_the_hosted_nemotron_3_5_model_gets_input_type_without_a_prefix(
-    endpoint,
+    endpoint: Callable[[Handler], list[httpx.Request]],
 ) -> None:
     seen = endpoint(_ok)
 
