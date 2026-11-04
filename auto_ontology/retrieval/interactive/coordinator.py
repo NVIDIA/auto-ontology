@@ -37,6 +37,10 @@ from .evidence import (
 from .followup_merge import merge_follow_up_question
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
+from .result_feedback import (
+    attach_result_mismatch_diagnosis,
+    wrong_result_hint,
+)
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
@@ -80,48 +84,10 @@ def _apply_debug_seed(
         session.path_state["error"] = debug_error
         logger.info("Debug seed: execution error → %s", debug_error[:200])
     else:
-        # SQL ran but results didn't match — no execution error detail available.
-        # Inject targeted hints based on observed failure patterns.
-        session.path_state["error"] = (
-            "The SQL produced incorrect results. "
-            "Do NOT modify formula coefficients, formula structure or column and field names."
-            "Address whichever of the following applies, or fix a different issue you identify:\n\n"
-            "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
-            "every condition they imply, not just the primary one. Common drops: an "
-            "entity/category/type filter stated in the original question (e.g. a specific "
-            "visa class, organ, facility, or group), an IS NOT NULL guard on a column "
-            "or JSONB field feeding a computed metric, aggregate, or ratio (so rows with "
-            "NULL metrics do not appear or float to the top of DESC sorts), a "
-            "positivity/non-zero guard on a denominator, a second threshold in a "
-            "compound AND/OR, an exact value or unit filter (e.g. status = 'Completed', "
-            "unit = 'year'). If the evidence lists multiple conditions, verify all of "
-            "them are still present in your SQL.\n\n"
-            "2. OUTPUT GRAIN AND ROW SELECTION: Check whether the question wants one "
-            'row per group or a single aggregate/top-1 row, and whether "most '
-            'recent"/"latest snapshot"/dedup logic is implied — an extra join or an '
-            "extra GROUP BY column can silently fan out or split a group that should "
-            'stay merged. If the question asks for top-N or "the one with the highest '
-            'X," add LIMIT N, but NEVER add LIMIT 1 to a multi-row or per-entity query. '
-            "Judge from the question's phrasing whether unmatched "
-            "primary-entity rows should still appear.\n\n"
-            "3. ORDER BY, PROJECTION, AND SCALE: Keep ORDER BY <primary_metric> DESC "
-            "(including for cost, fee, time, and count metrics) unless ascending order "
-            "is explicitly requested; do NOT drop a valid ORDER BY or add unrequested "
-            "secondary tie-breaker columns. Project only the requested columns in the "
-            "EXACT left-to-right order stated in the question and clarifications (when "
-            "a breakdown asks for counts and percentages across categories, group all "
-            "counts together followed by all percentages unless interleaving is "
-            "explicitly requested; for 'basic info' or 'details', select only the "
-            "entity's ID and name/title — never dump all table columns or add an "
-            "unrequested status label column; when profiling or auditing a single "
-            "specific entity ID, include that entity ID column first if requested). "
-            "If the knowledge base defines a percentage/proportion formula with `* 100`, "
-            "preserve `* 100`. If your existing query's filters, grain, projections, "
-            "and ordering already satisfy every requirement above, preserve the exact "
-            "same logical result rows and order (a wrong-result verdict can be caused "
-            "solely by SQL numeric type differences, which are retried automatically "
-            "when the result values stay unchanged)."
-        )
+        # SQL ran but results didn't match. The checklist is the fallback;
+        # _run_sql_generation replaces its lead with a diagnosis of this
+        # query's rows once evidence has been built.
+        session.path_state["error"] = wrong_result_hint()
         logger.info("Debug seed: wrong results — injecting targeted hints")
     # Preserve round 1's reconstruction lineage as read-only prompt context
     # before wiping "failed_attempts" below — see sql_reconstruction.py's
@@ -162,6 +128,9 @@ def _apply_debug_seed(
     # (empty_like_result_check.py) are the same one-shot-per-phase shape —
     # popped here so each repair gets its one fresh attempt on the new turn's
     # SQL instead of silently no-opping because a prior turn already used it.
+    # error_known_fixable is popped by the first reconstruct of a chain. A
+    # stale True left by an earlier chain would skip the diagnosis's
+    # analysis (or the fresh analysis, when diagnosis itself fails).
     for key in (
         "failed_attempts",
         "jsonb_path_repair_attempts",
@@ -169,6 +138,7 @@ def _apply_debug_seed(
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
+        "error_known_fixable",
     ):
         session.path_state.pop(key, None)
 
@@ -212,6 +182,7 @@ def _apply_follow_up_seed(
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
+        "error_known_fixable",
     ):
         session.path_state.pop(key, None)
 
@@ -413,6 +384,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         )
     if evidence:
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
+
+    # Wrong-result debug only. Execution errors already carry the driver text.
+    attach_result_mismatch_diagnosis(session, evidence)
 
     payload: TextToSQLPayload = {
         "question": question,
