@@ -82,6 +82,42 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     )
 
 
+def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
+    anchor = {
+        "schema_name": "public",
+        "table_name": "orders",
+        "col_name": "amount",
+        "attr_name": "Order Amount",
+    }
+    hop = {
+        "source_schema": "public",
+        "source_table": "orders",
+        "source_column": "customer_key",
+        "target_schema": "public",
+        "target_table": "customers",
+        "target_column": "customer_key",
+    }
+
+    section = sql_from_semantic.format_join_paths_section(
+        anchor, [{"path": [hop]}], target_db=None, dialect="mysql"
+    )
+
+    assert section.startswith("## Semantic Hints & Join Paths\n")
+    assert sql_from_semantic.SAME_KEY_JOIN_RULE in section
+    assert "customer_key" in section
+    assert sql_from_semantic.SAME_KEY_JOIN_RULE not in (
+        sql_from_semantic.format_join_paths_section(
+            anchor, [], target_db=None, dialect="mysql"
+        )
+    )
+    assert (
+        sql_from_semantic.format_join_paths_section(
+            None, [{"path": [hop]}], target_db=None, dialect="mysql"
+        )
+        == ""
+    )
+
+
 def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
     assert "Do not add `IS NOT NULL` solely because" in create_sql_user_prompt
     assert "question or evidence requires the requested value" in (

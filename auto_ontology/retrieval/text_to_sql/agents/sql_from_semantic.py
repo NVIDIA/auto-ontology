@@ -68,6 +68,40 @@ logger = logging.getLogger(__name__)
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
 
 
+SAME_KEY_JOIN_RULE = (
+    "Keep a chain of joins on the same key when you can. When a table is joined "
+    "on one identifier and the next listed join can continue on that same "
+    "identifier, use it instead of switching to a different column partway "
+    "through. For example, if table A joins table B on b_key, join table C on "
+    "b_key too, not on b_id. Switch keys only when no listed join continues on "
+    "the same one."
+)
+
+
+def format_join_paths_section(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict],
+    *,
+    target_db: str | None,
+    dialect: str | None,
+) -> str:
+    """The prompt's Semantic Hints & Join Paths section, or ``""`` without an anchor."""
+    if not primary_attribute:
+        return ""
+    rule = f"{SAME_KEY_JOIN_RULE}\n\n" if attribute_join_paths else ""
+    return (
+        "## Semantic Hints & Join Paths\n"
+        + rule
+        + format_semantic_context(
+            primary_attribute,
+            attribute_join_paths,
+            target_db=target_db,
+            dialect=dialect,
+        )
+        + "\n\n"
+    )
+
+
 def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
     """Render the intent subtype's SQL example as structural guidance only."""
     sql_template = (path_state.get("sql_template") or "").strip()
@@ -263,19 +297,12 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             target_db = path_state.get("target_db")
 
-            # Build the join-paths section (semantic hint + suggested joins).
-            join_paths = ""
-            if primary_attribute:
-                join_paths = (
-                    "## Semantic Hints & Join Paths\n"
-                    + format_semantic_context(
-                        primary_attribute,
-                        attribute_join_paths,
-                        target_db=target_db,
-                        dialect=dialect,
-                    )
-                    + "\n\n"
-                )
+            join_paths = format_join_paths_section(
+                primary_attribute,
+                attribute_join_paths,
+                target_db=target_db,
+                dialect=dialect,
+            )
 
             # Build the available-tables schema section.
             tables_section = (
