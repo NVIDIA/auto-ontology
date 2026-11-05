@@ -189,10 +189,28 @@ def _export_document(request: ExportRequest) -> AutoOntologyModelDocument:
     )
 
 
+def _normalize_ossie_nullability(document: AutoOntologyModelDocument) -> None:
+    """Collapse unknown nullability to nullable for the Ossie converter.
+
+    An Ossie column carries only a boolean ``is_nullable``, and the converter
+    reads it with ``bool(...)``: passing ``None`` through would export an
+    undetermined column as NOT NULL. Unknown means the source never declared the
+    constraint, so the permissive reading is nullable.
+    """
+    for database in document.data_layer.databases:
+        for schema in database.schemas:
+            for table in schema.tables:
+                for column in table.columns:
+                    if column.is_nullable is None:
+                        column.is_nullable = True
+
+
 def _ossie_source(document: AutoOntologyModelDocument) -> str:
     """Return the native YAML the Ossie converter reads for *document*."""
     _validate_ossie_metric_names(document)
-    return _dump_yaml(_project_terms_onto_one_table(document))
+    projected = _project_terms_onto_one_table(document)
+    _normalize_ossie_nullability(projected)
+    return _dump_yaml(projected)
 
 
 def export_model(request: ExportRequest) -> str:

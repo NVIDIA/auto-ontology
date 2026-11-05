@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import os
 from contextlib import contextmanager
 from typing import Any
@@ -28,6 +29,45 @@ def _connection_string(token: str = "secret") -> str:
     return (
         f"databricks://token:{quote(token, safe='')}@example.databricks.com/main"
         "?http_path=%2Fsql%2F1.0%2Fwarehouses%2Fwarehouse-id"
+    )
+
+
+def _describe_json(
+    columns: list[dict[str, Any]] | None = None,
+    constraints: str | None = None,
+) -> pd.DataFrame:
+    """``DESCRIBE TABLE EXTENDED ... AS JSON`` output."""
+    metadata: dict[str, Any] = {
+        "columns": columns
+        if columns is not None
+        else [
+            {
+                "name": "order_id",
+                "type": {"name": "bigint"},
+                "nullable": False,
+                "comment": "the order id",
+            },
+            {
+                "name": "customer_id",
+                "type": {"name": "bigint"},
+                "nullable": True,
+                "comment": None,
+            },
+        ]
+    }
+    if constraints is not None:
+        metadata["table_constraints"] = constraints
+    return pd.DataFrame({"json_metadata": [json.dumps(metadata)]})
+
+
+def _constraints_text(constraints: list[tuple[str, str]]) -> str | None:
+    """The compact ``table_constraints`` string AS JSON reports."""
+    if not constraints:
+        return None
+    return (
+        "["
+        + ", ".join(f"({name},{definition})" for name, definition in constraints)
+        + "]"
     )
 
 
@@ -315,6 +355,8 @@ def test_single_schema_lists_tables_with_show_tables() -> None:
 
     def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
         issued.append(" ".join(sql_text.split()))
+        if "AS JSON" in sql_text:
+            return _describe_json()
         return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
 
     db.execute = fake_execute  # type: ignore[method-assign]
@@ -327,8 +369,8 @@ def test_single_schema_lists_tables_with_show_tables() -> None:
     assert issued == [
         "SHOW TABLES IN `main`.`nbu_dmt_explorer`",
         "SHOW VIEWS IN `main`.`nbu_dmt_explorer`",
-        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`orders`",
-        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`customers`",
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`orders` AS JSON",
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`customers` AS JSON",
     ]
     assert not any("information_schema" in q for q in issued)
     assert list(tables["table_name"]) == ["orders", "customers"]
@@ -356,13 +398,7 @@ def test_single_schema_describes_each_table_on_one_connection() -> None:
             return pd.DataFrame(
                 {"database": ["nbu_dmt_explorer"], "tablename": ["orders"]}
             )
-        return pd.DataFrame(
-            {
-                "col_name": ["order_id", "placed_at", "", "# Partition Information"],
-                "data_type": ["bigint", "timestamp", "", ""],
-                "comment": ["the order id", None, "", ""],
-            }
-        )
+        return _describe_json()
 
     db._connect = fake_connect  # type: ignore[method-assign]
     db._run = fake_run  # type: ignore[method-assign]
@@ -370,18 +406,21 @@ def test_single_schema_describes_each_table_on_one_connection() -> None:
 
     assert connects == 1
     assert issued[0].startswith("SHOW TABLES IN")
-    assert issued[1] == "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`orders`"
+    assert issued[1] == (
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`orders` AS JSON"
+    )
     assert not any("information_schema" in q for q in issued)
 
     # Trailing metadata sections are not columns.
-    assert list(columns["column_name"]) == ["order_id", "placed_at"]
+    assert list(columns["column_name"]) == ["order_id", "customer_id"]
     assert list(columns["ordinal_position"]) == [1, 2]
-    # DESCRIBE carries the type, which SHOW COLUMNS omits entirely.
-    assert list(columns["data_type"]) == ["bigint", "timestamp"]
+    # AS JSON carries the type, which SHOW COLUMNS omits entirely.
+    assert list(columns["data_type"]) == ["bigint", "bigint"]
     # ...and the comment, which normalize_columns types as the description.
     assert list(columns["description"])[0] == "the order id"
-    # Nullability is reported by neither, so it is left for normalize_columns to fill.
-    assert "is_nullable" not in columns.columns
+    # Nullability is declared metadata, so the catalog can store the real value
+    # instead of treating every column as unknown.
+    assert list(columns["is_nullable"]) == [False, True]
 
 
 def test_multiple_schemas_still_use_information_schema() -> None:
@@ -423,7 +462,9 @@ def test_show_columns_skips_a_table_it_cannot_read() -> None:
             return pd.DataFrame({"database": ["s", "s"], "tablename": ["ok", "denied"]})
         if "`denied`" in sql_text:
             raise DatabricksError("permission denied")
-        return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
+        return _describe_json(
+            columns=[{"name": "id", "type": {"name": "bigint"}, "nullable": False}]
+        )
 
     db._connect = fake_connect  # type: ignore[method-assign]
     db._run = fake_run  # type: ignore[method-assign]
@@ -455,7 +496,9 @@ def test_described_columns_use_the_schema_name_the_warehouse_reports() -> None:
             return pd.DataFrame({"database": ["sales"], "tablename": ["orders"]})
         if sql_text.startswith("SHOW VIEWS"):
             return pd.DataFrame(columns=["namespace", "viewname"])
-        return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
+        return _describe_json(
+            columns=[{"name": "id", "type": {"name": "bigint"}, "nullable": False}]
+        )
 
     db._connect = fake_connect  # type: ignore[method-assign]
     db._run = fake_run  # type: ignore[method-assign]
@@ -501,7 +544,7 @@ def test_schema_scope_permission_denial_aborts_after_first_table() -> None:
 
     assert issued == [
         "SHOW TABLES IN `main`.`s`",
-        "DESCRIBE TABLE EXTENDED `main`.`s`.`first`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`first` AS JSON",
     ]
 
 
@@ -520,9 +563,19 @@ def _describe_rows(constraints: list[tuple[str, str]]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["col_name", "data_type", "comment"])
 
 
-def _describing_db(constraints: list[tuple[str, str]]) -> tuple[Any, list[str]]:
+def _describing_db(
+    constraints: list[tuple[str, str]],
+    *,
+    json_supported: bool = True,
+    tables: list[str] | None = None,
+    unsupported_tables: set[str] | None = None,
+) -> tuple[Any, list[str]]:
+    from databricks.sql.exc import Error as DatabricksError
+
     db = DatabricksDatabase(_connection_string(), schemas=["s"])
     issued: list[str] = []
+    table_names = tables or ["orders"]
+    unsupported = unsupported_tables or set()
 
     @contextmanager
     def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
@@ -531,7 +584,23 @@ def _describing_db(constraints: list[tuple[str, str]]) -> tuple[Any, list[str]]:
     def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
         issued.append(" ".join(sql_text.split()))
         if sql_text.startswith("SHOW TABLES"):
-            return pd.DataFrame({"database": ["s"], "tablename": ["orders"]})
+            return pd.DataFrame(
+                {
+                    "database": ["s"] * len(table_names),
+                    "tablename": table_names,
+                }
+            )
+        if "AS JSON" in sql_text:
+            if not json_supported:
+                raise DatabricksError(
+                    "PARSE_SYNTAX_ERROR: Syntax error at or near 'AS JSON'"
+                )
+            if any(f"`{name}`" in sql_text for name in unsupported):
+                raise DatabricksError(
+                    "UNSUPPORTED_FEATURE: DESCRIBE AS JSON is not supported "
+                    "for this table"
+                )
+            return _describe_json(constraints=_constraints_text(constraints))
         return _describe_rows(constraints)
 
     db._connect = fake_connect  # type: ignore[method-assign]
@@ -594,6 +663,151 @@ def test_composite_keys_pair_columns_positionally() -> None:
     assert list(fks["referenced_column"]) == ["x", "y"]
 
 
+def test_json_constraints_string_can_carry_primary_and_foreign_keys() -> None:
+    """AS JSON packs every constraint into one string, not one row per constraint."""
+    db, _issued = _describing_db(
+        [
+            ("pk_orders", "PRIMARY KEY (`order_id`)"),
+            (
+                "fk_customer",
+                "FOREIGN KEY (`customer_id`) REFERENCES `main`.`s`.`customers` (`id`)",
+            ),
+        ]
+    )
+
+    assert list(db.get_pks()["column_name"]) == ["order_id"]
+    fks = db.get_fks()
+    assert list(fks["column_name"]) == ["customer_id"]
+    assert list(fks["referenced_table"]) == ["customers"]
+    assert list(fks["referenced_column"]) == ["id"]
+
+
+def test_as_json_unsupported_falls_back_to_text_for_remaining_tables() -> None:
+    """Runtimes before 16.2 reject the clause; text DESCRIBE still reads the schema."""
+    db, issued = _describing_db(
+        [("pk_orders", "PRIMARY KEY (`order_id`)")],
+        json_supported=False,
+        tables=["orders", "customers"],
+    )
+
+    columns = db.get_columns()
+
+    assert issued == [
+        "SHOW TABLES IN `main`.`s`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`orders` AS JSON",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`orders`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`customers`",
+    ]
+    assert db._describe_json_supported is False
+    assert list(columns["column_name"]) == [
+        "order_id",
+        "customer_id",
+        "order_id",
+        "customer_id",
+    ]
+    # The text form carries no declared nullability, so it stays unknown rather
+    # than being guessed as nullable.
+    assert columns["is_nullable"].isna().all()
+    # Constraints still come from the text form's # Constraints section.
+    assert list(db.get_pks()["column_name"]) == ["order_id", "order_id"]
+
+
+def test_a_foreign_table_does_not_disable_json_for_the_rest_of_the_run() -> None:
+    """UNSUPPORTED_FEATURE is table-local, unlike a pre-16.2 parse error."""
+    db, issued = _describing_db(
+        [],
+        tables=["orders", "customers"],
+        unsupported_tables={"orders"},
+    )
+
+    columns = db.get_columns()
+
+    assert issued == [
+        "SHOW TABLES IN `main`.`s`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`orders` AS JSON",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`orders`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`customers` AS JSON",
+    ]
+    assert db._describe_json_supported is True
+    # The foreign table falls back to unknown nullability; the next table still
+    # reports its declared values instead of being dragged down with it.
+    assert pd.isna(columns.loc[columns["table_name"] == "orders", "is_nullable"]).all()
+    assert list(columns.loc[columns["table_name"] == "customers", "is_nullable"]) == [
+        False,
+        True,
+    ]
+
+
+def test_json_columns_frame_keeps_declared_nullability_and_comments() -> None:
+    metadata: dict[str, Any] = {
+        "columns": [
+            {
+                "name": "amount",
+                "type": {"name": "decimal", "precision": 10, "scale": 2},
+                "nullable": True,
+                "comment": "order total",
+            },
+            {"name": "id", "type": {"name": "bigint"}, "nullable": False},
+            {"name": "legacy", "type": {"name": "string"}},
+        ]
+    }
+
+    frame, constraints = DatabricksDatabase._json_columns_frame(metadata, "s", "orders")
+
+    assert list(frame["data_type"]) == ["decimal(10,2)", "bigint", "string"]
+    assert list(frame["is_nullable"])[:2] == [True, False]
+    # A payload that omits nullable is unknown, not "not nullable".
+    assert pd.isna(frame["is_nullable"].iloc[2])
+    assert list(frame["description"]) == ["order total", None, None]
+    assert constraints is None
+
+
+@pytest.mark.parametrize(
+    ("type_info", "expected"),
+    [
+        ({"name": "bigint"}, "bigint"),
+        ({"name": "decimal", "precision": 28, "scale": 2}, "decimal(28,2)"),
+        ({"name": "decimal", "precision": 28}, "decimal(28)"),
+        ({"name": "varchar", "length": 10}, "varchar(10)"),
+        ({"name": "char"}, "char"),
+        ({"name": "string", "collation": "UTF8_BINARY"}, "string"),
+        ({"name": "string", "collation": "UTF8_LCASE"}, "string COLLATE UTF8_LCASE"),
+        ({"name": "timestamp_ltz"}, "timestamp"),
+        (
+            {"name": "interval", "start_unit": "DAY", "end_unit": "SECOND"},
+            "interval day to second",
+        ),
+        ({"name": "array", "element_type": {"name": "bigint"}}, "array<bigint>"),
+        (
+            {
+                "name": "map",
+                "key_type": {"name": "string"},
+                "value_type": {"name": "decimal", "precision": 10, "scale": 2},
+            },
+            "map<string,decimal(10,2)>",
+        ),
+        (
+            {
+                "name": "struct",
+                "fields": [
+                    {"name": "id", "type": {"name": "bigint"}},
+                    {
+                        "name": "tags",
+                        "type": {
+                            "name": "array",
+                            "element_type": {"name": "string"},
+                        },
+                    },
+                ],
+            },
+            "struct<id:bigint,tags:array<string>>",
+        ),
+    ],
+)
+def test_render_type(type_info: dict[str, Any], expected: str) -> None:
+    assert DatabricksDatabase._render_type(type_info) == expected
+
+
 def test_a_table_without_constraints_yields_empty_key_frames() -> None:
     """Unity Catalog constraints are informational and often simply absent."""
     db, _issued = _describing_db([])
@@ -616,7 +830,7 @@ def test_describe_pass_runs_once_for_columns_pks_and_fks() -> None:
     # One SHOW TABLES + one DESCRIBE, not three of each.
     assert issued == [
         "SHOW TABLES IN `main`.`s`",
-        "DESCRIBE TABLE EXTENDED `main`.`s`.`orders`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`orders` AS JSON",
     ]
 
 
