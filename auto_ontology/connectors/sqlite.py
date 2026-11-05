@@ -132,7 +132,7 @@ class SQLiteDatabase(SQLDatabase):
             return pd.DataFrame()
         rows = cur.fetchall()
         return pd.DataFrame(
-            [dict(row) for row in rows], columns=[col[0] for col in cur.description]
+            [tuple(row) for row in rows], columns=[col[0] for col in cur.description]
         )
 
     def get_tables(self) -> pd.DataFrame:
