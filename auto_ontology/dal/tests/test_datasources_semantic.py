@@ -442,7 +442,10 @@ def test_tables_by_ids_withholds_sample_values_of_pii_columns(world) -> None:
     """Every caller puts these samples in a prompt; a PII column's must not go.
 
     Uses the real ``PII`` tag rather than a prefixed one: the read matches that
-    name, and the tag is shared and protected, so it is not cleaned up.
+    name, and the tag is shared and protected, so it is not cleaned up. Its
+    stored name is padded and re-cased for the read, since ``get_or_create_tag``
+    trims and would otherwise leave the query's folding untested; it is put back
+    afterwards for the other tests sharing the store.
     """
     for name in ("customers.customer_id", "customers.name"):
         store().query_write(
@@ -453,7 +456,12 @@ def test_tables_by_ids_withholds_sample_values_of_pii_columns(world) -> None:
     pii = get_or_create_tag(name=PII_TAG_NAME)
     _link(s.tag_target, tag_id=pii["id"], column_id=world.columns["customers.name"])
 
-    (row,) = d.fetch_tables_by_ids([world.tables["customers"]])
+    rename = s.tag.update().where(s.tag.c.id == pii["id"])
+    store().query_write(rename.values(name="  pIi  "))
+    try:
+        (row,) = d.fetch_tables_by_ids([world.tables["customers"]])
+    finally:
+        store().query_write(rename.values(name=pii["name"]))
     columns = {column["name"]: column for column in row["columns"]}
     # The column itself stays in the schema context; only its values go.
     assert columns["name"]["sample_values"] is None
