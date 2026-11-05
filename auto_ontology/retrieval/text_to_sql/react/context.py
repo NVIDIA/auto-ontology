@@ -27,6 +27,9 @@ class ToolContext:
     checks resolve names against, loaded on first use because a question that
     never drafts SQL should not pay for it.
 
+    ``retriever`` searches the semantic collection (definitions, analyses);
+    ``data_retriever`` the one tables and columns are embedded in.
+
     ``cost_status`` is for callers that charge for queries: it returns what the
     model has left to spend and what each action costs, read fresh each time
     because every query changes it. ``None`` when queries are free.
@@ -35,6 +38,7 @@ class ToolContext:
     retriever: Any
     connectors: list[SQLDatabase]
     database_name: str | None = None
+    data_retriever: Any = None
     numeric_type_alignment: bool = False
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     joined_pairs: set[frozenset[str]] = field(default_factory=set)

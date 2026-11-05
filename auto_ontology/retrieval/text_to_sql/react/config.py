@@ -39,9 +39,9 @@ def max_tool_calls() -> int:
     """Tool calls an episode may make before it has to answer.
 
     Sized for search, a follow-up search, a value check, a draft and a fix,
-    with room for one more of each. The design doc's v1 cap.
+    with room for one more of each.
     """
-    return _int_env("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", 12)
+    return _int_env("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", 24)
 
 
 def model_retries() -> int:
@@ -56,7 +56,7 @@ def model_retries() -> int:
 
 def max_sql_runs() -> int:
     """``run_sql`` calls allowed per episode, submissions excluded."""
-    return _int_env("TEXT_TO_SQL_REACT_MAX_SQL_RUNS", 6)
+    return _int_env("TEXT_TO_SQL_REACT_MAX_SQL_RUNS", 10)
 
 
 def max_observation_chars() -> int:
@@ -65,7 +65,7 @@ def max_observation_chars() -> int:
     A 10,000-column table cannot be shown, and a result that overflows the
     context window loses the question outright rather than answering it badly.
     """
-    return _int_env("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", 4000)
+    return _int_env("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", 8000)
 
 
 def max_result_rows() -> int:
