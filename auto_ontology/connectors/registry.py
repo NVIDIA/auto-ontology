@@ -25,6 +25,7 @@ from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.snowflake import SnowflakeDatabase
 from auto_ontology.connectors.sqlite import SQLiteDatabase
 from auto_ontology.connectors.trino import TrinoDatabase
+from auto_ontology.connectors.bigquery import BigQueryDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,8 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "kyuubi": KyuubiDatabase,
     "sqlite": SQLiteDatabase,
     "trino": TrinoDatabase,
+    "bigquery": BigQueryDatabase,
 }
-
 _connectors: list[SQLDatabase] | None = None
 
 
