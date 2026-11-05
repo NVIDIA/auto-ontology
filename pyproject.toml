@@ -13,7 +13,6 @@ dependencies = [
     "hvac>=2.4.0",
     # Capped at 1.3.4, the last release that accepts openai<2.45.0; see the openai pin.
     "langchain-openai>=1.3.0,<1.3.5",
-    "langgraph>=1.2.11",
     "pydantic>=2.13.5",
     # Kept below 3 until the code is tested against pandas 3; the cap used to be
     # forced by nemo-retriever.

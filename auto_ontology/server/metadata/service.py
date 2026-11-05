@@ -4,7 +4,7 @@
 
 """Orchestration for ``question-entity-coverage``.
 
-``entity_coverage`` runs a fast LangGraph that extracts entities, retrieves
+``entity_coverage`` runs a fast pipeline that extracts entities, retrieves
 semantic candidates, and returns a deterministic coverage grade.
 
 The pipeline shares retriever/connector state and is not safe to run in parallel

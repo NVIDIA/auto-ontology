@@ -183,21 +183,21 @@ def agent_wrapper(agent: BaseAgent):
     - Logging
     - State management
 
-    Usage in orchestrator/graph.py:
-        graph.add_node("node_name", agent_wrapper(MyAgent("my_agent")))
+    Usage in a pipeline:
+        nodes = {"node_name": agent_wrapper(MyAgent("my_agent"))}
 
     Args:
         agent: BaseAgent instance
 
     Returns:
-        Wrapped function compatible with LangGraph
+        A function from state to the node's output
     """
 
     def wrapped(state: AgentState) -> Dict[str, Any]:
         """
         Wrapped agent execution function.
 
-        This function is called by LangGraph for each agent node.
+        The pipeline calls this for each agent node.
         It provides error handling and logging around the agent's execute method.
         """
         # Validate input

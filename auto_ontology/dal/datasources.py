@@ -1015,12 +1015,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
     ``sample_values`` is what lets a SQL-generating model write a correct
     ``->``/``->>`` path into a JSONB column instead of guessing a plausible
-    sibling key — this is the only per-column field ``candidates_preparation``'s
-    "back-fill" step (§4a: any table whose columns arrived without
-    sample_values from the vector-index hit) exists to supply. It was
-    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
-    dropped it from this query's rewrite (the Neo4j Cypher version had it);
-    restored so the back-fill isn't a no-op again. ``is_nullable`` is included
+    sibling key. It was selected here from Aug 2026 until the
+    Neo4j-to-Postgres port silently dropped it from this query's rewrite (the
+    Neo4j Cypher version had it); restored so a table whose columns arrived
+    without sample_values from the vector-index hit can be back-filled. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` resolves the referenced attribute back to its owning column

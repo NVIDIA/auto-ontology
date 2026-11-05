@@ -3,32 +3,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-LangGraph agent state and API payload types.
+Agent state and API payload types.
 
-Kept separate from ``graph.py`` to avoid circular imports (agents import state;
-``graph`` imports agents).
+Kept separate from ``pipeline.py`` to avoid circular imports (agents
+import state; the pipeline imports agents).
 """
 
 from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from auto_ontology.utils.retriever import Retriever
 from auto_ontology.connectors.base import SQLDatabase
-
-
-class AgentPayload(TypedDict):
-    """Payload for the ingest/legacy retrieval flow (single retriever)."""
-
-    question: str
-    retriever: Retriever
-    path_state: NotRequired[dict]
-    connectors: NotRequired[list[SQLDatabase]]
-    acronyms: NotRequired[list[dict[str, str]]]
-    custom_prompts: NotRequired[str]
 
 
 class TextToSQLPayload(TypedDict):
@@ -36,86 +25,43 @@ class TextToSQLPayload(TypedDict):
 
     question: str
     evidence: NotRequired[str]
-    # Question/SQL pairs retrieved as structural precedent for this question,
-    # each a ``{"question": ..., "sql": ...}`` mapping. Unlike `evidence` these
-    # are advisory and usually come from *other* databases, so they inform
-    # query shape only — never identifiers or filter values.
-    sql_examples: NotRequired[list[dict[str, str]]]
-    value_anchors: NotRequired[list[dict[str, str]]]
-    # When true, intent preprocessing skips top-level type selection but still
-    # classifies the calculation subtype and extracts inline evidence.
-    calculation_only: NotRequired[bool]
-    shorten_answer: NotRequired[bool]
-    validate_sql_values: NotRequired[bool]
-    skip_evidence_refinement: NotRequired[bool]
     # For graders that compare numbers exactly: rewrite explicit float casts in
     # the generated Postgres SQL to NUMERIC (see ``numeric_types``).
     numeric_type_alignment: NotRequired[bool]
-    # The clarified/merged question on its own — no hint blocks or SQL
-    # references mixed in (unlike `evidence`, which carries those too).
-    # Omitted by callers that never enrich the question.
-    enriched_question: NotRequired[str]
     processing_question: NotRequired[str]
     data_retriever: Retriever
     semantic_retriever: NotRequired[Retriever]
     path_state: NotRequired[dict]
     connectors: NotRequired[list[SQLDatabase]]
+    target_db: NotRequired[str]
+    # Accepted from callers but not read by the ReAct agent.
+    sql_examples: NotRequired[list[dict[str, str]]]
+    value_anchors: NotRequired[list[dict[str, str]]]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
-    target_db: NotRequired[str]
-    # Prediction override: True forces prediction, False excludes prediction while
-    # still classifying as information/calculation, and None/absent classifies freely.
     prediction: NotRequired[bool | None]
 
 
-class RetryRestoreState(TypedDict):
-    """Immutable request boundary used to restart the full SQL pipeline."""
-
-    initial_question: str
-    evidence: str
-    messages: list[BaseMessage]
-    sql_examples: list[dict[str, str]]
-    value_anchors: list[dict[str, str]]
-    glossary: list[dict[str, str]]
-    path_state: dict
-
-
 class AgentState(TypedDict):
-    """State object passed through the LangGraph."""
+    """State object passed from node to node."""
 
     llm: ChatNVIDIA
     reasoning_llm: NotRequired[ChatNVIDIA]
     initial_question: str
     evidence: NotRequired[str]
-    sql_examples: NotRequired[list[dict[str, str]]]
-    value_anchors: NotRequired[list[dict[str, str]]]
-    calculation_only: bool
-    shorten_answer: bool
-    validate_sql_values: bool
-    skip_evidence_refinement: bool
     numeric_type_alignment: NotRequired[bool]
-    sql_value_validation_cache: dict
-    enriched_question: NotRequired[str]
     messages: list[HumanMessage]
     decision: str
-    # Caller-supplied branch override; see TextToSQLPayload.prediction.
-    prediction_override: NotRequired[bool | None]
     connectors: list[SQLDatabase]
     path_state: dict
     data_retriever: Retriever
     semantic_retriever: Retriever
-    domain_rules: list[dict[str, str]]
+    # Read by the entity-coverage pipeline, which shares this state type.
+    domain_rules: NotRequired[list[dict[str, str]]]
     # User-curated Glossary definitions (the ``acronyms`` table), kept apart from
     # domain_rules so prompts can inject them without the custom-analysis SQL.
     # After ``question_extraction``, this is narrowed to the entries the LLM used.
     glossary: NotRequired[list[dict[str, str]]]
-    restore_from: RetryRestoreState
-    full_pipeline_attempt: int
-
-
-def get_original_question(state: AgentState) -> str:
-    """Raw user question as submitted, without sanitization."""
-    return state.get("initial_question", "")
 
 
 def get_standalone_question(state: AgentState) -> str:
@@ -147,23 +93,9 @@ def get_question_for_processing(state: AgentState) -> str:
     return normalized_question or get_standalone_question(state)
 
 
-def rules_to_text(rules: list[dict[str, str]]) -> str:
-    """Convert a list of ``{"name": ..., "description": ...}`` rules to a prompt string."""
-    if not rules:
-        return ""
-    parts = []
-    for rule in rules:
-        parts.append(f"## {rule['name']}\n{rule['description']}")
-    return "\n\n".join(parts) + "\n\n"
-
-
 __all__ = [
-    "AgentPayload",
     "TextToSQLPayload",
-    "RetryRestoreState",
     "AgentState",
-    "get_original_question",
     "get_standalone_question",
     "get_question_for_processing",
-    "rules_to_text",
 ]

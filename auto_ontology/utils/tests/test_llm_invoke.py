@@ -78,7 +78,7 @@ def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:
 
 
 def _interleaved() -> list[BaseMessage]:
-    """The shape sql_from_semantic sends: system, user, system, system, user."""
+    """An interleaved shape: system, user, system, system, user."""
     return [
         SystemMessage(content="role"),
         HumanMessage(content="question"),

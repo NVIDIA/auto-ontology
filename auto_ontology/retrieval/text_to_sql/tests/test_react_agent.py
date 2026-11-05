@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from auto_ontology.retrieval.text_to_sql import text_to_sql_graph
+from auto_ontology.retrieval.text_to_sql import pipeline
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import QueryResponse
 from auto_ontology.retrieval.text_to_sql.react import agent as agent_module
 from auto_ontology.retrieval.text_to_sql.react.loop import EpisodeResult, Submission
@@ -52,7 +52,7 @@ def test_an_answer_is_handed_to_formatting(monkeypatch: pytest.MonkeyPatch) -> N
     assert path_state["thoughts_log"] == [
         {"node": "react_sql_agent", "text": "Searching for: revenue"}
     ]
-    assert text_to_sql_graph.route_react(result) == "format_and_respond"
+    assert pipeline.route_react(result) == "format_and_respond"
 
 
 def test_no_answer_is_reported_as_unconstructable(
@@ -67,35 +67,12 @@ def test_no_answer_is_reported_as_unconstructable(
     assert result["decision"] == "unconstructable"
     assert result["path_state"]["react_end_reason"] == "budget_exhausted"
     assert result["path_state"]["unconstructable_explanation"]
-    assert text_to_sql_graph.route_react(result) == "unconstructable_sql_response"
+    assert pipeline.route_react(result) == "unconstructable_sql_response"
 
 
-def test_flag_routes_fresh_questions_to_the_agent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEXT_TO_SQL_REACT", "true")
-    graph = text_to_sql_graph.create_graph()
-
-    assert "react_sql_agent" in graph.nodes
-    assert (
-        text_to_sql_graph._react_entry_router_fn({"path_state": {}})
-        == "react_sql_agent"
-    )
-    assert (
-        text_to_sql_graph._react_entry_router_fn(
-            {"path_state": {"_resume_from": "reconstruct_sql"}}
-        )
-        == "reconstruct_sql"
-    )
-
-
-def test_flag_off_keeps_the_fixed_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEXT_TO_SQL_REACT", "false")
-
-    assert "react_sql_agent" not in text_to_sql_graph.create_graph().nodes
-
-
-def test_agent_is_on_when_flag_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TEXT_TO_SQL_REACT", raising=False)
-
-    assert "react_sql_agent" in text_to_sql_graph.create_graph().nodes
+def test_the_pipeline_has_only_the_agent_and_its_two_outcomes() -> None:
+    assert set(pipeline.create_nodes()) == {
+        "react_sql_agent",
+        "format_and_respond",
+        "unconstructable_sql_response",
+    }

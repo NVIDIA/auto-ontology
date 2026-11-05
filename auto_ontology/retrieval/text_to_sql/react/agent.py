@@ -2,12 +2,10 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The graph node that answers a question with one ReAct episode.
+"""The pipeline node that answers a question with one ReAct episode.
 
-It replaces the whole fixed pipeline — intent, extraction, retrieval,
-preparation, construction, validation, execution and repair — and hands its
-result to ``format_and_respond`` in the shape that node already reads, so
-everything downstream of the answer is unchanged.
+It hands its result to ``format_and_respond`` in the shape that node reads, or
+to ``unconstructable_sql_response`` when the episode ends without an answer.
 """
 
 from __future__ import annotations

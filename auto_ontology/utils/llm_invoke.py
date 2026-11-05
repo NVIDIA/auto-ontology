@@ -428,8 +428,8 @@ def _system_messages_first(
     """Move every system message ahead of the conversation for Claude models.
 
     Claude takes a single system prompt ahead of the conversation, but agents
-    interleave them: ``sql_from_semantic`` sends system, user, system, system,
-    user, and a validation retry appends a system message after the user turn.
+    can interleave them, e.g. system, user, system, system, user, or a retry
+    that appends a system message after the user turn.
     On the inference-api gateway, ``azure/anthropic/*`` rejects every request
     with a system message after a user message, because the gateway attaches
     prompt-cache markers in an order Anthropic refuses::

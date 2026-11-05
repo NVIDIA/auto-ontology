@@ -4,8 +4,8 @@
 
 """One ReAct episode: the model calls tools until it submits a query.
 
-Plain Python, no LangGraph inside, so the same function serves a request in
-the graph and a rollout in an RL environment. Every message the model sees is
+Plain Python, so the same function serves a request in
+the pipeline and a rollout in an RL environment. Every message the model sees is
 built here and recorded in the trajectory, so a trajectory is exactly what was
 sent — which is what training on it needs.
 
@@ -140,9 +140,8 @@ def run_episode(
     dialect: str | None = None,
 ) -> EpisodeResult:
     """Run the model with the three tools until it submits or the budget ends."""
-    # The dialect rules the fixed pipeline gives its SQL writer (for MySQL: do
-    # not CAST or ROUND computed values, which changes the digits an exact
-    # grader compares), so the two paths write queries under the same rules.
+    # Dialect rules, e.g. for MySQL: do not CAST or ROUND computed values,
+    # which changes the digits an exact grader compares.
     system_prompt = prompts.SYSTEM_PROMPT.format(dialect=dialect or "SQL")
     dialect_rules = format_dialect_rules(dialect).strip()
     if dialect_rules:

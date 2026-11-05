@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat streaming endpoint — wraps the LangGraph text-to-SQL pipeline.
+"""Chat streaming endpoint — wraps the text-to-SQL pipeline.
 
 Each chat request runs in a prewarmed agent subprocess from
 ``WarmPool``. See ``worker.py`` for why subprocess isolation is

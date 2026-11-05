@@ -2,13 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""LangGraph for the entity-coverage pipeline."""
+"""The entity-coverage pipeline: question_extraction → retrieve_candidates → coverage_grade."""
 
 from __future__ import annotations
 
-import logging
-
-from langgraph.graph import END, StateGraph
+from typing import Any, Callable
 
 from auto_ontology.retrieval.entity_coverage.agents.coverage import CoverageGradeAgent
 from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (
@@ -20,30 +18,24 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_retrieval import (
 from auto_ontology.retrieval.text_to_sql.base import agent_wrapper
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
-logger = logging.getLogger(__name__)
+Node = Callable[[AgentState], dict[str, Any]]
 
 
-def create_graph() -> StateGraph:
-    """Build: question_extraction → retrieve_candidates → coverage_grade → END."""
-    graph = StateGraph(AgentState)
-
-    graph.add_node(
-        "question_extraction",
+def create_nodes() -> list[Node]:
+    """The steps in the order they run."""
+    return [
         agent_wrapper(QuestionExtractionAgent(include_subject=False)),
-    )
-    graph.add_node(
-        "retrieve_candidates",
         agent_wrapper(CandidateRetrievalAgent()),
-    )
-    graph.add_node(
-        "coverage_grade",
         agent_wrapper(CoverageGradeAgent()),
-    )
+    ]
 
-    graph.set_entry_point("question_extraction")
-    graph.add_edge("question_extraction", "retrieve_candidates")
-    graph.add_edge("retrieve_candidates", "coverage_grade")
-    graph.add_edge("coverage_grade", END)
 
-    logger.info("Entity-coverage graph created")
-    return graph
+def run(state: AgentState, nodes: list[Node]) -> AgentState:
+    """Run every step on a copy of ``state`` and return the final state.
+
+    Each step's output overwrites the matching top-level keys.
+    """
+    final_state = dict(state)
+    for node in nodes:
+        final_state.update(node(final_state) or {})  # type: ignore[arg-type]
+    return final_state  # type: ignore[return-value]

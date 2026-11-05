@@ -67,7 +67,7 @@ def _apply_debug_seed(
     *,
     debug_error: str | None = None,
 ) -> None:
-    """Prepare path_state to resume at reconstruct_sql with the submit feedback as context.
+    """Record the submit feedback in path_state for the debug turn.
 
     *debug_error* is an already-extracted DB error string the caller obtained
     from its own submit response (see `step`'s *turn_type* param) — a given
@@ -75,7 +75,6 @@ def _apply_debug_seed(
     "wrong results" case (SQL ran but the answer didn't match — no execution
     error to report).
     """
-    session.path_state["_resume_from"] = "reconstruct_sql"
     if debug_error is not None:
         session.path_state["error"] = debug_error
         logger.info("Debug seed: execution error → %s", debug_error[:200])
@@ -123,54 +122,6 @@ def _apply_debug_seed(
             "when the result values stay unchanged)."
         )
         logger.info("Debug seed: wrong results — injecting targeted hints")
-    # Preserve round 1's reconstruction lineage as read-only prompt context
-    # before wiping "failed_attempts" below — see sql_reconstruction.py's
-    # history_section, which renders "prior_round_failed_attempts" alongside
-    # this turn's own attempts so the debug turn's LLM can see e.g. "you
-    # already tried the flattened JSONB key and were told it was wrong"
-    # instead of reconstructing from scratch with no memory of round 1's
-    # fixes. This is deliberately a *separate* key from "failed_attempts":
-    # the routers in text_to_sql_graph.py (route_sql_validation,
-    # _make_soft_check_router) gate on len(failed_attempts), so carrying the
-    # round 1 list forward under that same key would eat into the fresh
-    # reconstruction budget the counter-reset below exists to guarantee.
-    # Content and count are tracked separately on purpose.
-    prior_round_failed_attempts = session.path_state.get("failed_attempts")
-    if prior_round_failed_attempts:
-        session.path_state["prior_round_failed_attempts"] = prior_round_failed_attempts
-
-    session.path_state["sql_attempts"] = 0
-    session.path_state["reconstruction_count"] = 0
-    session.path_state["error_analysis_done"] = False
-    # "failed_attempts" controls reconstruction and the unified validator's
-    # intent-LLM retry safeguard (len(failed_attempts) > 5). It must reset here
-    # too, or a debug turn inherits the attempt count from the PRIOR turn and
-    # can skip the intent phase almost immediately, cutting off the fresh
-    # repair budget this turn is supposed to get.
-    #
-    # "jsonb_path_repair_attempts" is JsonbPathCheckAgent's bounded counter
-    # (see jsonb_path_check.py, capped at _MAX_REPAIR_ATTEMPTS) — it stays at
-    # its capped value forever once exhausted in this phase, so without
-    # popping it here the debug turn's from-scratch reconstruction (which can
-    # reintroduce the exact class of bug the check already fixed, e.g.
-    # flattening a nested JSONB key back out) gets zero path-check coverage
-    # instead of the fresh attempt budget every other repair guard below
-    # already gets. "join_path_repair_attempts" is the analogous counter for
-    # JoinPathCheckAgent — same reasoning.
-    # "value_repair_attempted" (proactive_value_check.py, empty_result_value_repair.py),
-    # "null_jsonb_retry_attempted", and "empty_like_retry_attempted"
-    # (empty_like_result_check.py) are the same one-shot-per-phase shape —
-    # popped here so each repair gets its one fresh attempt on the new turn's
-    # SQL instead of silently no-opping because a prior turn already used it.
-    for key in (
-        "failed_attempts",
-        "jsonb_path_repair_attempts",
-        "join_path_repair_attempts",
-        "value_repair_attempted",
-        "null_jsonb_retry_attempted",
-        "empty_like_retry_attempted",
-    ):
-        session.path_state.pop(key, None)
 
 
 def _apply_follow_up_seed(
@@ -187,31 +138,13 @@ def _apply_follow_up_seed(
     follow_up_q = follow_up_question or ""
 
     # Clear Phase 1 SQL artifacts; keep relevant_tables as merge hints.
-    # Also clear similar_questions so Phase 1 VDB-retrieved examples don't bleed in —
-    # Phase 1 context is injected explicitly via the follow-up instruction block instead.
-    #
-    # The repair/one-shot-guard keys (failed_attempts through
-    # empty_like_retry_attempted) reset here for the same reason
-    # _apply_debug_seed resets them: Phase 2 asks a fresh question
-    # and gets a fresh repair budget.
     for key in (
         "normalized_question",
         "sql_code",
         "sql_generation_result",
         "error",
-        "sql_attempts",
-        "reconstruction_count",
-        "error_analysis_done",
-        "_resume_from",
         "final_response",
         "sql_response_from_db",
-        "similar_questions",
-        "failed_attempts",
-        "jsonb_path_repair_attempts",
-        "join_path_repair_attempts",
-        "value_repair_attempted",
-        "null_jsonb_retry_attempted",
-        "empty_like_retry_attempted",
     ):
         session.path_state.pop(key, None)
 
@@ -417,37 +350,21 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     payload: TextToSQLPayload = {
         "question": question,
         "evidence": evidence,
-        # Same merged/clarified question that expanded_question_note carries
-        # into evidence above, minus the hint blocks and SQL reference —
-        # for consumers (e.g. the relevance filter) that want the clarified
-        # intent but not sort/scalar/output-shape noise.
-        "enriched_question": (
-            session.working_question if session.working_question != question else ""
-        ),
         "data_retriever": session.data_retriever,
         "semantic_retriever": session.semantic_retriever,
         "connectors": session.connectors,
         "path_state": dict(
             session.path_state
         ),  # copy so Auto Ontology doesn't mutate in place
-        "acronyms": [],
-        "custom_prompts": combined_knowledge,  # full union as low-priority fallback
-        "calculation_only": True,
-        "shorten_answer": True,
-        "validate_sql_values": True,
         # The grader compares numbers exactly, so a float and a numeric holding
         # the same value disagree: keep our explicit casts on the numeric side.
         "numeric_type_alignment": session.numeric_type_alignment,
-        "skip_evidence_refinement": session.skip_evidence_refinement,
     }
     result = get_agent_response_with_state(payload)
 
     # Merge returned path_state back into durable session path_state
     if returned_ps := result.get("path_state"):
         session.path_state.update(returned_ps)
-
-    # Clear resume_from after use so next call goes through full pipeline
-    session.path_state.pop("_resume_from", None)
 
     return result.get("sql_code", "")
 

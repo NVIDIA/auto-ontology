@@ -64,7 +64,7 @@ def test_ground_passes_question_and_kg_to_prompt():
     assert "churn rate" in prompt_text
 
 
-# ── wiring: _run_sql_generation injects grounded_kb into custom_prompts ───────
+# ── wiring: _run_sql_generation grounds the evidence in the KB ────────────────
 #
 # coordinator._run_sql_generation does a lazy `from auto_ontology.retrieval.text_to_sql.main import ...`
 # which triggers module-level LLM client initialisation (requires REASONING_API_KEY).
@@ -84,7 +84,7 @@ def _make_fake_t2s_state():
     return mod
 
 
-def test_run_sql_generation_sets_custom_prompts():
+def test_run_sql_generation_grounds_evidence_in_the_kb():
     from auto_ontology.retrieval.interactive.coordinator import _run_sql_generation
     from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
@@ -118,7 +118,7 @@ def test_run_sql_generation_sets_custom_prompts():
         patch(
             "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
             return_value="",
-        ),
+        ) as generate_evidence,
     ):
         sys.modules["auto_ontology.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
             fake_get_agent_response
@@ -132,11 +132,12 @@ def test_run_sql_generation_sets_custom_prompts():
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.main", None)
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.state", None)
 
-    assert captured_payload.get("custom_prompts") != ""
-    assert "PPR" in captured_payload["custom_prompts"]
+    knowledge = generate_evidence.call_args.args[1]
+    assert "PPR" in knowledge
+    assert captured_payload["question"] == "What is the average PPR?"
 
 
-def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
+def test_run_sql_generation_empty_kg_grounds_nothing():
     from auto_ontology.retrieval.interactive.coordinator import _run_sql_generation
     from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
@@ -158,9 +159,15 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
 
     mock_llm = MagicMock()
 
-    with patch(
-        "auto_ontology.retrieval.interactive.coordinator._get_fast_llm",
-        return_value=mock_llm,
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._get_fast_llm",
+            return_value=mock_llm,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
+            return_value="",
+        ) as generate_evidence,
     ):
         sys.modules["auto_ontology.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
             fake_get_agent_response
@@ -174,5 +181,6 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.main", None)
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.state", None)
 
-    assert captured_payload.get("custom_prompts") == ""
+    assert generate_evidence.call_args.args[1] == ""
+    assert captured_payload["question"] == "How many panels?"
     mock_llm.invoke.assert_not_called()

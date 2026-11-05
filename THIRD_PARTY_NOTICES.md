@@ -36,7 +36,6 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | langchain-nvidia-ai-endpoints | >=1.4.3 | MIT | https://github.com/langchain-ai/langchain-nvidia |
 | langchain-openai | >=1.3.0,<1.3.5 | MIT | https://github.com/langchain-ai/langchain |
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
-| LangGraph | >=1.2.11 | MIT | https://github.com/langchain-ai/langgraph |
 | mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
 | NumPy | >=2.5.2 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | https://github.com/numpy/numpy |
 | openai | ==2.44.0 | Apache-2.0 | https://github.com/openai/openai-python |

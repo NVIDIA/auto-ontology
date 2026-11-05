@@ -2,8 +2,4 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A ReAct text-to-SQL agent: retrieve, run_sql and submit, with the model in control.
-
-On unless ``TEXT_TO_SQL_REACT`` is set to something other than a true value; see
-:mod:`.config`.
-"""
+"""A ReAct text-to-SQL agent: retrieve, run_sql and submit, with the model in control."""
