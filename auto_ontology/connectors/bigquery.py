@@ -173,19 +173,18 @@ class BigQueryDatabase(SQLDatabase):
     def get_fks(self) -> pd.DataFrame:
         query = f"""
         SELECT 
-            k1.table_schema,
-            k1.table_name,
-            k1.column_name,
-            k2.table_schema AS referenced_schema,
-            k2.table_name AS referenced_table,
-            k2.column_name AS referenced_column
-        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k1
-        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k2
-            ON k1.constraint_name = k2.constraint_name
-            AND k1.position_in_unique_constraint = k2.ordinal_position
-        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS` c
-            ON k1.constraint_name = c.constraint_name
-        WHERE c.constraint_type = 'FOREIGN KEY'
+            k.table_schema,
+            k.table_name,
+            k.column_name,
+            c.table_schema AS referenced_schema,
+            c.table_name AS referenced_table,
+            c.column_name AS referenced_column
+        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS` tc
+            ON k.constraint_name = tc.constraint_name
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE` c
+            ON k.constraint_name = c.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
         """
         try:
             return self.execute(query)
