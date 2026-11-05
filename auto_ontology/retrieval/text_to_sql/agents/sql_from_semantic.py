@@ -37,10 +37,12 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_entity_tables_for_prompt,
     format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
 )
+from auto_ontology.retrieval.text_to_sql.table_ranking import unique_entities
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -307,6 +309,14 @@ class SQLFromCandidatesAgent(BaseAgent):
                 if relevant_tables
                 else "No tables available."
             )
+            entities_section = format_entity_tables_for_prompt(
+                relevant_tables,
+                unique_entities(path_state.get("entities") or []),
+                target_db=target_db,
+                dialect=dialect,
+            )
+            if entities_section:
+                tables_section += f"\n\n{entities_section}"
             important_columns = format_important_columns_for_prompt(
                 primary_attribute,
                 attribute_join_paths,

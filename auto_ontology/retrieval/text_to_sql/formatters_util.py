@@ -370,6 +370,62 @@ def _format_entity_matches(matches: Any, names_by_id: dict[str, str]) -> str:
     return f"matches: {'; '.join(parts)}" if parts else ""
 
 
+def _full_table_name(table: dict, target_db: str | None, dialect: str | None) -> str:
+    return qualify_table(
+        table.get("database_name") or target_db or "",
+        table.get("schema_name", ""),
+        table.get("name", "UNKNOWN"),
+        dialect,
+    )
+
+
+def format_entity_tables_for_prompt(
+    tables: list[dict],
+    entities: list[str] | None = None,
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """An ENTITIES section: each question entity with its matching tables, best first.
+
+    Built from the ``entity_matches`` that
+    :func:`~auto_ontology.retrieval.text_to_sql.table_ranking.rank_tables_by_entity`
+    puts on *tables*, and naming each table exactly as
+    :func:`format_tables_for_prompt` does. Entities follow *entities* order;
+    any others follow in the order their tables appear. ``""`` when no table
+    carries a match.
+    """
+    per_entity: dict[str, list[tuple[int, int, str]]] = {}
+    for position, table in enumerate(tables or []):
+        matches = table.get("entity_matches")
+        if not isinstance(matches, list):
+            continue
+        name = _full_table_name(table, target_db, dialect)
+        for match in matches:
+            if not isinstance(match, dict) or not match.get("entity"):
+                continue
+            label = name
+            if match.get("column"):
+                label += f" (via {_plain_cell(match['column'])})"
+            rank = match.get("rank")
+            per_entity.setdefault(match["entity"], []).append(
+                (rank if isinstance(rank, int) else len(tables), position, label)
+            )
+    if not per_entity:
+        return ""
+
+    ordered = [e for e in entities or [] if e in per_entity]
+    ordered += [e for e in per_entity if e not in ordered]
+    lines = [
+        "ENTITIES (each entity in the question and the tables above that carry "
+        "it, best match first; prefer the first table unless the question needs "
+        "a column only a later one has):"
+    ]
+    for entity in ordered:
+        ranked = ", ".join(label for *_, label in sorted(per_entity[entity]))
+        lines.append(f'- "{_plain_cell(entity)}": {ranked}')
+    return "\n".join(lines)
+
+
 def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
@@ -393,12 +449,7 @@ def format_tables_for_prompt(
         return "No tables available"
 
     def full_name_of(table: dict) -> str:
-        return qualify_table(
-            table.get("database_name") or target_db or "",
-            table.get("schema_name", ""),
-            table.get("name", "UNKNOWN"),
-            dialect,
-        )
+        return _full_table_name(table, target_db, dialect)
 
     names_by_id = {str(t["id"]): full_name_of(t) for t in tables if t.get("id")}
 

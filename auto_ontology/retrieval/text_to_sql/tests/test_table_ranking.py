@@ -7,6 +7,7 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_entity_tables_for_prompt,
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.table_ranking import (
@@ -60,12 +61,13 @@ def test_each_entity_marks_its_best_table_and_points_alternatives_at_it() -> Non
 
     assert [t["id"] for t in ranked] == ["orders", "order_history"]
     assert ranked[0]["entity_matches"] == [
-        {"entity": "order", "column": "ORDER_DATE", "best": True}
+        {"entity": "order", "column": "ORDER_DATE", "rank": 1, "best": True}
     ]
     assert ranked[1]["entity_matches"] == [
         {
             "entity": "order",
             "column": "ORDER_DATE",
+            "rank": 2,
             "best": False,
             "best_table_id": "orders",
         }
@@ -142,6 +144,33 @@ def test_prompt_has_no_entity_note_without_matches() -> None:
 
     assert "Tables are ordered" not in rendered
     assert "matches:" not in rendered
+
+
+def test_entities_section_lists_each_entitys_tables_best_first() -> None:
+    tables = rank_tables_by_entity(
+        [_table("order_history"), _table("customers"), _table("orders")],
+        {
+            "customer": {"customers": _hit(0.3, "NAME")},
+            "order": {
+                "order_history": _hit(0.4, "ORDER_DATE"),
+                "orders": _hit(0.2, "ORDER_DATE"),
+                "customers": _hit(0.6, "LAST_ORDER"),
+            },
+        },
+        ["order", "customer"],
+    )
+
+    rendered = format_entity_tables_for_prompt(tables, ["order", "customer"])
+
+    assert rendered.splitlines()[1:] == [
+        '- "order": public.orders (via ORDER_DATE), '
+        "public.order_history (via ORDER_DATE), public.customers (via LAST_ORDER)",
+        '- "customer": public.customers (via NAME)',
+    ]
+
+
+def test_entities_section_is_empty_without_matches() -> None:
+    assert format_entity_tables_for_prompt([_table("t1")], ["order"]) == ""
 
 
 def test_hub_siblings_are_capped_by_shared_entity_scores() -> None:

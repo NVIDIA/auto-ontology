@@ -129,8 +129,9 @@ def rank_tables_by_entity(
     order, so the result is deterministic.
 
     Every matched table gets ``entity_matches``: one entry per entity it
-    matches, with the matching column, whether it is that entity's best table,
-    and otherwise the id of the table that is. The input dicts are not mutated.
+    matches, with the matching column, its 1-based rank among that entity's
+    tables, whether it is that entity's best table, and otherwise the id of
+    the table that is. The input dicts are not mutated.
     """
     if not tables or not scores:
         return list(tables)
@@ -166,10 +167,11 @@ def rank_tables_by_entity(
     matches: dict[str, list[dict[str, Any]]] = {}
     for entity, ranked in ranked_per_entity:
         best_id = ranked[0]
-        for table_id in ranked:
+        for rank, table_id in enumerate(ranked, start=1):
             entry: dict[str, Any] = {
                 "entity": entity,
                 "column": scores[entity][table_id]["column"],
+                "rank": rank,
                 "best": table_id == best_id,
             }
             if table_id != best_id:
