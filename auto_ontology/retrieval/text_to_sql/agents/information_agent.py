@@ -163,11 +163,12 @@ observations. Never invent tables, columns, formulas, descriptions, or relations
 
 Available tools:
 - list_databases: catalog databases (the root of the lazy data tree).
-- list_schemas: schemas for a database_id.
+- list_schemas: schemas for a database_id or database_name.
 - list_tables: tables for a schema_id.
 - list_columns: a bounded column page for a table_id, with skip/limit.
 - get_dataset: dataset identity plus bounded schemas and tables.
 - get_table: table details, columns, semantic attributes, and connected tables.
+  Accepts table_id or table_name (with optional database_name for scoping).
 - get_column: column details, calculation/semantic attributes, owning table, and
   connected tables.
 - get_table_semantic_fks: semantic foreign-key connections for a table.
@@ -180,9 +181,10 @@ Available tools:
 - search_semantic_layer: vector-search Terms, ColumnAttributes, SqlAttributes, and
   CustomAnalyses when the supplied candidates do not identify the right metadata.
 
-Prefer IDs already present in candidates or observations. Use the dataset name to
-scope name lookups. Prefer exact metadata tools over vector search when an ID or exact
-name is known. If the user asks how a measure is calculated or defined, report
+Prefer IDs already present in candidates or observations. When the initial context
+includes a dataset name, use it with list_schemas(database_name=...) or
+get_dataset(dataset_name=...) to retrieve schemas and tables directly. Prefer exact
+metadata tools over vector search when an ID or exact name is known. If the user asks how a measure is calculated or defined, report
 its description/formula or SQL semantic attributes, owning table/column, and connected
 tables. If the user asks which columns a table has, list them and its connected tables.
 State clearly when metadata is missing or ambiguous.

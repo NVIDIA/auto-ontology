@@ -162,12 +162,22 @@ def list_schemas(
     *,
     database_id: str | None = None,
     dataset_id: str | None = None,
+    database_name: str | None = None,
     **_: Any,
 ) -> dict[str, Any]:
     """Return schemas directly beneath one database."""
     resolved_id = database_id or dataset_id
+    if not resolved_id and database_name:
+        # Look up database by name when ID is not provided
+        databases = fetch_databases()
+        matches = [
+            db for db in databases
+            if db.get("name", "").lower() == database_name.lower()
+        ]
+        if matches:
+            resolved_id = matches[0]["id"]
     if not resolved_id:
-        return _error("invalid_arguments", "Provide database_id.")
+        return _error("invalid_arguments", "Provide database_id or database_name.")
     result = fetch_schemas_for_database(resolved_id)
     if result is None:
         return _error(
