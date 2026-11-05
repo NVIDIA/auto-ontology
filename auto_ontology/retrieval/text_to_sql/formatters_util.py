@@ -342,6 +342,34 @@ def _column_row(column: Any) -> dict[str, str]:
     }
 
 
+_ENTITY_MATCH_NOTE = (
+    "Tables are ordered by how well they match the question's entities, each "
+    "entity's best table first. When several tables match the same entity, use "
+    "the one marked best match unless the question needs a column only another "
+    "one has."
+)
+
+
+def _format_entity_matches(matches: Any, names_by_id: dict[str, str]) -> str:
+    """One ``matches:`` line naming each entity this table matches, and how well."""
+    if not isinstance(matches, list) or not matches:
+        return ""
+    parts = []
+    for match in matches:
+        if not isinstance(match, dict) or not match.get("entity"):
+            continue
+        part = f'"{_plain_cell(match["entity"])}"'
+        if match.get("column"):
+            part += f" via {_plain_cell(match['column'])}"
+        if match.get("best"):
+            part += " (best match)"
+        else:
+            better = names_by_id.get(str(match.get("best_table_id") or ""))
+            part += f" (better match: {better})" if better else " (weaker match)"
+        parts.append(part)
+    return f"matches: {'; '.join(parts)}" if parts else ""
+
+
 def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
@@ -364,13 +392,23 @@ def format_tables_for_prompt(
     if not tables:
         return "No tables available"
 
+    def full_name_of(table: dict) -> str:
+        return qualify_table(
+            table.get("database_name") or target_db or "",
+            table.get("schema_name", ""),
+            table.get("name", "UNKNOWN"),
+            dialect,
+        )
+
+    names_by_id = {str(t["id"]): full_name_of(t) for t in tables if t.get("id")}
+
     formatted_tables = []
+    if any(table.get("entity_matches") for table in tables):
+        formatted_tables.append(_ENTITY_MATCH_NOTE)
     for table in tables:
         table_name = table.get("name", "UNKNOWN")
         table_label = table.get("label", "")
-        database_name = table.get("database_name") or target_db or ""
-        schema_name = table.get("schema_name", "")
-        full_name = qualify_table(database_name, schema_name, table_name, dialect)
+        full_name = full_name_of(table)
         blocks = [
             _pipe_table(
                 _TABLE_HEADERS,
@@ -386,6 +424,9 @@ def format_tables_for_prompt(
                 ],
             )
         ]
+        entity_line = _format_entity_matches(table.get("entity_matches"), names_by_id)
+        if entity_line:
+            blocks.append(entity_line)
 
         columns = table.get("columns")
         if not isinstance(columns, list):

@@ -52,7 +52,6 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
-from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.formatters_util import qualify_table
 from auto_ontology.retrieval.text_to_sql.models import (
@@ -66,6 +65,13 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
+)
+from auto_ontology.retrieval.text_to_sql.table_ranking import (
+    EntityTableScores,
+    best_score_across_entities,
+    rank_tables_by_entity,
+    score_tables_by_entity,
+    unique_entities,
 )
 from auto_ontology.retrieval.text_to_sql.value_anchors import (
     anchor_tables_missing_from_scope,
@@ -109,11 +115,12 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
 # see _rank_and_cap_hub_siblings' docstring.
 _HUB_SIBLING_CAP = int(os.environ.get("HUB_SIBLING_CAP", "6"))
 
-# How many ColumnAttribute hits to pull per entity when scoring hub siblings
-# for the rank — generous relative to per-hub sibling counts (median 2, rare
-# mega-hubs up to ~20) so a sibling several entities down the ranking still
-# has a chance to be seen, without unbounded index-scan cost.
-_HUB_SIBLING_RANK_K = 30
+# On by default: reorders the final tables round-robin across entities and
+# marks each entity's best table (see table_ranking). Costs one ColumnAttribute
+# search per entity, which the hub-sibling rank shares when both are on.
+_ENTITY_TABLE_RANKING_ENABLED = os.environ.get(
+    "ENTITY_TABLE_RANKING_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes")
 
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
 #: wide candidate set cannot starve the rest of the request.
@@ -283,7 +290,8 @@ class CandidatePreparationAgent(BaseAgent):
         # Extra-table retrieval only needs the question + entities — independent
         # of the anchor-column LLM/join-path work below. Kick it off in the
         # background so the two multi-second steps overlap instead of stacking.
-        extra_pool = ThreadPoolExecutor(max_workers=1)
+        entities = unique_entities(path_state.get("entities") or [])
+        extra_pool = ThreadPoolExecutor(max_workers=2)
         extra_future = extra_pool.submit(
             self._retrieve_additional_tables,
             state.get("data_retriever"),
@@ -291,6 +299,26 @@ class CandidatePreparationAgent(BaseAgent):
             path_state.get("entities") or [],
             target_db,
         )
+        scores_future = (
+            extra_pool.submit(
+                score_tables_by_entity,
+                state.get("data_retriever"),
+                entities,
+                target_db,
+            )
+            if entities
+            and (_ENTITY_TABLE_RANKING_ENABLED or _HUB_SIBLING_EXPANSION_ENABLED)
+            else None
+        )
+
+        def entity_scores() -> EntityTableScores:
+            if scores_future is None:
+                return {}
+            try:
+                return scores_future.result()
+            except Exception:
+                self.logger.warning("Entity table scoring failed", exc_info=True)
+                return {}
 
         # --- 2. Enrich ColumnAttributes with store context and build join paths ---
         primary_attribute: dict | None = None
@@ -399,11 +427,9 @@ class CandidatePreparationAgent(BaseAgent):
                         )
                         hub_sibling_hops, hub_sibling_truncated = (
                             self._rank_and_cap_hub_siblings(
-                                state,
-                                path_state.get("entities") or [],
-                                target_db,
                                 hub_sibling_hops,
                                 cap=_HUB_SIBLING_CAP,
+                                scores=entity_scores(),
                             )
                         )
                         if hub_sibling_hops:
@@ -658,6 +684,19 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in forced_tables],
             )
 
+        if _ENTITY_TABLE_RANKING_ENABLED:
+            anchor_table_id = (
+                attr_contexts.get(primary_attribute["id"], {}).get("table_id")
+                if primary_attribute
+                else None
+            )
+            relevant_tables = rank_tables_by_entity(
+                relevant_tables,
+                entity_scores(),
+                entities,
+                lead_table_id=str(anchor_table_id) if anchor_table_id else None,
+            )
+
         self.logger.info(
             "Final %d table(s) reaching SQL generation: %s",
             len(relevant_tables),
@@ -720,11 +759,9 @@ class CandidatePreparationAgent(BaseAgent):
 
     def _rank_and_cap_hub_siblings(
         self,
-        state: AgentState,
-        entities: list[str],
-        target_db: str | None,
         hub_sibling_hops: list[dict],
         cap: int,
+        scores: EntityTableScores,
     ) -> tuple[list[dict], int]:
         """Rank a hub's sibling tables by embedding similarity to the
         question's extracted entities, then cap — replacing
@@ -742,21 +779,17 @@ class CandidatePreparationAgent(BaseAgent):
         dropped table was usually still a strong match once actually
         compared against the question — it just never got the chance.
 
-        Scoring reuses the exact same vector index and per-entity search
-        ``candidate_retrieval`` already runs every turn (``ColumnAttribute``
-        label, same retriever) — no LLM call, and no new embedding calls
-        beyond what this turn already pays for elsewhere; only the
-        request/response size for these specific lookups is new. For each
-        sibling table, its score is the *best* (lowest-distance) hit across
-        all entities among that table's own ColumnAttributes — i.e. "does
-        any extracted entity match any column on this table well" — not a
-        weighted blend across entities, to keep this cheap and legible.
-        The hub itself is never scored or dropped (see
-        ``find_anchor_hub_siblings``'s docstring for why it's always kept).
+        *scores* are the per-entity table scores from
+        :func:`~auto_ontology.retrieval.text_to_sql.table_ranking.score_tables_by_entity`,
+        shared with the final table ranking. A sibling's score is its *best*
+        (lowest-distance) hit across all entities — "does any extracted entity
+        match any column on this table well". The hub itself is never scored
+        or dropped (see ``find_anchor_hub_siblings``'s docstring for why it's
+        always kept).
 
-        Falls back to the prior (unranked, arbitrary-order) cap on any
-        failure — retriever missing, search error, etc. — so this can only
-        ever do as well as or better than the old behavior, never worse.
+        Falls back to the prior unranked cap when *scores* is empty (no
+        entities, retriever missing, search error), so this can only ever do
+        as well as or better than the old behavior, never worse.
 
         Returns ``(kept_hops, truncated_count)`` in the same shape
         ``find_anchor_hub_siblings`` returns.
@@ -764,58 +797,17 @@ class CandidatePreparationAgent(BaseAgent):
         hub_entries = [h for h in hub_sibling_hops if h.get("is_hub")]
         sibling_entries = [h for h in hub_sibling_hops if not h.get("is_hub")]
 
-        def _unranked_fallback() -> tuple[list[dict], int]:
+        if len(sibling_entries) <= cap or not scores:
             kept = sibling_entries[:cap]
             return hub_entries + kept, len(sibling_entries) - len(kept)
 
-        if len(sibling_entries) <= cap or not entities:
-            return _unranked_fallback()
-
-        retriever = state.get("data_retriever")
-        if retriever is None:
-            return _unranked_fallback()
-
-        sibling_table_ids = {h["id"] for h in sibling_entries if h.get("id")}
-        best_score: dict[str, float] = {}
-        try:
-            for entity in entities:
-                rows = search_semantic_index(
-                    retriever,
-                    entity,
-                    label_filter=["ColumnAttribute"],
-                    per_label_k=_HUB_SIBLING_RANK_K,
-                    database_name=target_db,
-                )
-                attr_ids = [r["id"] for r in rows if r.get("id")]
-                if not attr_ids:
-                    continue
-                ctx = fetch_attr_column_contexts(
-                    attr_ids,
-                    database_name=target_db,
-                )
-                for r in rows:
-                    c = ctx.get(r.get("id"))
-                    tid = c.get("table_id") if c else None
-                    if tid not in sibling_table_ids:
-                        continue
-                    score = r.get("score")
-                    if score is None:
-                        continue
-                    if tid not in best_score or score < best_score[tid]:
-                        best_score[tid] = score
-        except Exception:
-            self.logger.warning(
-                "Hub-sibling relevance ranking failed — falling back to unranked cap",
-                exc_info=True,
-            )
-            return _unranked_fallback()
-
+        best_score = best_score_across_entities(scores)
         # Siblings with no scored hit at all (never matched any entity)
         # sort last rather than being dropped outright — they still get a
         # chance to fill remaining cap slots after scored ones.
         ranked = sorted(
             sibling_entries,
-            key=lambda h: best_score.get(h.get("id"), float("inf")),
+            key=lambda h: best_score.get(str(h.get("id") or ""), float("inf")),
         )
         kept = ranked[:cap]
         truncated = len(sibling_entries) - len(kept)
