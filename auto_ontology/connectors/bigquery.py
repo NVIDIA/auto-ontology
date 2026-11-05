@@ -32,7 +32,7 @@ class BigQueryDatabase(SQLDatabase):
         self,
         connection_url_or_project: str,
         dataset_id: Optional[str] = None,
-        location: str = "US",
+        location: Optional[str] = None,
         credentials_json: Optional[str] = None,
         credentials_file: Optional[str] = None,
         maximum_bytes_billed: Optional[int] = 10737418240,
@@ -42,7 +42,8 @@ class BigQueryDatabase(SQLDatabase):
             self.project_id = parsed.netloc
             self.dataset_id = parsed.path.strip("/")
             params = parse_qs(parsed.query)
-            self.location = params.get("location", [location])[0]
+            loc_val = params.get("location", [None])[0]
+            self.location = loc_val.strip() if loc_val and loc_val.strip() else location
         else:
             self.project_id = connection_url_or_project
             self.dataset_id = dataset_id or ""
@@ -80,12 +81,14 @@ class BigQueryDatabase(SQLDatabase):
         if parameters:
             query_params = []
             for p in parameters:
-                if isinstance(p, int):
+                if p is None:
+                    query_params.append(bigquery.ScalarQueryParameter(None, "STRING", None))
+                elif isinstance(p, bool):  # Check bool before int
+                    query_params.append(bigquery.ScalarQueryParameter(None, "BOOL", p))
+                elif isinstance(p, int):
                     query_params.append(bigquery.ScalarQueryParameter(None, "INT64", p))
                 elif isinstance(p, float):
                     query_params.append(bigquery.ScalarQueryParameter(None, "FLOAT64", p))
-                elif isinstance(p, bool):
-                    query_params.append(bigquery.ScalarQueryParameter(None, "BOOL", p))
                 else:
                     query_params.append(bigquery.ScalarQueryParameter(None, "STRING", str(p)))
             config.query_parameters = query_params
@@ -110,7 +113,11 @@ class BigQueryDatabase(SQLDatabase):
         SELECT 
             table_schema,
             table_name,
-            table_type
+            CASE 
+                WHEN table_type = 'VIEW' THEN 'view'
+                WHEN table_type = 'BASE TABLE' THEN 'table'
+                ELSE LOWER(table_type)
+            END AS table_type
         FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.TABLES`
         """
         return self.execute(query)
@@ -118,12 +125,15 @@ class BigQueryDatabase(SQLDatabase):
     def get_columns(self) -> pd.DataFrame:
         query = f"""
         SELECT 
-            table_schema,
-            table_name,
-            column_name,
-            data_type,
-            (is_nullable = 'YES') AS is_nullable
-        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.COLUMNS`
+            c.table_schema,
+            c.table_name,
+            c.column_name,
+            c.data_type,
+            (c.is_nullable = 'YES') AS is_nullable,
+            COALESCE(p.description, '') AS description
+        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.COLUMNS` c
+        LEFT JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` p
+            ON c.table_name = p.table_name AND c.column_name = p.column_name
         """
         return self.execute(query)
 
@@ -135,19 +145,45 @@ class BigQueryDatabase(SQLDatabase):
             view_definition
         FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.VIEWS`
         """
-        try:
-            return self.execute(query)
-        except Exception:
-            return pd.DataFrame(columns=["table_schema", "table_name", "view_definition"])
+        return self.execute(query)
 
-    def get_queries(self) -> pd.DataFrame:
+    def get_queries(self, hours: int = 24) -> pd.DataFrame:
         return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_pks(self) -> pd.DataFrame:
-        return pd.DataFrame(columns=["table_schema", "table_name", "column_name", "pk_name"])
+        query = f"""
+        SELECT 
+            k.table_schema,
+            k.table_name,
+            k.column_name,
+            k.ordinal_position
+        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS` c
+            ON k.constraint_name = c.constraint_name
+        WHERE c.constraint_type = 'PRIMARY KEY'
+        """
+        try:
+            return self.execute(query)
+        except Exception:
+            return pd.DataFrame(columns=["table_schema", "table_name", "column_name", "ordinal_position"])
 
     def get_fks(self) -> pd.DataFrame:
-        return pd.DataFrame(columns=["table_schema", "table_name", "column_name", "foreign_table_schema", "foreign_table_name", "foreign_column_name", "fk_name"])
+        query = f"""
+        SELECT 
+            k.table_schema,
+            k.table_name,
+            k.column_name,
+            r.unique_constraint_schema AS referenced_schema,
+            r.unique_constraint_name AS referenced_table,
+            k.column_name AS referenced_column
+        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` r
+            ON k.constraint_name = r.constraint_name
+        """
+        try:
+            return self.execute(query)
+        except Exception:
+            return pd.DataFrame(columns=["table_schema", "table_name", "column_name", "referenced_schema", "referenced_table", "referenced_column"])
 
     def execute(self, query: str, parameters: Optional[list] = None) -> pd.DataFrame:
         job_config = self._get_job_config(parameters)
