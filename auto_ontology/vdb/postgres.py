@@ -521,6 +521,12 @@ class PostgresVDB:
         applied to the declared metadata columns; passed straight through to
         ``PGVectorStore.similarity_search_with_score_by_vector``.
 
+        Failures are isolated per query: a query whose similarity search
+        raises logs the error and yields ``[]`` for that query only — hits
+        already gathered for earlier queries are kept, and later queries are
+        still attempted. The failed query is therefore distinguishable from
+        the other results instead of emptying the whole batch.
+
         Requires an ``embeddings`` instance from the constructor.
         """
         store = self._get_store()
@@ -535,7 +541,7 @@ class PostgresVDB:
         _started = time.perf_counter()
 
         results: list[list[dict]] = []
-        for query in queries:
+        for i, query in enumerate(queries):
             try:
                 hits = store.similarity_search_with_score_by_vector(
                     embedding=query,
@@ -553,8 +559,8 @@ class PostgresVDB:
                     ]
                 )
             except Exception as e:
-                logger.error(f"Error in retrieval: {e}")
-                return [[] for _ in queries]
+                logger.error(f"Error in retrieval for query {i}: {e}")
+                results.append([])
 
         logger.debug(
             "vdb.retrieval total=%.3fs queries=%d pool=%s",
