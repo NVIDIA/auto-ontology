@@ -204,7 +204,7 @@ databases:
 3. Resolve relationships: infer joins between tables and bridge tables, and
    suggest SQL attributes from query history.
 4. Write the ontology: store terms, relationships, and SQL attributes in
-   Postgres, with embeddings in pgvector for retrieval.
+   Postgres, with embeddings in the vector store for retrieval.
 
 The result is a semantic graph you can explore in the UI. In this example, one
 compilation of Wide World Importers produced 31 terms; selecting **Order** shows
@@ -255,6 +255,7 @@ Use **Settings → Import / Export**, or `POST /api/model/import` and
 | Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation         | 3002 |
 | MCP server          | FastMCP                           | Read-only agent tools over the public API  | 3003 |
 | Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store  | 5432 |
+| Qdrant              | Optional                          | Vector store in place of pgvector          | 6333 |
 | HashiCorp Vault     | Optional                          | Connection credential storage              | n/a  |
 
 Keep ports 3001 and 3002 on a private network. FastAPI trusts the user identity
@@ -400,7 +401,7 @@ NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 | --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes), writes each answer's SQL and explanation, and grades answerability |
 | `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
-| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
+| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in the vector store, and matches each question to them                      |
 | `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Ranks candidate tables when compilation builds bridge-table SQL attributes                                                     |
 
 To use self-hosted NIM or any OpenAI-compatible endpoint, set
@@ -410,6 +411,40 @@ unset falls back to `DEFAULT_MODELS_<FIELD>`, so the simplest setup fills in
 that support structured output, and keep the embedding model the same for
 ingestion and queries. [`.env.example`](./.env.example) documents every
 variable.
+
+### Vector store
+
+Auto-Ontology keeps its embeddings in pgvector by default, in the same Postgres
+as the catalog. To use [Qdrant](https://qdrant.tech/documentation/) instead,
+set `AUTO_ONTOLOGY_VDB_BACKEND=qdrant` and point `QDRANT_URL` at your instance.
+Set `QDRANT_API_KEY` for [Qdrant Cloud](https://qdrant.tech/documentation/cloud/)
+or any instance with an API key.
+
+With Docker Compose, start the bundled Qdrant service with the `qdrant` profile:
+
+```bash
+docker compose --profile qdrant up -d
+```
+
+`dev_tools/setup_env.sh` starts the Qdrant service by itself when `.env` sets
+`AUTO_ONTOLOGY_VDB_BACKEND=qdrant`.
+
+With Helm, set `vdbBackend=qdrant` and `qdrantUrl`. The chart does not deploy
+Qdrant. Install it with the
+[Qdrant Helm chart](https://github.com/qdrant/qdrant-helm) or use Qdrant Cloud.
+
+Qdrant stores the full 2048-dimension float32 embeddings and applies the
+`label` and `database_name` filters during the vector search.
+
+A new backend starts with empty collections. To move an existing deployment,
+copy its pgvector collections into Qdrant:
+
+```bash
+uv run python -m dev_tools.copy_vdb_to_qdrant
+```
+
+The copy keeps the float16 precision that pgvector stores. Run ingestion and
+compilation again to write float32 vectors.
 
 ### Predictions
 

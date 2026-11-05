@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Turn embedded rows into the records :meth:`PostgresVDB.run` writes.
+"""Turn embedded rows into the records :meth:`VectorStore.run` writes.
 
 An embedded row is the dict the row builders produce (``text``, ``path``,
 ``page_number``, ``metadata``) after the embed step has set
@@ -17,15 +17,21 @@ indistinguishable in the store.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, Iterator
 
 if TYPE_CHECKING:
     import pandas as pd
 
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.base import VectorStore
 
-__all__ = ["to_vdb_records", "write_embedded_rows"]
+__all__ = [
+    "VdbDocument",
+    "to_vdb_documents",
+    "to_vdb_records",
+    "write_embedded_rows",
+]
 
 
 def _text(row: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -102,8 +108,63 @@ def to_vdb_records(
 
 
 def write_embedded_rows(
-    vdb: "PostgresVDB", rows: "Iterable[dict[str, Any]] | pd.DataFrame"
+    vdb: "VectorStore", rows: "Iterable[dict[str, Any]] | pd.DataFrame"
 ) -> int:
     """Write the embedded *rows* to *vdb*; returns the number of rows written."""
     records = to_vdb_records(rows)
     return vdb.run(records) if records else 0
+
+
+# ---------------------------------------------------------------------------
+# Records -> documents, the step every backend's write_to_index starts with
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VdbDocument:
+    """One record, ready for a vector store write.
+
+    ``metadata`` is the record metadata without ``embedding``, plus
+    ``document_type``. Backends store it as is, and search hits return it.
+    """
+
+    text: str | None
+    metadata: dict[str, Any]
+    embedding: list[float]
+
+
+def _flatten(records: Iterable) -> Iterator[dict]:
+    """Yield record dicts from a possibly-nested list of records."""
+    for item in records:
+        if isinstance(item, dict):
+            yield item
+        elif isinstance(item, list):
+            yield from _flatten(item)
+
+
+def to_vdb_documents(records: Iterable) -> tuple[list[VdbDocument], int]:
+    """The documents a backend writes for *records*, and the number skipped.
+
+    *records* is what :func:`to_vdb_records` returns, possibly nested. A record
+    without an embedding is skipped, because no search can reach it.
+    """
+    documents: list[VdbDocument] = []
+    skipped = 0
+    for record in _flatten(records):
+        metadata = record.get("metadata") or {}
+        embedding = metadata.get("embedding")
+        if not embedding:
+            skipped += 1
+            continue
+        text = record.get("text") or record.get("content") or metadata.get("content")
+        documents.append(
+            VdbDocument(
+                text=text,
+                metadata={
+                    "document_type": record.get("document_type"),
+                    **{k: v for k, v in metadata.items() if k != "embedding"},
+                },
+                embedding=[float(v) for v in embedding],
+            )
+        )
+    return documents, skipped

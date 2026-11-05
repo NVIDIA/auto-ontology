@@ -14,7 +14,7 @@ from auto_ontology.utils.embedding import EmbedParams, batch_embed
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.vdb import get_semantic_vdb
-from auto_ontology.vdb.postgres import PostgresVDB
+from auto_ontology.vdb.base import VectorStore
 from auto_ontology.vdb.records import write_embedded_rows
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class SemanticEmbedder:
 
     database_name: str
     embed_params: EmbedParams
-    vdb: PostgresVDB
+    vdb: VectorStore
 
     def embed_term(
         self,
