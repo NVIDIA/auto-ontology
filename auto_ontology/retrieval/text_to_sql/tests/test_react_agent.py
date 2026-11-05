@@ -71,7 +71,7 @@ def test_no_answer_is_reported_as_unconstructable(
 
 
 def test_the_pipeline_has_only_the_agent_and_its_two_outcomes() -> None:
-    assert set(pipeline.create_nodes()) == {
+    assert set(pipeline.create_steps()) == {
         "react_sql_agent",
         "format_and_respond",
         "unconstructable_sql_response",

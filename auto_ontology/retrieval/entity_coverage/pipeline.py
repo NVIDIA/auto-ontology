@@ -18,10 +18,10 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_retrieval import (
 from auto_ontology.retrieval.text_to_sql.base import agent_wrapper
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
-Node = Callable[[AgentState], dict[str, Any]]
+Step = Callable[[AgentState], dict[str, Any]]
 
 
-def create_nodes() -> list[Node]:
+def create_steps() -> list[Step]:
     """The steps in the order they run."""
     return [
         agent_wrapper(QuestionExtractionAgent(include_subject=False)),
@@ -30,12 +30,12 @@ def create_nodes() -> list[Node]:
     ]
 
 
-def run(state: AgentState, nodes: list[Node]) -> AgentState:
+def run(state: AgentState, steps: list[Step]) -> AgentState:
     """Run every step on a copy of ``state`` and return the final state.
 
     Each step's output overwrites the matching top-level keys.
     """
     final_state = dict(state)
-    for node in nodes:
-        final_state.update(node(final_state) or {})  # type: ignore[arg-type]
+    for step in steps:
+        final_state.update(step(final_state) or {})  # type: ignore[arg-type]
     return final_state  # type: ignore[return-value]

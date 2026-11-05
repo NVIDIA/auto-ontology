@@ -10,7 +10,7 @@ rather than in ``auto_ontology.server.chat`` so the agent pipeline itself — e.
 ``thoughts`` summary — can use the same labels without depending on the
 server layer. ``auto_ontology.server.chat.helpers`` re-exports this for the router.
 
-1-to-1 with the nodes added inside ``create_nodes``. Unknown
+1-to-1 with the nodes added inside ``create_steps``. Unknown
 nodes fall through to the raw node_name in callers so we never display a
 blank thinking step.
 """

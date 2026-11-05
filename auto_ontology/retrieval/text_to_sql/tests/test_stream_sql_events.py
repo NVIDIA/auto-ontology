@@ -44,9 +44,9 @@ def _stream_items(steps: list[dict[str, Any]]) -> Iterator[tuple[str, str, Any]]
     """Replay ``steps`` the way ``run_steps`` reports them: each node's start
     as it begins, then its output when it returns."""
     for step in steps:
-        for node_name, output in step.items():
-            yield ("start", node_name, None)
-            yield ("end", node_name, output)
+        for step_name, output in step.items():
+            yield ("start", step_name, None)
+            yield ("end", step_name, output)
 
 
 def _use_stream(
@@ -54,10 +54,10 @@ def _use_stream(
     monkeypatch: pytest.MonkeyPatch,
     items: Iterator[tuple[str, str, Any]],
 ) -> None:
-    """``_build_state`` needs real connectors/retrievers and the nodes need a
+    """``_build_state`` needs real connectors/retrievers and the steps need a
     live LLM — neither is what's under test, so both are replaced."""
     monkeypatch.setattr(main, "_build_state", lambda payload: {"path_state": {}})
-    monkeypatch.setattr(main, "run_steps", lambda _state, _nodes: items)
+    monkeypatch.setattr(main, "run_steps", lambda _state, _steps: items)
 
 
 def _run(

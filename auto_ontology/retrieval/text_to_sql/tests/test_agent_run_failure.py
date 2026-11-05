@@ -22,7 +22,7 @@ llm_invoke._MODEL_NAME = "openai/test-model"
 from auto_ontology.retrieval.text_to_sql import main  # noqa: E402
 
 
-def _fail_after_generation(_state: Any, _nodes: Any) -> Iterator[tuple[str, str, Any]]:
+def _fail_after_generation(_state: Any, _steps: Any) -> Iterator[tuple[str, str, Any]]:
     """Pipeline double that fails after the agent has produced SQL."""
     yield ("start", "react_sql_agent", None)
     yield (
@@ -75,13 +75,13 @@ def test_nonstreaming_error_exposes_partial_answer(
     assert caught.value.partial_answer["sql_code"] == "SELECT 1"
 
 
-def _fail_inside_first_node(_state: Any, _nodes: Any) -> Iterator[tuple[str, str, Any]]:
+def _fail_inside_first_node(_state: Any, _steps: Any) -> Iterator[tuple[str, str, Any]]:
     """Pipeline double whose first node raises before it ever returns."""
     yield ("start", "react_sql_agent", None)
     raise TimeoutError("retriever unavailable")
 
 
-def test_error_inside_a_node_names_that_node(
+def test_error_inside_a_step_names_that_step(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A node that raises produces no update, so completions alone can't name
@@ -105,7 +105,7 @@ def test_error_after_a_node_completes_names_the_running_node(
     """Once the next node has announced itself, it — not the one that just
     finished — is what the failure is attributed to."""
 
-    def fail_in_second_node(_state: Any, _nodes: Any) -> Iterator[tuple[str, str, Any]]:
+    def fail_in_second_node(_state: Any, _steps: Any) -> Iterator[tuple[str, str, Any]]:
         yield ("start", "react_sql_agent", None)
         yield ("end", "react_sql_agent", {"path_state": {}})
         yield ("start", "format_and_respond", None)

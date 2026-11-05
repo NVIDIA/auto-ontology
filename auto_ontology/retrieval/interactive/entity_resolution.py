@@ -21,7 +21,7 @@ import re
 from langchain_core.messages import HumanMessage
 
 from auto_ontology.retrieval.entity_coverage.pipeline import (
-    create_nodes as _create_entity_coverage_nodes,
+    create_steps as _create_entity_coverage_steps,
     run as _run_entity_coverage,
 )
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
@@ -65,7 +65,7 @@ CLARIFY_MAX_DISTANCE: float = _resolve_clarify_max_distance()
 _AMBIGUITY_MAX_GAP: float = 0.25
 
 # Entity-coverage steps — shared across calls, built once at import.
-_ec_nodes = _create_entity_coverage_nodes()
+_ec_steps = _create_entity_coverage_steps()
 
 _FILLER = frozenset(
     [
@@ -190,7 +190,7 @@ def _run_entity_coverage_pipeline(
         # present in AgentState; we omit them and bypass _build_state intentionally.
     }
     try:
-        final_state = _run_entity_coverage(state, _ec_nodes)
+        final_state = _run_entity_coverage(state, _ec_steps)
         return final_state.get("path_state", {})
     except Exception as exc:
         logger.error("Clarify — entity-coverage pipeline failed: %s", exc)

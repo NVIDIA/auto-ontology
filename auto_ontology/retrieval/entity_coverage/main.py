@@ -12,7 +12,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from auto_ontology.retrieval.data_access.custom_analyses import fetch_custom_analyses
-from auto_ontology.retrieval.entity_coverage.pipeline import create_nodes, run
+from auto_ontology.retrieval.entity_coverage.pipeline import create_steps, run
 from auto_ontology.retrieval.entity_coverage.state import (
     DEFAULT_MAX_DISTANCE,
     EntityCoveragePayload,
@@ -28,7 +28,7 @@ except (ValueError, EnvironmentError, OSError) as exc:
     logger.error("Failed to initialize LLM client: %s", exc)
     llm_client = None
 
-nodes = create_nodes()
+steps = create_steps()
 
 
 def _build_state(payload: EntityCoveragePayload) -> AgentState:
@@ -88,7 +88,7 @@ def get_coverage_response(payload: EntityCoveragePayload) -> dict:
         raise RuntimeError("LLM client is not configured.")
 
     state = _build_state(payload)
-    final_state = run(state, nodes)
+    final_state = run(state, steps)
 
     path_state = final_state.get("path_state", {})
     final_response = path_state.get("final_response")
@@ -102,6 +102,6 @@ def get_coverage_response(payload: EntityCoveragePayload) -> dict:
 
 __all__ = [
     "get_coverage_response",
-    "nodes",
+    "steps",
     "llm_client",
 ]

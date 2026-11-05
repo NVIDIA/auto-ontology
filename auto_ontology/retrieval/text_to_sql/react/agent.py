@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The pipeline node that answers a question with one ReAct episode.
+"""The pipeline step that answers a question with one ReAct episode.
 
 It hands its result to ``format_and_respond`` in the shape that node reads, or
 to ``unconstructable_sql_response`` when the episode ends without an answer.
@@ -22,7 +22,7 @@ from auto_ontology.retrieval.text_to_sql.state import (
     get_question_for_processing,
 )
 
-NODE_NAME = "react_sql_agent"
+STEP_NAME = "react_sql_agent"
 
 _UNANSWERED = (
     "I couldn't write a query that answers this question from the data I could "
@@ -70,7 +70,7 @@ class ReactSQLAgent(BaseAgent):
 
         for step in result.trajectory:
             for call in step.get("tool_calls") or []:
-                record_thought(path_state, NODE_NAME, _tool_thought(call))
+                record_thought(path_state, STEP_NAME, _tool_thought(call))
         path_state["react_trajectory"] = result.trajectory
         path_state["react_end_reason"] = result.reason
         path_state["relevant_tables"] = list(ctx.seen_tables.values())

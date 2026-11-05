@@ -8,12 +8,12 @@ from typing import Generator
 
 from langchain_core.messages import HumanMessage
 
-from auto_ontology.retrieval.text_to_sql.pipeline import create_nodes, run_steps
+from auto_ontology.retrieval.text_to_sql.pipeline import create_steps, run_steps
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_target_database_name,
 )
 from auto_ontology.retrieval.text_to_sql.node_labels import NODE_LABELS
-from auto_ontology.retrieval.text_to_sql.react.agent import NODE_NAME as REACT_NODE
+from auto_ontology.retrieval.text_to_sql.react.agent import STEP_NAME as REACT_STEP
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     TextToSQLPayload,
@@ -53,7 +53,7 @@ except (ValueError, EnvironmentError) as e:
     logger.error("Failed to initialize reasoning LLM client: %s", e)
     reasoning_llm_client = None
 
-nodes = create_nodes()
+steps = create_steps()
 
 
 def _build_state(payload: TextToSQLPayload) -> AgentState:
@@ -128,25 +128,25 @@ def _extract_answer(final_state: dict) -> dict:
     return {"response": str(final_response)}
 
 
-def _submitted_sql(node_name: str, node_output: dict, node_path_state: dict) -> str:
+def _submitted_sql(step_name: str, step_output: dict, step_path_state: dict) -> str:
     """The SQL the agent just submitted as its answer, or ``""``."""
-    if node_name != REACT_NODE or (node_output or {}).get("decision") != "valid_sql":
+    if step_name != REACT_STEP or (step_output or {}).get("decision") != "valid_sql":
         return ""
-    return (node_path_state.get("sql_code") or "").strip()
+    return (step_path_state.get("sql_code") or "").strip()
 
 
-def _merge_node_output(final_state: dict, node_output: dict | None) -> None:
-    """Fold one node's output into the accumulated state, in place.
+def _merge_step_output(final_state: dict, step_output: dict | None) -> None:
+    """Fold one step's output into the accumulated state, in place.
 
     ``path_state`` is merged key-by-key (nodes only ever return the subset
     they touched); every other top-level key is overwritten outright.
     """
-    if not node_output:
+    if not step_output:
         return
-    if "path_state" in node_output:
+    if "path_state" in step_output:
         final_state.setdefault("path_state", {})
-        final_state["path_state"].update(node_output["path_state"])
-    for key, value in node_output.items():
+        final_state["path_state"].update(step_output["path_state"])
+    for key, value in step_output.items():
         if key != "path_state":
             final_state[key] = value
 
@@ -198,46 +198,46 @@ def stream_agent_response(
 
     state = _build_state(payload)
     final_state = dict(state)
-    last_node: str | None = None
+    last_step: str | None = None
     try:
-        for phase, node_name, node_output in run_steps(dict(state), nodes):
+        for phase, step_name, step_output in run_steps(dict(state), steps):
             # A node that raises never reaches "end", so the start is what
             # names the node that failed.
-            last_node = node_name
+            last_step = step_name
             if phase == "start":
                 yield {
                     "type": "step",
                     "phase": "start",
-                    "node": node_name,
+                    "node": step_name,
                     "thought": None,
                 }
                 continue
 
             logger.info("--- AGENT STEP ---")
-            logger.info("Node: %s", node_name)
+            logger.info("Step: %s", step_name)
 
             # A node records its thoughts at the tail of
             # path_state["thoughts_log"] — see BaseAgent.record_thought.
             # Only surface the last one when this node added it, so a step
             # event never shows a stale entry left by an earlier node.
             thought = None
-            node_path_state = (node_output or {}).get("path_state") or {}
-            thoughts_log = node_path_state.get("thoughts_log") or []
-            if thoughts_log and thoughts_log[-1].get("node") == node_name:
+            step_path_state = (step_output or {}).get("path_state") or {}
+            thoughts_log = step_path_state.get("thoughts_log") or []
+            if thoughts_log and thoughts_log[-1].get("node") == step_name:
                 thought = thoughts_log[-1].get("text")
 
             yield {
                 "type": "step",
                 "phase": "end",
-                "node": node_name,
+                "node": step_name,
                 "thought": thought,
             }
 
-            node_sql = _submitted_sql(node_name, node_output, node_path_state)
-            if node_sql:
-                yield {"type": "sql", "node": node_name, "sql": node_sql}
+            step_sql = _submitted_sql(step_name, step_output, step_path_state)
+            if step_sql:
+                yield {"type": "sql", "node": step_name, "sql": step_sql}
 
-            _merge_node_output(final_state, node_output)
+            _merge_step_output(final_state, step_output)
 
         answer = _extract_answer(final_state)
         thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
@@ -252,8 +252,8 @@ def stream_agent_response(
         logger.exception("Error during agent stream")
         yield {
             "type": "error",
-            "message": f"Agent failed after {last_node or 'start'}: {exc}",
-            "node": last_node,
+            "message": f"Agent failed after {last_step or 'start'}: {exc}",
+            "node": last_step,
             "error_type": type(exc).__name__,
             "partial_answer": _extract_partial_answer(final_state),
         }
@@ -280,9 +280,9 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
     final_state = dict(state)
 
     try:
-        for phase, _node_name, node_output in run_steps(dict(state), nodes):
+        for phase, _step_name, step_output in run_steps(dict(state), steps):
             if phase == "end":
-                _merge_node_output(final_state, node_output)
+                _merge_step_output(final_state, step_output)
     except Exception as exc:
         logger.exception("Error during agent stream in get_agent_response_with_state")
         # Keep whatever SQL the agent had already submitted when a later node
@@ -313,7 +313,7 @@ __all__ = [
     "get_agent_response",
     "get_agent_response_with_state",
     "stream_agent_response",
-    "nodes",
+    "steps",
     "llm_client",
     "reasoning_llm_client",
     "AgentRunError",
