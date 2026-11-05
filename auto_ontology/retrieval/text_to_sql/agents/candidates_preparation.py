@@ -25,6 +25,7 @@ Design Decisions:
 
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -1162,6 +1163,44 @@ class CandidatePreparationAgent(BaseAgent):
                 len(unjustified),
                 unjustified,
             )
+
+        # Safeguard: prevent removing tables whose columns match entities from
+        # the question. The LLM relevance filter can incorrectly remove tables
+        # when a matching column is truncated (beyond _RELEVANCE_FILTER_MAX_COLS)
+        # or when multiple tables with similar names exist. If an entity from
+        # the question (e.g., "amt10") exactly matches a column name in a table,
+        # that table must NOT be removed — it's likely the table the user needs.
+        path_state = state.get("path_state", {})
+        entities = set(
+            str(e).lower() for e in (path_state.get("entities") or []) if e
+        )
+        # Also extract potential column names directly from the question
+        # (words that look like column names: contain digits or underscores)
+        for word in re.findall(r"\b\w+\b", question.lower()):
+            if "_" in word or any(c.isdigit() for c in word):
+                entities.add(word)
+
+        entity_protected_tables: set[str] = set()
+        for table in tables:
+            qname = _qualified_name(table).lower()
+            if qname not in names_to_remove:
+                continue
+            columns = table.get("columns") or []
+            for col in columns:
+                col_name = (
+                    col.get("name", "").lower() if isinstance(col, dict) else ""
+                )
+                if col_name and col_name in entities:
+                    entity_protected_tables.add(qname)
+                    self.logger.info(
+                        "Entity safeguard: protecting table %s (has column %r "
+                        "matching question entity)",
+                        qname,
+                        col_name,
+                    )
+                    break
+
+        names_to_remove -= entity_protected_tables
 
         filtered = [
             t for t in tables if _qualified_name(t).lower() not in names_to_remove
