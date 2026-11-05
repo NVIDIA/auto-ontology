@@ -66,6 +66,7 @@
     "fetch_sorted_tables": "() -> 'list[dict[str, Any]]'",
     "fetch_table_by_id": "(table_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_table_by_name": "(name: 'str') -> 'dict[str, Any] | None'",
+    "fetch_table_column_names": "(database_name: 'str | None') -> 'list[dict[str, Any]]'",
     "fetch_table_context": "(table_id: 'str') -> 'dict[str, Any]'",
     "fetch_tables_and_columns_by_node_ids": "(node_ids: 'list[str]') -> 'tuple[pd.DataFrame, pd.DataFrame, str]'",
     "fetch_tables_by_ids": "(table_ids: 'list[str]') -> 'list[dict[str, Any]]'",
