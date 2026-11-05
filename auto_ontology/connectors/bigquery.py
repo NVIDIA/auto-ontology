@@ -83,7 +83,7 @@ class BigQueryDatabase(SQLDatabase):
             for p in parameters:
                 if p is None:
                     query_params.append(bigquery.ScalarQueryParameter(None, "STRING", None))
-                elif isinstance(p, bool):  # Check bool before int
+                elif isinstance(p, bool):
                     query_params.append(bigquery.ScalarQueryParameter(None, "BOOL", p))
                 elif isinstance(p, int):
                     query_params.append(bigquery.ScalarQueryParameter(None, "INT64", p))
@@ -133,7 +133,9 @@ class BigQueryDatabase(SQLDatabase):
             COALESCE(p.description, '') AS description
         FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.COLUMNS` c
         LEFT JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` p
-            ON c.table_name = p.table_name AND c.column_name = p.column_name
+            ON c.table_name = p.table_name 
+           AND c.column_name = p.column_name
+           AND p.field_path = c.column_name
         """
         return self.execute(query)
 
@@ -164,26 +166,31 @@ class BigQueryDatabase(SQLDatabase):
         """
         try:
             return self.execute(query)
-        except Exception:
-            return pd.DataFrame(columns=["table_schema", "table_name", "column_name", "ordinal_position"])
+        except Exception as e:
+            logger.error(f"Failed to fetch primary keys for dataset {self.dataset_id}: {e}")
+            raise
 
     def get_fks(self) -> pd.DataFrame:
         query = f"""
         SELECT 
-            k.table_schema,
-            k.table_name,
-            k.column_name,
-            r.unique_constraint_schema AS referenced_schema,
-            r.unique_constraint_name AS referenced_table,
-            k.column_name AS referenced_column
-        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k
-        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` r
-            ON k.constraint_name = r.constraint_name
+            k1.table_schema,
+            k1.table_name,
+            k1.column_name,
+            k2.table_schema AS referenced_schema,
+            k2.table_name AS referenced_table,
+            k2.column_name AS referenced_column
+        FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k1
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE` k2
+            ON k1.constraint_name = k2.constraint_name
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS` c
+            ON k1.constraint_name = c.constraint_name
+        WHERE c.constraint_type = 'FOREIGN KEY'
         """
         try:
             return self.execute(query)
-        except Exception:
-            return pd.DataFrame(columns=["table_schema", "table_name", "column_name", "referenced_schema", "referenced_table", "referenced_column"])
+        except Exception as e:
+            logger.error(f"Failed to fetch foreign keys for dataset {self.dataset_id}: {e}")
+            raise
 
     def execute(self, query: str, parameters: Optional[list] = None) -> pd.DataFrame:
         job_config = self._get_job_config(parameters)
