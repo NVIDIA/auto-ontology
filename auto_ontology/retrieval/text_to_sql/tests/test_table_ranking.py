@@ -30,12 +30,28 @@ def test_last_entity_best_table_is_not_left_at_the_end() -> None:
     scores = {
         "order": {"a1": _hit(0.1), "a2": _hit(0.2), "a3": _hit(0.3)},
         "customer": {"b1": _hit(0.4)},
-        "product": {"e1": _hit(0.5), "a1": _hit(0.6)},
+        "product": {"e1": _hit(0.5)},
     }
 
     ranked = rank_tables_by_entity(tables, scores, ["order", "customer", "product"])
 
     assert [t["id"] for t in ranked] == ["a1", "b1", "e1", "a2", "a3"]
+
+
+def test_table_matching_more_entities_outranks_a_closer_single_match() -> None:
+    tables = [_table(t) for t in ["closest", "shared", "other"]]
+    scores = {
+        "department": {"closest": _hit(0.1), "shared": _hit(0.4)},
+        "enrollment": {"shared": _hit(0.5), "other": _hit(0.2)},
+    }
+
+    ranked = rank_tables_by_entity(tables, scores, ["department", "enrollment"])
+
+    assert [t["id"] for t in ranked] == ["shared", "closest", "other"]
+    assert ranked[0]["entity_matches"] == [
+        {"entity": "department", "column": "col", "rank": 1},
+        {"entity": "enrollment", "column": "col", "rank": 1},
+    ]
 
 
 def test_lead_table_goes_first_and_unmatched_tables_keep_their_order() -> None:
@@ -48,7 +64,7 @@ def test_lead_table_goes_first_and_unmatched_tables_keep_their_order() -> None:
     assert "entity_matches" not in ranked[0]
 
 
-def test_each_entity_marks_its_best_table_and_points_alternatives_at_it() -> None:
+def test_each_match_records_its_rank_within_the_entity() -> None:
     tables = [_table("order_history"), _table("orders")]
     scores = {
         "order": {
@@ -61,16 +77,10 @@ def test_each_entity_marks_its_best_table_and_points_alternatives_at_it() -> Non
 
     assert [t["id"] for t in ranked] == ["orders", "order_history"]
     assert ranked[0]["entity_matches"] == [
-        {"entity": "order", "column": "ORDER_DATE", "rank": 1, "best": True}
+        {"entity": "order", "column": "ORDER_DATE", "rank": 1}
     ]
     assert ranked[1]["entity_matches"] == [
-        {
-            "entity": "order",
-            "column": "ORDER_DATE",
-            "rank": 2,
-            "best": False,
-            "best_table_id": "orders",
-        }
+        {"entity": "order", "column": "ORDER_DATE", "rank": 2}
     ]
     assert "entity_matches" not in tables[0]
 
@@ -120,7 +130,7 @@ def test_score_tables_keeps_best_hit_per_table_and_isolates_failures(
     }
 
 
-def test_prompt_shows_entity_matches_and_the_better_table() -> None:
+def test_prompt_shows_entity_matches_without_steering_to_one_table() -> None:
     tables = rank_tables_by_entity(
         [_table("order_history"), _table("orders")],
         {
@@ -134,9 +144,10 @@ def test_prompt_shows_entity_matches_and_the_better_table() -> None:
 
     rendered = format_tables_for_prompt(tables)
 
-    assert rendered.startswith("Tables are ordered by how well")
-    assert 'matches: "order" via ORDER_DATE (best match)' in rendered
-    assert 'matches: "order" via ORDER_DATE (better match: public.orders)' in rendered
+    assert rendered.startswith("Tables are ordered by how many")
+    assert rendered.count('matches: "order" via ORDER_DATE') == 2
+    assert "best match" not in rendered
+    assert "prefer" not in rendered.lower()
 
 
 def test_prompt_has_no_entity_note_without_matches() -> None:
@@ -146,7 +157,7 @@ def test_prompt_has_no_entity_note_without_matches() -> None:
     assert "matches:" not in rendered
 
 
-def test_entities_section_lists_each_entitys_tables_best_first() -> None:
+def test_entities_section_lists_each_entitys_tables_in_rank_order() -> None:
     tables = rank_tables_by_entity(
         [_table("order_history"), _table("customers"), _table("orders")],
         {
@@ -163,8 +174,8 @@ def test_entities_section_lists_each_entitys_tables_best_first() -> None:
     rendered = format_entity_tables_for_prompt(tables, ["order", "customer"])
 
     assert rendered.splitlines()[1:] == [
-        '- "order": public.orders (via ORDER_DATE), '
-        "public.order_history (via ORDER_DATE), public.customers (via LAST_ORDER)",
+        '- "order": public.customers (via LAST_ORDER), '
+        "public.orders (via ORDER_DATE), public.order_history (via ORDER_DATE)",
         '- "customer": public.customers (via NAME)',
     ]
 

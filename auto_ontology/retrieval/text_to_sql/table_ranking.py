@@ -10,9 +10,9 @@ collection order of candidate preparation says nothing about relevance, so
 the right table for the question's last entity could sit at the bottom.
 
 Ranking therefore happens per entity and is then interleaved: every entity's
-best table comes before any entity's second best. Each table also records
-which entities it matches and whether it is that entity's best match, so the
-prompt can tell the model which of several look-alike tables carries a concept.
+top table comes before any entity's second. Each table also records which
+entities it matches, so the prompt can show which look-alike tables carry the
+same concept.
 """
 
 import logging
@@ -123,25 +123,38 @@ def rank_tables_by_entity(
 ) -> list[dict]:
     """Reorder *tables* round-robin across entities and annotate entity matches.
 
+    Within one entity, tables matching more of the question's entities rank
+    first: a table carrying two entities is more likely the intended source
+    than a closer match carrying one. Vector distance breaks ties, then the
+    original position, so the result is deterministic.
+
     Order: the lead (anchor) table, then rank 1 of every entity in entity
     order, then rank 2 of every entity, and so on. Tables no entity matched
-    follow in their original order. Ties within an entity keep the original
-    order, so the result is deterministic.
+    follow in their original order.
 
     Every matched table gets ``entity_matches``: one entry per entity it
-    matches, with the matching column, its 1-based rank among that entity's
-    tables, whether it is that entity's best table, and otherwise the id of
-    the table that is. The input dicts are not mutated.
+    matches, with the matching column and its 1-based rank among that
+    entity's tables. The input dicts are not mutated.
     """
     if not tables or not scores:
         return list(tables)
 
     position = {str(t.get("id") or ""): i for i, t in enumerate(tables) if t.get("id")}
+    in_scope_per_entity = [
+        (entity, [tid for tid in scores.get(entity) or {} if tid in position])
+        for entity in entities
+    ]
+    coverage: dict[str, int] = {}
+    for _, in_scope in in_scope_per_entity:
+        for tid in in_scope:
+            coverage[tid] = coverage.get(tid, 0) + 1
+
     ranked_per_entity: list[tuple[str, list[str]]] = []
-    for entity in entities:
-        per_table = scores.get(entity) or {}
-        in_scope = [tid for tid in per_table if tid in position]
-        in_scope.sort(key=lambda tid: (per_table[tid]["score"], position[tid]))
+    for entity, in_scope in in_scope_per_entity:
+        per_table = scores[entity] if in_scope else {}
+        in_scope.sort(
+            key=lambda tid: (-coverage[tid], per_table[tid]["score"], position[tid])
+        )
         if in_scope:
             ranked_per_entity.append((entity, in_scope))
 
@@ -166,17 +179,14 @@ def rank_tables_by_entity(
 
     matches: dict[str, list[dict[str, Any]]] = {}
     for entity, ranked in ranked_per_entity:
-        best_id = ranked[0]
         for rank, table_id in enumerate(ranked, start=1):
-            entry: dict[str, Any] = {
-                "entity": entity,
-                "column": scores[entity][table_id]["column"],
-                "rank": rank,
-                "best": table_id == best_id,
-            }
-            if table_id != best_id:
-                entry["best_table_id"] = best_id
-            matches.setdefault(table_id, []).append(entry)
+            matches.setdefault(table_id, []).append(
+                {
+                    "entity": entity,
+                    "column": scores[entity][table_id]["column"],
+                    "rank": rank,
+                }
+            )
 
     by_id = {str(t.get("id") or ""): t for t in tables if t.get("id")}
     result: list[dict] = []

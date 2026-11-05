@@ -343,15 +343,14 @@ def _column_row(column: Any) -> dict[str, str]:
 
 
 _ENTITY_MATCH_NOTE = (
-    "Tables are ordered by how well they match the question's entities, each "
-    "entity's best table first. When several tables match the same entity, use "
-    "the one marked best match unless the question needs a column only another "
-    "one has."
+    "Tables are ordered by how many of the question's entities they match, then "
+    "by how closely. Several tables may match the same entity; choose by what "
+    "the question asks, not by position."
 )
 
 
-def _format_entity_matches(matches: Any, names_by_id: dict[str, str]) -> str:
-    """One ``matches:`` line naming each entity this table matches, and how well."""
+def _format_entity_matches(matches: Any) -> str:
+    """One ``matches:`` line naming each entity this table matches, and through which column."""
     if not isinstance(matches, list) or not matches:
         return ""
     parts = []
@@ -361,11 +360,6 @@ def _format_entity_matches(matches: Any, names_by_id: dict[str, str]) -> str:
         part = f'"{_plain_cell(match["entity"])}"'
         if match.get("column"):
             part += f" via {_plain_cell(match['column'])}"
-        if match.get("best"):
-            part += " (best match)"
-        else:
-            better = names_by_id.get(str(match.get("best_table_id") or ""))
-            part += f" (better match: {better})" if better else " (weaker match)"
         parts.append(part)
     return f"matches: {'; '.join(parts)}" if parts else ""
 
@@ -385,7 +379,7 @@ def format_entity_tables_for_prompt(
     target_db: str | None = None,
     dialect: str | None = None,
 ) -> str:
-    """An ENTITIES section: each question entity with its matching tables, best first.
+    """An ENTITIES section: each question entity with its matching tables, in rank order.
 
     Built from the ``entity_matches`` that
     :func:`~auto_ontology.retrieval.text_to_sql.table_ranking.rank_tables_by_entity`
@@ -416,9 +410,9 @@ def format_entity_tables_for_prompt(
     ordered = [e for e in entities or [] if e in per_entity]
     ordered += [e for e in per_entity if e not in ordered]
     lines = [
-        "ENTITIES (each entity in the question and the tables above that carry "
-        "it, best match first; prefer the first table unless the question needs "
-        "a column only a later one has):"
+        "ENTITIES (each entity in the question and the tables above with a "
+        "matching column; tables matching more of the question's entities come "
+        "first, then closer matches):"
     ]
     for entity in ordered:
         ranked = ", ".join(label for *_, label in sorted(per_entity[entity]))
@@ -451,8 +445,6 @@ def format_tables_for_prompt(
     def full_name_of(table: dict) -> str:
         return _full_table_name(table, target_db, dialect)
 
-    names_by_id = {str(t["id"]): full_name_of(t) for t in tables if t.get("id")}
-
     formatted_tables = []
     if any(table.get("entity_matches") for table in tables):
         formatted_tables.append(_ENTITY_MATCH_NOTE)
@@ -475,7 +467,7 @@ def format_tables_for_prompt(
                 ],
             )
         ]
-        entity_line = _format_entity_matches(table.get("entity_matches"), names_by_id)
+        entity_line = _format_entity_matches(table.get("entity_matches"))
         if entity_line:
             blocks.append(entity_line)
 
