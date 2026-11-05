@@ -302,7 +302,7 @@ class CandidatePreparationAgent(BaseAgent):
         scores_future = (
             extra_pool.submit(
                 score_tables_by_entity,
-                state.get("data_retriever"),
+                state.get("semantic_retriever"),
                 entities,
                 target_db,
             )

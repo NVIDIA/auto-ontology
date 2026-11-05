@@ -199,3 +199,46 @@ def test_hub_siblings_fall_back_to_unranked_cap_without_scores() -> None:
 
     assert [h["id"] for h in kept] == ["hub", "s1"]
     assert truncated == 1
+
+
+def test_entity_scoring_searches_the_semantic_index(monkeypatch) -> None:
+    from auto_ontology.retrieval.text_to_sql.agents import candidates_preparation
+
+    used: list[object] = []
+    semantic, data = object(), object()
+
+    def fake_score(retriever, entities, target_db):
+        used.append(retriever)
+        return {}
+
+    monkeypatch.setattr(candidates_preparation, "score_tables_by_entity", fake_score)
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+    for name, value in {
+        "fetch_custom_analyses_with_sql": lambda ids: [],
+        "fetch_tables_from_custom_analyses": lambda ids: [],
+        "get_relevant_tables_from_candidates": lambda candidates: [_table("t1")],
+        "fetch_tables_by_ids": lambda ids: [],
+        "find_connected_junction_tables": lambda ids: ([], []),
+        "find_kept_table_bridges": lambda ids, candidate_ids: ([], [], 0),
+        "find_direct_table_joins": lambda ids: [],
+    }.items():
+        monkeypatch.setattr(candidates_preparation, name, value)
+
+    CandidatePreparationAgent().execute(
+        {
+            "initial_question": "orders per customer",
+            "data_retriever": data,
+            "semantic_retriever": semantic,
+            "path_state": {
+                "target_db": "db",
+                "entities": ["order", "customer"],
+                "retrieved_custom_analyses": [{"id": "analysis"}],
+            },
+        }
+    )
+
+    assert used == [semantic]
