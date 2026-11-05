@@ -29,6 +29,7 @@ from sqlalchemy import select  # noqa: E402
 from auto_ontology.dal import datasources as d  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tags import PII_TAG_NAME, get_or_create_tag  # noqa: E402
 from auto_ontology.semantic.constants import (  # noqa: E402
     SQL_ATTR_SOURCE_BRIDGE,
     SQL_ATTR_SOURCE_MANUAL,
@@ -435,6 +436,28 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["order_id"]["semantic_fk"] is None
     assert columns["customer_id"]["semantic_fk"] == "shop.customers.customer_id"
     assert columns["total"]["semantic_fk"] is None
+
+
+def test_tables_by_ids_withholds_sample_values_of_pii_columns(world) -> None:
+    """Every caller puts these samples in a prompt; a PII column's must not go.
+
+    Uses the real ``PII`` tag rather than a prefixed one: the read matches that
+    name, and the tag is shared and protected, so it is not cleaned up.
+    """
+    for name in ("customers.customer_id", "customers.name"):
+        store().query_write(
+            s.catalog_column.update()
+            .where(s.catalog_column.c.id == world.columns[name])
+            .values(sample_values='["Ada Lovelace", "Alan Turing"]')
+        )
+    pii = get_or_create_tag(name=PII_TAG_NAME)
+    _link(s.tag_target, tag_id=pii["id"], column_id=world.columns["customers.name"])
+
+    (row,) = d.fetch_tables_by_ids([world.tables["customers"]])
+    columns = {column["name"]: column for column in row["columns"]}
+    # The column itself stays in the schema context; only its values go.
+    assert columns["name"]["sample_values"] is None
+    assert columns["customer_id"]["sample_values"] == ["Ada Lovelace", "Alan Turing"]
 
 
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
