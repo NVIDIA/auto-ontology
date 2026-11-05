@@ -38,14 +38,12 @@ def test_bigquery_get_queries_hours(mock_client_cls: MagicMock, mock_auth: Magic
 
 
 def test_build_connection_string_bigquery() -> None:
-    # Test valid configuration with location
-    conn = {"engine": "bigquery", "project": "my-project", "dataset": "my_ds", "location": "US"}
+    # Use "type" instead of "engine"
+    conn = {"type": "bigquery", "project": "my-project", "dataset": "my_ds", "location": "US"}
     assert build_connection_string(conn) == "bigquery://my-project/my_ds?location=US"
 
-    # Test valid configuration without location
-    conn_no_loc = {"engine": "bigquery", "project": "my-project", "dataset": "my_ds"}
+    conn_no_loc = {"type": "bigquery", "project": "my-project", "dataset": "my_ds"}
     assert build_connection_string(conn_no_loc) == "bigquery://my-project/my_ds"
 
-    # Test missing required project
     with pytest.raises(ValueError):
-        build_connection_string({"engine": "bigquery", "dataset": "my_ds"})
+        build_connection_string({"type": "bigquery", "dataset": "my_ds"})

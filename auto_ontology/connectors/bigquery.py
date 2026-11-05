@@ -180,8 +180,9 @@ class BigQueryDatabase(SQLDatabase):
             k2.table_name AS referenced_table,
             k2.column_name AS referenced_column
         FROM `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k1
-        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE` k2
+        JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` k2
             ON k1.constraint_name = k2.constraint_name
+            AND k1.position_in_unique_constraint = k2.ordinal_position
         JOIN `{self.project_id}.{self.dataset_id}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS` c
             ON k1.constraint_name = c.constraint_name
         WHERE c.constraint_type = 'FOREIGN KEY'
