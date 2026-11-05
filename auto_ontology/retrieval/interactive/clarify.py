@@ -82,19 +82,22 @@ Terms not found in the database schema or external knowledge (ask the user to de
 Formulas or conditions whose exact specification is still missing, ranked most-critical first (ask about the first unasked item before proceeding):
 {incomplete_formulas_note}
 
+Clarification questions you can still ask: {turns_remaining}
+
 {sort_direction_note}
 
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, history, or scientific tautologies: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results", "show basic information", "show some info", "show their details", or "I need a list of <entities>" without naming which specific attributes or metrics to display), prioritize asking the user which specific metrics or fields they want in the output.
+3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results", "show basic information", "show some info", "show their details", "key details", "a report", "a summary", or "I need a list of <entities>" without naming which specific attributes or metrics to display) and the prior clarifications have not settled it, make this your first question. Cover the whole output in that one question: which fields or metrics to show for each result, how many results to return (for example what "top" means), and how to order them.
 4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
 7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
 8. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, unspecified limits, normalization methods, or preferred output format.
-9. Output a single focused question only — never two questions joined with "and" or "or".
-10. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
+9. Each question covers exactly one topic: one term, one formula, or the output described in rule 3. It may have up to three short parts about that same topic, for example a formula together with how missing values and ties are handled. Never combine unrelated topics in one question, because the user answers only one topic per question.
+10. Questions are limited (see "Clarification questions you can still ask"). Ask first about what would change the SQL most: the output in rule 3 and missing formulas or thresholds. Edge cases such as ties, missing values or letter case come last, and are best folded into the question about the term they belong to. With one question left, ask about the single most critical unresolved item.
+11. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -105,7 +108,9 @@ from the schema or external knowledge:
 Term: {term}
 Why it's needed: {description}
 
-Generate a single, focused question to ask the user to clarify this specification.
+Generate one question to ask the user to clarify this specification. It may have up to \
+three short parts about this same term, for example its formula together with how missing \
+values and ties are handled.
 Ask about the business concept — what data they want to see — not about database tables or columns.
 Output only the question text, nothing else.\
 """
@@ -485,6 +490,7 @@ def should_clarify(
         unanswered_topics=unanswered_topics_text,
         unresolvable_terms=unresolvable_text,
         incomplete_formulas_note=incomplete_formulas_note,
+        turns_remaining=max(turns_remaining, 0),
         sort_direction_note=sort_direction_note,
     )
     response = safe_invoke_text(llm, prompt).strip()
