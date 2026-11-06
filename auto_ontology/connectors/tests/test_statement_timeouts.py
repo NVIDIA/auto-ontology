@@ -229,8 +229,8 @@ class _PgCursor:
     def execute(self, sql: str, params: Any = None) -> None:
         self._conn.log.append(("query", sql))
 
-    def fetchall(self) -> list[dict[str, int]]:
-        return [{"v": 1}]
+    def fetchall(self) -> list[tuple[int, ...]]:
+        return [(1,)]
 
 
 class _PgPool:
@@ -317,8 +317,8 @@ class _MySQLCursor:
                 )
         self.executed.append((sql, params))
 
-    def fetchall(self) -> list[dict[str, int]]:
-        return [{"v": 1}]
+    def fetchall(self) -> list[tuple[int, ...]]:
+        return [(1,)]
 
     def close(self) -> None:
         return None

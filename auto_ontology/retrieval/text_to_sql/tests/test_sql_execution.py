@@ -3,11 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from auto_ontology.connectors.sqlite import SQLiteDatabase
 from auto_ontology.retrieval.text_to_sql.agents import sql_execution
 
 
@@ -70,3 +73,37 @@ def test_metadata_errors_are_returned_as_query_errors(
 
     assert response.error == "metadata failed"
     assert response.result is None
+
+
+def test_sqlite_connector_preserves_duplicate_column_values_through_run_sql(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "shop.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE customers (id INT, name TEXT);
+        CREATE TABLE orders (id INT, customer_id INT, name TEXT);
+        INSERT INTO customers VALUES (1, 'Ada');
+        INSERT INTO orders VALUES (100, 1, 'first order');
+        """
+    )
+    conn.close()
+
+    connector = SQLiteDatabase(f"sqlite:///{db_path}")
+    try:
+        sql = (
+            "SELECT c.id, o.id, c.name, o.name "
+            "FROM customers c JOIN orders o ON o.customer_id = c.id"
+        )
+        frame = connector.execute(sql)
+        assert list(frame.columns) == ["id", "id", "name", "name"]
+        assert frame.values.tolist() == [[1, 100, "Ada", "first order"]]
+
+        response = sql_execution._run_sql(sql, connector)
+        assert response.error is None
+        assert json.loads(response.result[0]) == [
+            {"id": 1, "id__2": 100, "name": "Ada", "name__2": "first order"}
+        ]
+    finally:
+        connector.close()
