@@ -38,7 +38,7 @@ from auto_ontology.vdb.records import write_embedded_rows
 if TYPE_CHECKING:
     import pandas as pd
 
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.base import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -505,7 +505,7 @@ def embed_rows(
 def embed_rows_into_vdb(
     rows: list[dict[str, Any]],
     params: EmbedParams,
-    vdb: "PostgresVDB",
+    vdb: "VectorStore",
     *,
     what: str,
 ) -> int:
@@ -532,7 +532,7 @@ def embed_rows_into_vdb(
 def embed_docs_into_vdb(
     docs: list[dict],
     embed_params: EmbedParams,
-    vdb: "PostgresVDB",
+    vdb: "VectorStore",
     database_name: str | None = None,
 ) -> int:
     """Embed *docs* and upsert them into *vdb*.

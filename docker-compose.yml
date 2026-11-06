@@ -21,6 +21,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional vector store. Start it with `docker compose --profile qdrant up`
+  # and set AUTO_ONTOLOGY_VDB_BACKEND=qdrant in .env. Without the profile the
+  # backend keeps its vectors in pgvector. No other service depends on it:
+  # the backend connects on first use.
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    container_name: qdrant
+    restart: unless-stopped
+    profiles: ["qdrant"]
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    # No API key by default. To require one, add
+    #   environment:
+    #     QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    # and set QDRANT_API_KEY in .env. Do not pass an empty value: Qdrant reads
+    # it as a key that every request must send.
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
@@ -51,6 +71,9 @@ services:
       POSTGRES_HOST: postgres
       # In-network port; POSTGRES_PORT in .env is the host-side mapping.
       POSTGRES_PORT: "5432"
+      # The bundled qdrant service unless .env sets QDRANT_URL, for example to
+      # a Qdrant Cloud cluster.
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       INGESTION_SERVICE_URL: http://ingestion-service:3002
     depends_on:
       postgres:
@@ -93,6 +116,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
     depends_on:
       postgres:
         condition: service_started
@@ -175,3 +199,4 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  qdrant_data:

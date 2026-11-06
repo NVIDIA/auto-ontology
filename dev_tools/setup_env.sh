@@ -11,12 +11,35 @@ cd "$REPO_ROOT"
 INFRA_SERVICES="postgres pgadmin ingestion-service"
 AUTO_ONTOLOGY_SERVICES="auto-ontology auto-ontology-frontend"
 
+# The vector store backend, from the shell or else from .env, in lower case.
+# Reads .env the way python-dotenv does for this value: a " #" starts a comment.
+vdb_backend() {
+	local value="${AUTO_ONTOLOGY_VDB_BACKEND:-}"
+	if [[ -z "$value" && -f .env ]]; then
+		value=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}AUTO_ONTOLOGY_VDB_BACKEND[[:space:]]*=//p' .env | tail -n 1)
+		value="${value%%[[:space:]]#*}"
+	fi
+	value="${value//\"/}"
+	value="${value//\'/}"
+	echo "$value" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
+}
+
 resolve_infra_services() {
 	local services=""
 	for svc in $INFRA_SERVICES; do
 		services="$services $svc"
 	done
+	# The qdrant service sits behind a Compose profile. Naming it here starts it.
+	if [[ "$(vdb_backend)" == "qdrant" ]]; then
+		services="$services qdrant"
+	fi
 	echo "${services# }"
+}
+
+print_qdrant_url() {
+	if [[ "$(vdb_backend)" == "qdrant" ]]; then
+		echo "  Qdrant:        http://localhost:6333/dashboard"
+	fi
 }
 
 # Tear down any previously-running Auto Ontology app containers so the chosen mode
@@ -33,6 +56,7 @@ if [[ " $* " =~ \ --dev\  ]]; then
 	echo "Services:"
 	echo "  Postgres:      http://localhost:5432"
 	echo "  pgAdmin:       http://localhost:5050"
+	print_qdrant_url
 	echo "  Auto Ontology ingestion: http://localhost:3002"
 
 	echo ""
@@ -56,6 +80,7 @@ if [[ " $* " =~ \ --ds\  ]]; then
 	echo "Services:"
 	echo "  Postgres:      http://localhost:5432"
 	echo "  pgAdmin:       http://localhost:5050"
+	print_qdrant_url
 	echo "  Auto Ontology frontend:  http://localhost:3000"
 	echo "  Auto Ontology ingestion: http://localhost:3002"
 
@@ -76,6 +101,7 @@ echo ""
 echo "Services:"
 echo "  Postgres:      http://localhost:5432"
 echo "  pgAdmin:       http://localhost:5050"
+print_qdrant_url
 echo "  Auto Ontology frontend:  http://localhost:3000"
 echo "  Auto Ontology backend:   http://localhost:3001"
 echo "  Auto Ontology ingestion: http://localhost:3002"

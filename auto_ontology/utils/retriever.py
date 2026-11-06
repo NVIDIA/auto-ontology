@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Vector search over a pgvector collection, and the app's two singletons."""
+"""Vector search over one VDB collection, and the app's two singletons."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 from auto_ontology.utils.embedding import EmbedParams, embed_texts, get_embed_params
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
-from auto_ontology.vdb.postgres import PostgresVDB
+from auto_ontology.vdb.base import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ _QUERY_TIMEOUT_S = 60.0
 
 
 class Retriever:
-    """Embed a query and run a k-NN search against one :class:`PostgresVDB`.
+    """Embed a query and run a k-NN search against one :class:`~auto_ontology.vdb.base.VectorStore`.
 
     ``vdb_kwargs["vdb"]`` is part of the interface, not an implementation
     detail: :func:`~auto_ontology.retrieval.data_access.semantic_search.search_semantic_index`
@@ -32,12 +32,12 @@ class Retriever:
     the ``where`` filter.
     """
 
-    def __init__(self, vdb: PostgresVDB, embed_params: EmbedParams) -> None:
+    def __init__(self, vdb: VectorStore, embed_params: EmbedParams) -> None:
         self.vdb_kwargs: dict[str, Any] = {"vdb": vdb}
         self.embed_params = embed_params
 
     @property
-    def vdb(self) -> PostgresVDB:
+    def vdb(self) -> VectorStore:
         return self.vdb_kwargs["vdb"]
 
     def query(
@@ -101,7 +101,7 @@ def _close_retriever_vdb(retriever: Retriever | None) -> None:
     try:
         retriever.vdb.close()
     except Exception:
-        logger.exception("Failed to close PostgresVDB on retriever cleanup")
+        logger.exception("Failed to close the VDB on retriever cleanup")
 
 
 def close_retrievers() -> None:

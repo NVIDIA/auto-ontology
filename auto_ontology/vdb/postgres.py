@@ -25,6 +25,8 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
 
+from auto_ontology.vdb.records import to_vdb_documents
+
 logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
@@ -47,15 +49,6 @@ class _UnusableEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
-
-
-def _flatten(records: Iterable) -> Iterable[dict]:
-    """Yield record dicts from a possibly-nested list of records."""
-    for item in records:
-        if isinstance(item, dict):
-            yield item
-        elif isinstance(item, list):
-            yield from _flatten(item)
 
 
 def _to_async_url(url: str) -> str:
@@ -178,10 +171,10 @@ class PostgresVDB:
         # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
         self.database_name = kwargs.get("database_name")
         if self.database_name and reset:
-            ids = self.delete_by_database(self.database_name)
+            deleted = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",
-                len(ids),
+                deleted,
                 self.database_name,
             )
 
@@ -350,26 +343,9 @@ class PostgresVDB:
         **kwargs: Any,
     ) -> int:
         """Bulk-insert records, returning the number of rows written."""
-        documents: list[Document] = []
-        embeddings: list[list[float]] = []
-        skipped = 0
-
-        for record in _flatten(records):
-            metadata = record.get("metadata") or {}
-            embedding = metadata.get("embedding")
-            text = (
-                record.get("text") or record.get("content") or metadata.get("content")
-            )
-            if not embedding:
-                skipped += 1
-                continue
-
-            doc_metadata = {
-                "document_type": record.get("document_type"),
-                **{k: v for k, v in metadata.items() if k != "embedding"},
-            }
-            documents.append(Document(page_content=text, metadata=doc_metadata))
-            embeddings.append([float(v) for v in embedding])
+        parsed, skipped = to_vdb_documents(records)
+        documents = [Document(page_content=d.text, metadata=d.metadata) for d in parsed]
+        embeddings = [d.embedding for d in parsed]
 
         if not documents:
             logger.info(
@@ -399,10 +375,10 @@ class PostgresVDB:
         )
         return inserted
 
-    def delete_by_database(self, database_name: str) -> list[str]:
+    def delete_by_database(self, database_name: str) -> int:
         """Delete all rows whose ``database_name`` column matches ``database_name``.
 
-        Returns the list of deleted row IDs (empty if the table doesn't exist
+        Returns the number of deleted rows (``0`` if the table doesn't exist
         or no rows match).
         """
         store = self._get_store()
@@ -412,7 +388,7 @@ class PostgresVDB:
                 "nothing to delete",
                 self.collection_name,
             )
-            return []
+            return 0
 
         filter: dict[str, Any] = {
             _DATABASE_METADATA_COLUMN: database_name,
@@ -424,10 +400,10 @@ class PostgresVDB:
         )
         ids = list(existing.get("ids", []) or [])
         if not ids:
-            return []
+            return 0
 
         store.delete(filter=filter)
-        return ids
+        return len(ids)
 
     def delete_all(self) -> int:
         """Delete every row in the collection.
@@ -464,6 +440,13 @@ class PostgresVDB:
     def delete_by_id(self, node_id: str) -> int:
         """Delete every row whose metadata ``id`` matches ``node_id``.
 
+        Shorthand for :meth:`delete_by_ids` with one ID.
+        """
+        return self.delete_by_ids([node_id])
+
+    def delete_by_ids(self, node_ids: Iterable[str]) -> int:
+        """Delete every row whose metadata ``id`` is in ``node_ids``, in one statement.
+
         ``id`` lives in the JSONB ``langchain_metadata`` column (it is not
         a promoted real column — only ``database_name`` and ``label`` are),
         so the match goes through ``langchain_metadata ->> 'id'`` rather
@@ -475,9 +458,12 @@ class PostgresVDB:
         Returns the number of rows deleted (``0`` when the collection
         table doesn't exist yet or nothing matched).
         """
+        ids = list(dict.fromkeys(node_ids))
+        if not ids:
+            return 0
         if not self._table_exists():
             logger.info(
-                "PostgresVDB.delete_by_id: collection %s not found, nothing to delete",
+                "PostgresVDB.delete_by_ids: collection %s not found, nothing to delete",
                 self.collection_name,
             )
             return 0
@@ -491,20 +477,20 @@ class PostgresVDB:
                     sql.SQL(
                         """
                         DELETE FROM {table}
-                        WHERE langchain_metadata ->> 'id' = %s
+                        WHERE langchain_metadata ->> 'id' = ANY(%s)
                         """
                     ).format(
                         table=sql.Identifier(self.schema_name, self.collection_name)
                     ),
-                    (node_id,),
+                    (ids,),
                 )
                 deleted = cur.rowcount
 
         logger.info(
-            "PostgresVDB.delete_by_id: deleted %d rows from %s for id=%s",
+            "PostgresVDB.delete_by_ids: deleted %d rows from %s for %d id(s)",
             deleted,
             self.collection_name,
-            node_id,
+            len(ids),
         )
         return deleted
 
