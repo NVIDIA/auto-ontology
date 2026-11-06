@@ -81,6 +81,95 @@ each datastore's readiness probe has passed.
         sleep 2
       done
   {{- include "auto-ontology.initResources" . | nindent 2 }}
+{{- if .Values.elasticsearch.bundled.enabled }}
+- name: wait-for-elasticsearch
+  image: busybox:1.36
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  command:
+    - sh
+    - -c
+    - |
+      until nc -z elasticsearch {{ .Values.elasticsearch.bundled.service.port }}; do
+        echo "waiting for elasticsearch..."
+        sleep 2
+      done
+  {{- include "auto-ontology.initResources" . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The vector store backend, after checking the values make sense together. Fails
+the render rather than deploying a backend that errors on its first write.
+*/}}
+{{- define "auto-ontology.vectorBackend" -}}
+{{- $backend := .Values.vectorStore.backend | default "postgres" | lower -}}
+{{- $es := .Values.elasticsearch -}}
+{{- if not (has $backend (list "postgres" "elasticsearch")) -}}
+{{- fail (printf "vectorStore.backend must be postgres or elasticsearch, not %q." $backend) -}}
+{{- end -}}
+{{- if not (has (.Values.vectorStore.searchMode | default "semantic" | lower) (list "semantic" "hybrid")) -}}
+{{- fail (printf "vectorStore.searchMode must be semantic or hybrid, not %q." .Values.vectorStore.searchMode) -}}
+{{- end -}}
+{{- if eq $backend "postgres" -}}
+{{- if $es.bundled.enabled -}}
+{{- fail "elasticsearch.bundled.enabled needs vectorStore.backend=elasticsearch, or nothing would use it." -}}
+{{- end -}}
+{{- if eq (.Values.vectorStore.searchMode | default "semantic" | lower) "hybrid" -}}
+{{- fail "vectorStore.searchMode=hybrid needs vectorStore.backend=elasticsearch." -}}
+{{- end -}}
+{{- else -}}
+{{- if and $es.bundled.enabled $es.url -}}
+{{- fail "Set either elasticsearch.url (an existing cluster) or elasticsearch.bundled.enabled, not both." -}}
+{{- end -}}
+{{- if not (or $es.bundled.enabled $es.url) -}}
+{{- fail "vectorStore.backend=elasticsearch needs elasticsearch.url, or elasticsearch.bundled.enabled=true." -}}
+{{- end -}}
+{{- end -}}
+{{- $backend -}}
+{{- end -}}
+
+{{/*
+ES_URL: the bundled cluster's Service, or the configured one.
+*/}}
+{{- define "auto-ontology.elasticsearchUrl" -}}
+{{- if .Values.elasticsearch.bundled.enabled -}}
+{{ printf "http://elasticsearch:%d" (int .Values.elasticsearch.bundled.service.port) }}
+{{- else -}}
+{{ .Values.elasticsearch.url }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The Elasticsearch CA certificate, mounted into the backend and ingestion pods
+when elasticsearch.caSecret.name is set. Three pieces, one per place in the pod
+spec: the env var, the container mount and the pod volume.
+*/}}
+{{- define "auto-ontology.esCaEnv" -}}
+{{- if .Values.elasticsearch.caSecret.name -}}
+- name: ES_CA_CERTS
+  value: /etc/auto-ontology/elasticsearch/ca.crt
+{{- end }}
+{{- end -}}
+
+{{- define "auto-ontology.esCaVolumeMount" -}}
+{{- if .Values.elasticsearch.caSecret.name -}}
+volumeMounts:
+  - name: elasticsearch-ca
+    mountPath: /etc/auto-ontology/elasticsearch
+    readOnly: true
+{{- end }}
+{{- end -}}
+
+{{- define "auto-ontology.esCaVolume" -}}
+{{- if .Values.elasticsearch.caSecret.name -}}
+volumes:
+  - name: elasticsearch-ca
+    secret:
+      secretName: {{ .Values.elasticsearch.caSecret.name }}
+      items:
+        - key: {{ .Values.elasticsearch.caSecret.key | default "ca.crt" }}
+          path: ca.crt
+{{- end }}
 {{- end -}}
 
 {{/*

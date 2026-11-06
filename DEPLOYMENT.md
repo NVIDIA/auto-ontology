@@ -67,3 +67,84 @@ To install the latest published release:
    ```bash
    kubectl port-forward svc/frontend 3000:3000
    ```
+
+## Using Elasticsearch as the vector store
+
+By default entity vectors live in Postgres (pgvector) and the app embeds them
+itself. Set `vectorStore.backend: elasticsearch` to keep them in Elasticsearch
+instead: rows go into a `semantic_text` index, and Elasticsearch embeds rows
+and queries through an `nvidia` inference endpoint that the app creates from
+the same model settings (`defaultModelsApiKey`, `embedModel`). Postgres is
+still deployed and still holds the catalog.
+
+Elasticsearch needs to be 9.3+ or Serverless; hybrid search needs 9.5+ or
+Serverless. Self-managed clusters need an Enterprise or trial license for the
+`nvidia` inference service (on a basic license creating the endpoint fails
+with `403 current license is non-compliant for [inference]`). Use a
+build.nvidia.com (`nvapi-`) key, or another
+endpoint whose embedding model honours `input_type`.
+
+**An existing cluster** (Elastic Cloud, Serverless, ECK or self-managed). Add
+to the values file:
+
+```yaml
+vectorStore:
+  backend: elasticsearch
+  searchMode: semantic        # or hybrid
+elasticsearch:
+  url: https://my-deployment.es.us-east-1.aws.elastic.cloud:443
+  apiKey: <ES-API-KEY>        # or username / password
+  # For a cluster with a private CA, e.g. ECK's <cluster>-es-http-certs-public:
+  # caSecret:
+  #   name: <SECRET-NAME>
+  #   key: ca.crt
+```
+
+The API key needs to manage the inference endpoint and the
+`auto-ontology-*` indices:
+
+```json
+{
+  "cluster": ["manage_inference", "monitor_inference"],
+  "indices": [{ "names": ["auto-ontology-*"], "privileges": ["all"] }]
+}
+```
+
+**A bundled single-node cluster**, for trying it out:
+
+```yaml
+vectorStore:
+  backend: elasticsearch
+elasticsearch:
+  bundled:
+    enabled: true
+```
+
+This runs Elasticsearch next to Postgres with security on and a generated
+`elastic` password. It uses a 30-day trial license, so the `nvidia` inference
+service, and with it ingest and search, stops when the trial ends. For anything
+longer-lived, point `url` at a licensed cluster.
+
+The chart does not restart pods when only these settings change, so after a
+`helm upgrade` that switches `vectorStore` or `elasticsearch` values, restart
+the app (or bump `podAnnotations`):
+
+```bash
+kubectl rollout restart deploy/<release> deploy/ingestion
+```
+
+Switching an existing install from Postgres to Elasticsearch does not move its
+vectors. Start from a new install, or remove and re-add each connection so it
+is ingested into the new index, then reset the semantic layer.
+
+The endpoint keeps the model and key it was created with. To change either,
+delete the endpoint (`DELETE _inference/text_embedding/auto-ontology-embed`)
+and, for a new model, the `auto-ontology-*` indices, then re-ingest.
+
+### Running it locally
+
+`docker-compose.yml` has the same single-node cluster behind the
+`elasticsearch` profile, and `dev_tools/setup_env.sh` starts it when `.env` has
+`VDB_BACKEND=elasticsearch`; see [`dev_tools/README.md`](./dev_tools/README.md).
+`dev_tools/e2e_local.py` runs the whole path end to end and reports what it
+built.
