@@ -121,6 +121,35 @@ def test_a_column_is_unique_when_95_percent_of_its_values_are_distinct(
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
 @patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
 @patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_a_mostly_null_column_is_not_unique_but_a_small_tables_key_is(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    columns = [{"name": "code", "data_type": "text"}]
+    table = {"id": "t1", "name": "t", "schema_name": "public"}
+
+    sparse = _mock_connector()
+    sparse.execute.return_value = pd.DataFrame(
+        {"code": ["a", "b", "c", "d", "e", *([None] * 45)]}
+    )
+    small = _mock_connector()
+    small.execute.return_value = pd.DataFrame({"code": ["a", "b", "c"]})
+
+    sparse_result = calculate_columns_profiling(
+        table, columns, sparse, probe_distinct_values=False
+    )
+    small_result = calculate_columns_profiling(
+        table, columns, small, probe_distinct_values=False
+    )
+
+    assert sparse_result["code"]["is_unique"] is False
+    assert small_result["code"]["is_unique"] is True
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling_quotes_name_with_space(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,
@@ -308,7 +337,7 @@ def test_calculate_columns_profiling(
     # "token") would otherwise shadow it if we looked at call_args (last call).
     sql = connector.execute.call_args_list[0][0][0]
     assert '"public"."orders"' in sql
-    assert "LIMIT 1000" in sql
+    assert "LIMIT 5000" in sql
     assert connector.execute.call_count == 3
 
     # Returned dict includes every column (dates, long strings included),
@@ -613,7 +642,7 @@ def test_row_sample_runs_even_with_the_setting_off(
     mock_merge_col_attr: MagicMock,
     mock_get_connectors: MagicMock,
 ) -> None:
-    """``SELECT * ... LIMIT 1000`` is unconditional, end to end.
+    """``SELECT * ... LIMIT 5000`` is unconditional, end to end.
 
     Asserted against the real connector-resolution path (``get_connectors``)
     rather than a patched ``_resolve_connector``, and by recording every SQL
@@ -648,7 +677,7 @@ def test_row_sample_runs_even_with_the_setting_off(
         probe_distinct_values=False,
     )
 
-    assert executed == ["SELECT * FROM `nvapp`.`public`.`orders` LIMIT 1000"]
+    assert executed == ["SELECT * FROM `nvapp`.`public`.`orders` LIMIT 5000"]
 
 
 @patch("auto_ontology.semantic.visit_enter.calculate_columns_profiling")

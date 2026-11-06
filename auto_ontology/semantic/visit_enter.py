@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Row cap for the per-column profiling sample.
-_PROFILING_SAMPLE_LIMIT = 1000
+_PROFILING_SAMPLE_LIMIT = 5000
 # How long a profiling query may run before it is cancelled, on connectors that
 # support a cap. A bounded sample off a healthy warehouse is seconds; anything
 # past this is an engine that cannot get resources, and waiting out the driver's
@@ -68,6 +68,10 @@ _PROFILING_TOP_N = 5
 # Share of sampled non-null values that must be distinct for a column to count
 # as unique. Below 1 so a stray duplicate or a dirty row does not hide a key.
 _UNIQUE_RATIO = 0.95
+# Non-null values a column needs in the sample to count as unique, capped at
+# the sample's row count so a small table's key still qualifies. A mostly-null
+# column's few values are distinct by chance, not because they identify rows.
+_MIN_UNIQUE_NON_NULL = 20
 # String sample values longer than this are not persisted.
 _MAX_SAMPLE_VALUE_LEN = 30
 # Declared data-type substrings whose sample values are not persisted.
@@ -418,16 +422,17 @@ def calculate_columns_profiling(
     *,
     probe_distinct_values: bool = True,
 ) -> dict[str, dict[str, Any]]:
-    """Profile a table's columns from a live sample of up to 1000 rows.
+    """Profile a table's columns from a live sample of up to 5000 rows.
 
-    Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
-    ``is_unique`` flag (at least 95% of non-null values distinct) and the 5 most-common
+    Runs ``SELECT * ... LIMIT 5000`` and, for every column, computes an
+    ``is_unique`` flag (at least 95% of non-null values distinct, over at
+    least 20 non-null values or every sampled row) and the 5 most-common
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
 
     ``probe_distinct_values`` gates only that second step. The bounded
-    ``SELECT * ... LIMIT 1000`` always runs; the DISTINCT probe is the
+    ``SELECT * ... LIMIT 5000`` always runs; the DISTINCT probe is the
     unbounded one (a full-column scan per column on warehouses where
     ``DISTINCT`` + ``LIMIT`` does not early-stop), so it is what the
     "Distinct Value Scanning" setting turns off. With it off, a column keeps
@@ -500,7 +505,11 @@ def calculate_columns_profiling(
             # as dict/list, neither of which can go in a set or a Counter.
             keys = [_sample_key(value) for value in values]
 
-            is_unique = bool(keys and len(set(keys)) >= _UNIQUE_RATIO * len(keys))
+            is_unique = bool(
+                keys
+                and len(keys) >= min(_MIN_UNIQUE_NON_NULL, len(df))
+                and len(set(keys)) >= _UNIQUE_RATIO * len(keys)
+            )
 
             first_by_key: dict[str, Any] = {}
             for key, value in zip(keys, values):
@@ -737,7 +746,7 @@ def calculate_columns_profiling(
 
         filtered = [v for v in col_values if _keep_persisted_sample(v)]
         if _is_text_sample_type(declared_type):
-            # Checked against the full up-to-1000-row sample, not just the
+            # Checked against the full up-to-5000-row sample, not just the
             # top-5/distinct values kept for display — a minority format can
             # be entirely absent from the top-5 while still breaking a
             # fixed-format parser on real rows (observed: a column mostly

@@ -94,7 +94,7 @@ def read_configuration_flag(key: str, *, default: bool) -> bool:
 def is_distinct_value_probing_enabled() -> bool:
     """Whether compilation may run per-column ``SELECT DISTINCT`` probes.
 
-    Scoped to those probes only. The bounded ``SELECT * ... LIMIT 1000`` row
+    Scoped to those probes only. The bounded ``SELECT * ... LIMIT 5000`` row
     sample always runs -- it is one cheap query per table. The DISTINCT probes
     are the unbounded ones: one per low-cardinality text column, and a full
     column scan on warehouses where ``DISTINCT`` + ``LIMIT`` does not
