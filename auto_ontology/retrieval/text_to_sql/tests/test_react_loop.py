@@ -224,6 +224,19 @@ def test_column_order_rule_reaches_the_model(ctx: ToolContext, dialect: str | No
     assert "same order the question" in model.seen[0][0].content
 
 
+@pytest.mark.parametrize("dialect", [None, "postgresql", "mysql", "sqlite"])
+def test_requested_shape_rule_reaches_the_model(
+    ctx: ToolContext, dialect: str | None
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q", dialect=dialect)
+
+    system = model.seen[0][0].content
+    assert "Aggregate, GROUP BY or LIMIT only when the question" in system
+    assert "do not add a key or id to it" in system
+
+
 def _one_query_budget(ctx: ToolContext) -> None:
     ctx.can_run_queries = lambda: ctx.sql_runs < 1
 

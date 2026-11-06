@@ -10,6 +10,8 @@ lost accuracy every time they were measured, and a policy being trained should
 learn conventions from reward, not from a list. Output column order is the
 exception: no check can tell which order the question asked for, and graders
 that compare rows positionally fail a query whose columns are otherwise right.
+So is the shape of the result: a query that aggregates, groups or limits when
+the question did not ask for it runs cleanly and returns plausible rows.
 """
 
 from __future__ import annotations
@@ -30,6 +32,10 @@ stored values before filtering on them, and to test a draft.
 the error and can keep working.
 
 Return exactly the requested output fields and no others.
+
+Aggregate, GROUP BY or LIMIT only when the question or its clarifications ask \
+for a total, a breakdown or a top-N. GROUP BY only the columns the question \
+asks to list or break down; do not add a key or id to it.
 
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
