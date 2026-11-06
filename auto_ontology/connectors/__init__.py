@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.bigquery import BigQueryDatabase
 from auto_ontology.connectors.clickhouse import ClickHouseDatabase
 from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
@@ -22,6 +23,7 @@ from auto_ontology.connectors.trino import TrinoDatabase
 
 __all__ = [
     "SQLDatabase",
+    "BigQueryDatabase",
     "ClickHouseDatabase",
     "DatabricksDatabase",
     "DuckDBDatabase",
