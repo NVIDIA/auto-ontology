@@ -15,8 +15,11 @@
 #
 # ---------------------------------------------------------------------------
 
-ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.11.29
+# The image ships uv's managed CPython, and each uv release only knows the
+# patch releases that existed when it was cut, so bump both together. 3.12.16
+# needs uv >= 0.13; the build fails if uv cannot install the pinned version.
+ARG PYTHON_VERSION=3.12.16
+ARG UV_VERSION=0.13.7
 ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
 ARG BASE_IMG_TAG=jammy-20250619
 
@@ -25,15 +28,19 @@ ARG BASE_IMG_TAG=jammy-20250619
 ############################
 FROM $BASE_IMG:$BASE_IMG_TAG AS builder
 
+ARG PYTHON_VERSION
 ARG UV_VERSION
 
+# UV_PYTHON overrides .python-version ("3.12", for local development), so the
+# image gets exactly PYTHON_VERSION rather than whatever 3.12.x uv defaults to.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
-    UV_PYTHON_INSTALL_DIR=/opt/python
+    UV_PYTHON_INSTALL_DIR=/opt/python \
+    UV_PYTHON=${PYTHON_VERSION}
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
