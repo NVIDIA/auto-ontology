@@ -399,3 +399,29 @@ def test_concepts_for_tables_keeps_composite_columns_in_key_order(lines) -> None
 
     assert concept["keys"][0]["columns"] == ["order_id", "line_no"]
     assert concept["references"][0]["columns"] == ["order_id", "line_no"]
+
+
+def test_a_matched_attribute_brings_every_table_of_its_concept(orders) -> None:
+    world, order = orders
+    attribute = world.attribute("order_id", owner="orders.id")
+    term_id = next(
+        r["term_id"]
+        for r in store().query_read(
+            select(s.table__term.c.term_id).where(
+                s.table__term.c.table_id == world.tables["orders"]
+            )
+        )
+    )
+    store().query_write(
+        s.column_attribute__term.insert().values(
+            attribute_id=attribute, term_id=term_id
+        )
+    )
+    expected = sorted([world.tables["orders"], world.tables["order_details"]])
+
+    assert sorted(c.fetch_concept_table_ids(attribute_ids=[attribute])) == expected
+    assert sorted(c.fetch_concept_table_ids(term_ids=[term_id])) == expected
+    assert not c.fetch_concept_table_ids(
+        term_ids=[term_id], database_name=f"{world.prefix}-elsewhere"
+    )
+    assert c.fetch_concept_table_ids() == []

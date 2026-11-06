@@ -37,7 +37,10 @@ from auto_ontology.dal.attributes import (
     find_join_path,
     find_kept_table_bridges,
 )
-from auto_ontology.dal.concepts import fetch_concepts_for_tables
+from auto_ontology.dal.concepts import (
+    fetch_concept_table_ids,
+    fetch_concepts_for_tables,
+)
 from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
@@ -556,6 +559,30 @@ class CandidatePreparationAgent(BaseAgent):
                 added,
                 subject_term.get("name") or subject_term_id,
                 [t["name"] for t in subject_tables],
+            )
+
+        # --- 4c'. Add the other tables of the matched terms' concepts ---
+        # A concept groups the terms of one thing, which a database may split
+        # over several tables sharing a key; matching one of them should bring
+        # the rest.
+        concept_table_ids: list[str] = []
+        try:
+            concept_table_ids = fetch_concept_table_ids(
+                attribute_ids=list(attr_contexts),
+                term_ids=[subject_term_id] if subject_term_id else [],
+                database_name=target_db,
+            )
+        except Exception:
+            self.logger.warning("Concept table lookup failed", exc_info=True)
+        existing_ids = {t.get("id") for t in relevant_tables}
+        missing_concept_ids = [t for t in concept_table_ids if t not in existing_ids]
+        if missing_concept_ids:
+            concept_tables = fetch_tables_by_ids(missing_concept_ids)
+            relevant_tables = _merge_tables(relevant_tables, concept_tables)
+            self.logger.info(
+                "Added %d table(s) from the matched terms' concepts: %s",
+                len(concept_tables),
+                [t["name"] for t in concept_tables],
             )
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)

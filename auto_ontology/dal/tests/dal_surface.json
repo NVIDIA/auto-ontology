@@ -27,6 +27,7 @@
     "delete_concept_fk": "(fk_id: 'str') -> 'None'",
     "ensure_term_concept": "(term_id: 'str') -> 'str | None'",
     "fetch_concept_keys": "(concept_id: 'str') -> 'dict[str, list[str]]'",
+    "fetch_concept_table_ids": "(*, attribute_ids: 'list[str] | None' = None, term_ids: 'list[str] | None' = None, database_name: 'str | None' = None) -> 'list[str]'",
     "fetch_concepts": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "fetch_concepts_for_tables": "(table_ids: 'list[str]') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",

@@ -318,6 +318,64 @@ def fetch_concept_keys(concept_id: str) -> dict[str, list[str]]:
     return dict(keys)
 
 
+def fetch_concept_table_ids(
+    *,
+    attribute_ids: list[str] | None = None,
+    term_ids: list[str] | None = None,
+    database_name: str | None = None,
+) -> list[str]:
+    """Every table of the concepts behind *term_ids* and *attribute_ids*' terms.
+
+    A concept's tables are its key tables and the tables any of its terms
+    describe. Legacy tables are left out; *database_name* restricts the result
+    to one database.
+    """
+    if not attribute_ids and not term_ids:
+        return []
+    attribute_terms = select(s.column_attribute__term.c.term_id).where(
+        s.column_attribute__term.c.attribute_id.in_(list(attribute_ids or []))
+    )
+    concept_ids = (
+        select(s.term__concept.c.concept_id)
+        .where(
+            s.term__concept.c.term_id.in_(list(term_ids or []))
+            | s.term__concept.c.term_id.in_(attribute_terms)
+        )
+        .scalar_subquery()
+    )
+    concept_terms = select(s.term__concept.c.term_id).where(
+        s.term__concept.c.concept_id.in_(concept_ids)
+    )
+    tables = (
+        select(s.concept__pk.c.table_id.label("table_id"))
+        .where(s.concept__pk.c.concept_id.in_(concept_ids))
+        .union(
+            select(s.table__term.c.table_id.label("table_id")).where(
+                s.table__term.c.term_id.in_(concept_terms)
+            )
+        )
+        .subquery("concept_table")
+    )
+    statement = (
+        select(tables.c.table_id)
+        .select_from(
+            tables.join(s.catalog_table, s.catalog_table.c.id == tables.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(~s.catalog_table.c.is_legacy)
+        .order_by(tables.c.table_id)
+    )
+    if database_name is not None:
+        statement = statement.where(s.catalog_database.c.name == database_name)
+    return [r["table_id"] for r in store().query_read(statement)]
+
+
 def fetch_concepts_for_tables(table_ids: list[str]) -> list[dict[str, Any]]:
     """The concepts that join two or more of *table_ids*, ordered by name.
 
