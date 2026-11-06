@@ -17,6 +17,15 @@ from auto_ontology.semantic.embed import _build_rows
 from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
 
 
+@pytest.fixture(autouse=True)
+def _no_value_overlap_discovery():
+    """Value-overlap discovery reads the live database; it has its own tests."""
+    with patch(
+        "auto_ontology.semantic.semantic_fk.discover_value_overlap_fks", return_value=0
+    ):
+        yield
+
+
 def _hit(
     attr_id: str,
     table_id: str,
@@ -114,7 +123,7 @@ def test_vdb_resolution_uses_sql_fallback_when_llm_abstains(
 ) -> None:
     retriever = MagicMock()
     hit = _hit("target-attr", "table-2")
-    retriever.query.side_effect = [[hit], []]
+    retriever.query.side_effect = [[hit], [], []]
     column = {
         "id": "source-column",
         "name": "id",

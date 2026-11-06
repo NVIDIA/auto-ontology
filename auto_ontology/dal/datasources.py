@@ -846,6 +846,79 @@ def fetch_tables_for_role_classification(
     ]
 
 
+def fetch_columns_for_value_overlap(database_name: str) -> list[dict[str, Any]]:
+    """Every non-legacy table of one database, with the columns FK discovery reads.
+
+    Each column carries ``attribute_id`` (the attribute it owns, or ``None``)
+    and ``has_semantic_fk`` (whether it already references an attribute).
+    """
+    tables = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_table.c.pk,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(_table_join())
+        .where(
+            s.catalog_database.c.name == database_name,
+            ~s.catalog_table.c.is_legacy,
+        )
+        .order_by(s.catalog_schema.c.name, s.catalog_table.c.name)
+    )
+    attribute_id = (
+        select(func.min(s.column__has_attribute.c.attribute_id))
+        .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
+        .correlate(s.catalog_column)
+        .scalar_subquery()
+    )
+    has_semantic_fk = (
+        select(s.column__semantic_fk.c.attribute_id)
+        .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+        .correlate(s.catalog_column)
+        .exists()
+    )
+    columns = store().query_read(
+        select(
+            s.catalog_column.c.id,
+            s.catalog_column.c.table_id,
+            s.catalog_column.c.name,
+            s.catalog_column.c.data_type,
+            column_description_expr().label("description"),
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            attribute_id.label("attribute_id"),
+            has_semantic_fk.label("has_semantic_fk"),
+        )
+        .where(s.catalog_column.c.table_id.in_(_database_table_ids(database_name)))
+        .order_by(s.catalog_column.c.table_id, s.catalog_column.c.ordinal_position)
+    )
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for row in columns:
+        by_table.setdefault(row["table_id"], []).append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "data_type": row["data_type"] or "",
+                "description": row["description"] or "",
+                "sample_values": stringify_sample_values(row["sample_values"]),
+                "is_unique": row["is_unique"],
+                "attribute_id": row["attribute_id"],
+                "has_semantic_fk": bool(row["has_semantic_fk"]),
+            }
+        )
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "schema_name": row["schema_name"],
+            "pk": list(row["pk"] or []),
+            "columns": by_table.get(row["id"], []),
+        }
+        for row in tables
+    ]
+
+
 def set_table_roles(
     database_name: str,
     roles: dict[str, dict[str, Any]],

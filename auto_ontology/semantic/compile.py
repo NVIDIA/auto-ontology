@@ -56,6 +56,15 @@ def run_table_role_classification(database_name: str) -> tuple[int, int]:
         return classify_table_roles(database_name)
 
 
+def run_semantic_fk_resolution(database_name: str) -> int:
+    """Resolve semantic FKs on an already-compiled database.
+
+    Returns the number of semantic FK edges created.
+    """
+    with limit_inflight(SEMANTIC_LLM_MAX_INFLIGHT):
+        return resolve_semantic_fks(database_name)
+
+
 def _run_semantic_compilation(
     database_name: str,
     *,

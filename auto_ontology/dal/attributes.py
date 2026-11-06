@@ -471,6 +471,11 @@ def find_unlinked_fk_columns(
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
+            select(s.catalog_schema.c.name)
+            .where(s.catalog_schema.c.id == s.catalog_table.c.schema_id)
+            .correlate(s.catalog_table)
+            .scalar_subquery()
+            .label("schema_name"),
             s.column__foreign_key.c.target_column_id.label("fk_target_col_id"),
             # The FK target's *table*, not just its column: `resolve_semantic_fks`
             # skips a candidate whose target table is the source table, which it

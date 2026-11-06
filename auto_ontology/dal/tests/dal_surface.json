@@ -55,6 +55,7 @@
     "fetch_bridge_table_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_col_table_contexts": "(col_ids: 'list[str]') -> 'dict[str, dict[str, str]]'",
     "fetch_columns_for_table": "(table_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any] | None'",
+    "fetch_columns_for_value_overlap": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_databases": "(zone_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
     "fetch_item_by_id": "(item_id: 'str', label: 'str | list[str]') -> 'dict | None'",
     "fetch_join_edges": "() -> 'list[dict[str, Any]]'",

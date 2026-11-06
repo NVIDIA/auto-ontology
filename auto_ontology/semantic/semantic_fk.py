@@ -24,7 +24,12 @@ Algorithm
       ask the LLM to pick the best match, and fall back to probing the live
       database for a candidate whose sample values match when the LLM
       abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id
-      directly — no additional lookup needed.
+      directly — no additional lookup needed. A candidate profiling did not
+      mark unique joins the list when its live column is nearly unique and
+      holds enough of the FK column's values.
+3. **Value overlap** — every remaining column, attribute owner or not, is
+   compared with the key-like columns of other tables by value; see
+   :mod:`auto_ontology.semantic.value_overlap_fk`.
 """
 
 from __future__ import annotations
@@ -51,6 +56,12 @@ from auto_ontology.dal.datasources import (
     merge_unconstrained_foreign_key,
 )
 from auto_ontology.semantic.fk_suggester import named_table_key_links
+from auto_ontology.semantic.value_overlap_fk import (
+    discover_value_overlap_fks,
+    is_near_unique_column,
+    overlap_accepted,
+    shared_value_counts,
+)
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.llm_invoke import (
@@ -104,6 +115,9 @@ def resolve_semantic_fks(database_name: str) -> int:
     Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
+    created += discover_value_overlap_fks(
+        database_name, _resolve_connector(database_name)
+    )
     created -= prune_disjoint_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created
@@ -524,8 +538,8 @@ def _resolve_via_vdb(
     Candidates on the FK column's own table are excluded — a FK never
     references a column on the table it lives on. Candidates whose owning
     column is known (profiled) to be non-unique are excluded at the VDB
-    query level — a non-unique column can't validly serve as the referenced
-    key.
+    query level, except those :func:`_near_unique_hits` verifies live as a
+    nearly unique key holding the FK column's values.
 
     The hit's ``metadata["id"]`` is the ColumnAttribute id directly —
     no additional graph lookup is required.
@@ -547,10 +561,11 @@ def _resolve_via_vdb(
 
     full_hits = retriever.query(full_query, top_k=3, vdb_kwargs=vdb_kwargs) or []
     name_hits = retriever.query(name_query, top_k=3, vdb_kwargs=vdb_kwargs) or []
+    near_unique_hits = _near_unique_hits(col, retriever, database_name, connector)
 
     seen_ids: set[str] = set()
     merged: list[dict[str, Any]] = []
-    for hit in full_hits + name_hits:
+    for hit in full_hits + name_hits + near_unique_hits:
         hit_id = (hit.get("metadata") or {}).get("id", "")
         if hit_id and hit_id not in seen_ids:
             seen_ids.add(hit_id)
@@ -572,6 +587,74 @@ def _resolve_via_vdb(
     if selected:
         return selected
     return _match_hit_by_sample_values(col, merged, connector)
+
+
+def _near_unique_hits(
+    col: dict[str, Any],
+    retriever: Retriever,
+    database_name: str,
+    connector: SQLDatabase | None,
+) -> list[dict[str, Any]]:
+    """Hits on columns profiling did not mark unique that still serve as a key.
+
+    A key repeated for a few rows (a depot split between two zones) is not
+    unique, yet it is what a reference points at. A hit is kept when its live
+    column is nearly unique and holds enough of the FK column's values.
+    """
+    if connector is None or not col.get("table_name") or not col.get("name"):
+        return []
+    hits = (
+        retriever.query(
+            _build_query_text(col),
+            top_k=3,
+            vdb_kwargs={
+                "where": {
+                    "label": "ColumnAttribute",
+                    "database_name": database_name,
+                    "is_unique": False,
+                }
+            },
+        )
+        or []
+    )
+    source = (col.get("schema_name"), str(col["table_name"]), str(col["name"]))
+    kept: list[dict[str, Any]] = []
+    for hit in hits:
+        metadata = hit.get("metadata") or {}
+        table_name = metadata.get("table_name")
+        column_name = metadata.get("source_column")
+        if (
+            not table_name
+            or not column_name
+            or metadata.get("table_id") == col.get("table_id")
+        ):
+            continue
+        target = (metadata.get("schema_name"), str(table_name), str(column_name))
+        try:
+            if not is_near_unique_column(connector, *target):
+                continue
+            source_values, shared = shared_value_counts(connector, source, target)
+        except Exception:
+            logger.info(
+                "near-unique check skipped for %s.%s",
+                table_name,
+                column_name,
+                exc_info=True,
+            )
+            continue
+        if overlap_accepted(source_values, shared):
+            logger.info(
+                "resolve_semantic_fks [near-unique]: %s.%s candidate %s.%s "
+                "(%d of %d values shared)",
+                col.get("table_name"),
+                col.get("name"),
+                table_name,
+                column_name,
+                shared,
+                source_values,
+            )
+            kept.append(hit)
+    return kept
 
 
 def _match_hit_by_sample_values(

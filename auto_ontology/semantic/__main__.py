@@ -7,6 +7,7 @@
 Usage:
     python -m auto_ontology.semantic --database-name <database_name>
     python -m auto_ontology.semantic --database-name <database_name> --only-table-roles
+    python -m auto_ontology.semantic --database-name <database_name> --only-semantic-fks
 """
 
 from __future__ import annotations
@@ -37,6 +38,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--only-semantic-fks",
+        action="store_true",
+        help="Only resolve semantic FKs, on a database that is already compiled.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -51,10 +57,13 @@ def main() -> None:
 
     from auto_ontology.semantic.compile import (
         run_semantic_compilation,
+        run_semantic_fk_resolution,
         run_table_role_classification,
     )
 
-    if args.only_table_roles:
+    if args.only_semantic_fks:
+        run_semantic_fk_resolution(args.database_name)
+    elif args.only_table_roles:
         run_table_role_classification(args.database_name)
     else:
         run_semantic_compilation(args.database_name)
