@@ -164,6 +164,16 @@ FINAL_RUN_LAST_CALL = (
 
 PREDICT_LAST_CALL = "No tool calls left. Call predict now."
 
+NO_QUERIES_LEFT = (
+    "No budget left to run queries. Call submit now with your best query; it "
+    "is checked against the schema but not run."
+)
+
+FINAL_RUN_NO_QUERIES_LEFT = (
+    "No budget left to run queries. Call run_sql with final=true now with your "
+    "best query; it is checked against the schema but not run."
+)
+
 _KINDS = sorted(KIND_LABELS)
 
 RETRIEVE_TOOL = {
@@ -438,6 +448,12 @@ def last_call_for(mode: EpisodeMode, *, information_answers: bool = False) -> st
     if information_answers_offered(information_answers):
         return INFORMATION_LAST_CALL
     return LAST_CALL if config.submit_tool_enabled() else FINAL_RUN_LAST_CALL
+
+
+def no_queries_left_for() -> str:
+    return (
+        NO_QUERIES_LEFT if config.submit_tool_enabled() else FINAL_RUN_NO_QUERIES_LEFT
+    )
 
 
 def nudge_for(mode: EpisodeMode, *, information_answers: bool = False) -> str:
