@@ -18,6 +18,7 @@ from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.legacy_tables import detect_legacy_tables
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
+from auto_ontology.semantic.table_roles import classify_table_roles
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
@@ -44,6 +45,15 @@ def run_semantic_compilation(
     """
     with limit_inflight(SEMANTIC_LLM_MAX_INFLIGHT):
         return _run_semantic_compilation(database_name, domain_summary=domain_summary)
+
+
+def run_table_role_classification(database_name: str) -> tuple[int, int]:
+    """Classify table roles and sibling tables on an already-compiled database.
+
+    Returns ``(tables classified, sibling pairs noted)``.
+    """
+    with limit_inflight(SEMANTIC_LLM_MAX_INFLIGHT):
+        return classify_table_roles(database_name)
 
 
 def _run_semantic_compilation(
@@ -89,14 +99,15 @@ def _run_semantic_compilation(
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
 
-    # The three stages below are the long tail — FK resolution alone has run
+    # The stages below are the long tail — FK resolution alone has run
     # past 300s on one database — and none of them is required for the Terms
     # just written to be usable. A cancelled pass skips straight to the summary
     # rather than spending minutes on work nobody is waiting for.
     if is_cancelled():
         logger.info(
             "Semantic compilation cancelled (database=%r) — skipping the FK, "
-            "SqlAttribute and bridge-table stages; %d table(s) compiled in %.1fs",
+            "table-role, SqlAttribute and bridge-table stages; %d table(s) "
+            "compiled in %.1fs",
             database_name,
             count,
             time.monotonic() - started,
@@ -108,6 +119,11 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
+
+    logger.info("=" * 60)
+    logger.info("Classifying table roles and sibling tables…")
+    logger.info("=" * 60)
+    role_count, sibling_count = classify_table_roles(database_name)
 
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 
@@ -127,15 +143,17 @@ def _run_semantic_compilation(
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all four stages completed.
+    # exceptions, so reaching this means every stage completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
-        "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s) in %.1fs",
+        "%d table(s), %d semantic FK edge(s), %d table role(s), "
+        "%d sibling pair(s), %d SqlAttribute(s), %d bridge table(s) in %.1fs",
         database_name,
         count,
         fk_count,
+        role_count,
+        sibling_count,
         attr_count,
         bridge_table_count,
         time.monotonic() - started,

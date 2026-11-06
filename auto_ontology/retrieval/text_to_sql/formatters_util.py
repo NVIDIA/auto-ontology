@@ -299,7 +299,7 @@ def format_important_columns_for_prompt(
     return "\n".join(lines) or "No semantically matched columns."
 
 
-_TABLE_HEADERS = ["table", "label", "description", "primary key"]
+_TABLE_HEADERS = ["table", "label", "role", "grain", "description", "primary key"]
 _COLUMN_HEADERS = [
     "column",
     "type",
@@ -347,6 +347,37 @@ _ENTITY_MATCH_NOTE = (
     "by how closely. Several tables may match the same entity; choose by what "
     "the question asks, not by position."
 )
+
+
+_TABLE_ROLE_NOTE = (
+    "A table's role says how to join it. A dimension holds one row per entity "
+    "or code; join a fact to it to reach names and attributes. Do not join two "
+    "fact tables to each other only through a shared dimension key, such as a "
+    "department or term code: neither row identifies the other, so the join "
+    "repeats rows. Aggregate each fact on its own, then combine the results on "
+    "that key."
+)
+
+_SIBLING_NOTE = (
+    "Some tables have near-identical columns; their `similar to` lines say "
+    "what each one covers. Choose between them by those notes and the "
+    "question, not by position."
+)
+
+
+def _format_sibling_notes(siblings: Any, name_of: Any) -> list[str]:
+    """One ``similar to`` line per sibling table in scope."""
+    if not isinstance(siblings, list):
+        return []
+    lines = []
+    for sibling in siblings:
+        if not isinstance(sibling, dict) or not sibling.get("note"):
+            continue
+        lines.append(
+            f"similar to {_plain_cell(name_of(sibling))}; when to use this table "
+            f"instead: {_plain_cell(sibling['note'])}"
+        )
+    return lines
 
 
 def _format_entity_matches(matches: Any) -> str:
@@ -448,6 +479,10 @@ def format_tables_for_prompt(
     formatted_tables = []
     if any(table.get("entity_matches") for table in tables):
         formatted_tables.append(_ENTITY_MATCH_NOTE)
+    if any(table.get("table_role") for table in tables):
+        formatted_tables.append(_TABLE_ROLE_NOTE)
+    if any(table.get("sibling_notes") for table in tables):
+        formatted_tables.append(_SIBLING_NOTE)
     for table in tables:
         table_name = table.get("name", "UNKNOWN")
         table_label = table.get("label", "")
@@ -461,12 +496,15 @@ def format_tables_for_prompt(
                         "label": _plain_cell(
                             table_label if table_label != table_name else ""
                         ),
+                        "role": _plain_cell(table.get("table_role")),
+                        "grain": _plain_cell(table.get("grain")),
                         "description": _plain_cell(table.get("description")),
                         "primary key": _plain_cell(table.get("pk")),
                     }
                 ],
             )
         ]
+        blocks.extend(_format_sibling_notes(table.get("sibling_notes"), full_name_of))
         entity_line = _format_entity_matches(table.get("entity_matches"))
         if entity_line:
             blocks.append(entity_line)
@@ -528,6 +566,10 @@ def format_used_schema_for_prompt(
         label = table.get("label")
         if label and label != table.get("name"):
             line += f" | label: {label}"
+        if table.get("table_role"):
+            line += f" | role: {table['table_role']}"
+        if table.get("grain"):
+            line += f" | grain: {table['grain']}"
         if table.get("description"):
             line += f" | description: {table['description']}"
         if table.get("pk"):

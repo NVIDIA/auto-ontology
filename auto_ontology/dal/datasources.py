@@ -19,6 +19,7 @@ Two shapes recur and are easy to break:
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from typing import Any
 
 import pandas as pd
@@ -33,6 +34,7 @@ from sqlalchemy import (
     literal,
     or_,
     select,
+    tuple_,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
@@ -733,6 +735,258 @@ def fetch_legacy_table_ids(database_name: str | None = None) -> set[str]:
             s.catalog_table.c.id.in_(_database_table_ids(database_name))
         )
     return {row["id"] for row in store().query_read(statement)}
+
+
+def _table_reference_pairs(database_name: str) -> set[tuple[str, str]]:
+    """``(referencing table id, referenced table id)`` within one database.
+
+    Both a column-to-column foreign key and a ``SEMANTIC_FK`` to an attribute
+    another table's column carries count as a reference.
+    """
+    source = s.catalog_column.alias("ref_source")
+    target = s.catalog_column.alias("ref_target")
+    in_db = _database_table_ids(database_name)
+    declared = (
+        select(source.c.table_id.label("source"), target.c.table_id.label("target"))
+        .select_from(
+            s.column__foreign_key.join(
+                source, source.c.id == s.column__foreign_key.c.source_column_id
+            ).join(target, target.c.id == s.column__foreign_key.c.target_column_id)
+        )
+        .where(source.c.table_id.in_(in_db), target.c.table_id.in_(in_db))
+    )
+    semantic = (
+        select(source.c.table_id.label("source"), target.c.table_id.label("target"))
+        .select_from(
+            s.column__semantic_fk.join(
+                source, source.c.id == s.column__semantic_fk.c.column_id
+            )
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(target, target.c.id == s.column__has_attribute.c.column_id)
+        )
+        .where(source.c.table_id.in_(in_db), target.c.table_id.in_(in_db))
+    )
+    pairs: set[tuple[str, str]] = set()
+    for statement in (declared, semantic):
+        for row in store().query_read(statement):
+            if row["source"] != row["target"]:
+                pairs.add((row["source"], row["target"]))
+    return pairs
+
+
+def fetch_tables_for_role_classification(
+    database_name: str,
+) -> list[dict[str, Any]]:
+    """Every non-legacy table of one database, with what classifying it needs.
+
+    Each table carries its columns, and ``references`` / ``referenced_by``:
+    the names of the tables it points at and that point at it.
+    """
+    tables = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            table_description_expr().label("description"),
+            s.catalog_table.c.pk,
+            s.catalog_table.c.is_junction_table,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(_table_join())
+        .where(
+            s.catalog_database.c.name == database_name,
+            ~s.catalog_table.c.is_legacy,
+        )
+        .order_by(s.catalog_schema.c.name, s.catalog_table.c.name)
+    )
+    columns = store().query_read(
+        select(
+            s.catalog_column.c.table_id,
+            s.catalog_column.c.name,
+            s.catalog_column.c.data_type,
+            column_description_expr().label("description"),
+            s.catalog_column.c.sample_values,
+        )
+        .where(s.catalog_column.c.table_id.in_(_database_table_ids(database_name)))
+        .order_by(s.catalog_column.c.table_id, s.catalog_column.c.ordinal_position)
+    )
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for row in columns:
+        by_table.setdefault(row["table_id"], []).append(
+            {
+                "name": row["name"],
+                "data_type": row["data_type"],
+                "description": row["description"] or "",
+                "sample_values": stringify_sample_values(row["sample_values"]),
+            }
+        )
+    names = {row["id"]: row["name"] for row in tables}
+    references: dict[str, set[str]] = {}
+    referenced_by: dict[str, set[str]] = {}
+    for source, target in _table_reference_pairs(database_name):
+        if source in names and target in names:
+            references.setdefault(source, set()).add(names[target])
+            referenced_by.setdefault(target, set()).add(names[source])
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "schema_name": row["schema_name"],
+            "description": row["description"] or "",
+            "pk": list(row["pk"] or []),
+            "is_junction_table": bool(row["is_junction_table"]),
+            "columns": by_table.get(row["id"], []),
+            "references": sorted(references.get(row["id"], ())),
+            "referenced_by": sorted(referenced_by.get(row["id"], ())),
+        }
+        for row in tables
+    ]
+
+
+def set_table_roles(
+    database_name: str,
+    roles: dict[str, dict[str, Any]],
+    keep: Collection[str] = (),
+) -> None:
+    """Replace one database's table roles and grains with *roles*.
+
+    *roles* maps a table id to ``{"role", "grain"}``. Every other table of the
+    database is cleared, so a table a later compile judges unclassifiable
+    reads null rather than a stale role — except the ids in *keep*, whose
+    stored values are left as they are.
+    """
+    with write_transaction():
+        store().query_write(
+            update(s.catalog_table)
+            .where(
+                s.catalog_table.c.id.in_(_database_table_ids(database_name)),
+                s.catalog_table.c.id.not_in(list(keep)),
+            )
+            .values(table_role=None, grain=None)
+        )
+        for table_id, decision in roles.items():
+            store().query_write(
+                update(s.catalog_table)
+                .where(
+                    s.catalog_table.c.id == table_id,
+                    s.catalog_table.c.id.in_(_database_table_ids(database_name)),
+                )
+                .values(
+                    table_role=decision.get("role") or None,
+                    grain=decision.get("grain") or None,
+                )
+            )
+
+
+def set_table_siblings(
+    database_name: str,
+    siblings: list[dict[str, str]],
+    keep: Collection[tuple[str, str]] = (),
+) -> None:
+    """Replace one database's sibling-table notes with *siblings*.
+
+    Each entry carries ``table_id``, ``sibling_table_id`` and ``note``. Stored
+    notes between the two tables of a pair in *keep* are left as they are, in
+    both directions.
+    """
+    kept = {(a, b) for a, b in keep} | {(b, a) for a, b in keep}
+    with write_transaction():
+        statement = s.table__sibling.delete().where(
+            s.table__sibling.c.table_id.in_(_database_table_ids(database_name))
+        )
+        if kept:
+            statement = statement.where(
+                tuple_(
+                    s.table__sibling.c.table_id, s.table__sibling.c.sibling_table_id
+                ).not_in(sorted(kept))
+            )
+        store().query_write(statement)
+        rows = [
+            {
+                "table_id": entry["table_id"],
+                "sibling_table_id": entry["sibling_table_id"],
+                "note": entry["note"],
+            }
+            for entry in siblings
+            if entry.get("note") and entry["table_id"] != entry["sibling_table_id"]
+        ]
+        if rows:
+            store().query_write(
+                insert(s.table__sibling).values(rows).on_conflict_do_nothing()
+            )
+
+
+def fetch_table_semantics(table_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """``{table id: {"role", "grain", "siblings"}}`` for the given tables.
+
+    ``siblings`` lists ``{"id", "name", "schema_name", "database_name",
+    "note"}`` for each near-identical table, where ``note`` says when to use
+    this table rather than that one. A table with nothing recorded is omitted.
+
+    Returns ``{}`` rather than raising if the query fails: this decorates
+    retrieval results, and losing the decoration beats losing the results.
+    """
+    if not table_ids:
+        return {}
+    sibling = s.catalog_table.alias("sibling_table")
+    sibling_schema = s.catalog_schema.alias("sibling_schema")
+    sibling_db = s.catalog_database.alias("sibling_db")
+    try:
+        roles = store().query_read(
+            select(
+                s.catalog_table.c.id,
+                s.catalog_table.c.table_role,
+                s.catalog_table.c.grain,
+            ).where(s.catalog_table.c.id.in_(list(table_ids)))
+        )
+        siblings = store().query_read(
+            select(
+                s.table__sibling.c.table_id,
+                s.table__sibling.c.note,
+                sibling.c.id,
+                sibling.c.name,
+                sibling_schema.c.name.label("schema_name"),
+                sibling_db.c.name.label("database_name"),
+            )
+            .select_from(
+                s.table__sibling.join(
+                    sibling, sibling.c.id == s.table__sibling.c.sibling_table_id
+                )
+                .join(sibling_schema, sibling_schema.c.id == sibling.c.schema_id)
+                .join(sibling_db, sibling_db.c.id == sibling_schema.c.database_id)
+            )
+            .where(s.table__sibling.c.table_id.in_(list(table_ids)))
+            .order_by(s.table__sibling.c.table_id, sibling.c.name)
+        )
+    except Exception:
+        logger.warning("fetch_table_semantics: query failed", exc_info=True)
+        return {}
+
+    out: dict[str, dict[str, Any]] = {}
+    for row in roles:
+        if row["table_role"] or row["grain"]:
+            out[row["id"]] = {
+                "role": row["table_role"],
+                "grain": row["grain"],
+                "siblings": [],
+            }
+    for row in siblings:
+        entry = out.setdefault(
+            row["table_id"], {"role": None, "grain": None, "siblings": []}
+        )
+        entry["siblings"].append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "schema_name": row["schema_name"],
+                "database_name": row["database_name"],
+                "note": row["note"],
+            }
+        )
+    return out
 
 
 def apply_metadata_batch(

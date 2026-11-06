@@ -41,7 +41,11 @@ from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
 )
-from auto_ontology.dal.datasources import fetch_tables_by_ids, find_table_id_by_name
+from auto_ontology.dal.datasources import (
+    fetch_table_semantics,
+    fetch_tables_by_ids,
+    find_table_id_by_name,
+)
 from auto_ontology.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
@@ -80,6 +84,28 @@ from auto_ontology.retrieval.text_to_sql.value_anchors import (
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 
 
+def attach_table_semantics(tables: list[dict]) -> None:
+    """Copy each table's role, grain and sibling notes onto it, in place.
+
+    Only siblings that are themselves among *tables* are kept: the prompt must
+    not name a table the model cannot use.
+    """
+    ids = [str(t["id"]) for t in tables if t.get("id")]
+    semantics = fetch_table_semantics(ids)
+    in_scope = set(ids)
+    for table in tables:
+        entry = semantics.get(str(table.get("id")))
+        if not entry:
+            continue
+        if entry.get("role"):
+            table["table_role"] = entry["role"]
+        if entry.get("grain"):
+            table["grain"] = entry["grain"]
+        siblings = [s for s in entry.get("siblings") or [] if s["id"] in in_scope]
+        if siblings:
+            table["sibling_notes"] = siblings
+
+
 def _qualified_name(t: dict) -> str:
     """Build a database/schema-qualified table name for deduplication.
 
@@ -116,10 +142,17 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
 _HUB_SIBLING_CAP = int(os.environ.get("HUB_SIBLING_CAP", "6"))
 
 # On by default: reorders the final tables round-robin across entities and
-# marks each entity's best table (see table_ranking). Costs one ColumnAttribute
-# search per entity, which the hub-sibling rank shares when both are on.
+# records which entities each table matches (see table_ranking). Costs one
+# ColumnAttribute search per entity, which the hub-sibling rank shares when
+# both are on.
 _ENTITY_TABLE_RANKING_ENABLED = os.environ.get(
     "ENTITY_TABLE_RANKING_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes")
+
+# On by default: shows each final table's role, grain and the notes on its
+# sibling tables in scope (see semantic.table_roles). One store read.
+_TABLE_SEMANTICS_ENABLED = os.environ.get(
+    "TABLE_SEMANTICS_ENABLED", "true"
 ).strip().lower() in ("1", "true", "yes")
 
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
@@ -696,6 +729,9 @@ class CandidatePreparationAgent(BaseAgent):
                 entities,
                 lead_table_id=str(anchor_table_id) if anchor_table_id else None,
             )
+
+        if _TABLE_SEMANTICS_ENABLED:
+            attach_table_semantics(relevant_tables)
 
         self.logger.info(
             "Final %d table(s) reaching SQL generation: %s",

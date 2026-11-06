@@ -259,6 +259,12 @@ catalog_table = Table(
         nullable=True,
     ),
     Column("legacy_reason", Text, nullable=True),
+    # `fact`, `dimension` or `junction`, set by semantic compilation
+    # (`auto_ontology.semantic.table_roles`) and recomputed on every compile.
+    # Null until a compile has classified the table.
+    Column("table_role", Text, nullable=True),
+    # One sentence naming what a single row represents.
+    Column("grain", Text, nullable=True),
     _imported_id(),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
 )
@@ -386,6 +392,27 @@ table__join = Table(
         primary_key=True,
     ),
     Column("join_columns", JSONB, nullable=True),
+)
+
+# SIBLING: Table -> Table, for two tables that hold near-identical columns and
+# are easy to confuse. Stored once per direction: `note` says when to use
+# `table_id` rather than `sibling_table_id`.
+table__sibling = Table(
+    "table__sibling",
+    METADATA,
+    Column(
+        "table_id",
+        Text,
+        ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "sibling_table_id",
+        Text,
+        ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("note", Text, nullable=False),
 )
 
 # ---------------------------------------------------------------------------
@@ -1224,6 +1251,7 @@ Index("ix_catalog_column_name", catalog_column.c.name)
 
 Index("ix_column__foreign_key_target", column__foreign_key.c.target_column_id)
 Index("ix_table__join_target", table__join.c.target_table_id)
+Index("ix_table__sibling_sibling", table__sibling.c.sibling_table_id)
 Index("ix_sql_query__table_table_id", sql_query__table.c.table_id)
 Index("ix_sql_query__column_column_id", sql_query__column.c.column_id)
 
@@ -1432,6 +1460,7 @@ __all__ = [
     "sql_query__column",
     "semantic_compilation_history",
     "table__join",
+    "table__sibling",
     "table__term",
     "term",
     "text_attribute",

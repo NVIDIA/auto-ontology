@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -235,6 +236,51 @@ class LegacyTableJudgement(BaseModel):
         ),
     )
     reason: str = Field(default="", description="Brief reason for the decision.")
+
+
+class TableRoleJudgement(BaseModel):
+    """LLM output: a table's role in the schema and what one row represents."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["fact", "dimension", "junction"] | None = Field(
+        ...,
+        description=(
+            "fact: rows record events, transactions, offerings or measurements, "
+            "usually with several references and numeric measures. dimension: "
+            "one row per entity or code that other tables reference for its "
+            "name and attributes. junction: each row only associates two or "
+            "more entities. Null when the evidence does not say."
+        ),
+    )
+    grain: str = Field(
+        default="",
+        description=(
+            "One short sentence naming what a single row represents, for "
+            "example 'one row per subject offered in a term'."
+        ),
+    )
+
+
+class SiblingTableNotes(BaseModel):
+    """LLM output: how two near-identical tables differ."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_note: str | None = Field(
+        ...,
+        description=(
+            "When to use the first table rather than the second, in one short "
+            "sentence. Null when the two tables cannot be confused."
+        ),
+    )
+    second_note: str | None = Field(
+        ...,
+        description=(
+            "When to use the second table rather than the first, in one short "
+            "sentence. Null when the two tables cannot be confused."
+        ),
+    )
 
 
 class SemanticFkJoinDefaultSelection(BaseModel):

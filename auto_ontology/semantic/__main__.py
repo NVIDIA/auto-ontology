@@ -6,6 +6,7 @@
 
 Usage:
     python -m auto_ontology.semantic --database-name <database_name>
+    python -m auto_ontology.semantic --database-name <database_name> --only-table-roles
 """
 
 from __future__ import annotations
@@ -28,6 +29,14 @@ def main() -> None:
         help="Database name — must match the SQL connector and tabular ingest.",
     )
     parser.add_argument(
+        "--only-table-roles",
+        action="store_true",
+        help=(
+            "Only classify table roles and sibling tables, on a database that "
+            "is already compiled."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -40,9 +49,15 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
-    from auto_ontology.semantic.compile import run_semantic_compilation
+    from auto_ontology.semantic.compile import (
+        run_semantic_compilation,
+        run_table_role_classification,
+    )
 
-    run_semantic_compilation(args.database_name)
+    if args.only_table_roles:
+        run_table_role_classification(args.database_name)
+    else:
+        run_semantic_compilation(args.database_name)
 
 
 if __name__ == "__main__":
