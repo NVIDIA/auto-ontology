@@ -49,6 +49,11 @@ NUDGE = "Call a tool: retrieve, run_sql, or submit your final query."
 
 LAST_CALL = "No tool calls left. Call submit now with your best query."
 
+NO_QUERIES_LEFT = (
+    "No budget left to run queries. Call submit now with your best query; it "
+    "is checked against the schema but not run."
+)
+
 _KINDS = sorted(KIND_LABELS)
 
 RETRIEVE_TOOL = {

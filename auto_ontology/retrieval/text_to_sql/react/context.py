@@ -33,6 +33,8 @@ class ToolContext:
     ``cost_status`` is for callers that charge for queries: it returns what the
     model has left to spend and what each action costs, read fresh each time
     because every query changes it. ``None`` when queries are free.
+    ``can_run_queries`` comes with it: False once the next query would be
+    refused, so the episode can still submit instead of trying to run one.
     """
 
     retriever: Any
@@ -49,3 +51,4 @@ class ToolContext:
     schemas: dict[str, Any] | None = None
     sql_runs: int = 0
     cost_status: Callable[[], str | None] | None = None
+    can_run_queries: Callable[[], bool] | None = None

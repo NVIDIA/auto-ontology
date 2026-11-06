@@ -224,6 +224,73 @@ def test_column_order_rule_reaches_the_model(ctx: ToolContext, dialect: str | No
     assert "same order the question" in model.seen[0][0].content
 
 
+def _one_query_budget(ctx: ToolContext) -> None:
+    ctx.can_run_queries = lambda: ctx.sql_runs < 1
+
+
+def test_out_of_budget_offers_only_submit_and_accepts_without_running(
+    ctx: ToolContext,
+) -> None:
+    _one_query_budget(ctx)
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.submission.sql == FINAL_SQL
+    assert result.submission.db_response.result == []
+    assert model.bound_tool_names[1] == ["submit"]
+    assert model.seen[1][-1].content == prompts.NO_QUERIES_LEFT
+
+
+def test_out_of_budget_submission_still_has_to_pass_the_schema_checks(
+    ctx: ToolContext,
+) -> None:
+    ctx.can_run_queries = lambda: False
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql="SELECT revenue FROM orders", response="x")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.submission.sql == FINAL_SQL
+    rejection = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert "Unknown column: revenue" in rejection
+
+
+def test_out_of_budget_episode_without_a_submission_submits_the_latest_draft(
+    ctx: ToolContext,
+) -> None:
+    _one_query_budget(ctx)
+    model = ScriptedModel(
+        [_reply(call("run_sql", "1", sql=FINAL_SQL)), AIMessage(content="Stuck.")]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted_draft"
+    assert result.submission.sql == FINAL_SQL
+
+
+def test_free_queries_keep_an_unsubmitted_episode_unanswered(ctx: ToolContext) -> None:
+    model = ScriptedModel(
+        [_reply(call("run_sql", "1", sql=FINAL_SQL)), AIMessage(content="Stuck.")]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "no_submission"
+    assert result.submission is None
+
+
 class InternalServerError(Exception):
     """Named like the client's error for a throttled gateway, which the retry matches by type."""
 

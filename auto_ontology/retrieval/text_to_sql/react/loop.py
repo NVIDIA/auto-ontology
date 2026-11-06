@@ -77,7 +77,8 @@ def submit(
     """Check and run a final query; the submission when it ran cleanly.
 
     A failed submission is an observation, not the end of the episode: the
-    model sees why and can fix it.
+    model sees why and can fix it. When the caller's budget can no longer pay
+    for a query, the query is accepted after the schema checks without running.
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -88,6 +89,11 @@ def submit(
     check = check_sql(sql, getattr(connector, "dialect", None), catalog_for(ctx))
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
+    if not _can_run_queries(ctx):
+        # Running it would be refused, and a refusal is not a wrong query.
+        unrun = QueryResponse(result=[], sliced=False)
+        submission = Submission(sql, (response or "").strip(), assumptions, unrun)
+        return "Accepted without running it: no budget left for a query.", submission
     db_response = _run_sql(
         sql, connector, record_numeric_kinds=ctx.numeric_type_alignment
     )
@@ -111,6 +117,23 @@ def _clip(text: str, limit: int) -> str:
 
 def _call_key(name: str, args: dict) -> str:
     return f"{name}:{json.dumps(args, sort_keys=True, default=str)}"
+
+
+def _can_run_queries(ctx: ToolContext) -> bool:
+    return ctx.can_run_queries is None or ctx.can_run_queries()
+
+
+def _submit_draft(
+    ctx: ToolContext, draft: str | None, calls: int, trajectory: list[dict[str, Any]]
+) -> EpisodeResult | None:
+    """Submit the latest drafted query when the budget ended the episode."""
+    if not draft:
+        return None
+    observation, submission = submit(ctx, draft)
+    trajectory.append({"role": "draft_submission", "content": observation})
+    if submission is None:
+        return None
+    return EpisodeResult(submission, "submitted_draft", calls, trajectory)
 
 
 def _with_cost_status(ctx: ToolContext, text: str) -> str:
@@ -166,9 +189,16 @@ def run_episode(
     calls = 0
     nudges = 0
     made: set[str] = set()
+    draft: str | None = None
+    out_of_queries = False
 
     while True:
         last_turn = calls >= budget
+        if not out_of_queries and not _can_run_queries(ctx):
+            out_of_queries = True
+            messages.append(HumanMessage(content=prompts.NO_QUERIES_LEFT))
+            trajectory.append({"role": "human", "content": prompts.NO_QUERIES_LEFT})
+            bound = llm.bind_tools([prompts.SUBMIT_TOOL])
         if last_turn:
             messages.append(HumanMessage(content=prompts.LAST_CALL))
             trajectory.append({"role": "human", "content": prompts.LAST_CALL})
@@ -197,6 +227,10 @@ def run_episode(
         if not tool_calls:
             nudges += 1
             if last_turn or nudges > _MAX_CONSECUTIVE_NUDGES:
+                if out_of_queries:
+                    fallback = _submit_draft(ctx, draft, calls, trajectory)
+                    if fallback is not None:
+                        return fallback
                 return EpisodeResult(None, "no_submission", calls, trajectory)
             messages.append(HumanMessage(content=prompts.NUDGE))
             trajectory.append({"role": "human", "content": prompts.NUDGE})
@@ -206,6 +240,8 @@ def run_episode(
         for call in tool_calls:
             name = call.get("name") or ""
             args = call.get("args") or {}
+            if name in ("run_sql", "submit") and (args.get("sql") or "").strip():
+                draft = args["sql"]
             key = _call_key(name, args)
             if key in made and name != "submit":
                 observation, submission = (
@@ -228,4 +264,8 @@ def run_episode(
                 return EpisodeResult(submission, "submitted", calls, trajectory)
 
         if last_turn:
+            if out_of_queries:
+                fallback = _submit_draft(ctx, draft, calls, trajectory)
+                if fallback is not None:
+                    return fallback
             return EpisodeResult(None, "budget_exhausted", calls, trajectory)
