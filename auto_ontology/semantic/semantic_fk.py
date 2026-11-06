@@ -30,6 +30,9 @@ Algorithm
 3. **Value overlap** — every remaining column, attribute owner or not, is
    compared with the key-like columns of other tables by value; see
    :mod:`auto_ontology.semantic.value_overlap_fk`.
+4. **Equivalent keys** — keys on different tables holding the same identifier
+   are linked, and a column referencing one also references the other; see
+   :mod:`auto_ontology.semantic.equivalent_keys`.
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ from auto_ontology.dal.datasources import (
     fetch_own_key_column_ids,
     merge_unconstrained_foreign_key,
 )
+from auto_ontology.semantic.equivalent_keys import link_equivalent_keys
 from auto_ontology.semantic.fk_suggester import named_table_key_links
 from auto_ontology.semantic.value_overlap_fk import (
     discover_value_overlap_fks,
@@ -115,9 +119,9 @@ def resolve_semantic_fks(database_name: str) -> int:
     Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
-    created += discover_value_overlap_fks(
-        database_name, _resolve_connector(database_name)
-    )
+    connector = _resolve_connector(database_name)
+    created += discover_value_overlap_fks(database_name, connector)
+    created += link_equivalent_keys(database_name, connector)
     created -= prune_disjoint_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created

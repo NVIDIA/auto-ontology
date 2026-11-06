@@ -296,3 +296,18 @@ class SemanticFkJoinDefaultSelection(BaseModel):
         ),
     )
     rationale: str = Field(default="")
+
+
+class KeyEquivalenceJudgement(BaseModel):
+    """LLM output: whether two key columns hold the same identifier."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    equivalent: bool = Field(
+        ...,
+        description=(
+            "True only when both columns identify the same kind of thing with the "
+            "same codes, so a column holding those codes can join to either table."
+        ),
+    )
+    rationale: str = Field(default="")

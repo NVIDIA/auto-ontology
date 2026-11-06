@@ -437,6 +437,29 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["total"]["semantic_fk"] is None
 
 
+def test_tables_by_ids_lists_every_referenced_key_defaults_first(world) -> None:
+    world.table("archived_customers", table_type="base table")
+    world.column("archived_customers", "customer_id", 1)
+    for table, default in (("customers", False), ("archived_customers", True)):
+        attribute = world.attribute(f"{table}-key")
+        _link(
+            s.column__has_attribute,
+            column_id=world.columns[f"{table}.customer_id"],
+            attribute_id=attribute,
+        )
+        _link(
+            s.column__semantic_fk,
+            column_id=world.columns["orders.customer_id"],
+            attribute_id=attribute,
+            use_in_join_paths=default,
+        )
+    row = d.fetch_tables_by_ids([world.tables["orders"]])[0]
+    columns = {column["name"]: column for column in row["columns"]}
+    assert columns["customer_id"]["semantic_fk"] == (
+        "shop.archived_customers.customer_id, shop.customers.customer_id"
+    )
+
+
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
     assert d.fetch_tables_by_ids([]) == []
 

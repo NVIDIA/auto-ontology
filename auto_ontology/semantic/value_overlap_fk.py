@@ -96,7 +96,7 @@ over a table that merely repeats those values.
 
 
 @dataclass(frozen=True)
-class _Column:
+class ProfiledColumn:
     id: str
     name: str
     data_type: str
@@ -110,7 +110,7 @@ class _Column:
 
 @dataclass(frozen=True)
 class _Candidate:
-    target: _Column
+    target: ProfiledColumn
     shared: int
     source_values: int
 
@@ -287,7 +287,7 @@ def discover_value_overlap_fks(
         logger.info("value-overlap FK discovery: no key-like targets or sources")
         return 0
 
-    index: dict[str, list[_Column]] = {}
+    index: dict[str, list[ProfiledColumn]] = {}
     for target in targets:
         try:
             values = sampled_values(
@@ -309,7 +309,7 @@ def discover_value_overlap_fks(
             if _informative(value):
                 index.setdefault(value, []).append(target)
 
-    work: list[tuple[_Column, list[_Candidate]]] = []
+    work: list[tuple[ProfiledColumn, list[_Candidate]]] = []
     for source in sources:
         try:
             values = sampled_values(
@@ -356,14 +356,14 @@ def discover_value_overlap_fks(
 
 
 def candidates_for(
-    source: _Column,
+    source: ProfiledColumn,
     values: set[str],
-    index: dict[str, list[_Column]],
+    index: dict[str, list[ProfiledColumn]],
 ) -> list[_Candidate]:
     """Targets on other tables holding enough of *source*'s values, best first."""
     informative = [value for value in values if _informative(value)]
     shared: Counter[str] = Counter()
-    by_id: dict[str, _Column] = {}
+    by_id: dict[str, ProfiledColumn] = {}
     for value in informative:
         for target in index.get(value, ()):
             if target.table_id == source.table_id:
@@ -382,11 +382,22 @@ def candidates_for(
 
 def _profile_database(
     database_name: str, connector: SQLDatabase
-) -> tuple[list[_Column], list[_Column]]:
+) -> tuple[list[ProfiledColumn], list[ProfiledColumn]]:
     """Key-like target columns and candidate source columns of one database."""
-    targets: list[_Column] = []
-    sources: list[_Column] = []
-    for table in fetch_columns_for_value_overlap(database_name):
+    return profile_tables(fetch_columns_for_value_overlap(database_name), connector)
+
+
+def profile_tables(
+    tables: list[dict], connector: SQLDatabase
+) -> tuple[list[ProfiledColumn], list[ProfiledColumn]]:
+    """Key-like target columns and candidate source columns of *tables*.
+
+    *tables* is shaped like
+    :func:`~auto_ontology.dal.datasources.fetch_columns_for_value_overlap`.
+    """
+    targets: list[ProfiledColumn] = []
+    sources: list[ProfiledColumn] = []
+    for table in tables:
         joinable = [
             col
             for col in table["columns"]
@@ -410,7 +421,7 @@ def _profile_database(
         pk = {name.casefold() for name in table["pk"]}
         for col in joinable:
             non_null, distinct = stats.get(col["name"], (0, 0))
-            column = _Column(
+            column = ProfiledColumn(
                 id=col["id"],
                 name=col["name"],
                 data_type=col["data_type"],
@@ -434,7 +445,7 @@ def _profile_database(
     return targets, sources
 
 
-def _decide_and_write(source: _Column, candidates: list[_Candidate]) -> bool:
+def _decide_and_write(source: ProfiledColumn, candidates: list[_Candidate]) -> bool:
     try:
         selected = _llm_pick(source, candidates)
     except Exception:
@@ -461,7 +472,7 @@ def _decide_and_write(source: _Column, candidates: list[_Candidate]) -> bool:
     return True
 
 
-def _describe(column: _Column) -> str:
+def describe_column(column: ProfiledColumn) -> str:
     samples = ", ".join(column.sample_values[:_MAX_PROMPT_SAMPLES]) or "(none)"
     return (
         f"{column.table_name}.{column.name} ({column.data_type}) — "
@@ -469,15 +480,17 @@ def _describe(column: _Column) -> str:
     )
 
 
-def _llm_pick(source: _Column, candidates: list[_Candidate]) -> _Candidate | None:
+def _llm_pick(
+    source: ProfiledColumn, candidates: list[_Candidate]
+) -> _Candidate | None:
     lines = [
-        f"column_id={c.target.id} | {_describe(c.target)} | holds {c.shared} of the "
+        f"column_id={c.target.id} | {describe_column(c.target)} | holds {c.shared} of the "
         f"column's {c.source_values} sampled values "
         f"({100 * c.shared / c.source_values:.0f}%)"
         for c in candidates
     ]
     human = (
-        f"Column: {_describe(source)}\n\n"
+        f"Column: {describe_column(source)}\n\n"
         "Candidate key columns:\n" + "\n".join(lines) + "\n\n"
         "Which candidate does this column reference? Return its exact column_id, "
         "or null if none is a confident match."

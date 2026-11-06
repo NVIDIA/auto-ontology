@@ -19,9 +19,15 @@ from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
 
 @pytest.fixture(autouse=True)
 def _no_value_overlap_discovery():
-    """Value-overlap discovery reads the live database; it has its own tests."""
-    with patch(
-        "auto_ontology.semantic.semantic_fk.discover_value_overlap_fks", return_value=0
+    """Value-based discovery reads the live database; it has its own tests."""
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.discover_value_overlap_fks",
+            return_value=0,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.link_equivalent_keys", return_value=0
+        ),
     ):
         yield
 

@@ -182,16 +182,16 @@ def test_no_connector_writes_nothing() -> None:
 
 
 def test_short_values_never_make_a_candidate() -> None:
-    target = vo._Column("t.code", "code", "TEXT", "", (), "attr", "t", "t", None)
-    source = vo._Column("s.flag", "flag", "TEXT", "", (), None, "s", "s", None)
+    target = vo.ProfiledColumn("t.code", "code", "TEXT", "", (), "attr", "t", "t", None)
+    source = vo.ProfiledColumn("s.flag", "flag", "TEXT", "", (), None, "s", "s", None)
     index = {value: [target] for value in ("Y", "N", "12", "7")}
 
     assert vo.candidates_for(source, {"Y", "N", "12", "7"}, index) == []
 
 
 def test_targets_on_the_same_table_are_skipped() -> None:
-    target = vo._Column("t.key", "key", "TEXT", "", (), "attr", "t", "t", None)
-    source = vo._Column("t.ref", "ref", "TEXT", "", (), None, "t", "t", None)
+    target = vo.ProfiledColumn("t.key", "key", "TEXT", "", (), "attr", "t", "t", None)
+    source = vo.ProfiledColumn("t.ref", "ref", "TEXT", "", (), None, "t", "t", None)
     values = {f"K-{n}" for n in range(10)}
 
     assert vo.candidates_for(source, values, {v: [target] for v in values}) == []

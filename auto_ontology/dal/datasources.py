@@ -37,7 +37,7 @@ from sqlalchemy import (
     tuple_,
     update,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import aggregate_order_by, insert
 from sqlalchemy import values as sa_values
 
 from auto_ontology.dal import schema as s
@@ -1482,7 +1482,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    and returns that target as ``schema.table.column`` for SQL prompts. A
+    column referencing several keys lists each, comma-separated, join-path
+    defaults first.
     """
     if not table_ids:
         return []
@@ -1492,11 +1494,20 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
     semantic_fk_target = (
         select(
-            func.concat_ws(
-                ".",
-                semantic_schema.c.name,
-                semantic_table.c.name,
-                semantic_target.c.name,
+            func.string_agg(
+                func.concat_ws(
+                    ".",
+                    semantic_schema.c.name,
+                    semantic_table.c.name,
+                    semantic_target.c.name,
+                ),
+                aggregate_order_by(
+                    literal(", "),
+                    s.column__semantic_fk.c.use_in_join_paths.desc(),
+                    semantic_schema.c.name,
+                    semantic_table.c.name,
+                    semantic_target.c.name,
+                ),
             )
         )
         .select_from(
@@ -1519,12 +1530,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         )
         .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
         .correlate(s.catalog_column)
-        .order_by(
-            semantic_schema.c.name,
-            semantic_table.c.name,
-            semantic_target.c.name,
-        )
-        .limit(1)
         .scalar_subquery()
     )
     try:
