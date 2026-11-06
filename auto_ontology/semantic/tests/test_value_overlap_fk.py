@@ -32,14 +32,14 @@ def _build(path: Path) -> None:
     conn.executemany("INSERT INTO depots VALUES (?, ?, ?)", rows)
     conn.execute(
         "CREATE TABLE shipments (shipment_id TEXT, drop_point TEXT, crates INTEGER, "
-        "depot_ref TEXT)"
+        "depot_ref TEXT, depot_title TEXT)"
     )
     shipments = []
     for n in range(40):
         # Half of the distinct drop points are known depots; the rest are not.
         place = _DEPOTS[n % 8] if n < 24 else f"CUSTOMER-{n % 8}"
-        shipments.append((f"S{n:03d}", place, n % 12, _DEPOTS[n % 20]))
-    conn.executemany("INSERT INTO shipments VALUES (?, ?, ?, ?)", shipments)
+        shipments.append((f"S{n:03d}", place, n % 12, _DEPOTS[n % 20], place))
+    conn.executemany("INSERT INTO shipments VALUES (?, ?, ?, ?, ?)", shipments)
     conn.commit()
     conn.close()
 
@@ -98,6 +98,8 @@ def _catalog(*, depot_ref_linked: bool = True) -> list[dict[str, Any]]:
                 _col("shipments.drop_point", attribute_id="attr-drop-point"),
                 _col("shipments.crates", "INTEGER", attribute_id="attr-crates"),
                 _col("shipments.depot_ref", has_semantic_fk=depot_ref_linked),
+                # Holds depot keys too, but a label column is never a reference.
+                _col("shipments.depot_title", attribute_id="attr-depot-title"),
             ],
         },
     ]
@@ -223,6 +225,23 @@ def test_is_key_like(
 )
 def test_overlap_accepted(source_values: int, shared: int, expected: bool) -> None:
     assert vo.overlap_accepted(source_values, shared) is expected
+
+
+@pytest.mark.parametrize(
+    ("name", "samples", "expected"),
+    [
+        ("REGION_NAME", ("North",), True),
+        ("productTitle", ("Lamp",), True),
+        ("STATUS_DESC", ("OPEN",), True),
+        ("store_label", (), True),
+        ("location", ("Main Street", "Harbor Road", "D1-101"), True),
+        ("drop_point", ("D1-101", "D2-205", "Main Street"), False),
+        ("customer_code", ("C-1", "C-2"), False),
+        ("named_key", ("K1",), False),
+    ],
+)
+def test_is_label_column(name: str, samples: tuple[str, ...], expected: bool) -> None:
+    assert vo.is_label_column(name, samples) is expected
 
 
 @pytest.mark.parametrize(

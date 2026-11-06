@@ -16,6 +16,9 @@ Algorithm
 2. **Key-like targets.** A column that owns an attribute and is unique, or
    nearly so (``_NEAR_UNIQUE_SHARE`` of its sampled values distinct), is a
    possible target. Its distinct values are loaded from a bounded sample.
+   Label columns (names, titles, descriptions) are neither targets nor
+   sources: two tables sharing a name column are both described by it, and
+   joining on it bypasses the code that identifies the row.
 3. **Candidates.** Every other joinable column without a semantic FK, and not
    key-like itself, is compared value by value with the targets on other
    tables. Values shorter than ``_MIN_VALUE_LENGTH`` are ignored: flags and
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -66,6 +70,11 @@ _MIN_SHARED_SHARE = 0.1
 _MAX_CANDIDATES = 5
 _MAX_PROMPT_SAMPLES = 5
 _WORKERS = 2
+_LABEL_NAME_TOKENS = frozenset(
+    {"name", "names", "title", "desc", "descr", "description", "label", "caption"}
+)
+#: A column whose samples are mostly multi-word text holds labels, not codes.
+_WORDY_SAMPLE_SHARE = 0.5
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. A column shares values with one or more \
@@ -123,6 +132,18 @@ def is_joinable_type(data_type: str) -> bool:
         "int4",
         "int8",
     }
+
+
+def is_label_column(name: str, sample_values: tuple[str, ...] | list[str]) -> bool:
+    """Whether a column holds display labels (names, titles, descriptions)."""
+    tokens = set(
+        re.split(r"[^a-z0-9]+", re.sub(r"([a-z])([A-Z])", r"\1_\2", name).casefold())
+    )
+    if tokens & _LABEL_NAME_TOKENS:
+        return True
+    values = [value.strip() for value in sample_values if value and value.strip()]
+    wordy = sum(" " in value for value in values)
+    return bool(values) and wordy >= _WORDY_SAMPLE_SHARE * len(values)
 
 
 def is_key_like(non_null: int, distinct: int, is_unique: bool | None) -> bool:
@@ -367,7 +388,10 @@ def _profile_database(
     sources: list[_Column] = []
     for table in fetch_columns_for_value_overlap(database_name):
         joinable = [
-            col for col in table["columns"] if is_joinable_type(col["data_type"])
+            col
+            for col in table["columns"]
+            if is_joinable_type(col["data_type"])
+            and not is_label_column(col["name"], col["sample_values"] or ())
         ]
         if not joinable:
             continue
