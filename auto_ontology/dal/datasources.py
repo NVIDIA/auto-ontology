@@ -42,7 +42,12 @@ from auto_ontology.dal.sql_fragments import (
     column_description_expr,
     table_description_expr,
 )
-from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
+from auto_ontology.dal.tags import (
+    PII_TAG_NAME,
+    TARGET_COLUMN,
+    TARGET_TABLE,
+    fetch_tags_map,
+)
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 from auto_ontology.utils.sample_values import (
@@ -976,9 +981,25 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` resolves the referenced attribute back to its owning column
     and returns that target as ``schema.table.column`` for SQL prompts.
+
+    A column tagged ``PII`` comes back with ``sample_values`` ``None``. Every
+    caller renders these values into a text-to-SQL prompt, so a PII column's
+    real values would otherwise reach the model on each question that touches
+    its table. Its name, type and description still describe it, and the
+    value-anchor checks run against the database, not these samples.
     """
     if not table_ids:
         return []
+    is_pii = (
+        select(literal(1))
+        .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
+        .where(
+            s.tag_target.c.column_id == s.catalog_column.c.id,
+            func.lower(func.trim(s.tag.c.name)) == PII_TAG_NAME.lower(),
+        )
+        .correlate(s.catalog_column)
+        .exists()
+    )
     semantic_owner = s.column__has_attribute.alias("semantic_fk_owner")
     semantic_target = s.catalog_column.alias("semantic_fk_target")
     semantic_table = s.catalog_table.alias("semantic_fk_table")
@@ -1036,6 +1057,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
                 semantic_fk_target.label("semantic_fk"),
+                is_pii.label("is_pii"),
             )
             .select_from(
                 _table_join().join(
@@ -1078,7 +1100,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "data_type": row["data_type"],
                     "description": row["column_description"],
                     "format": row["format"],
-                    "sample_values": parse_sample_values(row["sample_values"]),
+                    "sample_values": None
+                    if row["is_pii"]
+                    else parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
                 }
