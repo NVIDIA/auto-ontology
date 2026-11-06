@@ -64,6 +64,23 @@ def _stored_pk(table_id: str) -> list[str] | None:
     return rows[0]["pk"]
 
 
+def _column(table_id: str, name: str) -> str:
+    return store().query_write(
+        s.catalog_column.insert()
+        .values(table_id=table_id, name=name)
+        .returning(s.catalog_column.c.id)
+    )[0]["id"]
+
+
+def _column_uniqueness(column_id: str) -> dict:
+    return store().query_read(
+        select(
+            s.catalog_column.c.is_unique,
+            s.catalog_column.c.is_unique_declared,
+        ).where(s.catalog_column.c.id == column_id)
+    )[0]
+
+
 def test_a_key_listed_alphabetically_is_stored_in_key_order(db_name: str) -> None:
     """Snowflake's ``SHOW PRIMARY KEYS`` lists a table's key columns by name.
 
@@ -117,3 +134,96 @@ def test_rows_without_a_position_keep_the_order_they_arrived_in(db_name: str) ->
     populate_pks(pks, db_name)
 
     assert _stored_pk(ids["orders"]) == ["region", "id"]
+
+
+def test_a_single_column_key_marks_its_column_unique(db_name: str) -> None:
+    """A PRIMARY KEY on one column *is* a uniqueness declaration for it.
+
+    `is_unique` otherwise only ever comes from sampled profiling, which cannot
+    establish a constraint on an empty table and can only ever look at rows.
+    """
+    ids = _tables(db_name, "public", "orders")
+    column_id = _column(ids["orders"], "order_id")
+    pks = pd.DataFrame([("public", "orders", "order_id", 1)], columns=_PK_COLUMNS)
+
+    populate_pks(pks, db_name)
+
+    assert _column_uniqueness(column_id) == {
+        "is_unique": True,
+        "is_unique_declared": True,
+    }
+
+
+def test_composite_key_members_keep_uniqueness_unknown(db_name: str) -> None:
+    """A key of two columns declares nothing about either one alone."""
+    ids = _tables(db_name, "public", "line_items")
+    order_column = _column(ids["line_items"], "order_id")
+    line_column = _column(ids["line_items"], "line_item_id")
+    pks = pd.DataFrame(
+        [
+            ("public", "line_items", "order_id", 1),
+            ("public", "line_items", "line_item_id", 2),
+        ],
+        columns=_PK_COLUMNS,
+    )
+
+    populate_pks(pks, db_name)
+
+    assert _stored_pk(ids["line_items"]) == ["order_id", "line_item_id"]
+    for column_id in (order_column, line_column):
+        assert _column_uniqueness(column_id) == {
+            "is_unique": None,
+            "is_unique_declared": None,
+        }
+
+
+def test_re_ingest_clears_a_declaration_the_source_dropped(db_name: str) -> None:
+    """Without the key, the column must not keep claiming to be unique."""
+    ids = _tables(db_name, "public", "orders")
+    column_id = _column(ids["orders"], "order_id")
+    populate_pks(
+        pd.DataFrame([("public", "orders", "order_id", 1)], columns=_PK_COLUMNS),
+        db_name,
+    )
+    assert _column_uniqueness(column_id)["is_unique"] is True
+
+    populate_pks(pd.DataFrame(columns=_PK_COLUMNS), db_name)
+
+    assert _column_uniqueness(column_id) == {
+        "is_unique": None,
+        "is_unique_declared": None,
+    }
+
+
+def test_a_composite_key_clears_an_earlier_single_column_declaration(
+    db_name: str,
+) -> None:
+    """A key that grows a column stops saying anything about its first one."""
+    ids = _tables(db_name, "public", "line_items")
+    order_column = _column(ids["line_items"], "order_id")
+    line_column = _column(ids["line_items"], "line_item_id")
+    populate_pks(
+        pd.DataFrame([("public", "line_items", "order_id", 1)], columns=_PK_COLUMNS),
+        db_name,
+    )
+    assert _column_uniqueness(order_column)["is_unique"] is True
+
+    populate_pks(
+        pd.DataFrame(
+            [
+                ("public", "line_items", "order_id", 1),
+                ("public", "line_items", "line_item_id", 2),
+            ],
+            columns=_PK_COLUMNS,
+        ),
+        db_name,
+    )
+
+    assert _column_uniqueness(order_column) == {
+        "is_unique": None,
+        "is_unique_declared": None,
+    }
+    assert _column_uniqueness(line_column) == {
+        "is_unique": None,
+        "is_unique_declared": None,
+    }

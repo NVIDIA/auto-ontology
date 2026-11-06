@@ -21,7 +21,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select, update  # noqa: E402
 
 from auto_ontology.dal import datasources as d  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
@@ -82,6 +82,7 @@ def _row(column_id: str) -> dict:
         select(
             s.catalog_column.c.sample_values,
             s.catalog_column.c.is_unique,
+            s.catalog_column.c.is_unique_declared,
             s.catalog_column.c.format,
         ).where(s.catalog_column.c.id == column_id)
     )[0]
@@ -135,6 +136,43 @@ def test_store_column_uniqueness_coerces_truthy_values(world) -> None:
     d.store_column_uniqueness(world.tables["orders"], {"id": 1})
 
     assert _row(world.columns["orders.id"])["is_unique"] is True
+
+
+def _declare_unique(world, table: str, column: str) -> None:
+    """What ingest does for a single-column primary key."""
+    store().query_write(
+        update(s.catalog_column)
+        .where(s.catalog_column.c.id == world.columns[f"{table}.{column}"])
+        .values(is_unique=True, is_unique_declared=True)
+    )
+
+
+def test_store_column_uniqueness_does_not_downgrade_a_declared_key(world) -> None:
+    """A sampled repeat says the sample repeated, not that the key was wrong."""
+    world.table("orders")
+    world.column("orders", "id")
+    _declare_unique(world, "orders", "id")
+
+    d.store_column_uniqueness(world.tables["orders"], {"id": False})
+
+    row = _row(world.columns["orders.id"])
+    assert row["is_unique"] is True
+    assert row["is_unique_declared"] is True
+
+
+def test_store_column_uniqueness_still_writes_columns_next_to_a_declared_one(
+    world,
+) -> None:
+    """Only the declared column is protected, not the whole table."""
+    world.table("orders")
+    world.column("orders", "id")
+    world.column("orders", "status", position=2)
+    _declare_unique(world, "orders", "id")
+
+    d.store_column_uniqueness(world.tables["orders"], {"id": False, "status": False})
+
+    assert _row(world.columns["orders.id"])["is_unique"] is True
+    assert _row(world.columns["orders.status"])["is_unique"] is False
 
 
 # --------------------------------------------------------------------------

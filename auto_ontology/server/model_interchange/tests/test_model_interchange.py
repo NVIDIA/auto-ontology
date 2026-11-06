@@ -212,6 +212,21 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
 
 
+def test_assemble_export_document_preserves_unknown_uniqueness() -> None:
+    """Unknown is not false: a column nothing established exports as null."""
+    rows = _export_rows()
+    rows["catalog"][0]["is_unique"] = None
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: ["col-1"],
+    )
+
+    column = document.data_layer.databases[0].schemas[0].tables[0].columns[0]
+    assert column.is_unique is None
+
+
 def test_semantic_fk_without_join_path_flag_defaults_to_enabled() -> None:
     semantic_fk = ModelSemanticFk(
         column_id="source-column",

@@ -511,14 +511,30 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
 
 
 def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
-    """Write ``is_unique`` flags onto a table's columns."""
+    """Write sampled ``is_unique`` flags onto a table's columns.
+
+    A column the source *declared* unique keeps that answer: a sample that
+    repeats a value says the sample repeated, not that the constraint was
+    wrong. Ingest sets ``is_unique_declared`` for a single-column primary key
+    (see ``auto_ontology.catalog.store.schemas.add_pks``), so those columns are skipped
+    here rather than overwritten.
+    """
     if not uniqueness:
         return
-    _set_column_property(
-        table_id,
-        {name: bool(flag) for name, flag in uniqueness.items()},
-        "is_unique",
-    )
+
+    declared = {
+        row["name"]
+        for row in store().query_read(
+            select(s.catalog_column.c.name).where(
+                s.catalog_column.c.table_id == table_id,
+                s.catalog_column.c.is_unique_declared.is_(True),
+            )
+        )
+    }
+    sampled = {
+        name: bool(flag) for name, flag in uniqueness.items() if name not in declared
+    }
+    _set_column_property(table_id, sampled, "is_unique")
 
 
 def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:

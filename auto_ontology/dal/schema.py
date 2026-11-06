@@ -278,6 +278,18 @@ catalog_column = Table(
     # wrong guess yields SQL that runs, returns nothing, and looks right.
     Column("format", Text, nullable=True),
     Column("is_unique", Boolean, nullable=True),
+    # The source's own declaration, kept apart from the sampled answer above:
+    # TRUE when the column is the whole of a single-column PRIMARY KEY. NULL
+    # means "the source declared no such thing" -- a composite key's members
+    # included -- not "known not to be unique".
+    #
+    # `is_unique` stays the effective answer callers read: ingest sets it TRUE
+    # for a declared column, and profiling fills it from sampled values for
+    # every other one. Keeping the provenance in its own column is what lets a
+    # re-ingest clear a declaration the source has since dropped without
+    # discarding sampled evidence, and stops a profile run from downgrading a
+    # declared constraint because one sample repeated a value.
+    Column("is_unique_declared", Boolean, nullable=True),
     # A real Boolean. It used to hold the *strings* `information_schema`
     # reports, 'YES' and 'NO', which read back as truthy either way -- so
     # `bool(stored)` was True for every column and every export claimed the

@@ -653,7 +653,7 @@ def _assemble_databases(
                     # numbers to come back as numbers.
                     sample_values=parse_sample_values(row.get("sample_values")) or [],
                     is_nullable=_nullable_or_default(row.get("is_nullable")),
-                    is_unique=bool(row.get("is_unique") or False),
+                    is_unique=row.get("is_unique"),
                 ),
             )
 
