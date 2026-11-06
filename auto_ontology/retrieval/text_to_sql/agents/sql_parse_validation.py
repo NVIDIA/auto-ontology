@@ -88,6 +88,132 @@ _JOINS_VALIDATED_ELSEWHERE = os.environ.get(
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
+def _detect_hallucinated_tables(
+    sql: str,
+    relevant_tables: list[dict] | None,
+    dialect: str | None,
+) -> tuple[list[str], list[str]]:
+    """Detect table names in SQL that don't match available tables.
+
+    Returns a tuple of (hallucinated_tables, available_tables_hint).
+    If a table name looks similar to an available table (e.g., v_rctmst_02 vs
+    bf_rctmst_02), include the available table in the hint.
+    """
+    if not sql or not relevant_tables:
+        return [], []
+
+    # Get available table names
+    available_names: set[str] = set()
+    for table in relevant_tables:
+        name = table.get("name", "")
+        if name:
+            available_names.add(name.lower())
+
+    # Extract table names from SQL using sqlglot
+    hallucinated: list[str] = []
+    hints: list[str] = []
+    try:
+        tree = sqlglot.parse_one(sql, read=dialect or None)
+        if tree is None:
+            return [], []
+
+        for table_node in tree.find_all(exp.Table):
+            table_name = table_node.name
+            if not table_name:
+                continue
+
+            # Check if table exists in available tables
+            if table_name.lower() not in available_names:
+                hallucinated.append(table_name)
+
+                # Find similar table names as hints
+                for avail_name in available_names:
+                    # Check for partial matches (e.g., same suffix or similar prefix)
+                    if (table_name.lower()[-8:] == avail_name[-8:] or
+                        table_name.lower()[-6:] == avail_name[-6:] or
+                        table_name.lower()[:4] == avail_name[:4]):
+                        hints.append(avail_name)
+
+    except Exception:
+        pass
+
+    return hallucinated, list(set(hints))
+
+
+def _detect_hallucinated_columns(
+    sql: str,
+    relevant_tables: list[dict] | None,
+    dialect: str | None,
+) -> tuple[list[str], list[str]]:
+    """Detect column names in SQL that don't match available columns.
+
+    Returns a tuple of (hallucinated_columns, available_columns_hint).
+    Common hallucinated column patterns like CDT, UDT, RokDT are detected.
+    """
+    if not sql or not relevant_tables:
+        return [], []
+
+    # Get all available column names from all tables
+    available_columns: set[str] = set()
+    table_columns: dict[str, set[str]] = {}  # table_name -> column names
+    for table in relevant_tables:
+        table_name = (table.get("name") or "").lower()
+        columns = table.get("columns") or []
+        table_cols: set[str] = set()
+        for col in columns:
+            col_name = col.get("name", "") if isinstance(col, dict) else ""
+            if col_name:
+                available_columns.add(col_name.lower())
+                table_cols.add(col_name.lower())
+        if table_name:
+            table_columns[table_name] = table_cols
+
+    # Known hallucinated patterns - common abbreviations LLMs invent
+    known_hallucinations = {"cdt", "udt", "rokdt", "createdt", "updatedt"}
+
+    hallucinated: list[str] = []
+    hints: list[str] = []
+    try:
+        tree = sqlglot.parse_one(sql, read=dialect or None)
+        if tree is None:
+            return [], []
+
+        for col_node in tree.find_all(exp.Column):
+            col_name = col_node.name
+            if not col_name:
+                continue
+
+            col_lower = col_name.lower()
+
+            # Check if column exists in available columns
+            if col_lower not in available_columns:
+                # Check if it's a known hallucination pattern
+                if col_lower in known_hallucinations:
+                    hallucinated.append(col_name)
+                    # Suggest common date columns as hints
+                    date_hints = ["sdt", "regymd", "rokymd", "created_at", "updated_at"]
+                    for hint in date_hints:
+                        if hint in available_columns:
+                            hints.append(hint)
+                else:
+                    # Check if the column might exist in a specific table context
+                    table_ref = (col_node.table or "").lower()
+                    if table_ref and table_ref in table_columns:
+                        # Column qualified with table name but doesn't exist
+                        if col_lower not in table_columns[table_ref]:
+                            hallucinated.append(f"{table_ref}.{col_name}")
+                            # Find similar columns in that table
+                            for avail_col in table_columns[table_ref]:
+                                if (col_lower[-4:] == avail_col[-4:] or
+                                    col_lower[:3] == avail_col[:3]):
+                                    hints.append(f"{table_ref}.{avail_col}")
+
+    except Exception:
+        pass
+
+    return hallucinated, list(set(hints))
+
+
 class IntentValidationModel(BaseModel):
     """Structured response for the LLM phase of unified SQL validation."""
 
@@ -868,6 +994,52 @@ class SQLValidationAgent(BaseAgent):
             error_msg = validation_result["error"]
             self.logger.info(f"SQL validation failed: {error_msg}")
             path_state["error"] = error_msg
+            return {
+                "decision": "invalid_sql",
+                "path_state": path_state,
+            }
+
+        # Check for hallucinated table names that don't exist in available tables
+        relevant_tables = path_state.get("relevant_tables") or []
+        hallucinated_tables, similar_hints = _detect_hallucinated_tables(
+            response.sql_code, relevant_tables, degenerate_dialect
+        )
+        if hallucinated_tables:
+            hint_msg = ""
+            if similar_hints:
+                hint_msg = f" Did you mean: {', '.join(similar_hints)}?"
+            error_msg = (
+                f"The SQL references table(s) that do not exist in the available schema: "
+                f"{', '.join(hallucinated_tables)}.{hint_msg} "
+                f"Use ONLY table names from AVAILABLE TABLES. Available tables: "
+                f"{', '.join(t.get('name', '') for t in relevant_tables[:10] if t.get('name'))}."
+            )
+            self.logger.info(f"Hallucinated table detected: {hallucinated_tables}")
+            path_state["error"] = error_msg
+            path_state["error_known_fixable"] = True
+            return {
+                "decision": "invalid_sql",
+                "path_state": path_state,
+            }
+
+        # Check for hallucinated column names (common patterns like CDT, UDT, RokDT)
+        hallucinated_cols, col_hints = _detect_hallucinated_columns(
+            response.sql_code, relevant_tables, degenerate_dialect
+        )
+        if hallucinated_cols:
+            hint_msg = ""
+            if col_hints:
+                hint_msg = f" Did you mean: {', '.join(col_hints)}?"
+            error_msg = (
+                f"The SQL references column(s) that do not exist in the available schema: "
+                f"{', '.join(hallucinated_cols)}.{hint_msg} "
+                f"Use ONLY column names from AVAILABLE TABLES. Do NOT invent column "
+                f"abbreviations like CDT, UDT, or RokDT. Check the actual column names "
+                f"in the schema (e.g., sdt, regymd, rokymd for dates)."
+            )
+            self.logger.info(f"Hallucinated column detected: {hallucinated_cols}")
+            path_state["error"] = error_msg
+            path_state["error_known_fixable"] = True
             return {
                 "decision": "invalid_sql",
                 "path_state": path_state,
