@@ -105,6 +105,15 @@ def passes_relevance_gate(hit: dict[str, Any], max_distance: float) -> bool:
     return cosine_distance(hit) <= max_distance
 
 
+def rank_score(hit: dict[str, Any]) -> float:
+    """*hit*'s ``score`` for ordering, lower first; ``inf`` only when it has none.
+
+    Not ``score or inf``: a hybrid hit both searches rank first scores exactly
+    ``0.0``, the best possible, and ``or`` would sort it last.
+    """
+    return _float(hit.get("score"), math.inf)
+
+
 def cosine_distance(hit: dict[str, Any], missing: float = math.inf) -> float:
     """*hit*'s cosine distance, for comparisons tuned in cosine units.
 

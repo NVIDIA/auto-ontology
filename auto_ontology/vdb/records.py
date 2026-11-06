@@ -119,3 +119,17 @@ def write_embedded_rows(
     """Write the embedded *rows* to *vdb*; returns the number of rows written."""
     records = to_vdb_records(rows)
     return vdb.run(records) if records else 0
+
+
+def replace_embedded_rows(
+    vdb: "VectorStore",
+    node_ids: Iterable[str],
+    rows: "Iterable[dict[str, Any]] | pd.DataFrame",
+) -> int:
+    """Swap *node_ids*' rows in *vdb* for the embedded *rows*.
+
+    See :meth:`~auto_ontology.vdb.base.VectorStore.replace_rows`: a failed
+    write keeps the old rows.
+    """
+    records = to_vdb_records(rows)
+    return vdb.replace_rows(node_ids, records) if records else 0

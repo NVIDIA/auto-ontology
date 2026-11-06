@@ -29,6 +29,7 @@ from auto_ontology.retrieval.data_access.hit_scores import (
     cosine_distance,
     is_hybrid_hit,
     passes_relevance_gate,
+    rank_score,
 )
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE
@@ -419,7 +420,7 @@ def _entity_ranked_hits(
             "Clarify — collision re-query failed for %r", entity, exc_info=True
         )
         return []
-    return sorted(hits, key=lambda h: float(h.get("score") or float("inf")))
+    return sorted(hits, key=rank_score)
 
 
 _COLLISION_LLM_PROMPT = """\
@@ -963,11 +964,7 @@ def _resolve_collisions(
             hit = next(
                 (h for h in fresh_hits[e] if str(h.get("id") or "") == shared_id), None
             )
-            return (
-                float(hit["score"])
-                if hit
-                else float(best_hit_per_entity[e].get("score") or float("inf"))
-            )
+            return float(hit["score"]) if hit else rank_score(best_hit_per_entity[e])
 
         def _distance_for_shared(e: str) -> float:
             # The margins below are in cosine units. A hybrid hit's score is

@@ -50,7 +50,7 @@ from auto_ontology.utils.retriever import Retriever
 from auto_ontology.vdb.base import VectorStore
 from auto_ontology.vdb.elasticsearch import ElasticsearchVDB
 from auto_ontology.vdb.postgres import PostgresVDB
-from auto_ontology.vdb.records import write_embedded_rows
+from auto_ontology.vdb.records import replace_embedded_rows, write_embedded_rows
 from dev_tools.fake_embedder import FakeEmbedder, embed
 
 #: The model name each side sends, so the recorded calls say who embedded.
@@ -241,6 +241,58 @@ def test_deleting_everything_leaves_an_empty_searchable_store(backend) -> None:
     assert store.delete_all() == len(_ROWS)
 
     assert _search(store, params, "customer email") == []
+
+
+def test_deleting_a_database_returns_the_deleted_rows_ids(backend) -> None:
+    # dal.reset counts them with len(); Elasticsearch once returned an int.
+    _, store, params = backend
+    _write(store, params, _rows())
+
+    deleted = store.delete_by_database("pagila")
+
+    assert isinstance(deleted, list)
+    assert len(set(deleted)) == sum(1 for row in _ROWS if row[2] == "pagila")
+    assert _ids(_search(store, params, "address", top_k=10)) == ["c_billing"]
+
+
+def _replace(store: VectorStore, params: EmbedParams, node_id: str, text: str) -> int:
+    """Re-embed one row as a catalog edit does (``_refresh_vdb_embeddings``)."""
+    rows = _rows([(node_id, "Column", "pagila", text)])
+    return replace_embedded_rows(
+        store, [node_id], embed_rows(rows, params, what="contract")
+    )
+
+
+def test_replacing_a_row_swaps_it_for_the_new_text(backend) -> None:
+    _, store, params = backend
+    _write(store, params, _rows())
+
+    assert _replace(store, params, "c_email", "customer phone number") == 1
+
+    hits = _search(store, params, "customer phone number", top_k=10)
+    assert _ids(hits).count("c_email") == 1
+    assert len(hits) == len(_ROWS)
+    assert next(h for h in hits if h["metadata"]["id"] == "c_email")["text"] == (
+        "customer phone number"
+    )
+
+
+def test_a_replacement_that_cannot_be_embedded_keeps_the_old_row(
+    backend, fake: FakeEmbedder
+) -> None:
+    # pgvector embeds in embed_rows, before anything is deleted; Elasticsearch
+    # embeds in the write, so the store has to write before it deletes.
+    _, store, params = backend
+    _write(store, params, _rows())
+    fake.fail_next(401, times=20)
+
+    with pytest.raises(RuntimeError):
+        _replace(store, params, "c_email", "customer phone number")
+    fake.reset()
+
+    hits = _search(store, params, "customer email", top_k=10)
+    assert _ids(hits).count("c_email") == 1
+    assert len(hits) == len(_ROWS)
 
 
 def test_searching_an_empty_store_finds_nothing(backend) -> None:

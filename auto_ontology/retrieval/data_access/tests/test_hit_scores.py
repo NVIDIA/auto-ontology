@@ -23,9 +23,16 @@ from auto_ontology.retrieval.data_access.hit_scores import (
     cosine_distance,
     names_entity,
     passes_relevance_gate,
+    rank_score,
 )
-from auto_ontology.retrieval.entity_coverage.agents.coverage import _filter_by_distance
+from auto_ontology.retrieval.entity_coverage.agents.coverage import (
+    _filter_by_distance,
+    _rank_candidates,
+)
 from auto_ontology.retrieval.interactive.entity_resolution import _ambiguity_check
+from auto_ontology.retrieval.text_to_sql.agents.candidates_retrieval import (
+    _dedupe_best_score,
+)
 
 
 def _cosine(score: float, **extra: Any) -> dict:
@@ -261,3 +268,32 @@ def test_ambiguity_check_reads_branch_agreement_for_hybrid_hits() -> None:
     ]
 
     assert _ambiguity_check({"retrieved_column_attributes": hits}) == {"tie"}
+
+
+# ---------------------------------------------------------------------------
+# Ordering
+# ---------------------------------------------------------------------------
+
+
+def test_a_perfect_score_ranks_first_and_only_a_missing_one_last() -> None:
+    # A hybrid hit both searches rank first has score exactly 0.0.
+    assert rank_score(_hybrid(1.0)) == 0.0
+    assert rank_score({"score": None}) == math.inf
+    assert rank_score({}) == math.inf
+
+
+def test_dedupe_keeps_the_perfect_hit_over_a_weaker_duplicate() -> None:
+    perfect = _hybrid(1.0, id="c_rate", query_entity="rental rate")
+    weaker = _hybrid(0.4, id="c_rate", query_entity="rate")
+
+    for hits in ([perfect, weaker], [weaker, perfect]):
+        (kept,) = _dedupe_best_score(hits)
+        assert kept["score"] == 0.0
+
+
+def test_a_perfect_candidate_sorts_first() -> None:
+    ranked = _rank_candidates(
+        [_hybrid(0.5, id="b"), {"id": "none", "score": None}, _hybrid(1.0, id="a")]
+    )
+
+    assert [h["id"] for h in ranked] == ["a", "b", "none"]

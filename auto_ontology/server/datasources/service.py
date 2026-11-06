@@ -163,11 +163,11 @@ def _get_node_ids_for_embedding_update(
 
 
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
-    """Delete stale VDB rows, re-embed, and append Table/Column rows."""
+    """Re-embed these Table/Column rows, replacing their previous VDB rows."""
     from auto_ontology.utils import get_embed_params
     from auto_ontology.utils.embedding import embed_rows
     from auto_ontology.vdb import get_data_vdb
-    from auto_ontology.vdb.records import write_embedded_rows
+    from auto_ontology.vdb.records import replace_embedded_rows
 
     unique_ids = set(dict.fromkeys(node_ids))
 
@@ -197,13 +197,12 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     if not records:
         return
 
-    # Embedded before anything is deleted, so a failed embed leaves the old rows.
+    # A failed embed must leave the old rows. On pgvector that is embedding
+    # here, before replace_embedded_rows deletes anything; on Elasticsearch
+    # embed_rows passes the text through and the store writes before it
+    # deletes.
     rows = embed_rows(records, get_embed_params(), what="tabular")
-
-    vdb = get_data_vdb()
-    for nid in unique_ids:
-        vdb.delete_by_id(nid)
-    write_embedded_rows(vdb, rows)
+    replace_embedded_rows(get_data_vdb(), unique_ids, rows)
 
 
 def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:

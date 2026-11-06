@@ -29,7 +29,7 @@ import time
 import uuid
 from typing import Any, Callable, Iterable
 
-from elasticsearch import BadRequestError, Elasticsearch, NotFoundError
+from elasticsearch import BadRequestError, Elasticsearch, NotFoundError, helpers
 
 from auto_ontology.infra.elasticsearch import EmbedEndpoint, ensure_embed_endpoint
 from auto_ontology.vdb.backend import SearchMode
@@ -56,6 +56,9 @@ _FILTERABLE_METADATA = (
 # needs wall-clock time to refill. Elasticsearch has already retried each
 # request a few times before reporting the row as failed.
 _RETRY_ATTEMPTS = 4
+#: Ids per delete_by_query in delete_by_database, under the default 65,536
+#: terms limit with room to spare.
+_DELETE_BATCH = 10_000
 _RETRY_BASE_SECONDS = 15.0
 _RETRY_MAX_SECONDS = 120.0
 
@@ -277,7 +280,7 @@ class ElasticsearchVDB:
     # Write
     # ------------------------------------------------------------------
 
-    def _documents(self, records: list) -> list[dict]:
+    def _documents(self, records: list, generation: str | None = None) -> list[dict]:
         docs: list[dict] = []
         for record in _flatten(records):
             metadata = record.get("metadata") or {}
@@ -289,7 +292,7 @@ class ElasticsearchVDB:
             docs.append(
                 {
                     "text": text,
-                    "generation": self._generation,
+                    "generation": generation or self._generation,
                     "metadata": {
                         "document_type": record.get("document_type"),
                         # A vector computed by an older code path is not
@@ -375,7 +378,7 @@ class ElasticsearchVDB:
         dead endpoint surfaces -- the same point at which
         :func:`~auto_ontology.utils.embedding.embed_rows` raises on the other.
         """
-        docs = self._documents(records)
+        docs = self._documents(records, kwargs.get("generation"))
         if not docs:
             logger.info("ElasticsearchVDB.write_to_index: no rows to insert")
             return 0
@@ -430,6 +433,51 @@ class ElasticsearchVDB:
         self.create_index()
         return self.write_to_index(records)
 
+    def replace_rows(self, node_ids: Iterable[str], records: list) -> int:
+        """Write *records*, then drop the older rows of the ids that got a new one.
+
+        Write first, the order a reset uses: the write is the embed here, so
+        deleting first would leave an edit the endpoint rejects with no row at
+        all. The new rows carry their own generation, which is what tells them
+        apart from the old ones sharing their id. An id whose new row was
+        rejected keeps its old one.
+        """
+        ids = sorted({str(node_id) for node_id in node_ids})
+        if not ids:
+            return 0
+        generation = uuid.uuid4().hex
+        self.create_index()
+        # Raises when nothing was written, before anything is deleted.
+        written = self.write_to_index(records, generation=generation)
+        rewritten = self._ids_in_generation(ids, generation)
+        if rewritten:
+            self._delete(
+                {
+                    "bool": {
+                        "filter": [{"terms": {"metadata.id": rewritten}}],
+                        "must_not": [{"term": {"generation": generation}}],
+                    }
+                }
+            )
+        return written
+
+    def _ids_in_generation(self, ids: list[str], generation: str) -> list[str]:
+        """Which of *ids* have a row in *generation*."""
+        response = self._client.search(
+            index=self.index_name,
+            size=0,
+            query={
+                "bool": {
+                    "filter": [
+                        {"terms": {"metadata.id": ids}},
+                        {"term": {"generation": generation}},
+                    ]
+                }
+            },
+            aggs={"ids": {"terms": {"field": "metadata.id", "size": len(ids)}}},
+        )
+        return [bucket["key"] for bucket in response["aggregations"]["ids"]["buckets"]]
+
     # ------------------------------------------------------------------
     # Delete
     # ------------------------------------------------------------------
@@ -446,9 +494,30 @@ class ElasticsearchVDB:
             return 0
         return int(response.get("deleted", 0))
 
-    def delete_by_database(self, database_name: str) -> int:
-        """Delete every row for *database_name*; returns how many."""
-        return self._delete({"term": {"metadata.database_name": database_name}})
+    def delete_by_database(self, database_name: str) -> list[str]:
+        """Delete every row for *database_name*; returns the deleted rows' ids.
+
+        Ids rather than a count, the contract PostgresVDB has and dal.reset
+        relies on. They are collected first and the rows then deleted by id,
+        so the list is exactly what was removed.
+        """
+        try:
+            ids = [
+                hit["_id"]
+                for hit in helpers.scan(
+                    self._client,
+                    index=self.index_name,
+                    query={
+                        "query": {"term": {"metadata.database_name": database_name}}
+                    },
+                    _source=False,
+                )
+            ]
+        except NotFoundError:
+            return []
+        for start in range(0, len(ids), _DELETE_BATCH):
+            self._delete({"ids": {"values": ids[start : start + _DELETE_BATCH]}})
+        return ids
 
     def delete_all(self) -> int:
         """Delete every row, keeping the index and its mapping."""

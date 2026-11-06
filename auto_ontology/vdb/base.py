@@ -14,7 +14,7 @@ changes what ``retrieval`` takes: query *vectors* when it is false, query
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Iterable, Literal, Protocol
 
 
 class VectorStore(Protocol):
@@ -48,6 +48,18 @@ class VectorStore(Protocol):
 
     def delete_by_id(self, node_id: str) -> int:
         """Delete every row whose ``metadata["id"]`` is *node_id*."""
+        ...
+
+    def delete_by_database(self, database_name: str) -> list[str]:
+        """Delete every row for *database_name*; returns the deleted rows' ids."""
+        ...
+
+    def replace_rows(self, node_ids: Iterable[str], records: list) -> int:
+        """Swap the rows for *node_ids* for *records*; returns rows written.
+
+        A write that fails must leave the previous rows searchable, so an edit
+        that cannot be embedded does not take the node out of retrieval.
+        """
         ...
 
     def retrieval(
