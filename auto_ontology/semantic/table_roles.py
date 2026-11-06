@@ -7,14 +7,14 @@
 SQL generation sees a flat list of tables. Two things it cannot read off that
 list decide many wrong queries:
 
-* **Role.** A dimension (one row per department, term or code) is where a name
-  or label lives; a fact (offerings, enrollments, transactions, summaries)
+* **Role.** A dimension (one row per customer, product or code) is where a
+  name or label lives; a fact (orders, payments, shipments, summaries)
   references dimensions. Joining a fact to a dimension is how a name is
   reached. Joining two facts to each other on a shared dimension key repeats
   rows, because neither row identifies the other.
 * **Siblings.** A warehouse often holds several tables with near-identical
   columns — a detail table and its summary, a current and an all-history
-  copy, two feeds of one catalog. Both join the same way, so nothing in the
+  copy, two feeds of one source. Both join the same way, so nothing in the
   join graph says which one a question means.
 
 Algorithm
@@ -82,10 +82,10 @@ _ROLE_SYSTEM_PROMPT = """\
 You classify one table of a data warehouse so a SQL writer knows how to use it.
 
 Return its role:
-- dimension: one row per entity or code (a department, a term, a building, a
-  person, a status code). Other tables reference it to get a name, label or
-  attribute. Mostly descriptive columns.
-- fact: rows record events, transactions, offerings, enrollments, assignments,
+- dimension: one row per entity or code (a customer, a product, a region, a
+  calendar date, a status code). Other tables reference it to get a name,
+  label or attribute. Mostly descriptive columns.
+- fact: rows record events, transactions, orders, payments, assignments,
   measurements or aggregates. It usually references several other tables and
   often carries counts, amounts or dates of what happened. A summary or
   aggregated table is a fact.

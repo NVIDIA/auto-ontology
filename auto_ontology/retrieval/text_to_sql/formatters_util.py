@@ -353,7 +353,7 @@ _TABLE_ROLE_NOTE = (
     "A table's role says how to join it. A dimension holds one row per entity "
     "or code; join a fact to it to reach names and attributes. Do not join two "
     "fact tables to each other only through a shared dimension key, such as a "
-    "department or term code: neither row identifies the other, so the join "
+    "customer or region code: neither row identifies the other, so the join "
     "repeats rows. Aggregate each fact on its own, then combine the results on "
     "that key."
 )

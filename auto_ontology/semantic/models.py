@@ -246,7 +246,7 @@ class TableRoleJudgement(BaseModel):
     role: Literal["fact", "dimension", "junction"] | None = Field(
         ...,
         description=(
-            "fact: rows record events, transactions, offerings or measurements, "
+            "fact: rows record events, transactions, orders or measurements, "
             "usually with several references and numeric measures. dimension: "
             "one row per entity or code that other tables reference for its "
             "name and attributes. junction: each row only associates two or "
@@ -257,7 +257,7 @@ class TableRoleJudgement(BaseModel):
         default="",
         description=(
             "One short sentence naming what a single row represents, for "
-            "example 'one row per subject offered in a term'."
+            "example 'one row per order line'."
         ),
     )
 

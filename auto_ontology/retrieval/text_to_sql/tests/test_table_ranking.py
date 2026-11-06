@@ -41,16 +41,16 @@ def test_last_entity_best_table_is_not_left_at_the_end() -> None:
 def test_table_matching_more_entities_outranks_a_closer_single_match() -> None:
     tables = [_table(t) for t in ["closest", "shared", "other"]]
     scores = {
-        "department": {"closest": _hit(0.1), "shared": _hit(0.4)},
-        "enrollment": {"shared": _hit(0.5), "other": _hit(0.2)},
+        "region": {"closest": _hit(0.1), "shared": _hit(0.4)},
+        "revenue": {"shared": _hit(0.5), "other": _hit(0.2)},
     }
 
-    ranked = rank_tables_by_entity(tables, scores, ["department", "enrollment"])
+    ranked = rank_tables_by_entity(tables, scores, ["region", "revenue"])
 
     assert [t["id"] for t in ranked] == ["shared", "closest", "other"]
     assert ranked[0]["entity_matches"] == [
-        {"entity": "department", "column": "col", "rank": 1},
-        {"entity": "enrollment", "column": "col", "rank": 1},
+        {"entity": "region", "column": "col", "rank": 1},
+        {"entity": "revenue", "column": "col", "rank": 1},
     ]
 
 
