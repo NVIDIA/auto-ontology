@@ -34,6 +34,9 @@ from auto_ontology.dal.sql_fragments import (  # noqa: E402
     column_description_expr,
     table_description_expr,
 )
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -61,7 +64,7 @@ def fixture():
     table = _insert(s.catalog_table, schema_id=schema, name="customer")
     column = _insert(s.catalog_column, table_id=table, name="email")
 
-    yield {"prefix": prefix, "table": table, "column": column}
+    yield {"prefix": prefix, "schema": schema, "table": table, "column": column}
 
     store().query_write(
         s.catalog_database.delete().where(s.catalog_database.c.name == prefix)
@@ -81,6 +84,22 @@ def _attribute(prefix: str, description: str | None) -> str:
         term_name="Customer",
         table_id="",
     )
+
+
+def _reference(fixture: dict, attribute_id: str) -> None:
+    """The fixture's column references *attribute_id*, owned on another table."""
+    owner_table = _insert(
+        s.catalog_table,
+        schema_id=fixture["schema"],
+        name=f"owner_{uuid.uuid4().hex[:6]}",
+    )
+    owner = _insert(s.catalog_column, table_id=owner_table, name="id")
+    store().query_write(
+        s.column__has_attribute.insert().values(
+            column_id=owner, attribute_id=attribute_id
+        )
+    )
+    reference_attribute(fixture["column"], attribute_id)
 
 
 def _describe_column(column_id: str) -> str | None:
@@ -148,21 +167,13 @@ def test_has_attribute_beats_semantic_fk(fixture) -> None:
             column_id=fixture["column"], attribute_id=owned
         )
     )
-    store().query_write(
-        s.column__semantic_fk.insert().values(
-            column_id=fixture["column"], attribute_id=referenced
-        )
-    )
+    _reference(fixture, referenced)
     assert _describe_column(fixture["column"]) == "owned"
 
 
 def test_falls_back_to_semantic_fk_when_that_is_all_there_is(fixture) -> None:
     referenced = _attribute(fixture["prefix"], "referenced")
-    store().query_write(
-        s.column__semantic_fk.insert().values(
-            column_id=fixture["column"], attribute_id=referenced
-        )
-    )
+    _reference(fixture, referenced)
     assert _describe_column(fixture["column"]) == "referenced"
 
 

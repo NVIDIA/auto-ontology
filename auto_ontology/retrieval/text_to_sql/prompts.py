@@ -113,13 +113,13 @@ create_sql_user_prompt = (
     "functions such as AVG(COUNT(...)).\n\n"
     "**Joins**\n"
     "- When evidence rules map to columns in different tables, include the joins "
-    "that connect those tables using the listed paths. Choose the join type "
-    "(INNER / LEFT / RIGHT) from the question's intent and avoid fan-out from "
-    "many-to-many joins.\n"
-    "- A listed join path is indivisible. If it contains intermediate or bridge "
-    "tables, include every table and every hop exactly as listed. Removing a "
-    "bridge table, skipping a hop, or replacing the path with a direct endpoint "
-    "join is forbidden, even when the bridge contributes no projected column.\n\n"
+    "that connect those tables using the listed concepts and joins. Choose the "
+    "join type (INNER / LEFT / RIGHT) from the question's intent and avoid "
+    "fan-out from many-to-many joins.\n"
+    "- Join through a concept only as its rules allow: PK to PK or FK to PK, "
+    "never FK to FK. When two tables both hold an FK to the same concept, join "
+    "each of them to one of its PK tables, even when that table contributes no "
+    "projected column.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
     "- A condition on an aggregated value belongs in HAVING, not WHERE. When the "
@@ -442,14 +442,16 @@ ORDER BY total_sales DESC;"""
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
   or CASE logic within the SQL.
-- SEMANTIC HINT (if present) shows a likely starting table and suggested join
-  paths derived from the semantic model. Treat it as a strong hint: prefer it
-  when it fits. Never force the semantic hint if it doesn't match the question.
-- SUGGESTED JOIN PATHS show verified column-level join conditions:
+- SEMANTIC HINT (if present) shows a likely starting table derived from the
+  semantic model. Treat it as a strong hint: prefer it when it fits. Never force
+  the semantic hint if it doesn't match the question.
+- CONCEPTS (if present) list each concept's PK columns and FK columns. Inside a
+  concept, join PK to PK or FK to PK, equating the columns in the order listed:
 {join_template}
-  Follow hops in order when the path spans more than one table. Once you choose
-  a path, every intermediate/bridge table and every listed hop is mandatory.
-  Never shorten the path or join its endpoints directly.
+  Never join two FK columns to each other, even of the same concept; route the
+  join through one of the concept's PK tables instead.
+- OTHER JOINS (if present) are verified join conditions outside any concept.
+  Use them exactly as listed.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
   trimming only what does not apply. Do NOT copy its aliases.
@@ -576,9 +578,11 @@ those custom analyses — do NOT mark them as critical issues
 solely for that reason.
 
 When AUTHORITATIVE JOIN PATHS are provided, they come from
-the verified semantic model. If the generated SQL uses a
-join condition from those paths, keep it and do NOT flag
-that join as invalid.
+the verified semantic model. If the generated SQL joins two
+columns of one concept as its rules allow (PK to PK, or FK
+to PK), or uses a listed other join, keep it and do NOT flag
+that join as invalid. A join between two FK columns of a
+concept is never one of these.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -627,9 +631,11 @@ those custom analyses — do NOT mark them as critical issues
 solely for that reason.
 
 When AUTHORITATIVE JOIN PATHS are provided, they come from
-the verified semantic model. If the generated SQL uses a
-join condition from those paths, keep it and do NOT flag
-that join as invalid.
+the verified semantic model. If the generated SQL joins two
+columns of one concept as its rules allow (PK to PK, or FK
+to PK), or uses a listed other join, keep it and do NOT flag
+that join as invalid. A join between two FK columns of a
+concept is never one of these.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -991,8 +997,8 @@ def create_intent_validation_prompt(
             "concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those."
         )
         authoritative_note = (
-            "\nIf AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows "
-            "one of those verified paths."
+            "\nIf AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that a "
+            "concept allows (PK to PK, or FK to PK) or that is a listed other join."
         )
     evidence_criterion = (
         "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "

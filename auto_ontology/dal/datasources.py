@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import values as sa_values
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import SEMANTIC_FK_ATTRIBUTES, SEMANTIC_FK_LINKS
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
     column_description_expr,
@@ -967,7 +968,7 @@ def _terms_count(table_id: ColumnElement) -> ColumnElement:
     return (
         select(func.count())
         .select_from(s.term)
-        .where(direct | via(s.column__has_attribute) | via(s.column__semantic_fk))
+        .where(direct | via(s.column__has_attribute) | via(SEMANTIC_FK_ATTRIBUTES))
         .correlate(owner)
         .scalar_subquery()
     )
@@ -1154,49 +1155,20 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     restored so the back-fill isn't a no-op again. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
-    ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    ``semantic_fk`` names the concept the column references, for SQL prompts;
+    the concept's keys are listed separately, so no target column is named.
     """
     if not table_ids:
         return []
-    semantic_owner = s.column__has_attribute.alias("semantic_fk_owner")
-    semantic_target = s.catalog_column.alias("semantic_fk_target")
-    semantic_table = s.catalog_table.alias("semantic_fk_table")
-    semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
     semantic_fk_target = (
-        select(
-            func.concat_ws(
-                ".",
-                semantic_schema.c.name,
-                semantic_table.c.name,
-                semantic_target.c.name,
-            )
-        )
+        select(s.concept.c.name)
         .select_from(
-            s.column__semantic_fk.join(
-                semantic_owner,
-                semantic_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
-            )
-            .join(
-                semantic_target,
-                semantic_target.c.id == semantic_owner.c.column_id,
-            )
-            .join(
-                semantic_table,
-                semantic_table.c.id == semantic_target.c.table_id,
-            )
-            .join(
-                semantic_schema,
-                semantic_schema.c.id == semantic_table.c.schema_id,
-            )
+            s.concept__fk_column.join(
+                s.concept__fk, s.concept__fk.c.id == s.concept__fk_column.c.fk_id
+            ).join(s.concept, s.concept.c.id == s.concept__fk.c.concept_id)
         )
-        .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+        .where(s.concept__fk_column.c.column_id == s.catalog_column.c.id)
         .correlate(s.catalog_column)
-        .order_by(
-            semantic_schema.c.name,
-            semantic_table.c.name,
-            semantic_target.c.name,
-        )
         .limit(1)
         .scalar_subquery()
     )
@@ -1427,11 +1399,8 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     # target contributes nothing and the size comparison fails -- the second of
     # the two checks described above.
     #
-    # The SEMANTIC_FK route is Column -> ColumnAttribute <- Column: the
-    # attribute this column references is *owned* by some other column, and that
-    # other column is the join target. Reversing it would make every bridge
-    # point back at itself.
-    sem_owner = s.column__has_attribute.alias("sem_owner")
+    # The SEMANTIC_FK route is Column -> concept key column on each member
+    # table: those key columns are the join targets, never the column itself.
     resolved = (
         select(
             s.catalog_column.c.id.label("column_id"),
@@ -1453,14 +1422,12 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
             .outerjoin(fk_table, fk_table.c.id == fk_target.c.table_id)
             .outerjoin(fk_schema, fk_schema.c.id == fk_table.c.schema_id)
             .outerjoin(
-                s.column__semantic_fk,
-                s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
+                SEMANTIC_FK_LINKS,
+                SEMANTIC_FK_LINKS.c.column_id == s.catalog_column.c.id,
             )
             .outerjoin(
-                sem_owner,
-                sem_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+                sem_target, sem_target.c.id == SEMANTIC_FK_LINKS.c.target_column_id
             )
-            .outerjoin(sem_target, sem_target.c.id == sem_owner.c.column_id)
             .outerjoin(sem_table, sem_table.c.id == sem_target.c.table_id)
             .outerjoin(sem_schema, sem_schema.c.id == sem_table.c.schema_id)
         )
@@ -1477,7 +1444,7 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     )
     # DISTINCT on the *column*, not a row count. `resolved` carries one row per
     # resolvable target, and a column may have several -- two foreign keys, or a
-    # SEMANTIC_FK reaching an attribute owned by more than one column. Counting
+    # SEMANTIC_FK reaching a concept with more than one member table. Counting
     # rows lets a table where one column resolves twice and another not at all
     # match `columns_count`, which is exactly the "every column is a key" claim
     # this is supposed to enforce. That is the first of the two checks the

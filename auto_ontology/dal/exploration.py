@@ -30,6 +30,7 @@ from sqlalchemy import and_, func, literal, select
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import SEMANTIC_FK_ATTRIBUTES
 
 # Private on purpose, and imported across modules on purpose: these are the one
 # definition of a table's column/sql/term counts, and the SQL shared them the
@@ -275,8 +276,8 @@ def _attribute_link():
         )
         .union(
             select(
-                s.column__semantic_fk.c.column_id,
-                s.column__semantic_fk.c.attribute_id,
+                SEMANTIC_FK_ATTRIBUTES.c.column_id,
+                SEMANTIC_FK_ATTRIBUTES.c.attribute_id,
                 literal(REL_SEMANTIC_FK).label("rel_type"),
             )
         )

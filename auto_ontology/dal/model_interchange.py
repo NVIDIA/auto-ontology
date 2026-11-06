@@ -28,6 +28,14 @@ from auto_ontology.catalog.constants import Props
 from auto_ontology.catalog.model import CatalogNode
 from auto_ontology.catalog.store.queries import add_query
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import (
+    SEMANTIC_FK_ATTRIBUTES,
+    ensure_term_concept,
+    link_column_to_attribute,
+    merge_concept_fk,
+    merge_concepts,
+    set_concept_key,
+)
 from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
@@ -53,6 +61,9 @@ from auto_ontology.server.model_interchange.embed import (
 from auto_ontology.server.model_interchange.schemas import (
     AutoOntologyModelDocument,
     ModelColumn,
+    ModelConcept,
+    ModelConceptKey,
+    ModelConceptReference,
     ModelColumnAttribute,
     ModelCustomAnalysis,
     ModelDatabase,
@@ -337,24 +348,116 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
 
 
 def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
+    links = SEMANTIC_FK_ATTRIBUTES
     return [
         dict(r)
         for r in store().query_read(
             select(
-                s.column__semantic_fk.c.column_id,
-                s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
-                s.column__semantic_fk.c.use_in_join_paths,
+                links.c.column_id,
+                links.c.attribute_id.label("column_attribute_id"),
+                links.c.use_in_join_paths,
             )
             .select_from(
+                _catalog_join().join(links, links.c.column_id == s.catalog_column.c.id)
+            )
+            .where(_database_scope(database_ids))
+            .distinct()
+        )
+    ]
+
+
+def _export_concepts(database_ids: list[str]) -> list[dict[str, Any]]:
+    """Concepts of the exported terms, with every key and reference they have.
+
+    Scoping to the document's catalog happens in :func:`assemble_export_document`,
+    like the terms' ``represents``.
+    """
+    term_ids = [
+        row["term_id"]
+        for row in store().query_read(
+            select(s.table__term.c.term_id)
+            .select_from(
                 _catalog_join().join(
-                    s.column__semantic_fk,
-                    s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
+                    s.table__term,
+                    s.table__term.c.table_id == s.catalog_table.c.id,
                 )
             )
             .where(_database_scope(database_ids))
             .distinct()
         )
     ]
+    if not term_ids:
+        return []
+    concepts: dict[str, dict[str, Any]] = {}
+    for row in store().query_read(
+        select(
+            s.concept.c.id,
+            s.concept.c.name,
+            s.concept.c.description,
+            s.term__concept.c.term_id,
+        )
+        .select_from(
+            s.concept.join(
+                s.term__concept, s.term__concept.c.concept_id == s.concept.c.id
+            )
+        )
+        .where(
+            s.concept.c.id.in_(
+                select(s.term__concept.c.concept_id).where(
+                    s.term__concept.c.term_id.in_(term_ids)
+                )
+            )
+        )
+        .order_by(s.concept.c.name, s.term__concept.c.term_id)
+    ):
+        concept = concepts.setdefault(
+            row["id"],
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"] or "",
+                "term_ids": [],
+                "keys": {},
+                "references": {},
+            },
+        )
+        concept["term_ids"].append(row["term_id"])
+    if not concepts:
+        return []
+    for row in store().query_read(
+        select(
+            s.concept__pk.c.concept_id,
+            s.concept__pk.c.table_id,
+            s.concept__pk.c.column_id,
+        )
+        .where(s.concept__pk.c.concept_id.in_(list(concepts)))
+        .order_by(s.concept__pk.c.table_id, s.concept__pk.c.ordinal)
+    ):
+        concepts[row["concept_id"]]["keys"].setdefault(row["table_id"], []).append(
+            row["column_id"]
+        )
+    for row in store().query_read(
+        select(
+            s.concept__fk.c.concept_id,
+            s.concept__fk.c.id,
+            s.concept__fk.c.use_in_join_paths,
+            s.concept__fk_column.c.column_id,
+        )
+        .select_from(
+            s.concept__fk.join(
+                s.concept__fk_column,
+                s.concept__fk_column.c.fk_id == s.concept__fk.c.id,
+            )
+        )
+        .where(s.concept__fk.c.concept_id.in_(list(concepts)))
+        .order_by(s.concept__fk.c.id, s.concept__fk_column.c.ordinal)
+    ):
+        reference = concepts[row["concept_id"]]["references"].setdefault(
+            row["id"],
+            {"column_ids": [], "use_in_join_paths": row["use_in_join_paths"]},
+        )
+        reference["column_ids"].append(row["column_id"])
+    return list(concepts.values())
 
 
 def _export_sql_owners(database_ids: list[str], link_table, owner_table, owner_column):
@@ -437,6 +540,7 @@ def fetch_export_rows(database_ids: list[str]) -> dict[str, Any]:
         "foreign_keys": _export_foreign_keys(database_ids),
         "joins": _export_joins(database_ids),
         "terms": _export_terms(database_ids),
+        "concepts": _export_concepts(database_ids),
         "semantic_fks": _export_semantic_fks(database_ids),
         "sql_attributes": _export_sql_attributes(database_ids),
         "custom_analyses": _export_custom_analyses(database_ids),
@@ -533,6 +637,12 @@ def assemble_export_document(
         if str(row.get("column_attribute_id") or "") in _attribute_ids
         and str(row.get("column_id") or "") in column_ids
     ]
+    concepts = _assemble_concepts(
+        rows.get("concepts") or [],
+        term_ids=_term_ids,
+        table_ids=table_ids,
+        column_ids=column_ids,
+    )
     sql_attributes = _assemble_sql_attributes(
         rows["sql_attributes"],
         sql_column_resolver,
@@ -561,12 +671,57 @@ def assemble_export_document(
         ),
         semantic_layer=ModelSemanticLayer(
             terms=terms,
+            concepts=concepts,
             semantic_fks=semantic_fks,
             sql_attributes=sql_attributes,
             custom_analyses=custom_analyses,
         ),
         zones=[],
     )
+
+
+def _assemble_concepts(
+    rows: list[dict[str, Any]],
+    *,
+    term_ids: set[str],
+    table_ids: set[str],
+    column_ids: set[str],
+) -> list[ModelConcept]:
+    """Concepts with at least one exported term, cut down to the catalog carried.
+
+    A key or reference is dropped whole when any of its columns is missing:
+    half a composite key would import as a different, wrong key.
+    """
+    concepts = []
+    for row in rows:
+        kept_terms = [str(t) for t in row.get("term_ids") or [] if str(t) in term_ids]
+        if not kept_terms:
+            continue
+        keys = [
+            ModelConceptKey(table_id=str(table_id), column_ids=list(columns))
+            for table_id, columns in (row.get("keys") or {}).items()
+            if str(table_id) in table_ids and all(c in column_ids for c in columns)
+        ]
+        references = [
+            ModelConceptReference(
+                column_ids=list(reference["column_ids"]),
+                use_in_join_paths=bool(reference.get("use_in_join_paths", True)),
+            )
+            for reference in (row.get("references") or {}).values()
+            if reference.get("column_ids")
+            and all(c in column_ids for c in reference["column_ids"])
+        ]
+        concepts.append(
+            ModelConcept(
+                id=str(row["id"]),
+                name=row.get("name") or "",
+                description=row.get("description") or "",
+                term_ids=kept_terms,
+                keys=keys,
+                references=references,
+            )
+        )
+    return concepts
 
 
 def _column_live_id_map(catalog_rows: list[dict[str, Any]]) -> dict[str, str]:
@@ -877,6 +1032,7 @@ def _remap_optional(id_map: dict[str, str], yaml_id: str) -> str | None:
     A scoped export is deliberately honest about the parts of a term it does not
     own: ``_export_terms`` emits *every* table representing a term, in scope or
     not, and ``_export_semantic_fks`` every pair touching an in-scope column.
+    A concept's term outside the document is likewise skipped.
     Those ids point outside the document by design, so requiring them -- as
     :func:`_remap` does -- made any such document abort the whole import.
 
@@ -988,6 +1144,7 @@ def apply_import_model(
         _import_column_attributes(
             document, id_map, created, skipped, embed_buffer, column_meta
         )
+        _import_concepts(document, id_map)
         _import_semantic_fks(document, id_map)
         _import_sql_attributes(
             document, id_map, created, skipped, embed_buffer, term_names, schema_cache
@@ -1005,6 +1162,7 @@ def apply_import_model(
         "column_attributes": sum(
             len(term.columns_attributes) for term in document.semantic_layer.terms
         ),
+        "concepts": len(document.semantic_layer.concepts),
         "semantic_fks": len(document.semantic_layer.semantic_fks),
         "sql_attributes": sum(
             len(getattr(document.semantic_layer.sql_attributes, key))
@@ -1312,14 +1470,39 @@ def _delete_scoped_semantics_not_in_payload(
         .where(s.table__term.c.table_id.in_(scoped_tables))
         .distinct()
     )
-    store().query_write(
-        s.term.delete().where(
-            s.term.c.id.in_(inside),
-            s.term.c.id.notin_(outside),
-            s.term.c.source == SEMANTIC_SOURCE,
-            _payload_identity(s.term).notin_(keep_terms or [""]),
-        )
+    doomed_terms = select(s.term.c.id).where(
+        s.term.c.id.in_(inside),
+        s.term.c.id.notin_(outside),
+        s.term.c.source == SEMANTIC_SOURCE,
+        _payload_identity(s.term).notin_(keep_terms or [""]),
     )
+    doomed_concepts = [
+        row["concept_id"]
+        for row in store().query_read(
+            select(s.term__concept.c.concept_id)
+            .where(s.term__concept.c.term_id.in_(doomed_terms))
+            .distinct()
+        )
+    ]
+    store().query_write(s.term.delete().where(s.term.c.id.in_(doomed_terms)))
+
+    # Keys and references on these tables are rebuilt from the payload; a
+    # concept left without a term goes with them.
+    store().query_write(
+        s.concept__fk.delete().where(s.concept__fk.c.source_table_id.in_(scoped_tables))
+    )
+    store().query_write(
+        s.concept__pk.delete().where(s.concept__pk.c.table_id.in_(scoped_tables))
+    )
+    if doomed_concepts:
+        store().query_write(
+            s.concept.delete().where(
+                s.concept.c.id.in_(doomed_concepts),
+                ~select(s.term__concept.c.term_id)
+                .where(s.term__concept.c.concept_id == s.concept.c.id)
+                .exists(),
+            )
+        )
 
 
 def _import_terms(
@@ -1488,10 +1671,84 @@ def _import_column_attributes(
     _link(s.column_attribute__term, property_of_rows)
 
 
+def _import_concepts(
+    document: AutoOntologyModelDocument, id_map: dict[str, str]
+) -> None:
+    """Group the imported terms into their concepts, then key and reference them.
+
+    Each term already has a concept of its own (or one from an earlier
+    import); the first term's is kept and the others are merged into it.
+    """
+    for concept in document.semantic_layer.concepts:
+        live_terms = [
+            live
+            for live in (_remap_optional(id_map, t) for t in concept.term_ids)
+            if live
+        ]
+        if not live_terms:
+            logger.debug(
+                "import: concept %s has no imported term; skipping", concept.id
+            )
+            continue
+        concept_id = ensure_term_concept(live_terms[0])
+        if concept_id is None:
+            continue
+        for term_id in live_terms[1:]:
+            other = ensure_term_concept(term_id)
+            if other and other != concept_id:
+                merge_concepts(concept_id, other)
+        values: dict[str, Any] = {"imported_id": concept.id}
+        if concept.description:
+            values["description"] = concept.description
+        if concept.name and not store().query_read(
+            select(s.concept.c.id).where(
+                s.concept.c.name == concept.name,
+                s.concept.c.source == SEMANTIC_SOURCE,
+                s.concept.c.id != concept_id,
+            )
+        ):
+            values["name"] = concept.name
+        store().query_write(
+            update(s.concept).where(s.concept.c.id == concept_id).values(**values)
+        )
+        id_map[concept.id] = concept_id
+
+        for key in concept.keys:
+            table_id = _remap_optional(id_map, key.table_id)
+            columns = [_remap_optional(id_map, c) for c in key.column_ids]
+            if table_id is None or not columns or None in columns:
+                continue
+            if not set_concept_key(concept_id, table_id, [c for c in columns if c]):
+                logger.info(
+                    "import: concept %s key on %s refused", concept.id, key.table_id
+                )
+        for reference in concept.references:
+            columns = [_remap_optional(id_map, c) for c in reference.column_ids]
+            if not columns or None in columns:
+                continue
+            fk_id = merge_concept_fk(concept_id, [c for c in columns if c])
+            if fk_id is None:
+                logger.info(
+                    "import: concept %s reference %s refused",
+                    concept.id,
+                    reference.column_ids,
+                )
+                continue
+            store().query_write(
+                update(s.concept__fk)
+                .where(s.concept__fk.c.id == fk_id)
+                .values(use_in_join_paths=reference.use_in_join_paths)
+            )
+
+
 def _import_semantic_fks(
     document: AutoOntologyModelDocument, id_map: dict[str, str]
 ) -> None:
-    rows = []
+    """Import the single-column ``semantic_fks`` list.
+
+    A document with ``concepts`` already carries these references there, so
+    this only writes what is not there yet: a document from before concepts.
+    """
     for fk in document.semantic_layer.semantic_fks:
         column_id = _remap_optional(id_map, fk.column_id)
         attribute_id = _remap_optional(id_map, fk.column_attribute_id)
@@ -1503,26 +1760,20 @@ def _import_semantic_fks(
                 fk.column_attribute_id,
             )
             continue
-        rows.append(
-            {
-                "column_id": column_id,
-                "attribute_id": attribute_id,
-                "use_in_join_paths": fk.use_in_join_paths,
-            }
-        )
-    if rows:
-        statement = insert(s.column__semantic_fk).values(rows)
-        store().query_write(
-            statement.on_conflict_do_update(
-                index_elements=[
-                    s.column__semantic_fk.c.column_id,
-                    s.column__semantic_fk.c.attribute_id,
-                ],
-                set_={
-                    "use_in_join_paths": statement.excluded.use_in_join_paths,
-                },
+        fk_id = link_column_to_attribute(column_id, attribute_id)
+        if fk_id is None:
+            logger.info(
+                "import: semantic fk %s -> %s refused",
+                fk.column_id,
+                fk.column_attribute_id,
             )
-        )
+            continue
+        if not document.semantic_layer.concepts:
+            store().query_write(
+                update(s.concept__fk)
+                .where(s.concept__fk.c.id == fk_id)
+                .values(use_in_join_paths=fk.use_in_join_paths)
+            )
 
 
 def _cached_dialects_and_schemas(

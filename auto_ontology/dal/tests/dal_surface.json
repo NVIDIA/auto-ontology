@@ -1,11 +1,9 @@
 {
   "attributes": {
     "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
-    "delete_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'None'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
-    "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
@@ -17,11 +15,28 @@
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
-    "set_semantic_fk_join_default": "(source_table_id: 'str', target_attribute_id: 'str', selected_column_id: 'str') -> 'None'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
   },
   "candidates": {
     "expand_info": "(ids_and_labels: 'list | None') -> 'dict'"
+  },
+  "concepts": {
+    "column_has_semantic_fk": "(column_id_expr: 'Any') -> 'Any'",
+    "concept_keys_containing": "(column_id: 'str') -> 'list[dict[str, Any]]'",
+    "concept_of_term": "(term_id: 'str') -> 'str | None'",
+    "delete_concept_fk": "(fk_id: 'str') -> 'None'",
+    "ensure_term_concept": "(term_id: 'str') -> 'str | None'",
+    "fetch_concept_keys": "(concept_id: 'str') -> 'dict[str, list[str]]'",
+    "fetch_concepts": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
+    "fetch_concepts_for_tables": "(table_ids: 'list[str]') -> 'list[dict[str, Any]]'",
+    "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "link_column_to_attribute": "(source_column_id: 'str', attribute_id: 'str') -> 'str | None'",
+    "link_column_to_key_column": "(source_column_id: 'str', target_column_id: 'str') -> 'str | None'",
+    "merge_concept_fk": "(concept_id: 'str', source_column_ids: 'list[str]') -> 'str | None'",
+    "merge_concepts": "(keep_id: 'str', drop_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None) -> 'bool'",
+    "semantic_table_edges": "(database_id: 'str', *, include_disabled: 'bool' = False) -> 'list[dict[str, Any]]'",
+    "set_concept_key": "(concept_id: 'str', table_id: 'str', column_ids: 'list[str]') -> 'bool'",
+    "set_semantic_fk_join_default": "(source_table_id: 'str', concept_id: 'str', selected_fk_id: 'str') -> 'None'"
   },
   "connections": {
     "clear_connection": "(*, database_name: 'str') -> 'None'",

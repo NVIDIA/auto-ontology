@@ -29,9 +29,14 @@ pytest.importorskip("sqlalchemy")
 
 from sqlalchemy import select  # noqa: E402
 
+from auto_ontology.dal import concepts as c  # noqa: E402
 from auto_ontology.dal import model_interchange as mi  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+    references_of,
+)
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -96,6 +101,14 @@ class World:
             ordinal_position=1,
             is_nullable=False,
         )
+        self.last_order_ref = _add(
+            s.catalog_column,
+            table_id=self.customers,
+            name="last_order_id",
+            data_type="integer",
+            ordinal_position=2,
+            is_nullable=True,
+        )
         _link(
             s.column__foreign_key,
             source_column_id=self.customer_ref,
@@ -129,18 +142,22 @@ class World:
             attribute_id=self.attribute,
         )
         _link(s.column_attribute__term, attribute_id=self.attribute, term_id=self.term)
-        _link(
-            s.column__semantic_fk,
-            column_id=self.customer_ref,
-            attribute_id=self.attribute,
-        )
+        self.concept = c.ensure_term_concept(self.term)
+        assert c.set_concept_key(self.concept, self.orders, [self.order_id])
+        reference_attribute(self.last_order_ref, self.attribute)
 
 
 def _cleanup(prefix: str) -> None:
     store().query_write(
         s.catalog_database.delete().where(s.catalog_database.c.name.like(f"{prefix}%"))
     )
-    for table in (s.term, s.column_attribute, s.sql_attribute, s.custom_analysis):
+    for table in (
+        s.concept,
+        s.term,
+        s.column_attribute,
+        s.sql_attribute,
+        s.custom_analysis,
+    ):
         store().query_write(table.delete().where(table.c.name.like(f"{prefix}%")))
 
 
@@ -197,6 +214,17 @@ def _reid(document, seed: str):
     for fk in document.semantic_layer.semantic_fks:
         fk.column_id = new(fk.column_id)
         fk.column_attribute_id = new(fk.column_attribute_id)
+    for concept in document.semantic_layer.concepts:
+        concept.id = new(concept.id)
+        concept.name = f"{seed}-{concept.name}"
+        concept.term_ids = [new(term_id) for term_id in concept.term_ids]
+        for key in concept.keys:
+            key.table_id = new(key.table_id)
+            key.column_ids = [new(column_id) for column_id in key.column_ids]
+        for reference in concept.references:
+            reference.column_ids = [
+                new(column_id) for column_id in reference.column_ids
+            ]
     return document
 
 
@@ -282,7 +310,15 @@ def test_export_carries_keys_joins_and_semantics(world) -> None:
     assert [
         (fk.column_id, fk.column_attribute_id, fk.use_in_join_paths)
         for fk in document.semantic_layer.semantic_fks
-    ] == [(world.customer_ref, world.attribute, True)]
+    ] == [(world.last_order_ref, world.attribute, True)]
+    [concept] = document.semantic_layer.concepts
+    assert concept.term_ids == [world.term]
+    assert [(k.table_id, k.column_ids) for k in concept.keys] == [
+        (world.orders, [world.order_id])
+    ]
+    assert [(r.column_ids, r.use_in_join_paths) for r in concept.references] == [
+        ([world.last_order_ref], True)
+    ]
 
 
 def test_an_empty_id_list_exports_everything_not_nothing(world) -> None:
@@ -371,14 +407,14 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
     target = f"{world.prefix}-copy"
     document = _reid(_document(world), target)
     document.data_layer.databases[0].schemas[0].database_name = target
-    document.semantic_layer.semantic_fks[0].use_in_join_paths = False
+    document.semantic_layer.concepts[0].references[0].use_in_join_paths = False
 
     try:
         summary = mi.apply_import_model(document, replace=False)
 
         assert summary["created"]["databases"] == 1
         assert summary["created"]["tables"] == 2
-        assert summary["created"]["columns"] == 3
+        assert summary["created"]["columns"] == 4
         assert summary["created"]["terms"] == 1
         assert summary["created"]["column_attributes"] == 1
 
@@ -387,11 +423,14 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
         )
         assert copied
         copied_semantic_fk = store().query_read(
-            select(s.column__semantic_fk.c.use_in_join_paths)
+            select(s.concept__fk.c.use_in_join_paths)
             .select_from(
-                s.column__semantic_fk.join(
+                s.concept__fk.join(
+                    s.concept__fk_column,
+                    s.concept__fk_column.c.fk_id == s.concept__fk.c.id,
+                ).join(
                     s.catalog_column,
-                    s.catalog_column.c.id == s.column__semantic_fk.c.column_id,
+                    s.catalog_column.c.id == s.concept__fk_column.c.column_id,
                 )
             )
             .where(
@@ -422,7 +461,7 @@ def test_the_round_trip_is_idempotent(world) -> None:
         assert sum(second["created"].values()) == 0, second["created"]
         assert second["skipped"]["databases"] == 1
         assert second["skipped"]["tables"] == 2
-        assert second["skipped"]["columns"] == 3
+        assert second["skipped"]["columns"] == 4
         assert second["skipped"]["terms"] == 1
     finally:
         _cleanup(f"{world.prefix}-copy")
@@ -440,17 +479,31 @@ def test_importing_onto_the_source_catalog_adopts_it(world) -> None:
 
 def test_reimport_updates_semantic_fk_join_path_selection(world) -> None:
     document = _document(world)
-    document.semantic_layer.semantic_fks[0].use_in_join_paths = False
+    document.semantic_layer.concepts[0].references[0].use_in_join_paths = False
 
     mi.apply_import_model(document, replace=False)
 
-    selected = store().query_read(
-        select(s.column__semantic_fk.c.use_in_join_paths).where(
-            s.column__semantic_fk.c.column_id == world.customer_ref,
-            s.column__semantic_fk.c.attribute_id == world.attribute,
-        )
+    assert references_of(world.attribute) == [
+        {"column_id": world.last_order_ref, "use_in_join_paths": False}
+    ]
+
+
+def test_a_document_from_before_concepts_still_imports_its_semantic_fks(
+    world,
+) -> None:
+    """``semantic_fks`` alone -- the old shape -- still lands as a reference."""
+    document = _document(world)
+    document.semantic_layer.concepts = []
+    document.semantic_layer.semantic_fks[0].use_in_join_paths = False
+    store().query_write(
+        s.concept__fk.delete().where(s.concept__fk.c.source_table_id == world.customers)
     )
-    assert selected == [{"use_in_join_paths": False}]
+
+    mi.apply_import_model(document, replace=False)
+
+    assert references_of(world.attribute) == [
+        {"column_id": world.last_order_ref, "use_in_join_paths": False}
+    ]
 
 
 def test_an_adopted_row_is_stamped_so_the_next_import_is_faster(world) -> None:

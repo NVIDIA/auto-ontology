@@ -151,6 +151,8 @@ def _project_terms_onto_one_table(
         for semantic_fk in projected.semantic_layer.semantic_fks
         if semantic_fk.column_attribute_id in kept_attribute_ids
     ]
+    # Ossie has no concept entity; its relationships come from semantic_fks.
+    projected.semantic_layer.concepts = []
     return projected
 
 

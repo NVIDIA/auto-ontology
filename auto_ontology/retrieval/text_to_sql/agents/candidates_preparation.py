@@ -37,6 +37,7 @@ from auto_ontology.dal.attributes import (
     find_join_path,
     find_kept_table_bridges,
 )
+from auto_ontology.dal.concepts import fetch_concepts_for_tables
 from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
@@ -718,6 +719,23 @@ class CandidatePreparationAgent(BaseAgent):
                 "Added %d direct join(s) between tables in scope", len(direct_paths)
             )
 
+        # --- 5e. The concepts joining the final tables ---
+        # The prompt describes joins inside a concept by its PK and FK columns
+        # instead of listing every column pair.
+        try:
+            concepts = fetch_concepts_for_tables(
+                [t["id"] for t in relevant_tables if t.get("id")]
+            )
+        except Exception:
+            self.logger.warning("Concept lookup failed", exc_info=True)
+            concepts = []
+        if concepts:
+            self.logger.info(
+                "%d concept(s) join the tables in scope: %s",
+                len(concepts),
+                [c["name"] for c in concepts],
+            )
+
         # --- 6. Drop value anchors that name schema rather than data ---
         # Anchors were matched against stored values without the schema, so a
         # phrase belonging to a column name still arrives pointing at whichever
@@ -750,6 +768,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "sql_attributes_str": sql_attributes_str,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
+                "concepts": concepts,
                 "term_synonyms": term_synonyms,
             }
         }

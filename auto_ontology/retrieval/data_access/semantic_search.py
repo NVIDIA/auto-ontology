@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Literal
 
 from auto_ontology.catalog.constants import Labels
 
-from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
+from auto_ontology.semantic.constants import LABEL_CONCEPT, LABEL_SQL_ATTRIBUTE
 
 if TYPE_CHECKING:
     from auto_ontology.utils.retriever import Retriever
@@ -280,6 +280,8 @@ def _hits_to_semantic_rows(
         lab = meta.get("label") if meta.get("label") is not None else hit.get("label")
         lab_str = str(lab) if lab is not None else ""
         if label_filter and lab_str not in label_filter:
+            continue
+        if not label_filter and lab_str == LABEL_CONCEPT:
             continue
         cnt = label_counts.get(lab_str, 0)
         if cnt >= _resolve_label_k(per_label_k, lab_str):

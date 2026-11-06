@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from auto_ontology.semantic.constants import LABEL_CONCEPT
 from auto_ontology.utils.embedding import EmbedParams, batch_embed
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
@@ -181,6 +182,62 @@ def embed_all_semantic_nodes(
     write_embedded_rows(embedder.vdb, with_embeddings)
     logger.info("embed_all_semantic_nodes: %d VDB row(s) written", len(with_embeddings))
     return len(with_embeddings)
+
+
+def embed_concepts(embedder: SemanticEmbedder) -> int:
+    """Embed every concept of the embedder's database, replacing older rows.
+
+    Returns the number of rows written.
+    """
+    from auto_ontology.dal.concepts import fetch_concepts
+
+    concepts = fetch_concepts(embedder.database_name)
+    rows = [_concept_row(embedder.database_name, concept) for concept in concepts]
+    if not rows:
+        return 0
+    embedded_df = batch_embed(rows, embedder.embed_params)
+    if embedded_df is None or embedded_df.empty:
+        logger.warning("embed_concepts: embed produced no rows")
+        return 0
+    with_embeddings = [
+        row
+        for row in embedded_df.to_dict(orient="records")
+        if (row.get("metadata") or {}).get("embedding")
+    ]
+    for concept in concepts:
+        embedder.vdb.delete_by_id(concept["id"])
+    write_embedded_rows(embedder.vdb, with_embeddings)
+    logger.info("embed_concepts: %d VDB row(s) written", len(with_embeddings))
+    return len(with_embeddings)
+
+
+def _concept_row(database_name: str, concept: dict[str, Any]) -> dict[str, Any]:
+    """``Concept: <name>. <description> Terms: a, b. Key: t1.(c1, c2); ...``"""
+    terms = ", ".join(t["name"] for t in concept["terms"] if t.get("name"))
+    keys = "; ".join(
+        f"{table['table_name']}.({', '.join(c['name'] for c in table['columns'])})"
+        for table in concept["keys"].values()
+    )
+    text = f"Concept: {concept['name']}. {concept.get('description') or ''}".strip()
+    if terms:
+        text += f" Terms: {terms}."
+    if keys:
+        text += f" Key: {keys}"
+    path = f"semantic:concept:{concept['id']}"
+    fields: dict[str, Any] = {
+        "label": LABEL_CONCEPT,
+        "id": concept["id"],
+        "name": concept["name"],
+        "table_ids": list(concept["keys"]),
+        "database_name": database_name,
+        "source_path": path,
+    }
+    return {
+        "text": text,
+        "path": path,
+        "page_number": -1,
+        "metadata": {**fields, "content_metadata": dict(fields)},
+    }
 
 
 def _format_sample_values(raw: Any, data_type: str | None = None) -> str:

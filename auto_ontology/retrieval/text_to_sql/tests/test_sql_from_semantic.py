@@ -74,12 +74,8 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
         create_sql_user_prompt
     )
     assert "include the joins that connect those tables" in create_sql_user_prompt
-    assert "include every table and every hop exactly as listed" in (
-        create_sql_user_prompt
-    )
-    assert "every intermediate/bridge table and every listed hop is mandatory" in (
-        system_prompt
-    )
+    assert "never FK to FK" in create_sql_user_prompt
+    assert "Never join two FK columns to each other" in system_prompt
 
 
 def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
@@ -102,7 +98,7 @@ def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
         anchor, [{"path": [hop]}], target_db=None, dialect="mysql"
     )
 
-    assert section.startswith("## Semantic Hints & Join Paths\n")
+    assert section.startswith("## Semantic Hints & Joins\n")
     assert sql_from_semantic.SAME_KEY_JOIN_RULE in section
     assert "customer_key" in section
     assert sql_from_semantic.SAME_KEY_JOIN_RULE not in (
@@ -110,9 +106,12 @@ def test_join_paths_section_prefers_continuing_on_the_same_key() -> None:
             anchor, [], target_db=None, dialect="mysql"
         )
     )
+    assert "customer_key" in sql_from_semantic.format_join_paths_section(
+        None, [{"path": [hop]}], target_db=None, dialect="mysql"
+    )
     assert (
         sql_from_semantic.format_join_paths_section(
-            None, [{"path": [hop]}], target_db=None, dialect="mysql"
+            None, [], target_db=None, dialect="mysql"
         )
         == ""
     )

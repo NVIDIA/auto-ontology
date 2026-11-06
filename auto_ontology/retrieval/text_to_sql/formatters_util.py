@@ -151,74 +151,232 @@ def _hop_column(
     return f"{prefix}.{column}"
 
 
-def format_semantic_context(
-    primary_attribute: dict,
-    attribute_join_paths: list[dict],
+def hop_column_pairs(hop: dict) -> list[dict]:
+    """``{source_column, target_column}`` for every column a hop equates.
+
+    One pair for an ordinary hop; a composite key's hop lists them all in
+    ``column_pairs``.
+    """
+    pairs = hop.get("column_pairs")
+    if isinstance(pairs, list) and pairs:
+        return pairs
+    return [
+        {
+            "source_column": hop.get("source_column", ""),
+            "target_column": hop.get("target_column", ""),
+        }
+    ]
+
+
+def _hop_condition(
+    hop: dict, target_db: str | None = None, dialect: str | None = None
+) -> str:
+    """``a.x = b.x``, or ``a.x = b.x AND a.y = b.y`` for a composite key."""
+    return " AND ".join(
+        f"{_hop_column({**hop, **pair}, 'source', target_db, dialect)} = "
+        f"{_hop_column({**hop, **pair}, 'target', target_db, dialect)}"
+        for pair in hop_column_pairs(hop)
+    )
+
+
+CONCEPT_JOIN_RULES = (
+    "A concept is one real-world thing. Its PK columns identify it on each table "
+    "that holds it; its FK columns reference it from other tables. Within one "
+    "concept:\n"
+    "- Any PK may be joined to any other PK, and any FK to any PK.\n"
+    "- Never join two FKs to each other. Tables that both reference a thing are "
+    "related only through it: join each of them to one of its PK tables instead.\n"
+    "- Columns are equated position by position. A key of several columns joins "
+    "on all of them, combined with AND, in the order listed.\n"
+    "- A table with several FKs to one concept references it in different roles. "
+    "Use the one the question means, or the one marked [default] when it does "
+    "not say."
+)
+
+
+def _concept_side(
+    entry: dict, target_db: str | None, dialect: str | None, *, default: bool = False
+) -> str:
+    table = qualify_table(
+        entry.get("database_name") or target_db or "",
+        entry.get("schema_name", ""),
+        entry.get("table_name", ""),
+        dialect,
+    )
+    marker = " [default]" if default else ""
+    return f"{table} ({', '.join(entry.get('columns') or [])}){marker}"
+
+
+def format_concepts_for_prompt(
+    concepts: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
 ) -> str:
-    """Format the semantic anchor and verified optional join paths for a prompt.
+    """A CONCEPTS section: each concept's PK and FK columns and the join rules.
 
-    Names are qualified exactly as :func:`format_tables_for_prompt` does. The
-    prompt tells the model to copy a selected path's verified join conditions,
-    so a name spelled differently here than in the schema context is one the
-    model may copy into SQL — on a catalog-qualified engine, dropping the catalog
+    *concepts* is what :func:`auto_ontology.dal.concepts.fetch_concepts_for_tables`
+    returns. Names are qualified as :func:`format_tables_for_prompt` does.
+    ``""`` when there are none.
+    """
+    if not concepts:
+        return ""
+    lines = ["CONCEPTS (join keys from the semantic model):", CONCEPT_JOIN_RULES, ""]
+    for concept in concepts:
+        header = f"- {_plain_cell(concept.get('name'))}"
+        if concept.get("description"):
+            header += f": {_plain_cell(concept['description'])}"
+        lines.append(header)
+        keys = concept.get("keys") or []
+        lines.append(
+            "    PK: "
+            + "; ".join(_concept_side(key, target_db, dialect) for key in keys)
+        )
+        references = concept.get("references") or []
+        per_table: dict[str, int] = {}
+        for reference in references:
+            per_table[reference["table_id"]] = (
+                per_table.get(reference["table_id"], 0) + 1
+            )
+        if references:
+            lines.append(
+                "    FK: "
+                + "; ".join(
+                    _concept_side(
+                        reference,
+                        target_db,
+                        dialect,
+                        default=per_table[reference["table_id"]] > 1
+                        and bool(reference.get("use_in_join_paths")),
+                    )
+                    for reference in references
+                )
+            )
+    return "\n".join(lines)
+
+
+def _concept_roles(concepts: list[dict]) -> dict[tuple[str, str, str], set]:
+    """``(schema, table, column)`` -> ``{(concept id, "pk" | "fk")}``."""
+    roles: dict[tuple[str, str, str], set] = {}
+    for concept in concepts:
+        for role, entries in (
+            ("pk", concept.get("keys") or []),
+            ("fk", concept.get("references") or []),
+        ):
+            for entry in entries:
+                for column in entry.get("columns") or []:
+                    location = (
+                        str(entry.get("schema_name") or "").casefold(),
+                        str(entry.get("table_name") or "").casefold(),
+                        str(column).casefold(),
+                    )
+                    roles.setdefault(location, set()).add((concept["id"], role))
+    return roles
+
+
+def _covered_by_concept(hop: dict, roles: dict[tuple[str, str, str], set]) -> bool:
+    """Whether some concept already allows every column pair the hop equates."""
+
+    def side(pair: dict, name: str) -> set:
+        return roles.get(
+            (
+                str(hop.get(f"{name}_schema") or "").casefold(),
+                str(hop.get(f"{name}_table") or "").casefold(),
+                str(pair.get(f"{name}_column") or "").casefold(),
+            ),
+            set(),
+        )
+
+    allowed: set | None = None
+    for pair in hop_column_pairs(hop):
+        source, target = side(pair, "source"), side(pair, "target")
+        here = {
+            concept_id
+            for concept_id, role in source
+            for other_id, other_role in target
+            if concept_id == other_id and "pk" in (role, other_role)
+        }
+        allowed = here if allowed is None else allowed & here
+        if not allowed:
+            return False
+    return bool(allowed)
+
+
+def format_other_joins_for_prompt(
+    attribute_join_paths: list[dict],
+    concepts: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Verified join conditions no concept covers, each listed once.
+
+    ``""`` when every hop is covered by :func:`format_concepts_for_prompt`.
+    """
+    roles = _concept_roles(concepts)
+    conditions = list(
+        dict.fromkeys(
+            _hop_condition(hop, target_db, dialect)
+            for entry in attribute_join_paths
+            for hop in entry.get("path") or []
+            if not _covered_by_concept(hop, roles)
+        )
+    )
+    if not conditions:
+        return ""
+    heading = (
+        "OTHER JOINS (verified, outside any concept; use these exact conditions):"
+        if concepts
+        else "JOINS (verified; use these exact conditions):"
+    )
+    return "\n".join([heading, *(f"  {c}" for c in conditions)])
+
+
+def format_semantic_context(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+    concepts: list[dict] | None = None,
+) -> str:
+    """Format the semantic anchor, the concepts and other verified joins.
+
+    Joins inside a concept are described by its PK and FK columns rather than
+    listed pair by pair; only hops no concept covers are spelled out. Names
+    are qualified exactly as :func:`format_tables_for_prompt` does — a name
+    spelled differently here than in the schema context is one the model may
+    copy into SQL, and on a catalog-qualified engine dropping the catalog
     makes it unresolvable.
     """
-    anchor_schema = primary_attribute.get("schema_name", "")
-    anchor_table = primary_attribute.get("table_name", "")
-    anchor_col = primary_attribute.get("col_name", "")
-    anchor_name = primary_attribute.get("attr_name", "")
-    anchor_database = primary_attribute.get("database_name") or target_db or ""
-    anchor_full = qualify_table(anchor_database, anchor_schema, anchor_table, dialect)
-    # Only present on attrs (re-)ingested since this field was added — older
-    # rows just omit the tag.
-    anchor_datatype = primary_attribute.get("datatype") or ""
-    anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
-
-    lines: list[str] = [
-        "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
-        f"  Table: {anchor_full}",
-        f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
-    ]
-
-    if attribute_join_paths:
-        lines.append("")
-        lines.append(
-            "JOIN PATHS (VERIFIED OPTIONS — derived from the semantic model). "
-            "These paths show how available tables can join; they are not a plan "
-            "and most may be irrelevant to this question. Select only paths needed "
-            "to reach tables that contribute to the answer. Never add a path merely "
-            "because it is listed. When a path is needed, use its exact join "
-            "conditions. A selected path is indivisible: keep every intermediate "
-            "bridge table and every hop. Never shorten it or join its endpoints "
-            "directly:"
+    blocks: list[str] = []
+    if primary_attribute:
+        anchor_schema = primary_attribute.get("schema_name", "")
+        anchor_table = primary_attribute.get("table_name", "")
+        anchor_col = primary_attribute.get("col_name", "")
+        anchor_name = primary_attribute.get("attr_name", "")
+        anchor_database = primary_attribute.get("database_name") or target_db or ""
+        anchor_full = qualify_table(
+            anchor_database, anchor_schema, anchor_table, dialect
         )
-        for entry in attribute_join_paths:
-            attr_name = entry.get("attr_name", "")
-            col_name = entry.get("col_name", "")
-            schema = entry.get("schema_name", "")
-            table = entry.get("table_name", "")
-            datatype = entry.get("datatype") or ""
-            datatype_tag = f" [{datatype}]" if datatype else ""
-            # Structural entries (hub-sibling / bridge-table reconciliation)
-            # carry only "path" — no named attribute they resolve to. Render
-            # a generic label instead of a blank "  : ." header line.
-            if attr_name or col_name or table:
-                database = entry.get("database_name") or target_db or ""
-                full_table = qualify_table(database, schema, table, dialect)
-                lines.append(f"  {attr_name}: {full_table}.{col_name}{datatype_tag}")
-            else:
-                lines.append("  (structural bridge — connects tables kept above)")
-            path = entry.get("path") or []
-            if path:
-                lines.append("    Join path:")
-                for hop in path:
-                    left = _hop_column(hop, "source", target_db, dialect)
-                    right = _hop_column(hop, "target", target_db, dialect)
-                    lines.append(f"      {left} = {right}")
-
-    return "\n".join(lines)
+        # Only present on attrs (re-)ingested since this field was added — older
+        # rows just omit the tag.
+        anchor_datatype = primary_attribute.get("datatype") or ""
+        anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
+        blocks.append(
+            "\n".join(
+                [
+                    "SEMANTIC HINT — likely starting table (use as a strong hint, "
+                    "not a mandate):",
+                    f"  Table: {anchor_full}",
+                    f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
+                ]
+            )
+        )
+    blocks.append(format_concepts_for_prompt(concepts or [], target_db, dialect))
+    blocks.append(
+        format_other_joins_for_prompt(
+            attribute_join_paths, concepts or [], target_db, dialect
+        )
+    )
+    return "\n\n".join(block for block in blocks if block)
 
 
 def format_important_columns_for_prompt(

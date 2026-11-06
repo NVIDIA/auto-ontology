@@ -30,6 +30,9 @@ pytest.importorskip("sqlalchemy")
 from auto_ontology.dal import exploration as e  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+)
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -354,6 +357,7 @@ def test_table_details_lists_statements_and_terms(world) -> None:
 def test_table_details_finds_terms_by_either_route(world) -> None:
     """REPRESENTS and through a column's attribute — the same paths as related."""
     world.table("orders", columns=("id",))
+    world.table("customers", columns=("id",))
     world.term("Order", represents=("orders",))
     world.term("Customer")
     attribute = _add(
@@ -369,10 +373,11 @@ def test_table_details_finds_terms_by_either_route(world) -> None:
         term_id=world.terms["Customer"],
     )
     _link(
-        s.column__semantic_fk,
-        column_id=world.columns["orders.id"],
+        s.column__has_attribute,
+        column_id=world.columns["customers.id"],
         attribute_id=attribute,
     )
+    reference_attribute(world.columns["orders.id"], attribute)
 
     details = e.fetch_table_exploration_details(world.tables["orders"])
     assert {t["name"] for t in details["terms"]} == {

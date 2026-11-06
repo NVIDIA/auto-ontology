@@ -92,7 +92,7 @@ def test_repair_error_renders_wrong_type_distinctly_from_key_mismatch():
     assert "isn't JSONB-typed" in both
 
 
-def test_format_semantic_context_includes_datatype_tags():
+def test_format_semantic_context_includes_the_anchor_datatype_tag():
     primary_attribute = {
         "schema_name": "",
         "table_name": "aliens",
@@ -114,7 +114,6 @@ def test_format_semantic_context_includes_datatype_tags():
     result = format_semantic_context(primary_attribute, attribute_join_paths)
 
     assert "[jsonb]" in result
-    assert "[text]" in result
 
 
 def test_format_semantic_context_omits_tag_when_datatype_unknown():

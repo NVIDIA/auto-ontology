@@ -329,7 +329,7 @@ def test_unlinked_column_named_for_another_table_is_linked_without_a_term() -> N
             "auto_ontology.semantic.semantic_fk.merge_unconstrained_foreign_key"
         ) as merge_fk,
         patch(
-            "auto_ontology.semantic.semantic_fk.find_column_attribute_by_column_id",
+            "auto_ontology.semantic.semantic_fk.link_column_to_key_column",
             return_value=None,
         ),
         patch(
@@ -383,21 +383,24 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
     )
 
 
-def _join_group_row(column_id: str, column_name: str) -> dict:
+def _join_group_row(fk_id: str, column_name: str) -> dict:
     return {
+        "fk_id": fk_id,
+        "concept_id": "customer-concept",
+        "concept_name": "Customer",
         "source_table_id": "orders-table",
         "source_table_name": "orders",
         "source_table_description": "Customer orders.",
-        "source_column_id": column_id,
+        "source_column_id": f"{fk_id}-column",
         "source_column_name": column_name,
+        "source_column_names": [column_name],
         "source_column_description": f"The {column_name} role.",
-        "target_attribute_id": "customer-attribute",
-        "target_attribute_name": "Customer ID",
         "target_table_id": "customers-table",
         "target_table_name": "customers",
         "target_table_description": "Customers.",
         "target_column_id": "customer-id",
         "target_column_name": "id",
+        "target_column_names": ["id"],
         "target_column_description": "Customer identifier.",
         "use_in_join_paths": True,
     }
@@ -420,7 +423,7 @@ def test_single_semantic_fk_is_default_without_llm() -> None:
     get_llm_client.assert_not_called()
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customer-concept",
         "customer-id-column",
     )
 
@@ -431,7 +434,7 @@ def test_llm_selects_default_from_parallel_semantic_fks() -> None:
         _join_group_row("customer-column", "customer_id"),
     ]
     result = SemanticFkJoinDefaultSelection(
-        selected_column_id="customer-column",
+        selected_relationship_id="customer-column",
         rationale="The unqualified customer relationship.",
     )
     with (
@@ -455,7 +458,7 @@ def test_llm_selects_default_from_parallel_semantic_fks() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customer-concept",
         "customer-column",
     )
 
@@ -466,7 +469,7 @@ def test_invalid_llm_selection_uses_deterministic_default() -> None:
         _join_group_row("a-column", "a_customer_id"),
     ]
     result = SemanticFkJoinDefaultSelection(
-        selected_column_id="invented-column",
+        selected_relationship_id="invented-column",
         rationale="Invalid.",
     )
     with (
@@ -490,7 +493,7 @@ def test_invalid_llm_selection_uses_deterministic_default() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customer-concept",
         "a-column",
     )
 
@@ -517,7 +520,7 @@ def test_missing_llm_uses_deterministic_default() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customer-concept",
         "a-column",
     )
 
@@ -549,8 +552,8 @@ def test_prune_removes_disjoint_and_empty_source_fks(
     connector.qualify.side_effect = lambda schema, table: table
     connector.execute.return_value = pd.DataFrame({"n": [present, shared]})
     row = {
+        "fk_id": "fk",
         "source_column_id": "col",
-        "target_attribute_id": "attr",
         "source_table_name": "orders",
         "source_column_name": "customer_id",
         "target_table_name": "customers",
@@ -565,7 +568,7 @@ def test_prune_removes_disjoint_and_empty_source_fks(
             "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
             return_value=[row],
         ),
-        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+        patch("auto_ontology.semantic.semantic_fk.delete_concept_fk") as delete,
     ):
         assert semantic_fk.prune_disjoint_semantic_fks("database") == int(pruned)
 

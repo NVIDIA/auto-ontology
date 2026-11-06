@@ -113,9 +113,37 @@ class ModelTerm(BaseModel):
 
 
 class ModelSemanticFk(BaseModel):
+    """A single-column semantic FK, as the attribute it points at.
+
+    The pre-concept shape, still exported and accepted. ``concepts`` carries
+    every reference, composite ones included.
+    """
+
     column_attribute_id: str
     column_id: str
     use_in_join_paths: bool = True
+
+
+class ModelConceptKey(BaseModel):
+    table_id: str
+    column_ids: list[str] = Field(default_factory=list)
+
+
+class ModelConceptReference(BaseModel):
+    column_ids: list[str] = Field(default_factory=list)
+    use_in_join_paths: bool = True
+
+
+class ModelConcept(BaseModel):
+    """Terms describing one thing, its key per member table, and the
+    references to it. Column ids are in key order."""
+
+    id: str
+    name: str = ""
+    description: str = ""
+    term_ids: list[str] = Field(default_factory=list)
+    keys: list[ModelConceptKey] = Field(default_factory=list)
+    references: list[ModelConceptReference] = Field(default_factory=list)
 
 
 class ModelSqlAttribute(BaseModel):
@@ -144,6 +172,7 @@ class ModelCustomAnalysis(BaseModel):
 
 class ModelSemanticLayer(BaseModel):
     terms: list[ModelTerm] = Field(default_factory=list)
+    concepts: list[ModelConcept] = Field(default_factory=list)
     semantic_fks: list[ModelSemanticFk] = Field(default_factory=list)
     sql_attributes: ModelSqlAttributesBySource = Field(
         default_factory=ModelSqlAttributesBySource,

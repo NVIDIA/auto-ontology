@@ -68,6 +68,9 @@ from auto_ontology.dal.pii import (  # noqa: E402
 )
 from auto_ontology.dal.rules import delete_rule, update_rule  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+)
 from auto_ontology.dal.tags import (  # noqa: E402
     PII_TAG_NAME,
     TARGET_COLUMN,
@@ -1946,11 +1949,12 @@ def test_an_attribute_without_a_term_is_not_tagged(tagged, sql_query_cleanup) ->
 
 def test_a_semantic_fk_alone_does_not_propagate(tagged) -> None:
     """The column only references the attribute; it is not an instance of it."""
+    owners = _add(s.catalog_table, schema_id=tagged.schema, name="order_totals")
+    owner = _add(s.catalog_column, table_id=owners, name="total")
     tagged.link(
-        s.column__semantic_fk,
-        column_id=tagged.column,
-        attribute_id=tagged.column_attribute,
+        s.column__has_attribute, column_id=owner, attribute_id=tagged.column_attribute
     )
+    reference_attribute(tagged.column, tagged.column_attribute)
     tagged.label(column_id=tagged.column)
 
     assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)

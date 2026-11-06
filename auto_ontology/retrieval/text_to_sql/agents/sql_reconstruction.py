@@ -35,7 +35,10 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_tables_for_prompt,
+    hop_column_pairs,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -134,16 +137,24 @@ def _collect_known_columns(
         # the FK column isn't itself a resolved business attribute.
         for hop in entry.get("path") or []:
             src_table = hop.get("source_table")
-            src_col = hop.get("source_column")
             tgt_table = hop.get("target_table")
-            tgt_col = hop.get("target_column")
-            if not (src_table and src_col and tgt_table and tgt_col):
+            pairs = [
+                (pair.get("source_column"), pair.get("target_column"))
+                for pair in hop_column_pairs(hop)
+            ]
+            if not (src_table and tgt_table and all(a and b for a, b in pairs)):
                 continue
-            hop_key = (src_table, src_col, tgt_table, tgt_col)
+            hop_key = (src_table, tgt_table, tuple(pairs))
             if hop_key in seen_hops:
                 continue
             seen_hops.add(hop_key)
-            hop_lines.append(f"  {src_table}.{src_col} = {tgt_table}.{tgt_col}")
+            hop_lines.append(
+                "  "
+                + " AND ".join(
+                    f"{src_table}.{src_col} = {tgt_table}.{tgt_col}"
+                    for src_col, tgt_col in pairs
+                )
+            )
 
     return column_lines, hop_lines
 

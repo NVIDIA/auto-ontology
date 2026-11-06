@@ -54,9 +54,9 @@ def _column_attributes_of_tagged_columns(tag_id: str) -> Select:
     """Ids of unprocessed ColumnAttributes whose column carries *tag_id*.
 
     ``column__has_attribute`` only: that edge says the column *is* an instance of
-    the attribute. ``column__semantic_fk`` says the column merely references an
-    attribute describing a column elsewhere, so a PII foreign key must not make
-    the thing it points at PII.
+    the attribute. A semantic FK says the column merely references a concept
+    keyed by a column elsewhere, so a PII foreign key must not make the thing it
+    points at PII.
 
     Joined through the Term link because an attribute with no Term is invisible
     app-wide and cannot be tagged through ``attach_tag`` either.

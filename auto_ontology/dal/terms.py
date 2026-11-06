@@ -42,6 +42,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import SEMANTIC_FK_ATTRIBUTES
 from auto_ontology.dal.attributes import fetch_column_attribute_columns_map
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
@@ -1485,8 +1486,8 @@ def fetch_term_table_pairs(
         )
         .union(
             select(
-                s.column__semantic_fk.c.column_id,
-                s.column__semantic_fk.c.attribute_id,
+                SEMANTIC_FK_ATTRIBUTES.c.column_id,
+                SEMANTIC_FK_ATTRIBUTES.c.attribute_id,
                 literal(REL_SEMANTIC_FK).label("rel_type"),
             )
         )
@@ -1695,7 +1696,7 @@ def _term_link_edges():
         s.table__term,
         s.catalog_column,
         s.column_attribute__term,
-        s.column__semantic_fk,
+        SEMANTIC_FK_ATTRIBUTES,
         s.column__has_attribute,
     )
     return (

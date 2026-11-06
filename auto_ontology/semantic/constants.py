@@ -21,6 +21,9 @@ LABEL_SQL_ATTRIBUTE = "SqlAttribute"
 LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"
 
+# Embedded, but no search returns it unless this label is asked for by name.
+LABEL_CONCEPT = "Concept"
+
 # PQL (predictive) custom analyses — the KumoRFM-prediction twin of CustomAnalysis.
 # Stored under their own label so they never mix into the SQL text-to-SQL retrieval;
 # retrieved only as few-shot examples for PQL generation.

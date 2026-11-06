@@ -298,13 +298,10 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
     )
 
     assert "Table: lakehouse.lakehouse.clusters" in rendered
-    assert "lakehouse.lakehouse.events.name" in rendered
     assert (
         "lakehouse.lakehouse.clusters.cluster_id"
         " = lakehouse.lakehouse.events.cluster_id" in rendered
     )
-    assert "they are not a plan" in rendered
-    assert "Never add a path merely because it is listed" in rendered
 
 
 def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
@@ -336,7 +333,7 @@ def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
     assert "lakehouse.lakehouse.clusters.id = lakehouse.lakehouse.events.id" in rendered
 
 
-def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
+def test_semantic_context_lists_every_hop_through_a_bridge_table() -> None:
     rendered = format_semantic_context(
         {"schema_name": "public", "table_name": "orders", "col_name": "id"},
         [
@@ -367,7 +364,6 @@ def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
         ],
     )
 
-    assert "selected path is indivisible" in rendered
     assert "public.orders.account_id = public.accounts.id" in rendered
     assert "public.accounts.region_id = public.regions.id" in rendered
     assert "public.accounts.id = public.accounts.region_id" not in rendered
@@ -445,3 +441,122 @@ def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:
 
     assert "lakehouse.lakehouse.clusters" in tables_section
     assert "Table: lakehouse.lakehouse.clusters" in hint
+
+
+def test_composite_hop_equates_every_column_pair() -> None:
+    context = format_semantic_context(
+        {
+            "name": "line",
+            "database_name": "shop",
+            "schema_name": "public",
+            "table_name": "line_notes",
+            "source_column": "line_no",
+        },
+        [
+            {
+                "attr_name": "order line",
+                "path": [
+                    {
+                        "source_schema": "public",
+                        "source_table": "line_notes",
+                        "source_column": "order_id",
+                        "target_schema": "public",
+                        "target_table": "lines",
+                        "target_column": "order_id",
+                        "column_pairs": [
+                            {"source_column": "order_id", "target_column": "order_id"},
+                            {"source_column": "line_no", "target_column": "line_no"},
+                        ],
+                    }
+                ],
+            }
+        ],
+        target_db="shop",
+    )
+
+    notes = qualify_table("shop", "public", "line_notes")
+    lines = qualify_table("shop", "public", "lines")
+    assert (
+        f"{notes}.order_id = {lines}.order_id AND {notes}.line_no = {lines}.line_no"
+    ) in context
+
+
+def _order_concept() -> dict:
+    def side(table: str, *columns: str, **extra: object) -> dict:
+        return {
+            "table_id": table,
+            "database_name": "shop",
+            "schema_name": "public",
+            "table_name": table,
+            "columns": list(columns),
+            **extra,
+        }
+
+    return {
+        "id": "order",
+        "name": "Order",
+        "description": "A customer order.",
+        "keys": [side("order_details", "order_id"), side("orders", "id")],
+        "references": [
+            side("invoices", "order_id", use_in_join_paths=True),
+            side("shipments", "billing_order_id", use_in_join_paths=False),
+            side("shipments", "order_id", use_in_join_paths=True),
+        ],
+    }
+
+
+def _hop(source: str, source_column: str, target: str, target_column: str) -> dict:
+    return {
+        "source_schema": "public",
+        "source_table": source,
+        "source_column": source_column,
+        "target_schema": "public",
+        "target_table": target,
+        "target_column": target_column,
+    }
+
+
+def test_concepts_list_their_pks_and_fks_with_the_join_rules() -> None:
+    rendered = format_semantic_context(
+        None, [], target_db="shop", concepts=[_order_concept()]
+    )
+
+    assert "- Order: A customer order." in rendered
+    assert (
+        "PK: shop.public.order_details (order_id); shop.public.orders (id)" in rendered
+    )
+    assert (
+        "FK: shop.public.invoices (order_id); shop.public.shipments (billing_order_id); "
+        "shop.public.shipments (order_id) [default]"
+    ) in rendered
+    assert "Never join two FKs to each other" in rendered
+    assert " = " not in rendered
+
+
+def test_joins_a_concept_allows_are_not_listed_again() -> None:
+    rendered = format_semantic_context(
+        None,
+        [
+            {"path": [_hop("shipments", "order_id", "orders", "id")]},
+            {"path": [_hop("orders", "id", "order_details", "order_id")]},
+            {"path": [_hop("orders", "customer_id", "customers", "id")]},
+        ],
+        target_db="shop",
+        concepts=[_order_concept()],
+    )
+
+    assert "OTHER JOINS" in rendered
+    assert "shop.public.orders.customer_id = shop.public.customers.id" in rendered
+    assert "shop.public.shipments.order_id = shop.public.orders.id" not in rendered
+    assert "shop.public.orders.id = shop.public.order_details.order_id" not in rendered
+
+
+def test_a_join_between_two_fks_is_not_covered_by_their_concept() -> None:
+    rendered = format_semantic_context(
+        None,
+        [{"path": [_hop("shipments", "order_id", "invoices", "order_id")]}],
+        target_db="shop",
+        concepts=[_order_concept()],
+    )
+
+    assert "shop.public.shipments.order_id = shop.public.invoices.order_id" in rendered

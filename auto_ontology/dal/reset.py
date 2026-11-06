@@ -63,6 +63,56 @@ def _table_ids(database_name: str):
     )
 
 
+def _delete_concept_links(table_ids) -> int:
+    """Delete the concept keys on, and the semantic FKs from, *table_ids*.
+
+    The concepts themselves survive here; :func:`_delete_orphaned_concepts`
+    removes the ones left without a term once the terms are gone.
+    """
+    deleted = 0
+    for table, column in (
+        (s.concept__fk, s.concept__fk.c.source_table_id),
+        (s.concept__pk, s.concept__pk.c.table_id),
+    ):
+        deleted += len(
+            store().query_write(
+                delete(table).where(column.in_(table_ids)).returning(column)
+            )
+        )
+    return deleted
+
+
+def _concepts_of_terms(term_ids) -> list[str]:
+    """Concept ids of *term_ids*; read before the terms go, or the link has."""
+    return [
+        row["concept_id"]
+        for row in store().query_read(
+            select(s.term__concept.c.concept_id)
+            .where(s.term__concept.c.term_id.in_(term_ids))
+            .distinct()
+        )
+    ]
+
+
+def _delete_orphaned_concepts(concept_ids: list[str]) -> list[str]:
+    """Delete those of *concept_ids* no term belongs to any more; returns them."""
+    if not concept_ids:
+        return []
+    return [
+        row["id"]
+        for row in store().query_write(
+            delete(s.concept)
+            .where(
+                s.concept.c.id.in_(concept_ids),
+                ~select(s.term__concept.c.term_id)
+                .where(s.term__concept.c.concept_id == s.concept.c.id)
+                .exists(),
+            )
+            .returning(s.concept.c.id)
+        )
+    ]
+
+
 def _delete_scoped_semantic(database_name: str) -> int:
     """Delete the semantic rows belonging to one database.
 
@@ -106,11 +156,17 @@ def _delete_scoped_semantic(database_name: str) -> int:
     term_ids = select(s.table__term.c.term_id).where(
         only_ours(s.table__term, s.table__term.c.term_id, s.table__term.c.table_id)
     )
+    concept_ids = _concepts_of_terms(term_ids)
     deleted += len(
         store().query_write(
             delete(s.term).where(s.term.c.id.in_(term_ids)).returning(s.term.c.id)
         )
     )
+
+    # Concept: its keys and references on this database's tables go; the
+    # concept itself only once none of its terms is left.
+    deleted += _delete_concept_links(tables)
+    deleted += len(_delete_orphaned_concepts(concept_ids))
 
     # ColumnAttribute: owned outright by exactly one table.
     deleted += len(
@@ -172,6 +228,7 @@ def _delete_all_semantic() -> int:
     """
     deleted = 0
     for table in (
+        s.concept,
         s.term,
         s.column_attribute,
         s.sql_attribute,
@@ -241,11 +298,11 @@ def purge_semantic_entities_for_tables(table_ids: list[str]) -> int:
     Removes, for those tables:
 
     * their ``table__term`` links, and each Term no other table represents;
-    * the ColumnAttributes they own (their HAS_ATTRIBUTE, SEMANTIC_FK and
-      PROPERTY_OF links follow by cascade, including semantic FKs that other
-      tables' columns aimed at them);
-    * HAS_ATTRIBUTE and SEMANTIC_FK links from their columns to attributes other
-      tables own;
+    * the ColumnAttributes they own (their HAS_ATTRIBUTE and PROPERTY_OF links
+      follow by cascade);
+    * HAS_ATTRIBUTE links from their columns to attributes other tables own;
+    * their concept keys and the semantic FKs from them, and each concept no
+      term is left in;
     * compiled SqlAttributes whose SQL reads any of them. ``manual`` ones are
       user-authored and survive, as do CustomAnalyses.
 
@@ -270,14 +327,14 @@ def purge_semantic_entities_for_tables(table_ids: list[str]) -> int:
         vector_ids += attribute_ids
         deleted += len(attribute_ids)
 
-        for link in (s.column__has_attribute, s.column__semantic_fk):
-            deleted += len(
-                store().query_write(
-                    delete(link)
-                    .where(link.c.column_id.in_(column_ids))
-                    .returning(link.c.column_id)
-                )
+        deleted += len(
+            store().query_write(
+                delete(s.column__has_attribute)
+                .where(s.column__has_attribute.c.column_id.in_(column_ids))
+                .returning(s.column__has_attribute.c.column_id)
             )
+        )
+        deleted += _delete_concept_links(table_ids)
 
         touching = (
             select(s.sql_attribute__sql.c.attribute_id)
@@ -313,6 +370,7 @@ def purge_semantic_entities_for_tables(table_ids: list[str]) -> int:
             )
         ]
         deleted += len(unlinked_terms)
+        concept_ids = _concepts_of_terms(unlinked_terms)
         if unlinked_terms:
             term_ids = [
                 row["id"]
@@ -329,6 +387,9 @@ def purge_semantic_entities_for_tables(table_ids: list[str]) -> int:
             ]
             vector_ids += term_ids
             deleted += len(term_ids)
+        concept_ids = _delete_orphaned_concepts(concept_ids)
+        vector_ids += concept_ids
+        deleted += len(concept_ids)
 
     if vector_ids:
         semantic_vdb = get_semantic_vdb()

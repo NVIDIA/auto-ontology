@@ -25,6 +25,10 @@ from auto_ontology.dal import reset as r  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal import terms as t  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+    references_of,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -267,6 +271,8 @@ def test_semantic_fk_never_touches_a_legacy_table(world) -> None:
     w = world()
     current_attr = w.attribute("current-order", "XB_ORDERS.ORDER_ID")
     legacy_attr = w.attribute("legacy-order", "XA_ORDERS.ORDER_ID")
+    w.term("current-orders", "XB_ORDERS")
+    w.term("legacy-orders", "XA_ORDERS")
     w.mark_legacy()
 
     assert not a.merge_semantic_fk(w.columns["XA_ORDERS.CUSTOMER_ID"], current_attr)
@@ -307,16 +313,8 @@ def test_purge_removes_the_legacy_tables_entities_and_keeps_the_rest(
         column_id=w.columns["XA_ORDERS.CUSTOMER_ID"],
         attribute_id=current_attr,
     )
-    _link(
-        s.column__semantic_fk,
-        column_id=w.columns["XA_ORDERS.CUSTOMER_ID"],
-        attribute_id=current_attr,
-    )
-    _link(
-        s.column__semantic_fk,
-        column_id=w.columns["LINES.ORDER_ID"],
-        attribute_id=legacy_attr,
-    )
+    # A current table referencing the legacy table's key.
+    reference_attribute(w.columns["LINES.ORDER_ID"], legacy_attr)
     compiled_on_legacy = w.sql_attribute("compiled", "sql", "XA_ORDERS")
     manual_on_legacy = w.sql_attribute("manual", "manual", "XA_ORDERS")
     compiled_on_current = w.sql_attribute("compiled-current", "sql", "XB_ORDERS")
@@ -346,15 +344,17 @@ def test_purge_removes_the_legacy_tables_entities_and_keeps_the_rest(
         w.columns["XA_ORDERS.ORDER_ID"],
         w.columns["XA_ORDERS.CUSTOMER_ID"],
     ]
-    for link in (s.column__has_attribute, s.column__semantic_fk):
-        assert not store().query_read(
-            select(link.c.column_id).where(link.c.column_id.in_(legacy_columns))
-        )
     assert not store().query_read(
-        select(s.column__semantic_fk.c.column_id).where(
-            s.column__semantic_fk.c.attribute_id == legacy_attr
+        select(s.column__has_attribute.c.column_id).where(
+            s.column__has_attribute.c.column_id.in_(legacy_columns)
         )
     )
+    assert not store().query_read(
+        select(s.concept__pk.c.column_id).where(
+            s.concept__pk.c.column_id.in_(legacy_columns)
+        )
+    )
+    assert references_of(legacy_attr) == []
     assert store().query_read(
         select(s.column__has_attribute.c.column_id).where(
             s.column__has_attribute.c.attribute_id == current_attr

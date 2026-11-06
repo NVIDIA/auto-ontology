@@ -99,6 +99,7 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "sql_attributes_str",
         "primary_attribute",
         "attribute_join_paths",
+        "concepts",
         "evidence_repairs_applied",
         "sql_code",
         "sql_generation_result",

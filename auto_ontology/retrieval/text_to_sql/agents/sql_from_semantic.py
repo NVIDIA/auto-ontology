@@ -86,22 +86,20 @@ def format_join_paths_section(
     *,
     target_db: str | None,
     dialect: str | None,
+    concepts: list[dict] | None = None,
 ) -> str:
-    """The prompt's Semantic Hints & Join Paths section, or ``""`` without an anchor."""
-    if not primary_attribute:
-        return ""
-    rule = f"{SAME_KEY_JOIN_RULE}\n\n" if attribute_join_paths else ""
-    return (
-        "## Semantic Hints & Join Paths\n"
-        + rule
-        + format_semantic_context(
-            primary_attribute,
-            attribute_join_paths,
-            target_db=target_db,
-            dialect=dialect,
-        )
-        + "\n\n"
+    """The prompt's Semantic Hints & Joins section, or ``""`` when it is empty."""
+    context = format_semantic_context(
+        primary_attribute,
+        attribute_join_paths,
+        target_db=target_db,
+        dialect=dialect,
+        concepts=concepts,
     )
+    if not context:
+        return ""
+    rule = f"{SAME_KEY_JOIN_RULE}\n\n" if attribute_join_paths or concepts else ""
+    return "## Semantic Hints & Joins\n" + rule + context + "\n\n"
 
 
 def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
@@ -298,6 +296,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 attribute_join_paths,
                 target_db=target_db,
                 dialect=dialect,
+                concepts=path_state.get("concepts") or [],
             )
 
             # Build the available-tables schema section.

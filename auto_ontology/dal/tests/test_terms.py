@@ -34,6 +34,9 @@ from sqlalchemy import select  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal import terms as t  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+)
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -637,11 +640,7 @@ def test_attributes_carry_their_columns_and_zones(world) -> None:
     world.table("invoices", columns=("order_id",))
     term = world.term("Order", represents=("orders",))
     attr = world.column_attribute("order-id", "Order", table="orders", column="id")
-    _link(
-        s.column__semantic_fk,
-        column_id=world.columns["invoices.order_id"],
-        attribute_id=attr,
-    )
+    reference_attribute(world.columns["invoices.order_id"], attr)
     zone_id = world.zone("Sales", table="orders")
 
     row = t.fetch_column_attributes_by_term_id(term)[0]
@@ -683,11 +682,7 @@ def related(world):
     attr = world.column_attribute(
         "customer-id", "Customer", table="customers", column="id"
     )
-    _link(
-        s.column__semantic_fk,
-        column_id=world.columns["orders.customer_id"],
-        attribute_id=attr,
-    )
+    reference_attribute(world.columns["orders.customer_id"], attr)
     return world
 
 

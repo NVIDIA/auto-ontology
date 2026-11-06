@@ -2,29 +2,31 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolve SEMANTIC_FK edges after taxonomy compilation.
+"""Resolve semantic FKs -- references from a column to a concept -- after
+taxonomy and concept compilation.
 
 Algorithm
 ---------
-1. Find every Column node that has no SEMANTIC_FK edge and no HAS_ATTRIBUTE
+1. Find every Column node that has no semantic FK and no HAS_ATTRIBUTE
    edge (i.e. a FK column that the taxonomy pass skipped).
 2. For each such column:
    a. **Named table key** — a column named ``{other_table}_key``, ``_id``, or
       ``_code`` is linked to that table's column. Catalog names are enough;
       the target table may not have a term yet.
    b. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
-      graph, look up the ColumnAttribute attached to the target Column and
-      create SEMANTIC_FK directly. A declared FK that targets a column on the
-      *same* table is rejected — that's a self-reference, never the entity
-      the FK points to. When the target has no attribute yet, the column
-      stays a foreign key and the semantic edge waits.
+      graph, reference the concept whose key the target Column is part of
+      (:func:`~auto_ontology.dal.concepts.link_column_to_key_column`, which
+      also fills the other columns of a composite key). A declared FK that
+      targets a column on the *same* table is rejected — that's a
+      self-reference, never the entity the FK points to. When no concept is
+      keyed by the target yet, the column goes to inference.
    c. **LLM / VDB fallback** — if there is no declared FK, embed the column
       context, search the *semantic* VDB for the top-5 most similar
       ColumnAttribute records (excluding candidates on the FK's own table),
       ask the LLM to pick the best match, and fall back to probing the live
       database for a candidate whose sample values match when the LLM
-      abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id
-      directly — no additional lookup needed.
+      abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id; the
+      reference goes to the concept keyed by that attribute's column.
 """
 
 from __future__ import annotations
@@ -38,12 +40,12 @@ from sqlglot import exp
 
 from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
-from auto_ontology.dal.attributes import (
-    delete_semantic_fk,
+from auto_ontology.dal.attributes import find_unlinked_fk_columns
+from auto_ontology.dal.concepts import (
+    delete_concept_fk,
     fetch_semantic_fk_join_groups,
-    find_column_attribute_by_column_id,
-    find_unlinked_fk_columns,
-    merge_semantic_fk,
+    link_column_to_attribute,
+    link_column_to_key_column,
     set_semantic_fk_join_default,
 )
 from auto_ontology.dal.datasources import (
@@ -88,20 +90,20 @@ Rules:
 
 _JOIN_DEFAULT_SYSTEM_PROMPT = """\
 You are choosing the default foreign-key relationship used to join two database
-tables. Several columns on the same source table reference the same target column,
-but each column can represent a different business role.
+tables. Several columns (or column groups) on the same source table reference the
+same target, but each can represent a different business role.
 
 Choose the relationship that most naturally represents an unqualified join between
-the source and target tables. Return exactly one supplied source_column_id. Return
+the source and target tables. Return exactly one supplied relationship_id. Return
 null only when the schema context is genuinely insufficient. Never invent an ID.
 """
 
 
 def resolve_semantic_fks(database_name: str) -> int:
-    """Create SEMANTIC_FK edges for all unlinked FK columns.
+    """Create semantic FKs for all unlinked FK columns.
 
-    Runs after the taxonomy while-loop in ``compile_semantic_layer``.
-    Returns the total number of SEMANTIC_FK edges created.
+    Runs after the taxonomy while-loop and concept compilation in
+    ``compile_semantic_layer``. Returns the number of semantic FKs created.
     """
     created = _resolve_semantic_fks(database_name)
     created -= prune_disjoint_semantic_fks(database_name)
@@ -110,15 +112,16 @@ def resolve_semantic_fks(database_name: str) -> int:
 
 
 def prune_disjoint_semantic_fks(database_name: str) -> int:
-    """Delete semantic FKs whose column shares no value with its target.
+    """Delete semantic FKs whose column shares no value with its target key.
 
     An inferred edge is a guess from names and descriptions; a seven-digit
     school code read as the fourteen-digit CDS code it sits beside is one.
     No overlap at all is the only test applied: real references in loaded
     data can still miss most of their target, so a low share is no proof.
     An all-NULL source column is pruned too: joining through it returns no
-    rows, yet it would still be offered as a join path.
-    Returns the number of edges deleted.
+    rows, yet it would still be offered as a join path. For a composite key
+    the first column pair is checked.
+    Returns the number of references deleted.
     """
     connector = _resolve_connector(database_name)
     if connector is None:
@@ -151,7 +154,7 @@ def prune_disjoint_semantic_fks(database_name: str) -> int:
             )
             continue
         if not shared:
-            delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
+            delete_concept_fk(row["fk_id"])
             pruned += 1
             logger.info(
                 "semantic FK removed, %s: %s.%s -> %s.%s",
@@ -205,27 +208,23 @@ def _resolve_semantic_fks(database_name: str) -> int:
                     col.get("name"),
                 )
                 continue
-            attr_id = find_column_attribute_by_column_id(fk_target_col_id)
-            if attr_id:
-                _log_start(index, col)
-                # merge_semantic_fk refuses (and logs) a cross-database edge on
-                # its own -- should be structurally impossible for a declared
-                # FK, whose target is always a column in the same connected
-                # database, but treat "not written" the same as "no attribute
-                # found" rather than assume.
-                if merge_semantic_fk(col["id"], attr_id):
-                    declared_written += 1
-                    logger.debug(
-                        "resolve_semantic_fks [declared]: %s.%s → attr %s",
-                        col.get("table_name"),
-                        col.get("name"),
-                        attr_id,
-                    )
-                else:
-                    llm_queue.append((index, col))
+            _log_start(index, col)
+            # Refused when no concept is keyed by the target, the key is
+            # composite and the rest of it is missing here, or the reference
+            # would cross a database; inference may still find one.
+            fk_id = link_column_to_key_column(col["id"], fk_target_col_id)
+            if fk_id:
+                declared_written += 1
+                logger.debug(
+                    "resolve_semantic_fks [declared]: %s.%s → column %s",
+                    col.get("table_name"),
+                    col.get("name"),
+                    fk_target_col_id,
+                )
             else:
                 logger.debug(
-                    "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
+                    "resolve_semantic_fks [declared]: no concept keyed by column "
+                    "%s — queuing for LLM",
                     fk_target_col_id,
                 )
                 llm_queue.append((index, col))
@@ -261,9 +260,9 @@ def _resolve_semantic_fks(database_name: str) -> int:
             # it's a query-time filter over a collection shared by every
             # ingested database, not physical isolation -- the same shape of
             # mechanism that let Term nodes leak across databases elsewhere.
-            # merge_semantic_fk verifies against the catalog before writing
-            # rather than trust the filter alone, and logs its own rejection.
-            if attr_id and merge_semantic_fk(col["id"], attr_id):
+            # merge_concept_fk verifies against the catalog before writing
+            # rather than trust the filter alone.
+            if attr_id and link_column_to_attribute(col["id"], attr_id):
                 logger.debug(
                     "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),
@@ -289,7 +288,7 @@ def _resolve_semantic_fks(database_name: str) -> int:
     total = declared_written + inferred_written
     logger.info(
         "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
-        "SEMANTIC_FK edge(s)",
+        "semantic FK(s)",
         declared_written,
         inferred_written,
         total,
@@ -302,7 +301,7 @@ def select_semantic_fk_join_defaults(database_name: str) -> int:
     rows = fetch_semantic_fk_join_groups(database_name)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        key = (row["source_table_id"], row["target_attribute_id"])
+        key = (row["source_table_id"], row["concept_id"])
         grouped.setdefault(key, []).append(row)
 
     ambiguous = [group for group in grouped.values() if len(group) > 1]
@@ -323,36 +322,32 @@ def select_semantic_fk_join_defaults(database_name: str) -> int:
                 len(ambiguous),
             )
 
-    for (source_table_id, target_attribute_id), group in grouped.items():
-        selected_column_id = group[0]["source_column_id"]
+    for (source_table_id, concept_id), group in grouped.items():
+        selected_fk_id = group[0]["fk_id"]
         if len(group) > 1:
             llm_selected = _select_join_default_with_llm(group, llm)
             if llm_selected is None:
-                selected_column_id = _deterministic_join_default(group)
+                selected_fk_id = _deterministic_join_default(group)
                 logger.warning(
                     "Semantic FK join-default selection fell back to %s for %s -> %s",
-                    selected_column_id,
+                    selected_fk_id,
                     group[0]["source_table_name"],
                     group[0]["target_table_name"],
                 )
             else:
-                selected_column_id = llm_selected
+                selected_fk_id = llm_selected
 
-        set_semantic_fk_join_default(
-            source_table_id,
-            target_attribute_id,
-            selected_column_id,
-        )
+        set_semantic_fk_join_default(source_table_id, concept_id, selected_fk_id)
         logger.info(
             "Semantic FK join default: %s.%s -> %s.%s",
             group[0]["source_table_name"],
             next(
-                row["source_column_name"]
+                ", ".join(row["source_column_names"])
                 for row in group
-                if row["source_column_id"] == selected_column_id
+                if row["fk_id"] == selected_fk_id
             ),
             group[0]["target_table_name"],
-            group[0]["target_column_name"],
+            ", ".join(group[0]["target_column_names"]),
         )
 
     return len(grouped)
@@ -362,15 +357,15 @@ def _select_join_default_with_llm(
     group: list[dict[str, Any]],
     llm: object | None,
 ) -> str | None:
-    """Return an exact source-column ID selected by the LLM, or ``None``."""
+    """Return an exact reference ID selected by the LLM, or ``None``."""
     if llm is None:
         return None
 
     first = group[0]
     candidates = "\n".join(
         (
-            f"- source_column_id: {row['source_column_id']}\n"
-            f"  column: {row['source_column_name']}\n"
+            f"- relationship_id: {row['fk_id']}\n"
+            f"  column: {', '.join(row['source_column_names'])}\n"
             f"  description: {row.get('source_column_description') or '(none)'}"
         )
         for row in group
@@ -380,9 +375,9 @@ Source table: {first["source_table_name"]}
 Source table description: {first.get("source_table_description") or "(none)"}
 Target table: {first["target_table_name"]}
 Target table description: {first.get("target_table_description") or "(none)"}
-Target column: {first["target_column_name"]}
+Target column: {", ".join(first["target_column_names"])}
 Target column description: {first.get("target_column_description") or "(none)"}
-Target semantic attribute: {first.get("target_attribute_name") or "(none)"}
+Target concept: {first.get("concept_name") or "(none)"}
 
 Candidate relationships:
 {candidates}
@@ -404,12 +399,12 @@ Candidate relationships:
         )
         return None
 
-    selected = result.selected_column_id if result is not None else None
-    valid_ids = {row["source_column_id"] for row in group}
+    selected = result.selected_relationship_id if result is not None else None
+    valid_ids = {row["fk_id"] for row in group}
     if selected not in valid_ids:
         if selected is not None:
             logger.warning(
-                "Semantic FK join-default LLM returned unknown column id %r",
+                "Semantic FK join-default LLM returned unknown relationship id %r",
                 selected,
             )
         return None
@@ -422,9 +417,9 @@ def _deterministic_join_default(group: list[dict[str, Any]]) -> str:
         group,
         key=lambda row: (
             str(row.get("source_column_name") or "").casefold(),
-            str(row["source_column_id"]),
+            str(row["fk_id"]),
         ),
-    )["source_column_id"]
+    )["fk_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +433,7 @@ def _link_columns_named_for_another_table(
     """Point a copied ``{table}_key`` / ``_id`` / ``_code`` at that table's column.
 
     Sets ``fk_target_col_id`` on the candidate so the declared-key path can
-    attach a semantic edge when the target column already has an attribute.
+    reference the concept keyed by the target column.
     The column-to-column edge is written either way.
     """
     own_keys = fetch_own_key_column_ids(database_name)

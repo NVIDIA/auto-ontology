@@ -111,7 +111,7 @@ def test_intent_validation_keeps_authoritative_attribute_join(
     prompt = messages[1].content
     assert "AUTHORITATIVE JOIN PATHS" in prompt
     assert "public.orders.customer_id = public.customers.id" in prompt
-    assert "do not flag a generated join that follows" in prompt
+    assert "do not flag a generated join that a concept allows" in prompt
     assert "USED SQL OBJECTS" in prompt
     assert "- public.orders | description: Customer purchase records." in prompt
     assert "public.orders.customer_id (integer) - Customer placing the order." in prompt

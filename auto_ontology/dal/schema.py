@@ -31,8 +31,7 @@ Four decisions shape everything downstream:
 
   The separator marks the *first endpoint*, not a strict ``<source>__<target>``
   — which cannot name the self-edges (``column__join``, ``table__join``) or
-  distinguish the two edges that share endpoints, ``column__has_attribute`` and
-  ``column__semantic_fk``. Indexes and constraints follow their table's name, so
+  distinguish two edges that share endpoints. Indexes and constraints follow their table's name, so
   ``pk_table__term`` never drifts back to the ambiguous form.
 """
 
@@ -558,18 +557,9 @@ column_attribute__term = Table(
     UniqueConstraint("attribute_id"),
 )
 
-# HAS_ATTRIBUTE and SEMANTIC_FK both run Column -> ColumnAttribute, but they
-# assert different things and get their own tables rather than one table with a
-# `kind` discriminator:
-#
-#   HAS_ATTRIBUTE  this column *is* an instance of the attribute
-#   SEMANTIC_FK    this column *references* the attribute, which describes a
-#                  column on another table
-#
-# Their cardinality already differs -- `resolve_semantic_fks` treats a column as
-# unlinked when it has no SEMANTIC_FK, so at most one is expected, whereas a
-# column can carry several attributes -- and a discriminator in the primary key
-# makes any constraint that applies to only one of them impossible to express.
+# HAS_ATTRIBUTE: this column *is* an instance of the attribute. A column that
+# *references* another table's key is not here: that is a semantic FK, stored
+# on the referenced Concept (`concept__fk`).
 column__has_attribute = Table(
     "column__has_attribute",
     METADATA,
@@ -587,9 +577,54 @@ column__has_attribute = Table(
     ),
 )
 
-column__semantic_fk = Table(
-    "column__semantic_fk",
+# A Concept is the thing several Terms can describe: one entity whose rows are
+# split across tables that share a key. Semantic FKs point at the concept, not
+# at one of its tables, so a reference joins every table the thing lives in.
+concept = Table(
+    "concept",
     METADATA,
+    _id(),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("source", Text, nullable=False, server_default=text("'semantic'")),
+    _certified("name_certified"),
+    _certified("description_certified"),
+    _owner_id(),
+    *_edited(),
+    _imported_id(),
+    UniqueConstraint("name", "source", name="uq_concept_name_source"),
+)
+
+# GROUPS: Concept -> Term. `UNIQUE(term_id)` holds the rule the readers rely
+# on: every Term belongs to exactly one Concept.
+term__concept = Table(
+    "term__concept",
+    METADATA,
+    Column(
+        "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
+    ),
+    Column(
+        "concept_id",
+        Text,
+        ForeignKey(concept.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    UniqueConstraint("term_id"),
+)
+
+# The concept's key, once per member table. A table's key is its rows ordered
+# by `ordinal`; every member table's key has the same length, so `ordinal`
+# pairs the columns two member tables join on. `table_id` is the column's own
+# table, stored so the per-table uniqueness can be a constraint.
+concept__pk = Table(
+    "concept__pk",
+    METADATA,
+    Column(
+        "concept_id",
+        Text,
+        ForeignKey(concept.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
     Column(
         "column_id",
         Text,
@@ -597,10 +632,35 @@ column__semantic_fk = Table(
         primary_key=True,
     ),
     Column(
-        "attribute_id",
+        "table_id",
         Text,
-        ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
-        primary_key=True,
+        ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("ordinal", Integer, nullable=False),
+    UniqueConstraint(
+        "concept_id", "table_id", "ordinal", name="uq_concept__pk_table_ordinal"
+    ),
+)
+
+# One reference from a table to a concept -- one role. A table that points at
+# the same concept twice (a shipper and a receiver) has two rows. Its columns
+# are in `concept__fk_column`, ordered to match the concept's key.
+concept__fk = Table(
+    "concept__fk",
+    METADATA,
+    _id(),
+    Column(
+        "concept_id",
+        Text,
+        ForeignKey(concept.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "source_table_id",
+        Text,
+        ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
+        nullable=False,
     ),
     Column(
         "use_in_join_paths",
@@ -608,6 +668,29 @@ column__semantic_fk = Table(
         nullable=False,
         server_default=text("true"),
     ),
+    Index("ix_concept__fk_concept_id", "concept_id"),
+    Index("ix_concept__fk_source_table_id", "source_table_id"),
+)
+
+# `UNIQUE(column_id)`: a column holds at most one semantic FK, which
+# `resolve_semantic_fks` relies on to tell linked columns from unlinked ones.
+concept__fk_column = Table(
+    "concept__fk_column",
+    METADATA,
+    Column(
+        "fk_id",
+        Text,
+        ForeignKey(concept__fk.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("ordinal", Integer, primary_key=True),
+    Column(
+        "column_id",
+        Text,
+        ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    UniqueConstraint("column_id"),
 )
 
 sql_attribute = Table(
@@ -1234,12 +1317,15 @@ Index("ix_column_attribute_table_id", column_attribute.c.table_id)
 Index("ix_column_attribute__term_term_id", column_attribute__term.c.term_id)
 Index("ix_sql_attribute__term_term_id", sql_attribute__term.c.term_id)
 
-# Both link tables are read in both directions -- from a column to its
-# attributes, and from an attribute back to the columns that reference it
-# (`fetch_attr_column_contexts` binds the attribute first). The composite
-# primary key already indexes the column_id order; these cover the reverse.
+# Read in both directions -- from a column to its attributes, and from an
+# attribute back to its columns (`fetch_attr_column_contexts` binds the
+# attribute first). The composite primary key already indexes the column_id
+# order; this covers the reverse.
 Index("ix_column__has_attribute_attribute_id", column__has_attribute.c.attribute_id)
-Index("ix_column__semantic_fk_attribute_id", column__semantic_fk.c.attribute_id)
+Index("ix_term__concept_concept_id", term__concept.c.concept_id)
+# "Which concept key is this column in" -- the primary key leads with concept_id.
+Index("ix_concept__pk_column_id", concept__pk.c.column_id)
+Index("ix_concept__pk_table_id", concept__pk.c.table_id)
 
 # Supports the case-insensitive name check that replaces a unique constraint.
 Index("ix_zone_name_lower", func.lower(zone.c.name))
@@ -1277,6 +1363,7 @@ for _table in (
     catalog_table,
     catalog_column,
     term,
+    concept,
     column_attribute,
     sql_attribute,
     custom_analysis,
@@ -1340,28 +1427,14 @@ for _table in TRIGRAM_SEARCH_TABLES:
 
 #: Was the edge set for :func:`auto_ontology.dal.attributes.find_join_path` and
 #: :func:`auto_ontology.dal.attributes.find_table_bridge`; both now traverse
-#: ``_find_table_join_hops`` instead, which reads ``column__semantic_fk`` and
-#: ``column__has_attribute`` directly rather than through this view. Nothing
-#: in ``auto_ontology/dal/attributes.py`` queries this view anymore -- it's kept
-#: (unused) rather than dropped here, since removing it is a migration
-#: decision, not a side effect of a traversal change. Its original shape,
-#: kept for that future cleanup:
-#:
-#: * ``CONTAINS`` (Table <-> Column) and ``HAS_ATTRIBUTE``
-#:   (Column <-> ColumnAttribute) appear in both directions.
-#: * ``SEMANTIC_FK`` appears **outgoing only** (Column -> ColumnAttribute).
-#:
-#: Note carefully what that last line does *not* say. ``SEMANTIC_FK`` is
-#: **stored** in one direction, but the codebase reads it in both:
-#: ``fetch_attr_column_contexts`` binds a ColumnAttribute and finds the columns
-#: referencing it, which is the reverse traversal. Anything needing that must
-#: query :data:`column__semantic_fk` directly rather than this view.
-#:
-#: The restriction is specific to path-finding. Allowed to traverse SEMANTIC_FK
-#: backwards, a path would hop from one FK column up to a shared target
-#: attribute and back down a *different* FK column, inventing a join between two
-#: columns that merely reference the same thing -- two ``customer_id`` columns
-#: joined to each other. Here that is simply a row the view does not emit.
+#: ``_find_table_join_hops`` instead, which reads the concept edges
+#: (:func:`auto_ontology.dal.concepts.semantic_table_edges`) rather than this
+#: view. Nothing queries this view anymore -- it's kept (unused) rather than
+#: dropped here, since removing it is a migration decision, not a side effect
+#: of a traversal change. ``CONTAINS`` (Table <-> Column) and
+#: ``HAS_ATTRIBUTE`` (Column <-> ColumnAttribute) appear in both directions.
+#: Semantic FKs, which used to appear outgoing only, left with
+#: ``column__semantic_fk`` when FKs moved onto concepts.
 JOIN_PATH_EDGE_VIEW_SQL = """
 CREATE OR REPLACE VIEW join_path_edge AS
     SELECT 'column'::text AS src_kind, c.id       AS src_id,
@@ -1376,9 +1449,6 @@ CREATE OR REPLACE VIEW join_path_edge AS
     UNION ALL
     SELECT 'column_attribute', h.attribute_id, 'column', h.column_id
       FROM column__has_attribute h
-    UNION ALL
-    SELECT 'column', f.column_id, 'column_attribute', f.attribute_id
-      FROM column__semantic_fk f
 """
 
 DROP_JOIN_PATH_EDGE_VIEW_SQL = "DROP VIEW IF EXISTS join_path_edge"
@@ -1418,8 +1488,11 @@ __all__ = [
     "catalog_table",
     "column_attribute",
     "column__has_attribute",
-    "column__semantic_fk",
     "column_attribute__term",
+    "concept",
+    "concept__fk",
+    "concept__fk_column",
+    "concept__pk",
     "column__foreign_key",
     "custom_analysis",
     "custom_analysis__sql",
@@ -1434,6 +1507,7 @@ __all__ = [
     "table__join",
     "table__term",
     "term",
+    "term__concept",
     "text_attribute",
     "user_group",
     "user_group__member",

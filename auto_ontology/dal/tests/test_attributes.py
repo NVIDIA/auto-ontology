@@ -2,10 +2,10 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""ColumnAttribute, SEMANTIC_FK, and the join-path traversal.
+"""ColumnAttribute, semantic FKs, and the join-path traversal.
 
 The traversal gets most of the attention here, and one case in it gets more than
-the rest: **two columns that both point at the same attribute must not be joined
+the rest: **two columns that both reference the same concept must not be joined
 to each other.** It is a wrong answer that looks completely reasonable — a join between two
 ``customer_id`` columns is exactly the sort of thing a reviewer nods at.
 """
@@ -22,8 +22,13 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import attributes as a  # noqa: E402
+from auto_ontology.dal import concepts as c  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tests.semantic_fk_support import (  # noqa: E402
+    reference_attribute,
+    references_of,
+)
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -118,13 +123,19 @@ class World:
         attribute: str,
         *,
         use_in_join_paths: bool = True,
-    ) -> None:
-        _link(
-            s.column__semantic_fk,
-            column_id=self.columns[column],
-            attribute_id=self.attributes[attribute],
+    ) -> str:
+        """*column* references the concept keyed by *attribute*'s owner."""
+        return reference_attribute(
+            self.columns[column],
+            self.attributes[attribute],
             use_in_join_paths=use_in_join_paths,
         )
+
+    def describe(self, table: str, term: str) -> str:
+        """*table* represents a new term."""
+        term_id = self.term(term)
+        _link(s.table__term, table_id=self.tables[table], term_id=term_id)
+        return term_id
 
 
 @pytest.fixture
@@ -357,26 +368,20 @@ def test_setting_join_default_disables_every_other_group_member(world) -> None:
     world.references("orders.billing_customer_id", "customer-id")
     world.references("orders.customer_id", "customer-id")
 
-    group = a.fetch_semantic_fk_join_groups(f"{world.prefix}-shopdb")
+    group = c.fetch_semantic_fk_join_groups(f"{world.prefix}-shopdb")
     assert {
         (row["source_column_name"], row["target_column_name"]) for row in group
     } == {
         ("billing_customer_id", "id"),
         ("customer_id", "id"),
     }
+    selected = next(row for row in group if row["source_column_name"] == "customer_id")
 
-    a.set_semantic_fk_join_default(
-        world.tables["orders"],
-        world.attributes["customer-id"],
-        world.columns["orders.customer_id"],
+    c.set_semantic_fk_join_default(
+        world.tables["orders"], selected["concept_id"], selected["fk_id"]
     )
 
-    rows = store().query_read(
-        select(
-            s.column__semantic_fk.c.column_id,
-            s.column__semantic_fk.c.use_in_join_paths,
-        ).where(s.column__semantic_fk.c.attribute_id == world.attributes["customer-id"])
-    )
+    rows = references_of(world.attributes["customer-id"])
     assert {row["column_id"]: row["use_in_join_paths"] for row in rows} == {
         world.columns["orders.billing_customer_id"]: False,
         world.columns["orders.customer_id"]: True,
@@ -408,29 +413,41 @@ def test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute(
 ) -> None:
     """The fabrication risk routing-through-the-owner has to guard against.
 
-    `buyers.buyer_status_id` and `sellers.seller_status_id` both reference
-    `lookup.status_code` -- but `status_code` is *not* `lookup`'s own declared
-    PK, just an attribute they happen to share. Unlike the customers/orders/
-    invoices case above, joining these two columns through `lookup` would be
-    fabricated: nothing says a buyer and a seller with the same status code
-    are related. Entering a table from its owner side (as opposed to via a
-    real outgoing FK) is only ever legitimate when the shared attribute is
-    that table's own identity -- see `_find_table_join_hops`'s docstring, and
-    `find_shared_hub_bridge`, which applies the identical discipline for the
-    one shape this still can't reach.
+    `buyers.buyer_status_id` and `sellers.seller_status_id` both point at
+    `lookup.status_code` -- but `status_code` is *not* `lookup`'s identity,
+    its declared PK `id` is. Joining these two columns through `lookup` would
+    be fabricated: nothing says a buyer and a seller with the same status code
+    are related. A reference joins both ways through its concept's key, so
+    the guard is at write time: a table keyed by its declared PK is never
+    re-keyed onto another column a reference happens to target.
     """
-    world.table("lookup")
+    world.table("lookup", pk=["id"])
     world.column("lookup", "id", 1)
     world.column("lookup", "status_code", 2)
     world.attribute("status-code", owner="lookup.status_code")
+    world.describe("lookup", "lookup")
+    concept_id = c.ensure_term_concept(
+        c.store().query_read(
+            select(s.table__term.c.term_id).where(
+                s.table__term.c.table_id == world.tables["lookup"]
+            )
+        )[0]["term_id"]
+    )
+    assert c.set_concept_key(
+        concept_id, world.tables["lookup"], [world.columns["lookup.id"]]
+    )
 
     world.table("buyers")
     world.column("buyers", "buyer_status_id")
-    world.references("buyers.buyer_status_id", "status-code")
-
     world.table("sellers")
     world.column("sellers", "seller_status_id")
-    world.references("sellers.seller_status_id", "status-code")
+    for column in ("buyers.buyer_status_id", "sellers.seller_status_id"):
+        assert (
+            c.link_column_to_key_column(
+                world.columns[column], world.columns["lookup.status_code"]
+            )
+            is None
+        )
 
     assert (
         a.find_join_path(
@@ -661,10 +678,11 @@ def test_find_table_join_hops_queries_once_regardless_of_fan_out(world) -> None:
     """The property that separates this from a recursive CTE.
 
     A hub attribute referenced by many columns creates many distinct routes to
-    the same table. The whole database's semantic edges are fetched in one
-    query and walked in memory from there, so the query count never grows
-    with the number of routes through the hub, of which there are 8 here --
-    unlike a per-path traversal, which would re-expand the hub once per route.
+    the same table. The whole database's semantic edges are fetched in two
+    queries (the concept keys, then the references) and walked in memory from
+    there, so the query count never grows with the number of routes through
+    the hub, of which there are 8 here -- unlike a per-path traversal, which
+    would re-expand the hub once per route.
     """
     world.table("hub", pk=["id"])
     world.column("hub", "id")
@@ -677,22 +695,22 @@ def test_find_table_join_hops_queries_once_regardless_of_fan_out(world) -> None:
     world.column("island", "x")
 
     calls = 0
-    original = a.store
+    original = c.store
 
     def counting_store():
         nonlocal calls
         calls += 1
         return original()
 
-    a.store = counting_store
+    c.store = counting_store
     try:
         a._find_table_join_hops(
             world.tables["spoke0"], world.tables["island"], world.databases["shopdb"]
         )
     finally:
-        a.store = original
+        c.store = original
 
-    assert calls == 1
+    assert calls == 2
 
 
 # --------------------------------------------------------------------------
@@ -865,9 +883,8 @@ def test_update_of_a_missing_attribute_is_none(attributed) -> None:
 def test_contexts_read_semantic_fk_backwards(joined) -> None:
     """Binds the attribute and finds the column pointing *at* it.
 
-    This is the traversal `join_path_edge` deliberately omits, which is why this
-    function queries `column__semantic_fk` directly. If it ever starts reading
-    the view, this test is what fails.
+    The referencing columns come from the concept's references, read through
+    ``SEMANTIC_FK_LINKS`` rather than the join edges.
     """
     contexts = a.fetch_attr_column_contexts(
         [joined.attributes["customer-id"]], database_name=None
@@ -993,24 +1010,20 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
     world.table("orders")
     world.column("orders", "customer_id")
     attr = world.attribute("customer-id", owner="customers.id")
+    world.describe("customers", "customer")
 
     for _ in range(2):
-        a.merge_semantic_fk(world.columns["orders.customer_id"], attr)
+        assert a.merge_semantic_fk(world.columns["orders.customer_id"], attr)
 
-    rows = store().query_read(
-        select(s.column__semantic_fk.c.column_id).where(
-            s.column__semantic_fk.c.attribute_id == attr
-        )
-    )
-    assert len(rows) == 1
+    assert len(references_of(attr)) == 1
 
 
 def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
     """A column and attribute in different ingested databases must never link.
 
-    This is the only place a SEMANTIC_FK edge is created, so it is the only
-    place that has to enforce this — every other writer (compilation, test
-    fixtures, dev tooling) relies on this guard instead of checking first.
+    Every reference is written through ``merge_concept_fk``, so that is the
+    only place that has to enforce this — every other writer (compilation,
+    test fixtures, dev tooling) relies on this guard instead of checking first.
     """
     world.database("otherdb")
     world.table("customers")
@@ -1018,16 +1031,11 @@ def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
     world.table("remote_orders", database="otherdb")
     world.column("remote_orders", "customer_id")
     attr = world.attribute("customer-id", owner="customers.id")
+    world.describe("customers", "customer")
 
     written = a.merge_semantic_fk(world.columns["remote_orders.customer_id"], attr)
     assert written is False
-
-    rows = store().query_read(
-        select(s.column__semantic_fk.c.column_id).where(
-            s.column__semantic_fk.c.attribute_id == attr
-        )
-    )
-    assert rows == []
+    assert references_of(attr) == []
 
 
 # --------------------------------------------------------------------------
@@ -1075,10 +1083,14 @@ def test_shared_hub_bridge_is_order_independent(hub_and_spokes) -> None:
 
 def test_hub_helpers_ignore_unselected_semantic_fks(hub_and_spokes) -> None:
     store().query_write(
-        s.column__semantic_fk.update()
+        s.concept__fk.update()
         .where(
-            s.column__semantic_fk.c.column_id
-            == hub_and_spokes.columns["spoke_b.hub_id"]
+            s.concept__fk.c.id.in_(
+                select(s.concept__fk_column.c.fk_id).where(
+                    s.concept__fk_column.c.column_id
+                    == hub_and_spokes.columns["spoke_b.hub_id"]
+                )
+            )
         )
         .values(use_in_join_paths=False)
     )
@@ -1100,12 +1112,14 @@ def test_shared_hub_bridge_returns_empty_for_the_same_column_twice(
     assert a.find_shared_hub_bridge(col, col) == {}
 
 
-def test_shared_hub_bridge_requires_the_targets_own_declared_pk(world) -> None:
-    """Two FKs sharing a target that is NOT that table's declared PK must not bridge.
+def test_shared_hub_bridge_takes_the_concept_key_as_the_identity(world) -> None:
+    """A hub is a member table of the concept both FKs reference.
 
     Same shape as `hub_and_spokes`, but `hub.id` is never declared as the
-    table's PK -- this is what keeps the function from treating "any
-    attribute two FK columns happen to share" as a hub.
+    table's PK. The concept's key is the hub's identity whether or not the
+    database declares it; the guard against "any column two FKs happen to
+    share" sits where keys are written (see
+    `test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute`).
     """
     world.table("hub")  # no pk=...
     world.column("hub", "id")
@@ -1120,7 +1134,7 @@ def test_shared_hub_bridge_requires_the_targets_own_declared_pk(world) -> None:
     result = a.find_shared_hub_bridge(
         world.columns["spoke_a.hub_id"], world.columns["spoke_b.hub_id"]
     )
-    assert result == {}
+    assert result == {"hub_table": "hub", "hub_column": "id"}
 
 
 def test_shared_hub_bridge_returns_empty_when_fks_target_different_attributes(

@@ -238,15 +238,39 @@ class LegacyTableJudgement(BaseModel):
 
 
 class SemanticFkJoinDefaultSelection(BaseModel):
-    """LLM output selecting one FK column as the default join relationship."""
+    """LLM output selecting one FK relationship as the default join."""
 
     model_config = ConfigDict(extra="forbid")
 
-    selected_column_id: str | None = Field(
+    selected_relationship_id: str | None = Field(
         ...,
         description=(
-            "The exact source-column ID of the relationship that best represents "
+            "The exact relationship_id of the relationship that best represents "
             "the default join between the supplied tables, or null when uncertain."
         ),
+    )
+    rationale: str = Field(default="")
+
+
+class ConceptMergeDecision(BaseModel):
+    """LLM output: whether two concepts sharing a key are one thing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    same_thing: bool = Field(
+        ...,
+        description=(
+            "True only when both tables describe the same real-world thing, one "
+            "row per instance, split across tables. False for a parent and its "
+            "children, or two things that merely share an id format."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description="A business name for the merged concept, when same_thing.",
+    )
+    description: str | None = Field(
+        default=None,
+        description="One or two sentences describing the merged concept.",
     )
     rationale: str = Field(default="")

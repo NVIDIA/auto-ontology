@@ -17,6 +17,7 @@ from __future__ import annotations
 from sqlalchemy import ColumnElement, func, select
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import SEMANTIC_FK_ATTRIBUTES
 
 
 def name_contains(column: ColumnElement, search: str) -> ColumnElement:
@@ -83,7 +84,7 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     return func.coalesce(
         _non_blank(column.c.description),
         _attribute_description(column.c.id, s.column__has_attribute),
-        _attribute_description(column.c.id, s.column__semantic_fk),
+        _attribute_description(column.c.id, SEMANTIC_FK_ATTRIBUTES),
     )
 
 
