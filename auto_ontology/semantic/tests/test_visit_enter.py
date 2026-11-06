@@ -93,6 +93,34 @@ def test_keep_persisted_sample_caps_text_only() -> None:
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
 @patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
 @patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_a_column_is_unique_when_95_percent_of_its_values_are_distinct(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame(
+        {
+            "mostly_distinct": [*range(19), 0],
+            "repeated": [*range(18), 0, 0],
+        }
+    )
+    columns = [
+        {"name": "mostly_distinct", "data_type": "integer"},
+        {"name": "repeated", "data_type": "integer"},
+    ]
+
+    result = calculate_columns_profiling(
+        {"id": "t1", "name": "t", "schema_name": "public"}, columns, connector
+    )
+
+    assert result["mostly_distinct"]["is_unique"] is True
+    assert result["repeated"]["is_unique"] is False
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling_quotes_name_with_space(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,

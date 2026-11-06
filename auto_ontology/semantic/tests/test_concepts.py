@@ -84,3 +84,100 @@ def test_concept_row_names_its_terms_and_keys() -> None:
     assert row["metadata"]["label"] == LABEL_CONCEPT
     assert row["metadata"]["table_ids"] == ["lines-id"]
     assert row["metadata"]["database_name"] == "shop"
+
+
+def _column(
+    table: str, name: str, *, unique: bool = False, values: list | None = None
+) -> dict:
+    return {
+        "id": f"{table}.{name}",
+        "table_id": table,
+        "table_name": table,
+        "name": name,
+        "data_type": "varchar",
+        "is_unique": unique,
+        "sample_values": values,
+    }
+
+
+def _key(index: concepts._ReferenceIndex, table: str) -> list[str]:
+    return concepts._default_key(table, [], index)
+
+
+def test_the_key_is_the_unique_column_other_tables_name() -> None:
+    index = concepts._ReferenceIndex(
+        [
+            _column("products", "PRODUCTS_KEY", unique=True),
+            _column("products", "SKU_CODE", unique=True),
+            _column("order_lines", "SKU_CODE"),
+            _column("returns", "SKU_CODE"),
+        ],
+        [],
+    )
+
+    assert _key(index, "products") == ["products.SKU_CODE"]
+
+
+def test_a_declared_foreign_key_counts_as_a_reference() -> None:
+    index = concepts._ReferenceIndex(
+        [
+            _column("products", "A_KEY", unique=True),
+            _column("products", "B_KEY", unique=True),
+            _column("order_lines", "PRODUCT"),
+        ],
+        [{"target_column_id": "products.B_KEY", "source_table_id": "order_lines"}],
+    )
+
+    assert _key(index, "products") == ["products.B_KEY"]
+
+
+def test_a_generic_key_name_is_matched_with_its_table_name() -> None:
+    index = concepts._ReferenceIndex(
+        [
+            _column("students", "id", unique=True),
+            _column("students", "email_code", unique=True),
+            _column("order_lines", "student_id"),
+        ],
+        [],
+    )
+
+    assert _key(index, "students") == ["students.id"]
+
+
+def test_shared_values_break_a_tie_in_names() -> None:
+    index = concepts._ReferenceIndex(
+        [
+            _column("rooms", "ROOM_KEY", unique=True, values=["R-1", "R-2"]),
+            _column("rooms", "ROOM_CODE", unique=True, values=["B10-100"]),
+            _column("bookings", "LOCATION", values=["B10-100"]),
+        ],
+        [],
+    )
+
+    assert _key(index, "rooms") == ["rooms.ROOM_CODE"]
+
+
+def test_an_unreferenced_column_that_does_not_look_like_a_key_is_not_one() -> None:
+    index = concepts._ReferenceIndex(
+        [
+            _column("badges", "LABEL_TEXT", unique=True),
+            _column("badges", "COLOR_NAME", unique=True),
+            _column("other", "TITLE"),
+        ],
+        [],
+    )
+
+    assert _key(index, "badges") == []
+
+
+def test_a_declared_primary_key_wins() -> None:
+    index = concepts._ReferenceIndex(
+        [
+            _column("products", "ID"),
+            _column("products", "SKU_CODE", unique=True),
+            _column("order_lines", "SKU_CODE"),
+        ],
+        [],
+    )
+
+    assert concepts._default_key("products", ["id"], index) == ["products.ID"]

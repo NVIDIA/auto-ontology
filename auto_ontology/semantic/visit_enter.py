@@ -65,6 +65,9 @@ _PROFILING_QUERY_TIMEOUT_SECONDS = 120
 _MAX_CONSECUTIVE_SAMPLE_FAILURES = 3
 # Most-common values kept per column.
 _PROFILING_TOP_N = 5
+# Share of sampled non-null values that must be distinct for a column to count
+# as unique. Below 1 so a stray duplicate or a dirty row does not hide a key.
+_UNIQUE_RATIO = 0.95
 # String sample values longer than this are not persisted.
 _MAX_SAMPLE_VALUE_LEN = 30
 # Declared data-type substrings whose sample values are not persisted.
@@ -418,7 +421,7 @@ def calculate_columns_profiling(
     """Profile a table's columns from a live sample of up to 1000 rows.
 
     Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
-    ``is_unique`` flag (all non-null values distinct) and the 5 most-common
+    ``is_unique`` flag (at least 95% of non-null values distinct) and the 5 most-common
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
@@ -497,7 +500,7 @@ def calculate_columns_profiling(
             # as dict/list, neither of which can go in a set or a Counter.
             keys = [_sample_key(value) for value in values]
 
-            is_unique = bool(keys and len(set(keys)) == len(keys))
+            is_unique = bool(keys and len(set(keys)) >= _UNIQUE_RATIO * len(keys))
 
             first_by_key: dict[str, Any] = {}
             for key, value in zip(keys, values):

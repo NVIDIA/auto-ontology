@@ -8,7 +8,8 @@ Algorithm
 ---------
 1. **Singletons** -- every Term describing a table in the database gets a
    concept (``ensure_term_concept``), keyed on that table by its declared
-   primary key or, failing that, a unique column.
+   primary key or, failing that, the unique column other tables reference
+   most -- by name or declared foreign key, then by shared sampled values.
 2. **Candidates** -- two concepts are a candidate pair when one of each's
    keys has the same column names (normalized) with compatible types. Keys
    made only of generic names (``id``, ``code``, ...) are skipped: every
@@ -48,6 +49,7 @@ from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
 )
+from auto_ontology.utils.sample_values import parse_sample_values
 from auto_ontology.utils.sql_identifiers import quoted_identifier
 from auto_ontology.vdb import get_semantic_vdb
 
@@ -120,40 +122,202 @@ def _ensure_singleton_concepts(database_name: str) -> int:
         )
         .order_by(s.table__term.c.table_id, s.table__term.c.term_id)
     )
+    index: _ReferenceIndex | None = None
     keyed = 0
     for row in rows:
         concept_id = ensure_term_concept(row["term_id"])
         if not concept_id or row["table_id"] in fetch_concept_keys(concept_id):
             continue
-        key = _default_key(row["table_id"], list(row["pk"] or []))
+        if index is None:
+            index = _ReferenceIndex.load(database_name)
+        key = _default_key(row["table_id"], list(row["pk"] or []), index)
         if key and set_concept_key(concept_id, row["table_id"], key):
             keyed += 1
     return keyed
 
 
-def _default_key(table_id: str, pk_names: list[str]) -> list[str]:
-    """The declared primary key's column ids, else one unique column's."""
-    columns = store().query_read(
-        select(
-            s.catalog_column.c.id,
-            s.catalog_column.c.name,
-            s.catalog_column.c.is_unique,
+_KEY_LIKE_NAME = re.compile(r"(id|key|code|number|_num|_no|_nbr)$")
+#: Names of columns that describe a row rather than identify it. Many tables
+#: share them, which says nothing about references.
+_DESCRIPTIVE_NAME = re.compile(
+    r"(desc|description|name|title|text|comment|comments|note|notes|flag|ind"
+    r"|indicator|attribute|attr|label)$"
+)
+_KEY_SUFFIX = re.compile(r"(id|key|code|number|num|no|nbr)$")
+
+
+class _ReferenceIndex:
+    """The database's columns, indexed by what other tables could reference.
+
+    Built once per compile: ``columns`` per table, the tables holding a column
+    of each normalized name, the tables holding each sampled value, and the
+    tables with a declared foreign key into each column.
+    """
+
+    def __init__(self, columns: list[dict[str, Any]], declared: list[dict[str, Any]]):
+        self.table_names: dict[str, str] = {}
+        self.columns: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.by_name: dict[str, set[str]] = defaultdict(set)
+        self.by_value: dict[str, set[str]] = defaultdict(set)
+        for column in columns:
+            table_id = column["table_id"]
+            self.table_names[table_id] = column["table_name"]
+            self.columns[table_id].append(column)
+            self.by_name[_normalize(column["name"])].add(table_id)
+            for value in _comparable_values(column):
+                self.by_value[value].add(table_id)
+        self.declared: dict[str, set[str]] = defaultdict(set)
+        for row in declared:
+            self.declared[row["target_column_id"]].add(row["source_table_id"])
+
+    @classmethod
+    def load(cls, database_name: str) -> _ReferenceIndex:
+        scope = (
+            s.catalog_column.join(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
         )
-        .where(s.catalog_column.c.table_id == table_id)
-        .order_by(s.catalog_column.c.name)
-    )
+        in_database = (
+            s.catalog_database.c.name == database_name,
+            ~s.catalog_table.c.is_legacy,
+        )
+        columns = store().query_read(
+            select(
+                s.catalog_column.c.id,
+                s.catalog_column.c.table_id,
+                s.catalog_column.c.name,
+                s.catalog_column.c.data_type,
+                s.catalog_column.c.is_unique,
+                s.catalog_column.c.sample_values,
+                s.catalog_table.c.name.label("table_name"),
+            )
+            .select_from(scope)
+            .where(*in_database)
+            .order_by(s.catalog_column.c.table_id, s.catalog_column.c.name)
+        )
+        declared = store().query_read(
+            select(
+                s.column__foreign_key.c.target_column_id,
+                s.catalog_column.c.table_id.label("source_table_id"),
+            )
+            .select_from(
+                scope.join(
+                    s.column__foreign_key,
+                    s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
+                )
+            )
+            .where(*in_database)
+        )
+        return cls(
+            [
+                {**dict(c), "sample_values": parse_sample_values(c["sample_values"])}
+                for c in columns
+            ],
+            [dict(r) for r in declared],
+        )
+
+    def name_references(self, table_id: str, column: dict[str, Any]) -> int:
+        """Other tables that declare a foreign key into *column* or name it."""
+        name = _normalize(column["name"])
+        names = {name}
+        if name in _GENERIC_KEY_NAMES:
+            table = _normalize(self.table_names.get(table_id, ""))
+            names = {f"{table}{name}"}
+            if table.endswith("s"):
+                names.add(f"{table[:-1]}{name}")
+        tables = set(self.declared.get(column["id"], set()))
+        for name in names:
+            tables |= self.by_name.get(name, set())
+        return len(tables - {table_id})
+
+    def value_references(self, table_id: str, column: dict[str, Any]) -> int:
+        """Other tables with a column sharing one of *column*'s sampled values."""
+        tables: set[str] = set()
+        for value in _comparable_values(column):
+            tables |= self.by_value.get(value, set())
+        return len(tables - {table_id})
+
+
+def _comparable_values(column: dict[str, Any]) -> set[str]:
+    """Sampled values worth matching across tables: not dates or flags, and
+    long enough not to collide by chance."""
+    if _type_family(column.get("data_type")) in ("time", "bool"):
+        return set()
+    values = column.get("sample_values") or []
+    return {
+        text
+        for value in values
+        if len(text := str(value).strip().casefold()) >= 3
+        and not isinstance(value, (dict, list))
+    }
+
+
+def _default_key(
+    table_id: str, pk_names: list[str], index: _ReferenceIndex
+) -> list[str]:
+    """The declared primary key's column ids, else the unique column other
+    tables reference most; ``[]`` when no unique column is a plausible key."""
+    columns = index.columns.get(table_id, [])
     by_name = {c["name"].casefold(): c["id"] for c in columns}
     if pk_names:
         key = [by_name.get(name.casefold()) for name in pk_names]
         if all(key):
             return [column_id for column_id in key if column_id]
-    unique = [c for c in columns if c["is_unique"]]
-    if not unique:
-        return []
-    named_as_key = [
-        c for c in unique if re.search(r"(id|key|code)$", c["name"].casefold())
-    ]
-    return [(named_as_key or unique)[0]["id"]]
+    column_id = _choose_key(table_id, [c for c in columns if c["is_unique"]], index)
+    return [column_id] if column_id else []
+
+
+def _choose_key(
+    table_id: str, unique: list[dict[str, Any]], index: _ReferenceIndex
+) -> str | None:
+    """The unique column other tables most plausibly reference.
+
+    Columns named after another table's key (``<other table>_id``) are that
+    table's, unique here only by chance -- unless this table's own name starts
+    with it, as a copy or variant of that table's does -- and descriptive columns (names,
+    descriptions, flags) never identify a row. Of the rest, a key-like name
+    other tables reference wins, most references first; then any other
+    referenced column; then an unreferenced key-like name. Ties go to a name
+    built from this table's own, then to shared sampled values. A column
+    nothing references is taken only when its name looks like a key:
+    otherwise a value that happens to be unique in a small table would become
+    the table's identity.
+    """
+    own = _normalize(index.table_names.get(table_id, ""))
+    others = {
+        _normalize(name) for tid, name in index.table_names.items() if tid != table_id
+    }
+    others |= {name[:-1] for name in others if name.endswith("s")}
+    ranked = []
+    for column in unique:
+        lowered = column["name"].casefold()
+        stem = _KEY_SUFFIX.sub("", _normalize(column["name"]))
+        own_named = bool(stem) and own.startswith(stem)
+        if _DESCRIPTIVE_NAME.search(lowered) or (stem in others and not own_named):
+            continue
+        references = index.name_references(table_id, column)
+        key_like = bool(_KEY_LIKE_NAME.search(lowered))
+        tier = 0 if key_like and references else 1 if references else 2
+        if tier == 2 and not key_like:
+            continue
+        ranked.append(
+            (
+                tier,
+                -references,
+                not own_named,
+                -index.value_references(table_id, column),
+                lowered,
+                column["id"],
+            )
+        )
+    return min(ranked)[-1] if ranked else None
 
 
 # ---------------------------------------------------------------------------
