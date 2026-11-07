@@ -7,6 +7,7 @@
 import contextlib
 import threading
 import time
+import warnings
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -497,3 +498,125 @@ def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -
     monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
 
     assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
+
+
+class _GuidedAnswer(llm_invoke.StrictLLMOutputModel):
+    name: str
+
+
+class _FakeResponse:
+    def __init__(self, content: str) -> None:
+        self._content = content
+
+    def json(self) -> dict:
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": self._content},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+
+def _hosted_chat_nvidia(
+    monkeypatch: pytest.MonkeyPatch, contents: list[str]
+) -> tuple[Any, list[dict]]:
+    """A real hosted ``ChatNVIDIA`` whose HTTP call returns *contents* in turn."""
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        client = ChatNVIDIA(
+            model="nvidia/nemotron-3.5-lightning-30b-a3b",
+            api_key="nvapi-test",
+            base_url="https://integrate.api.nvidia.com/v1",
+        )
+    payloads: list[dict] = []
+    replies = iter(contents)
+
+    def get_req(
+        _self: object, payload: dict, extra_headers: dict | None = None
+    ) -> _FakeResponse:
+        payloads.append(payload)
+        return _FakeResponse(next(replies))
+
+    monkeypatch.setattr(type(client._client), "get_req", get_req)
+    monkeypatch.setattr(llm_invoke.time, "sleep", lambda _s: None)
+    return client, payloads
+
+
+def test_chat_nvidia_sends_guided_json_at_the_payload_top_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hosted endpoint rejects ``nvext.guided_json`` (400) and answers
+    ``response_format`` with empty content; only top-level ``guided_json`` works.
+    """
+    client, payloads = _hosted_chat_nvidia(monkeypatch, ['{"name": "x"}'])
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="q")], _GuidedAnswer
+    )
+
+    assert result == _GuidedAnswer(name="x")
+    assert len(payloads) == 1
+    assert payloads[0]["guided_json"] == _GuidedAnswer.model_json_schema()
+    assert "nvext" not in payloads[0]
+    assert "response_format" not in payloads[0]
+
+
+def test_bound_chat_nvidia_keeps_its_bound_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, payloads = _hosted_chat_nvidia(monkeypatch, ['{"name": "x"}'])
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client.bind(max_tokens=7), [HumanMessage(content="q")], _GuidedAnswer
+    )
+
+    assert result == _GuidedAnswer(name="x")
+    assert payloads[0]["max_tokens"] == 7
+    assert "guided_json" in payloads[0]
+
+
+def test_chat_nvidia_malformed_answer_reaches_the_validation_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, payloads = _hosted_chat_nvidia(
+        monkeypatch, ['{"name": "x", "extra": 1}', '```json\n{"name": "y"}\n```']
+    )
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="q")], _GuidedAnswer
+    )
+
+    assert result == _GuidedAnswer(name="y")
+    assert len(payloads) == 2
+    assert "did not validate" in payloads[1]["messages"][-1]["content"]
+
+
+def test_chat_nvidia_empty_answer_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, payloads = _hosted_chat_nvidia(monkeypatch, ["", '{"name": "x"}'])
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="q")], _GuidedAnswer
+    )
+
+    assert result == _GuidedAnswer(name="x")
+    assert len(payloads) == 2
+
+
+def test_other_clients_keep_with_structured_output() -> None:
+    llm = MagicMock()
+    llm.model_name = "openai/gpt-5"
+    llm.with_structured_output.return_value.invoke.return_value = _GuidedAnswer(
+        name="x"
+    )
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        llm, [HumanMessage(content="q")], _GuidedAnswer
+    )
+
+    assert result == _GuidedAnswer(name="x")
+    llm.with_structured_output.assert_called_once()
+    assert not llm.bind.called
