@@ -5,8 +5,8 @@
 """What the Elasticsearch store sends, checked without a cluster.
 
 The behaviour that matters end to end -- ranking, filtering, deletes -- is in
-``test_contract.py``, against a real cluster. These pin the parts that a
-working cluster would not catch: a distance on the wrong scale still ranks
+``test_elasticsearch_cluster.py``, against a real cluster. These pin the parts
+that a working cluster would not catch: a distance on the wrong scale still ranks
 correctly, a retry loop that retries a bad key still eventually fails, and a
 reset that fires before the first successful write still leaves a populated
 index *most* of the time.

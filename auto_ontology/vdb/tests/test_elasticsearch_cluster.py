@@ -2,26 +2,24 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Both vector stores must behave the same through the app's own write and read paths.
+"""The Elasticsearch store against a real cluster, through the app's own write and read paths.
 
-Each test runs once per backend, writing with
-:func:`~auto_ontology.utils.embedding.embed_rows` and
-:func:`~auto_ontology.vdb.records.write_embedded_rows` and reading with
+Writes go through :func:`~auto_ontology.utils.embedding.embed_rows` and
+:func:`~auto_ontology.vdb.records.write_embedded_rows`, and reads through
 :class:`~auto_ontology.utils.retriever.Retriever` -- the functions the services
-call -- so the switch between "the app embeds" and "the store embeds" is under
-test, not bypassed.
+call -- so the switch to "the store embeds" is under test, not bypassed.
 
-Both backends embed through :mod:`dev_tools.fake_embedder`: Postgres because
-the app calls it, Elasticsearch because its ``nvidia`` inference endpoint is
-pointed at it. Same vectors on both sides means the rankings must agree
-exactly, which ``test_both_backends_rank_alike`` checks.
+Elasticsearch embeds rows and queries itself, by calling its ``nvidia``
+inference endpoint over HTTP, so a monkeypatch in this process cannot stand in
+for the model. The endpoint is pointed at :mod:`dev_tools.fake_embedder`
+instead. The Postgres store needs none of this: the app embeds for it, and
+``test_records.py`` covers it with hand-made vectors.
 
-Needs a reachable Postgres (``POSTGRES_*``) and Elasticsearch (``ES_URL`` plus
-``ES_API_KEY`` or ``ES_USERNAME``/``ES_PASSWORD``). The Elasticsearch node calls
-back into this process for embeddings, at ``ES_TEST_EMBEDDER_HOST`` --
-``host.docker.internal`` by default, which is how a container reaches the
-host on Docker Desktop and on a Linux runner started with
-``--add-host=host.docker.internal:host-gateway``.
+Needs a reachable Elasticsearch (``ES_URL`` plus ``ES_API_KEY`` or
+``ES_USERNAME``/``ES_PASSWORD``). The node calls back into this process for
+embeddings, at ``ES_TEST_EMBEDDER_HOST`` -- ``host.docker.internal`` by
+default, which is how a container reaches the host on Docker Desktop and on a
+Linux runner started with ``--add-host=host.docker.internal:host-gateway``.
 """
 
 from __future__ import annotations
@@ -30,7 +28,6 @@ import os
 import uuid
 from typing import Iterator
 
-import psycopg
 import pytest
 
 from auto_ontology.infra.elasticsearch import (
@@ -38,7 +35,6 @@ from auto_ontology.infra.elasticsearch import (
     get_elasticsearch_client,
     get_elasticsearch_config,
 )
-from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.retrieval.data_access.hit_scores import passes_relevance_gate
 from auto_ontology.retrieval.data_access.semantic_search import (
     _build_metadata_where_clause,
@@ -49,11 +45,10 @@ from auto_ontology.utils.embedding_rows import build_embed_row
 from auto_ontology.utils.retriever import Retriever
 from auto_ontology.vdb.base import VectorStore
 from auto_ontology.vdb.elasticsearch import ElasticsearchVDB
-from auto_ontology.vdb.postgres import PostgresVDB
 from auto_ontology.vdb.records import replace_embedded_rows, write_embedded_rows
 from dev_tools.fake_embedder import FakeEmbedder, embed
 
-#: The model name each side sends, so the recorded calls say who embedded.
+#: The model name each side would send, so the recorded calls say who embedded.
 _APP_MODEL = "fake/app-side"
 _ES_MODEL = "fake/es-side"
 
@@ -88,27 +83,6 @@ def fake() -> Iterator[FakeEmbedder]:
         yield server
 
 
-def _postgres(fake: FakeEmbedder) -> Iterator[tuple[VectorStore, EmbedParams]]:
-    try:
-        psycopg.connect(get_postgres_connection_string(), connect_timeout=3).close()
-    except Exception as exc:  # noqa: BLE001 -- no database, nothing to assert
-        pytest.skip(f"postgres not reachable: {exc}")
-    name = f"contract_{uuid.uuid4().hex[:8]}"
-    store = PostgresVDB(
-        connection_string=get_postgres_connection_string(),
-        collection_name=name,
-        schema_name="vdb",
-    )
-    try:
-        yield store, EmbedParams(model_name=_APP_MODEL, embed_invoke_url=fake.url())
-    finally:
-        store.close()
-        with psycopg.connect(get_postgres_connection_string()) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"DROP TABLE IF EXISTS vdb.{name}")
-            conn.commit()
-
-
 def _elasticsearch(fake: FakeEmbedder) -> Iterator[tuple[VectorStore, EmbedParams]]:
     try:
         config = get_elasticsearch_config()
@@ -141,20 +115,13 @@ def _elasticsearch(fake: FakeEmbedder) -> Iterator[tuple[VectorStore, EmbedParam
         )
 
 
-_BACKENDS = {"postgres": _postgres, "elasticsearch": _elasticsearch}
-
-
-@pytest.fixture(params=sorted(_BACKENDS))
+@pytest.fixture
 def backend(
-    request: pytest.FixtureRequest,
-    fake: FakeEmbedder,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[tuple[str, VectorStore, EmbedParams]]:
-    name = request.param
-    monkeypatch.setenv("VDB_BACKEND", name)
+    fake: FakeEmbedder, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[VectorStore, EmbedParams]]:
+    monkeypatch.setenv("VDB_BACKEND", "elasticsearch")
     fake.reset()
-    for store, params in _BACKENDS[name](fake):
-        yield name, store, params
+    yield from _elasticsearch(fake)
 
 
 def _write(store: VectorStore, params: EmbedParams, rows: list[dict]) -> int:
@@ -183,7 +150,7 @@ def _ids(hits: list[dict]) -> list[str]:
 
 
 def test_the_nearest_row_comes_first_at_cosine_distance(backend) -> None:
-    _, store, params = backend
+    store, params = backend
     assert _write(store, params, _rows()) == len(_ROWS)
 
     hits = _search(store, params, "customer email")
@@ -192,7 +159,7 @@ def test_the_nearest_row_comes_first_at_cosine_distance(backend) -> None:
     expected = 1 - sum(
         a * b for a, b in zip(embed("customer email"), embed(_ROWS[0][3]))
     )
-    # Both stores quantise (halfvec, and BBQ with rescoring), so close, not equal.
+    # The index quantises (BBQ with rescoring), so close, not equal.
     assert hits[0]["_distance"] == pytest.approx(expected, abs=0.02)
     assert hits[0]["text"] == "customer email address"
     assert hits[0]["metadata"]["label"] == "Column"
@@ -201,20 +168,19 @@ def test_the_nearest_row_comes_first_at_cosine_distance(backend) -> None:
 def test_rows_are_passages_and_searches_are_queries(
     backend, fake: FakeEmbedder
 ) -> None:
-    name, store, params = backend
+    store, params = backend
     _write(store, params, _rows())
     write_types = set(fake.input_types())
     _search(store, params, "customer email")
 
     assert write_types == {"passage"}
     assert fake.input_types()[-1] == "query"
-    # And the embedding happened where the backend says it does.
-    side = _ES_MODEL if name == "elasticsearch" else _APP_MODEL
-    assert {call.model for call in fake.calls} == {side}
+    # And Elasticsearch embedded them, not the app.
+    assert {call.model for call in fake.calls} == {_ES_MODEL}
 
 
 def test_filters_narrow_by_label_and_database(backend) -> None:
-    _, store, params = backend
+    store, params = backend
     _write(store, params, _rows())
 
     tables = _search(store, params, "customer", label="Table")
@@ -225,7 +191,7 @@ def test_filters_narrow_by_label_and_database(backend) -> None:
 
 
 def test_deleting_by_id_removes_only_that_row(backend) -> None:
-    _, store, params = backend
+    store, params = backend
     _write(store, params, _rows())
 
     assert store.delete_by_id("c_email") == 1
@@ -235,7 +201,7 @@ def test_deleting_by_id_removes_only_that_row(backend) -> None:
 
 
 def test_deleting_everything_leaves_an_empty_searchable_store(backend) -> None:
-    _, store, params = backend
+    store, params = backend
     _write(store, params, _rows())
 
     assert store.delete_all() == len(_ROWS)
@@ -245,7 +211,7 @@ def test_deleting_everything_leaves_an_empty_searchable_store(backend) -> None:
 
 def test_deleting_a_database_returns_the_deleted_rows_ids(backend) -> None:
     # dal.reset counts them with len(); Elasticsearch once returned an int.
-    _, store, params = backend
+    store, params = backend
     _write(store, params, _rows())
 
     deleted = store.delete_by_database("pagila")
@@ -264,7 +230,7 @@ def _replace(store: VectorStore, params: EmbedParams, node_id: str, text: str) -
 
 
 def test_replacing_a_row_swaps_it_for_the_new_text(backend) -> None:
-    _, store, params = backend
+    store, params = backend
     _write(store, params, _rows())
 
     assert _replace(store, params, "c_email", "customer phone number") == 1
@@ -280,9 +246,9 @@ def test_replacing_a_row_swaps_it_for_the_new_text(backend) -> None:
 def test_a_replacement_that_cannot_be_embedded_keeps_the_old_row(
     backend, fake: FakeEmbedder
 ) -> None:
-    # pgvector embeds in embed_rows, before anything is deleted; Elasticsearch
-    # embeds in the write, so the store has to write before it deletes.
-    _, store, params = backend
+    # Elasticsearch embeds in the write, so the store has to write before it
+    # deletes.
+    store, params = backend
     _write(store, params, _rows())
     fake.fail_next(401, times=20)
 
@@ -296,35 +262,23 @@ def test_a_replacement_that_cannot_be_embedded_keeps_the_old_row(
 
 
 def test_searching_an_empty_store_finds_nothing(backend) -> None:
-    _, store, params = backend
+    store, params = backend
 
     assert _search(store, params, "customer email") == []
 
 
-def test_a_reset_replaces_one_database_and_keeps_the_others(
-    backend, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    name, store, params = backend
+def test_a_reset_replaces_one_database_and_keeps_the_others(backend) -> None:
+    store, params = backend
     _write(store, params, _rows())
 
-    if name == "elasticsearch":
-        assert isinstance(store, ElasticsearchVDB)
-        fresh: VectorStore = ElasticsearchVDB(
-            client=store._client,
-            index_name=store.index_name,
-            endpoint=store._endpoint,
-            database_name="pagila",
-            reset=True,
-        )
-    else:
-        assert isinstance(store, PostgresVDB)
-        fresh = PostgresVDB(
-            connection_string=store.connection_string,
-            collection_name=store.collection_name,
-            schema_name=store.schema_name,
-            database_name="pagila",
-            reset=True,
-        )
+    assert isinstance(store, ElasticsearchVDB)
+    fresh = ElasticsearchVDB(
+        client=store._client,
+        index_name=store.index_name,
+        endpoint=store._endpoint,
+        database_name="pagila",
+        reset=True,
+    )
     _write(fresh, params, _rows([("c_new", "Column", "pagila", "customer email")]))
 
     remaining = _ids(_search(store, params, "customer email address", top_k=10))
@@ -332,42 +286,7 @@ def test_a_reset_replaces_one_database_and_keeps_the_others(
 
 
 # ---------------------------------------------------------------------------
-# Parity
-# ---------------------------------------------------------------------------
-
-_PARITY_QUERIES = [
-    "customer email",
-    "how much does a rental cost",
-    "film duration",
-    "billing address on invoices",
-    "names of customers",
-]
-
-
-def test_both_backends_rank_alike(
-    fake: FakeEmbedder, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    rankings: dict[str, list[list[str]]] = {}
-    for name, make in _BACKENDS.items():
-        monkeypatch.setenv("VDB_BACKEND", name)
-        for store, params in make(fake):
-            _write(store, params, _rows())
-            # Only hits that share a word with the query: the rest sit at
-            # cosine ~0, where float16 and float32 may order ties differently.
-            rankings[name] = [
-                [
-                    hit["metadata"]["id"]
-                    for hit in _search(store, params, query, top_k=3)
-                    if hit["_distance"] < 0.9
-                ]
-                for query in _PARITY_QUERIES
-            ]
-
-    assert rankings["elasticsearch"] == rankings["postgres"]
-
-
-# ---------------------------------------------------------------------------
-# Hybrid search (Elasticsearch only)
+# Hybrid search
 # ---------------------------------------------------------------------------
 
 

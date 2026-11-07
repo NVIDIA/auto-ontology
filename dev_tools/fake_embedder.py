@@ -4,12 +4,10 @@
 
 """A deterministic stand-in for NVIDIA's ``/v1/embeddings`` endpoint.
 
-Both vector-store backends can be pointed at it: the Postgres backend through
-``EMBED_ENDPOINT`` (the app embeds), the Elasticsearch backend through the
-``url`` of its ``nvidia`` inference endpoint (Elasticsearch embeds). Because
-both then embed with the same function, the two backends must return the same
-neighbours for the same query -- which is what makes it a parity check, not
-just a smoke test.
+The Elasticsearch store's tests point the ``url`` of its ``nvidia`` inference
+endpoint here. Elasticsearch embeds rows and queries itself, over HTTP, so
+unlike the Postgres store -- where the app embeds and a test can monkeypatch
+it -- it needs a real server to call, and CI has no NVIDIA key.
 
 Each word and character trigram gets a fixed pseudo-random direction, and a
 text's vector is the normalised sum of its features'. That is crude, but it is
@@ -87,8 +85,7 @@ class FakeEmbedder:
     """An embeddings server on a background thread; use as a context manager.
 
     Bind to ``0.0.0.0`` when an Elasticsearch container has to reach it (it
-    then calls back through ``host.docker.internal``); the default loopback is
-    enough for the Postgres backend, which embeds in-process.
+    then calls back through ``host.docker.internal``).
     """
 
     host: str = "127.0.0.1"
