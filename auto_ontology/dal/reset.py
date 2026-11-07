@@ -31,6 +31,7 @@ from sqlalchemy import delete, select, union
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.semantic.constants import SEMANTIC_SOURCE
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
 
 logger = logging.getLogger(__name__)
@@ -102,21 +103,41 @@ def _delete_scoped_semantic(database_name: str) -> int:
         )
         return owner_column.in_(inside) & owner_column.notin_(outside)
 
-    # Term: reached through table__term.
+    # Term: reached through table__term, plus any semantic Term left with no
+    # representing table after a prior table deletion.
+    represented = (
+        select(s.table__term.c.term_id)
+        .where(s.table__term.c.term_id == s.term.c.id)
+        .correlate(s.term)
+        .exists()
+    )
     term_ids = select(s.table__term.c.term_id).where(
         only_ours(s.table__term, s.table__term.c.term_id, s.table__term.c.table_id)
     )
     deleted += len(
         store().query_write(
-            delete(s.term).where(s.term.c.id.in_(term_ids)).returning(s.term.c.id)
+            delete(s.term)
+            .where(
+                s.term.c.id.in_(term_ids)
+                | ((s.term.c.source == SEMANTIC_SOURCE) & ~represented)
+            )
+            .returning(s.term.c.id)
         )
     )
 
-    # ColumnAttribute: owned outright by exactly one table.
+    # ColumnAttribute: owned outright by one table, plus any attribute whose
+    # table_id points at a catalog_table that was already deleted.
+    live_tables = select(s.catalog_table.c.id)
     deleted += len(
         store().query_write(
             delete(s.column_attribute)
-            .where(s.column_attribute.c.table_id.in_(tables))
+            .where(
+                s.column_attribute.c.table_id.in_(tables)
+                | (
+                    (s.column_attribute.c.table_id != "")
+                    & s.column_attribute.c.table_id.notin_(live_tables)
+                )
+            )
             .returning(s.column_attribute.c.id)
         )
     )

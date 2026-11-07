@@ -473,6 +473,19 @@ def test_upsert_table_term_writes_nothing_when_the_table_is_missing() -> None:
     assert t.upsert_table_term("Ghost", "x", "no-such-table") is None
 
 
+def test_upsert_table_term_adopts_an_unrepresented_term(world) -> None:
+    """An orphaned Term with no table__term link is reclaimed rather than suffixed."""
+    world.table("orders")
+    orphan_id = world.term("Order", description="stale")
+
+    persisted = t.upsert_table_term(
+        f"{world.prefix}-Order", "reclaimed", world.tables["orders"]
+    )
+
+    assert persisted == (orphan_id, f"{world.prefix}-Order")
+    assert t.term_is_in_scope(orphan_id) is True
+
+
 # --------------------------------------------------------------------------
 # Term detail
 # --------------------------------------------------------------------------
