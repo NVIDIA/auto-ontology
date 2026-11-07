@@ -19,49 +19,57 @@ init container, which blocks on `public.catalog_database` -- so a post-install h
 would deadlock (the Deployment would never become Ready, so the hook would never
 run). `helm --wait` waits for the Job to complete.
 
-Named per `.Release.Revision` because Job specs are immutable — a stable name
-could not re-run on upgrade — and ttlSecondsAfterFinished garbage-collects
-finished Jobs.
+Named per `.Release.Revision` plus a hash of the rendered spec, because Job
+specs are immutable — a stable name could neither re-run nor take a new image.
+The hash is what renames it under ArgoCD, which renders with `helm template`
+and so always sees revision 1; without it ArgoCD's patch of the image is
+rejected and the old Job stays. No ttlSecondsAfterFinished: ArgoCD self-heal
+recreates a garbage-collected Job, re-running it every ~10 minutes. A
+superseded Job is deleted when it leaves the manifest (`helm upgrade`, ArgoCD
+prune).
 
 Alembic applies each revision in a transaction and records it in
 public.alembic_version, so re-running is a no-op rather than an error. A failed
 migration leaves the version table pointing at the last good revision.
 */}}
+{{- define "auto-ontology.alembicMigrateJobSpec" -}}
+backoffLimit: 3
+template:
+  metadata:
+    labels:
+      {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "auto-ontology-migrate") | nindent 6 }}
+  spec:
+    restartPolicy: OnFailure
+    {{- include "auto-ontology.imagePullSecrets" . | nindent 4 }}
+    initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.36
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z postgres {{ .Values.postgres.service.port }}; do
+              echo "waiting for postgres..."
+              sleep 2
+            done
+        {{- include "auto-ontology.initResources" . | nindent 8 }}
+    containers:
+      - name: alembic-migrate
+        image: "{{ include "auto-ontology.image" .Values.backend.image }}"
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        envFrom:
+          - secretRef:
+              name: {{ include "auto-ontology.secretName" . }}
+        args:
+          - migrate
+{{- end }}
+{{- $spec := include "auto-ontology.alembicMigrateJobSpec" . }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: auto-ontology-migrate-{{ .Release.Revision }}
+  name: auto-ontology-migrate-{{ .Release.Revision }}-{{ $spec | sha256sum | trunc 8 }}
   labels:
     {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "auto-ontology-migrate") | nindent 4 }}
 spec:
-  backoffLimit: 3
-  ttlSecondsAfterFinished: 600
-  template:
-    metadata:
-      labels:
-        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "auto-ontology-migrate") | nindent 8 }}
-    spec:
-      restartPolicy: OnFailure
-      {{- include "auto-ontology.imagePullSecrets" . | nindent 6 }}
-      initContainers:
-        - name: wait-for-postgres
-          image: busybox:1.36
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command:
-            - sh
-            - -c
-            - |
-              until nc -z postgres {{ .Values.postgres.service.port }}; do
-                echo "waiting for postgres..."
-                sleep 2
-              done
-          {{- include "auto-ontology.initResources" . | nindent 10 }}
-      containers:
-        - name: alembic-migrate
-          image: "{{ include "auto-ontology.image" .Values.backend.image }}"
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
-          envFrom:
-            - secretRef:
-                name: {{ include "auto-ontology.secretName" . }}
-          args:
-            - migrate
+  {{- $spec | nindent 2 }}
