@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from auto_ontology.dal.terms import semantic_layer_calculated
 from auto_ontology.ingestion_service.history import (
@@ -45,13 +45,22 @@ async def trigger() -> dict[str, str]:
 @router.post(
     "/semantic-compilation/reset", status_code=202, response_model=StatusResponse
 )
-async def reset() -> dict[str, str]:
-    """Ask the ingestion service to rebuild every database's semantic layer.
+async def reset(
+    database_name: str | None = Query(
+        default=None,
+        description=(
+            "Reset only this database's semantic layer. Omit to reset every database."
+        ),
+    ),
+) -> dict[str, str]:
+    """Ask the ingestion service to rebuild the semantic layer.
 
     The service deletes the semantic nodes and embeddings and compiles them
     again, so the layer is rebuilt without waiting for the next scheduled run.
+    With ``database_name`` only that database's layer is deleted; without it,
+    every database's.
     """
-    trigger_semantic_reset()
+    trigger_semantic_reset(database_name)
     return {"status": "accepted"}
 
 
