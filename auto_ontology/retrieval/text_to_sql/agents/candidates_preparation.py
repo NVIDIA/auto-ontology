@@ -158,6 +158,10 @@ def _new_single_hop_paths(
     return fresh
 
 
+def _table_key(schema: str | None, name: str | None) -> tuple[str, str]:
+    return (schema or "").casefold(), (name or "").casefold()
+
+
 def _split_unjoined_tables(
     tables: list[dict],
     joins: list[list[dict]],
@@ -173,15 +177,12 @@ def _split_unjoined_tables(
     everything is kept when no join touches any table.
     """
 
-    def key(schema: str, name: str) -> tuple[str, str]:
-        return (schema or "").casefold(), (name or "").casefold()
-
-    in_scope = {key(t.get("schema_name", ""), t.get("name", "")) for t in tables}
+    in_scope = {_table_key(t.get("schema_name"), t.get("name")) for t in tables}
     joined: set[tuple[str, str]] = set()
     for path in joins:
         for hop in path:
-            a = key(hop.get("source_schema", ""), hop.get("source_table", ""))
-            b = key(hop.get("target_schema", ""), hop.get("target_table", ""))
+            a = _table_key(hop.get("source_schema"), hop.get("source_table"))
+            b = _table_key(hop.get("target_schema"), hop.get("target_table"))
             if a != b and a in in_scope and b in in_scope:
                 joined.update((a, b))
     if not joined:
@@ -190,7 +191,7 @@ def _split_unjoined_tables(
     kept: list[dict] = []
     dropped: list[dict] = []
     for table in tables:
-        touched = key(table.get("schema_name", ""), table.get("name", "")) in joined
+        touched = _table_key(table.get("schema_name"), table.get("name")) in joined
         (kept if touched or table.get("id") in keep_ids else dropped).append(table)
     return kept, dropped
 
@@ -773,6 +774,27 @@ class CandidatePreparationAgent(BaseAgent):
                 len(unjoined),
                 [_qualified_name(t) for t in unjoined],
             )
+
+        # A join into a table the prompt does not describe invites guessed columns.
+        in_scope = {
+            _table_key(t.get("schema_name"), t.get("name")) for t in relevant_tables
+        }
+        scoped_paths = [
+            p
+            for p in attribute_join_paths
+            if all(
+                _table_key(hop.get(f"{end}_schema"), hop.get(f"{end}_table"))
+                in in_scope
+                for hop in p.get("path") or []
+                for end in ("source", "target")
+            )
+        ]
+        if len(scoped_paths) < len(attribute_join_paths):
+            self.logger.info(
+                "Dropped %d join path(s) through tables not in scope",
+                len(attribute_join_paths) - len(scoped_paths),
+            )
+            attribute_join_paths = scoped_paths
 
         if _ENTITY_TABLE_RANKING_ENABLED:
             relevant_tables = rank_tables_by_entity(

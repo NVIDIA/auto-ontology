@@ -454,6 +454,8 @@ def test_every_direct_join_between_final_tables_is_added_once(monkeypatch) -> No
 
     shown = hop("orders", "buyer_id", "people", "id")
     seller = hop("orders", "seller_id", "people", "id")
+    # Never added to scope, so a join into it would name undescribed columns.
+    unlisted = hop("orders", "depot_id", "depots", "id")
     asked: list[list[str]] = []
 
     def fake_direct(ids: list[str]) -> list[list[dict]]:
@@ -481,7 +483,7 @@ def test_every_direct_join_between_final_tables_is_added_once(monkeypatch) -> No
     monkeypatch.setattr(
         candidates_preparation,
         "find_connected_junction_tables",
-        lambda ids: ([], [[shown]]),
+        lambda ids: ([], [[shown], [unlisted]]),
     )
     monkeypatch.setattr(candidates_preparation, "find_direct_table_joins", fake_direct)
 
