@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 import time
 from datetime import timedelta
 
@@ -32,17 +34,42 @@ from auto_ontology.ingestion_service.scheduler import IntervalScheduler
 logger = logging.getLogger(__name__)
 
 # Cadence measured from the end of the previous run rather than a fixed
-# wall-clock time.
-INGEST_INTERVAL = timedelta(hours=24)
+# wall-clock time. Overridable via INGEST_INTERVAL_HOURS in the environment.
+DEFAULT_INGEST_INTERVAL_HOURS = 24.0
+INGEST_INTERVAL = timedelta(hours=DEFAULT_INGEST_INTERVAL_HOURS)
+
+
+def _resolve_ingest_interval() -> timedelta:
+    """Resolve the recurring ingest interval from ``INGEST_INTERVAL_HOURS``."""
+    raw = os.environ.get("INGEST_INTERVAL_HOURS", "").strip()
+    if not raw:
+        return INGEST_INTERVAL
+    try:
+        hours = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid INGEST_INTERVAL_HOURS=%r; falling back to %gh",
+            raw,
+            DEFAULT_INGEST_INTERVAL_HOURS,
+        )
+        return INGEST_INTERVAL
+    if not math.isfinite(hours) or hours <= 0:
+        logger.warning(
+            "Non-positive INGEST_INTERVAL_HOURS=%r; falling back to %gh",
+            raw,
+            DEFAULT_INGEST_INTERVAL_HOURS,
+        )
+        return INGEST_INTERVAL
+    return timedelta(hours=hours)
 
 
 class DataScheduler(IntervalScheduler):
-    """Drives data ingestion on startup, on a 24h timer, and on demand."""
+    """Drives data ingestion on startup, on a recurring timer, and on demand."""
 
     name = "ingest"
 
-    def __init__(self, interval: timedelta = INGEST_INTERVAL) -> None:
-        super().__init__(interval)
+    def __init__(self, interval: timedelta | None = None) -> None:
+        super().__init__(_resolve_ingest_interval() if interval is None else interval)
 
     async def _run_once(self) -> None:
         # Reload connectors each pass so newly added connections are picked up
