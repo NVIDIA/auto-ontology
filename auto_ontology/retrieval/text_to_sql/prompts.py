@@ -292,7 +292,13 @@ _MYSQL_DIALECT_RULES = (
     "- STDDEV(), STD() and VARIANCE() are the POPULATION statistics in MySQL "
     "(the same as STDDEV_POP() and VAR_POP()). Use the function the question "
     "names; use STDDEV_SAMP() or VAR_SAMP() only when it asks for a sample "
-    "statistic.\n\n"
+    "statistic.\n"
+    "- When the question asks for subtotal or grand-total rows, shown with "
+    "NULL in the grouped columns they total over, use GROUP BY ... WITH "
+    "ROLLUP rather than a UNION ALL of separately aggregated rows. List the "
+    "GROUP BY columns from the outermost total inward (GROUP BY school, "
+    "department WITH ROLLUP gives a subtotal per school and one overall "
+    "total), and keep the rows ROLLUP returns.\n\n"
 )
 
 

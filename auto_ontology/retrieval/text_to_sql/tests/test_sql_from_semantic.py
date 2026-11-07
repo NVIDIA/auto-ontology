@@ -147,6 +147,7 @@ def test_mysql_rules_lift_the_division_cast_and_forbid_rounding_casts() -> None:
     # Only a ratio too small for 4 decimal places may be widened.
     assert "1 / 1000000 = 0.0000" in rules
     assert "POPULATION statistics" in rules
+    assert "WITH ROLLUP" in rules
     # Other dialects keep their own rules.
     for dialect in ("sqlite", "postgres", "snowflake", None):
         assert "MySQL" not in format_dialect_rules(dialect)
