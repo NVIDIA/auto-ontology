@@ -24,6 +24,13 @@ from auto_ontology.retrieval.entity_coverage.graph import (
     create_graph as _create_entity_coverage_graph,
 )
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
+from auto_ontology.retrieval.data_access.hit_scores import (
+    ambiguous_pair,
+    cosine_distance,
+    is_hybrid_hit,
+    passes_relevance_gate,
+    rank_score,
+)
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from auto_ontology.utils.llm_invoke import get_llm_client, safe_invoke_text_nr
@@ -207,30 +214,34 @@ def _ambiguity_check(
     (meaning they're genuinely competing, not just two hits that separately
     happened to qualify). These are demoted to unresolvable even if
     CoverageGradeAgent counted them covered.
+
+    Hybrid hits are gated on their vector distance or an exact name, and are
+    a tie when the BM25 and vector searches disagree on their order, unless
+    only the best names the entity -- see ``hit_scores.ambiguous_pair``.
     """
     hits: list[dict] = path_state.get("retrieved_column_attributes") or []
-    # Group best score and second-best score per query_entity.
-    best: dict[str, float] = {}
-    second: dict[str, float] = {}
+    # Group best and second-best hit per query_entity.
+    best: dict[str, dict] = {}
+    second: dict[str, dict] = {}
     for hit in hits:
-        score = hit.get("score")
-        if score is None:
+        if hit.get("score") is None:
             continue
-        score = float(score)
-        if score > CLARIFY_MAX_DISTANCE:
+        if not passes_relevance_gate(hit, CLARIFY_MAX_DISTANCE):
             continue
+        score = float(hit["score"])
         for entity in hit.get("query_entities") or (
             [hit["query_entity"]] if hit.get("query_entity") else []
         ):
-            if entity not in best or score < best[entity]:
-                second[entity] = best.get(entity, float("inf"))
-                best[entity] = score
-            elif entity not in second or score < second[entity]:
-                second[entity] = score
+            if entity not in best or score < float(best[entity]["score"]):
+                if entity in best:
+                    second[entity] = best[entity]
+                best[entity] = hit
+            elif entity not in second or score < float(second[entity]["score"]):
+                second[entity] = hit
     ambiguous = {
         e
         for e, s in second.items()
-        if s <= CLARIFY_MAX_DISTANCE and (s - best[e]) < _AMBIGUITY_MAX_GAP
+        if ambiguous_pair(best[e], s, _AMBIGUITY_MAX_GAP, entity=e)
     }
     if ambiguous:
         logger.info("Clarify — ambiguous entities (2+ close VDB hits): %s", ambiguous)
@@ -409,7 +420,7 @@ def _entity_ranked_hits(
             "Clarify — collision re-query failed for %r", entity, exc_info=True
         )
         return []
-    return sorted(hits, key=lambda h: float(h.get("score") or float("inf")))
+    return sorted(hits, key=rank_score)
 
 
 _COLLISION_LLM_PROMPT = """\
@@ -790,8 +801,8 @@ def _resolve_collisions(
         for e in kb_covered_here:
             norm = _normalize_entity(e) or e.lower().strip()
             kb_entry = kb_text_by_norm.get(norm)
-            score = best_hit_per_entity[e].get("score")
-            score = float(score) if score is not None else float("inf")
+            # Cosine units: the threshold was tuned on them (hit_scores).
+            score = cosine_distance(best_hit_per_entity[e])
             if kb_entry and score < _KB_VDB_DISAMBIG_THRESHOLD:
                 kb_formula_candidates[e] = kb_entry
                 if adjudicated_norms_out is not None:
@@ -943,31 +954,44 @@ def _resolve_collisions(
             e: _entity_ranked_hits(e, semantic_retriever, db_name) for e in entities
         }
 
+        def _shared_hit(e: str) -> dict:
+            return next(
+                (h for h in fresh_hits[e] if str(h.get("id") or "") == shared_id),
+                best_hit_per_entity[e],
+            )
+
         def _score_for_shared(e: str) -> float:
             hit = next(
                 (h for h in fresh_hits[e] if str(h.get("id") or "") == shared_id), None
             )
-            return (
-                float(hit["score"])
-                if hit
-                else float(best_hit_per_entity[e].get("score") or float("inf"))
-            )
+            return float(hit["score"]) if hit else rank_score(best_hit_per_entity[e])
+
+        def _distance_for_shared(e: str) -> float:
+            # The margins below are in cosine units. A hybrid hit's score is
+            # an RRF ordering, so the margins read its vector distance instead
+            # (hit_scores); a semantic hit's score already is one.
+            hit = _shared_hit(e)
+            return cosine_distance(hit) if is_hybrid_hit(hit) else _score_for_shared(e)
+
+        def _distance(hit: dict) -> float:
+            return cosine_distance(hit) if is_hybrid_hit(hit) else float(hit["score"])
 
         ranked = sorted(entities, key=_score_for_shared)
         winner = ranked[0]
         winner_score = _score_for_shared(winner)
+        winner_distance = _distance_for_shared(winner)
 
         needs_llm: list[str] = []
         for loser in ranked[1:]:
-            loser_score = _score_for_shared(loser)
+            loser_distance = _distance_for_shared(loser)
             next_distinct = next(
                 (h for h in fresh_hits[loser] if str(h.get("id") or "") != shared_id),
                 None,
             )
-            margin_ok = (loser_score - winner_score) >= _COLLISION_WINNER_MARGIN
+            margin_ok = (loser_distance - winner_distance) >= _COLLISION_WINNER_MARGIN
             gap_ok = (
                 next_distinct is not None
-                and (float(next_distinct["score"]) - loser_score)
+                and (_distance(next_distinct) - loser_distance)
                 < _COLLISION_LOSER_MAX_GAP
             )
             if margin_ok and gap_ok:
@@ -1241,7 +1265,7 @@ def _find_unresolvable_entities(
     best_hit_per_entity: dict[str, dict] = {}
     for hit in col_hits:
         score = hit.get("score")
-        if score is None or float(score) > CLARIFY_MAX_DISTANCE:
+        if score is None or not passes_relevance_gate(hit, CLARIFY_MAX_DISTANCE):
             continue
         for entity in hit.get("query_entities") or (
             [hit["query_entity"]] if hit.get("query_entity") else []
@@ -1352,8 +1376,9 @@ def _find_unresolvable_entities(
                 )
             else:
                 hit_text = hit.get("text") or ""
+            # Cosine units: clarify.py compares it with _KB_VDB_DISAMBIG_THRESHOLD.
             resolved_hits.append(
-                (norm, hit_text, float(hit.get("score", 1.0)), str(hit.get("id") or ""))
+                (norm, hit_text, cosine_distance(hit, 1.0), str(hit.get("id") or ""))
             )
 
     # --- Step 4: final unresolvable = (VDB-uncovered ∪ ambiguous) − KB-covered ---

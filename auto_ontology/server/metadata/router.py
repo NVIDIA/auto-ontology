@@ -24,8 +24,10 @@ class EntityCoverageRequest(BaseModel):
         default=DEFAULT_MAX_DISTANCE,
         gt=0.0,
         description=(
-            "Maximum L2 vector distance for a candidate to count "
-            "(lower score = closer match)."
+            "Maximum cosine distance (1 - cos) for a candidate to count "
+            "(lower score = closer match). With VDB_SEARCH_MODE=hybrid, "
+            "candidates are ordered by fusing keyword and vector search, and "
+            "this applies to the vector search's distance."
         ),
     )
 

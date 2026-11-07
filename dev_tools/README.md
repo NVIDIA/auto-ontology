@@ -13,7 +13,10 @@ Local development helpers: environment setup, database seeding, and ingest.
 | Path | What it is |
 |---|---|
 | `setup_env.sh` | Brings the docker-compose stack up. Human-invoked. |
-| `local_ingest.py` | Ingests the local Postgres source into the pgvector store. |
+| `local_ingest.py` | Ingests the local Postgres source into the vector store. |
+| `e2e_local.py` | End-to-end run of the Elasticsearch vector store: compose Postgres + Elasticsearch, the ingestion service and API on the host, pagila registered as a connection, ingested and compiled, then the result checked. Needs Docker and an `nvapi-` key. |
+| `calibrate_vdb.py` | Compares the vector-store search modes on the labelled entities in `fixtures/calibration_entities.yaml` and sweeps each relevance gate. Needs the seeded fixture and an embedding key. |
+| `fake_embedder.py` | Deterministic stand-in for NVIDIA's `/v1/embeddings`; the vector-store contract tests embed through it on both backends. |
 | `generate_backend_openapi.py` | Dumps the FastAPI OpenAPI specs to `docs/openapi/`. Run by `ci-openapi.yml`. |
 | `release_helm_chart.py` | Packages the chart and publishes it to the NGC Helm registry. Run by `release-helm.yml`. |
 | `_add_spdx_headers.py` | One-off OSRB helper; kept so the header insertion is reproducible. |
@@ -82,11 +85,50 @@ Brings up the Auto-Ontology environment via `docker compose`.
 | `bash ./dev_tools/setup_env.sh --dev` | Infra only. You run `auto_ontology` / `auto-ontology-frontend` locally yourself. |
 | `bash ./dev_tools/setup_env.sh --ds` | Infra **+** `auto-ontology-frontend` in docker. You run `auto_ontology` locally on `:3001`; the containerised frontend reaches it via `host.docker.internal:3001`. |
 
+### Elasticsearch
+
+With `VDB_BACKEND=elasticsearch` in `.env`, `setup_env.sh` also starts the
+compose Elasticsearch (9.5.6, trial license), as long as `ES_URL` is unset or
+`http://localhost:<ES_PORT>`. `ES_PORT` defaults to 9200; set it when something
+else already has that port. Any other `ES_URL` (Elastic Cloud, Serverless,
+another local cluster) is used as is and nothing is started; a cluster on
+`localhost` is reached from the containers as `host.docker.internal`.
+
+```bash
+# .env
+VDB_BACKEND=elasticsearch
+ES_PORT=9201
+ES_URL=http://localhost:9201
+```
+
+The trial license matters: the `nvidia` inference service the app writes
+through is an Enterprise feature, and on a basic license creating it fails with
+`403 current license is non-compliant for [inference]`.
+
+### End-to-end check
+
+`e2e_local.py` exercises the whole Elasticsearch path the way the UI does and
+reports what was built: the inference endpoint and index sizes, the Terms the
+semantic layer got, recall on the pagila entities in
+`fixtures/calibration_entities.yaml`, and the search and entity-coverage APIs.
+It pins the vector store to the compose cluster (port 9201 by default), so an
+`ES_URL` in `.env` is never written to, and takes only the model settings from
+`.env`.
+
+```bash
+uv run --no-sync python -m dev_tools.e2e_local --output .e2e/report.md
+uv run --no-sync python -m dev_tools.e2e_local --search-mode hybrid --skip-compile
+```
+
+`--fresh` deletes the compose Postgres and Elasticsearch, volumes included,
+before starting. Logs go to `.e2e/`.
+
 ### Endpoints
 
 | Service | URL |
 |---|---|
 | Postgres | `localhost:5432` |
+| Elasticsearch (`VDB_BACKEND=elasticsearch`) | <http://localhost:9200> (`ES_PORT`) |
 | pgAdmin | <http://localhost:5050> |
 | Auto-Ontology ingestion service | <http://localhost:3002> |
 | Auto-Ontology frontend (full stack only) | <http://localhost:3000> |

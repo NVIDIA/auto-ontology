@@ -49,7 +49,7 @@ To run a text-to-SQL benchmark such as BIRD, refer to the
 | Frontend            | Next.js 16 (React 19, TypeScript, Tailwind CSS 4), Better Auth, Prisma | Web UI, authentication, API gateway        | 3000         |
 | Backend             | FastAPI (Python 3.12+), LangChain                                      | Chat / NL-to-SQL, catalog, datasource APIs | 3001         |
 | Ingestion worker    | FastAPI (Python 3.12+)                                                 | Ingests tabular data and writes embeddings | 3002         |
-| Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, vector store | 5432 |
+| Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, default vector store | 5432 |
 | HashiCorp Vault     | Optional                                                               | Secure storage of connection credentials   | —            |
 
 ### NVIDIA NIM
@@ -215,7 +215,8 @@ databases:
 3. Resolve relationships: infer joins between tables and bridge tables, and
    suggest SQL attributes from query history.
 4. Write the ontology: store terms, relationships, and SQL attributes in
-   Postgres, with embeddings in pgvector for retrieval.
+   Postgres, with embeddings in the vector store (pgvector or Elasticsearch)
+   for retrieval.
 
 The result is a semantic graph you can explore in the UI. In this example, one
 compilation of Wide World Importers produced 31 terms; selecting **Order** shows
@@ -265,7 +266,7 @@ Use **Settings → Import / Export**, or `POST /api/model/import` and
 | Backend             | FastAPI (Python 3.12+), LangChain | Text-to-SQL agent, catalog, ontology APIs  | 3001 |
 | Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation         | 3002 |
 | MCP server          | FastMCP                           | Read-only agent tools over the public API  | 3003 |
-| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store  | 5432 |
+| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, default vector store | 5432 |
 | HashiCorp Vault     | Optional                          | Connection credential storage              | n/a  |
 
 Keep ports 3001 and 3002 on a private network. FastAPI trusts the user identity
@@ -411,7 +412,7 @@ NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 | --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes), writes each answer's SQL and explanation, and grades answerability |
 | `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
-| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
+| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in the vector store, and matches each question to them                              |
 | `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Ranks candidate tables when compilation builds bridge-table SQL attributes                                                     |
 
 To use self-hosted NIM or any OpenAI-compatible endpoint, set

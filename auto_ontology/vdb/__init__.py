@@ -2,10 +2,44 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""VDB initialization — data layer and semantic layer collections."""
+"""VDB initialization — data layer and semantic layer collections.
 
+``VDB_BACKEND`` picks the store: ``postgres`` (pgvector, the default) or
+``elasticsearch`` (``semantic_text`` over an NVIDIA inference endpoint). Both
+implement :class:`~auto_ontology.vdb.base.VectorStore`. ``VDB_SEARCH_MODE=hybrid``
+(Elasticsearch only) fuses BM25 with the vector search; ``HYBRID_RRF_RANK_CONSTANT``
+and ``HYBRID_RRF_RANK_WINDOW`` tune the fusion.
+"""
+
+import os
+
+from auto_ontology.infra.elasticsearch import (
+    get_elasticsearch_client,
+    get_elasticsearch_config,
+    get_embed_endpoint,
+)
 from auto_ontology.infra.postgres import get_postgres_connection_string
+from auto_ontology.vdb.backend import embeds_server_side, vdb_backend, vdb_search_mode
+from auto_ontology.vdb.base import VectorStore
+from auto_ontology.vdb.elasticsearch import (
+    DEFAULT_RANK_CONSTANT,
+    DEFAULT_RANK_WINDOW,
+    ElasticsearchVDB,
+)
 from auto_ontology.vdb.postgres import PostgresVDB
+
+__all__ = [
+    "DATA_VDB_COLLECTION",
+    "SEMANTIC_VDB_COLLECTION",
+    "VDB_SCHEMA",
+    "VectorStore",
+    "embeds_server_side",
+    "get_data_vdb",
+    "get_semantic_vdb",
+    "get_vdb",
+    "vdb_backend",
+    "vdb_search_mode",
+]
 
 DATA_VDB_COLLECTION: str = "data_objects_layer"
 SEMANTIC_VDB_COLLECTION: str = "semantic_layer"
@@ -17,11 +51,30 @@ def get_vdb(
     database_name: str | None = None,
     collection_name: str = DATA_VDB_COLLECTION,
     reset: bool = False,
-) -> PostgresVDB:
-    """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
+) -> VectorStore:
+    """Build the configured store for *collection_name*.
 
     When database_name is provided, the VDB will use it to reset old embeddings for the given database.
     """
+    # Checked on every backend, so that hybrid on Postgres fails here.
+    search_mode = vdb_search_mode()
+    if vdb_backend() == "elasticsearch":
+        config = get_elasticsearch_config()
+        return ElasticsearchVDB(
+            client=get_elasticsearch_client(config),
+            index_name=f"{config.index_prefix}-{collection_name}",
+            endpoint=get_embed_endpoint(config.inference_id),
+            database_name=database_name,
+            reset=reset,
+            search_mode=search_mode,
+            rank_constant=int(
+                os.environ.get("HYBRID_RRF_RANK_CONSTANT") or DEFAULT_RANK_CONSTANT
+            ),
+            rank_window=int(
+                os.environ.get("HYBRID_RRF_RANK_WINDOW") or DEFAULT_RANK_WINDOW
+            ),
+        )
+
     connection_string = get_postgres_connection_string()
     kwargs: dict = {
         "connection_string": connection_string,
@@ -35,15 +88,15 @@ def get_vdb(
 
 def get_data_vdb(
     *, database_name: str | None = None, reset: bool = False
-) -> PostgresVDB:
+) -> VectorStore:
     """Backward-compatible alias for :func:`get_vdb` (tabular / data layer)."""
     return get_vdb(database_name=database_name, reset=reset)
 
 
 def get_semantic_vdb(
     *, database_name: str | None = None, reset: bool = False
-) -> PostgresVDB:
-    """Build a PostgresVDB for the semantic layer."""
+) -> VectorStore:
+    """Build the configured store for the semantic layer."""
     return get_vdb(
         database_name=database_name,
         collection_name=SEMANTIC_VDB_COLLECTION,

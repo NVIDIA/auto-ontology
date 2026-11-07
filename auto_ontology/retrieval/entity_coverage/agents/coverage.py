@@ -12,6 +12,10 @@ from typing import Any, Dict
 from auto_ontology.dal.attributes import fetch_attr_column_contexts
 from auto_ontology.dal.custom_analyses import fetch_custom_analyses_with_sql
 from auto_ontology.dal.sql_attributes import fetch_sql_attributes_with_sql
+from auto_ontology.retrieval.data_access.hit_scores import (
+    passes_relevance_gate,
+    rank_score,
+)
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.state import AgentState
@@ -22,10 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def _within_distance(hit: dict[str, Any], max_distance: float) -> bool:
-    try:
-        return float(hit.get("score") or float("inf")) <= max_distance
-    except (TypeError, ValueError):
-        return False
+    """Whether *hit* is a match; for a hybrid hit, by its vector distance or an exact name."""
+    return passes_relevance_gate(hit, max_distance)
 
 
 def _filter_by_distance(
@@ -146,7 +148,7 @@ def _enrich_custom_analyses(
 def _rank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
         candidates,
-        key=lambda h: float(h.get("score") or float("inf")),
+        key=rank_score,
     )
 
 

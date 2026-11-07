@@ -94,3 +94,6 @@ helm.sh
 /temp.txt
 /vectors_wiki.py
 /vectors_wiki_load.py
+
+# dev_tools/e2e_local.py logs
+.e2e/

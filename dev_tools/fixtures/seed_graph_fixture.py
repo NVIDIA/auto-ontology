@@ -15,7 +15,7 @@ Two deliberate choices:
   different every run. Neither is acceptable for a fidelity oracle. Writing the
   same artifacts directly through ``auto_ontology.dal`` is reproducible and exercises the
   same write paths the DAL port has to preserve.
-* **Embedding is stubbed out.** The service-layer creates embed into pgvector
+* **Embedding is stubbed out.** The service-layer creates embed into the vector store
   after writing the graph. Goldens capture graph reads, so the embed call is
   replaced with a no-op rather than requiring an embedding endpoint to build a
   fixture.
@@ -441,7 +441,7 @@ def _stub_embedding() -> None:
     """Replace embed calls with no-ops.
 
     Building the fixture must not require an embedding endpoint: the goldens
-    capture graph reads, and pgvector contents are not part of any DAL read
+    capture graph reads, and vector-store contents are not part of any DAL read
     result.
     """
     from auto_ontology.server.custom_analyses import service as ca_service
