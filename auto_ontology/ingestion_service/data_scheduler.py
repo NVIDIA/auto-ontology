@@ -5,8 +5,9 @@
 """Recurring scheduler for data ingestion.
 
 Runs :func:`run_ingest` for every configured connection once at startup, then
-again every 24h measured from the end of the previous run. Connections are
-reloaded on every pass so newly added ones are picked up without a restart.
+again every ``INGEST_INTERVAL_HOURS`` hours (default 24) measured from the end
+of the previous run. Connections are reloaded on every pass so newly added
+ones are picked up without a restart.
 
 A pass also replays the tagging rules, but only when semantic compilation is
 switched off — with it on, the semantic pass is the better moment and does it
@@ -17,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 import time
 from datetime import timedelta
 
@@ -32,17 +35,49 @@ from auto_ontology.ingestion_service.scheduler import IntervalScheduler
 logger = logging.getLogger(__name__)
 
 # Cadence measured from the end of the previous run rather than a fixed
-# wall-clock time.
-INGEST_INTERVAL = timedelta(hours=24)
+# wall-clock time. Overridable via INGEST_INTERVAL_HOURS (see .env.example).
+DEFAULT_INGEST_INTERVAL = timedelta(hours=24)
+INGEST_INTERVAL_ENV = "INGEST_INTERVAL_HOURS"
+
+
+def resolve_ingest_interval() -> timedelta:
+    """The ingest cadence from ``INGEST_INTERVAL_HOURS``, or 24h.
+
+    Unset or blank means the default. A value that is not a positive number
+    is logged and ignored rather than raised: the scheduler runs unattended,
+    and a typo in ``.env`` should not keep the catalog from ever being built.
+    """
+    raw = os.environ.get(INGEST_INTERVAL_ENV, "").strip()
+    if not raw:
+        return DEFAULT_INGEST_INTERVAL
+    try:
+        hours = float(raw)
+    except ValueError:
+        hours = 0.0
+    if not math.isfinite(hours) or hours <= 0:
+        logger.warning(
+            "ingest: ignoring %s=%r (expected a positive number of hours); "
+            "using the %gh default",
+            INGEST_INTERVAL_ENV,
+            raw,
+            DEFAULT_INGEST_INTERVAL.total_seconds() / 3600,
+        )
+        return DEFAULT_INGEST_INTERVAL
+    return timedelta(hours=hours)
 
 
 class DataScheduler(IntervalScheduler):
-    """Drives data ingestion on startup, on a 24h timer, and on demand."""
+    """Drives data ingestion on startup, on a timer, and on demand.
+
+    The timer defaults to :func:`resolve_ingest_interval`, so the cadence is
+    read from the environment when the scheduler is built, not when this
+    module is imported.
+    """
 
     name = "ingest"
 
-    def __init__(self, interval: timedelta = INGEST_INTERVAL) -> None:
-        super().__init__(interval)
+    def __init__(self, interval: timedelta | None = None) -> None:
+        super().__init__(interval or resolve_ingest_interval())
 
     async def _run_once(self) -> None:
         # Reload connectors each pass so newly added connections are picked up
