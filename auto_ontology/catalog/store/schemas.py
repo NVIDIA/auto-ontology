@@ -454,22 +454,49 @@ def delete_old_fks(last_seen, database_name: str):
     )
 
 
+def _database_table_ids(database_name: str):
+    """Select the ids of every table in *database_name*."""
+    return select(s.catalog_table.c.id).where(
+        s.catalog_table.c.schema_id.in_(
+            select(s.catalog_schema.c.id)
+            .select_from(
+                s.catalog_schema.join(
+                    s.catalog_database,
+                    s.catalog_schema.c.database_id == s.catalog_database.c.id,
+                )
+            )
+            .where(s.catalog_database.c.name == database_name)
+        )
+    )
+
+
 def reset_pks(database_name: str):
+    table_ids = _database_table_ids(database_name)
     store().query_write(
         update(s.catalog_table)
-        .where(
-            s.catalog_table.c.schema_id.in_(
-                select(s.catalog_schema.c.id)
-                .select_from(
-                    s.catalog_schema.join(
-                        s.catalog_database,
-                        s.catalog_schema.c.database_id == s.catalog_database.c.id,
-                    )
-                )
-                .where(s.catalog_database.c.name == database_name)
-            )
-        )
+        .where(s.catalog_table.c.id.in_(table_ids))
         .values(pk=None)
+    )
+    # A declaration disappears when the source's DDL changes, and the column
+    # flag `add_pks` set from it has to go with it -- otherwise a table the
+    # source stopped keying keeps claiming a uniqueness it no longer has. Only
+    # a declaration is cleared: a sampled `is_unique` is left alone, and
+    # `is_unique_declared` is what tells the two apart.
+    store().query_write(
+        update(s.catalog_column)
+        .where(
+            s.catalog_column.c.table_id.in_(table_ids),
+            s.catalog_column.c.is_unique_declared.is_(True),
+        )
+        .values(is_unique=None)
+    )
+    store().query_write(
+        update(s.catalog_column)
+        .where(
+            s.catalog_column.c.table_id.in_(table_ids),
+            s.catalog_column.c.is_unique_declared.is_not(None),
+        )
+        .values(is_unique_declared=None)
     )
 
 
@@ -493,6 +520,15 @@ def add_pks(pks_df, database_name: str):
     ``{L_LINENUMBER, L_ORDERKEY}``. The sort is stable, so rows already in key
     order stay as they are, and rows from a connector that reports no position
     keep the order they arrived in.
+
+    A key of exactly one column is also a *uniqueness declaration* for that
+    column, and this is the only place the catalog learns one: `is_unique`
+    otherwise comes from sampled profiling, which cannot establish a
+    constraint on an empty table and can only ever sample. The column is
+    marked here, in the same transaction as the key itself, with
+    `is_unique_declared` recording where the answer came from. A composite
+    key contributes nothing -- its parts are unique only together -- so each
+    member keeps the unknown state.
     """
     if pks_df is None or pks_df.empty:
         return
@@ -527,6 +563,26 @@ def add_pks(pks_df, database_name: str):
             pk=func.coalesce(s.catalog_table.c.pk, cast([], ARRAY(Text)))
             + incoming.c.key_columns
         )
+    )
+
+    single_column = {
+        table_id: columns[0] for table_id, columns in parts.items() if len(columns) == 1
+    }
+    if not single_column:
+        return
+
+    declared = sa_values(
+        column("table_id", Text),
+        column("column_name", Text),
+        name="declared_key",
+    ).data(list(single_column.items()))
+    store().query_write(
+        update(s.catalog_column)
+        .where(
+            s.catalog_column.c.table_id == declared.c.table_id,
+            s.catalog_column.c.name == declared.c.column_name,
+        )
+        .values(is_unique=True, is_unique_declared=True)
     )
 
 
