@@ -6058,6 +6058,24 @@
       "post": {
         "description": "semanticCompilationApi.reset — delete every database's compiled semantic\nlayer. Destructive, so it sits behind `manage` rather than the `read` tier\nthat may view the toggle.",
         "operationId": "post_api_semantic_compilation_reset",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "202": {
             "content": {
@@ -6074,6 +6092,16 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "semanticCompilationApi.reset — delete every database's compiled semantic layer.",
