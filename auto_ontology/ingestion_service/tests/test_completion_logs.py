@@ -102,7 +102,7 @@ def test_run_ingest_logs_the_empty_embed_case(
     with caplog.at_level(logging.INFO):
         run_ingest(_Connector("pagila"))
 
-    assert "nothing written to pgvector" in _messages(caplog)
+    assert "nothing written to the vector store" in _messages(caplog)
 
 
 def test_run_ingest_logs_no_success_when_extraction_raises(

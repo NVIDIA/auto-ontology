@@ -92,7 +92,7 @@ def run_ingest(connector: SQLDatabase) -> None:
     the embed step (:func:`auto_ontology.utils.embedding.batch_embed_chunks`).
 
     Embedding is the long pole — minutes of remote round trips against tens of
-    seconds for everything else — so its chunks are written to pgvector as they
+    seconds for everything else — so its chunks are written to the vector store as they
     arrive rather than buffered into one DataFrame. That keeps peak memory to a
     chunk, overlaps the write with the next chunk's embed, and means a failure
     three minutes in has already persisted most of the catalog.
@@ -139,14 +139,16 @@ def run_ingest(connector: SQLDatabase) -> None:
         rows_written += data_vdb.run(records)
 
     if rows_written:
-        logger.info("Tabular ingest result: %d rows written to pgvector", rows_written)
+        logger.info(
+            "Tabular ingest result: %d rows written to the vector store", rows_written
+        )
     else:
         # Previously silent, which read exactly like a successful embed. An empty
         # result is normal for a catalog that has not changed, but it is also what
         # a broken embed step produces, so it is worth a line either way.
         logger.info(
             "No embedding rows produced for database %s — nothing written to "
-            "pgvector (expected when the catalog is unchanged)",
+            "the vector store (expected when the catalog is unchanged)",
             database_name,
         )
 

@@ -6,7 +6,7 @@
 
 All direct store access lives in auto_ontology/dal/datasources.py.
 This module only keeps the VDB orchestration: update_node_properties
-and its helpers that mix catalog reads with pgvector upserts.
+and its helpers that mix catalog reads with vector-store upserts.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def update_node_properties(
 
     Returns ``{id, ...updated_fields}``. When the patch touches fields that
     feed retrieval text (``Table``/``Column`` description or column
-    ``sample_values``), stale pgvector rows are deleted and re-appended.
+    ``sample_values``), stale vector-store rows are replaced.
 
     Raises ``ValueError`` when the patch would put sample values on a column
     whose declared SQL type cannot hold hand-written text; both routes that
@@ -128,7 +128,7 @@ def _get_node_ids_for_embedding_update(
     label: str,
     properties: dict[str, Any],
 ) -> list[str]:
-    """Return the ids whose pgvector rows must be refreshed for *properties*.
+    """Return the ids whose vector-store rows must be refreshed for *properties*.
 
     * ``Column`` + ``description`` → column and parent ``Table`` (table text
       lists column descriptions).

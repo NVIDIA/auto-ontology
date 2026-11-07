@@ -274,8 +274,8 @@ def embed_chunk_size(params: EmbedParams) -> int:
     saturated while each chunk still finishes in seconds rather than minutes.
     That cadence is what the per-chunk log line, the streaming write and the
     retry all hang off: smaller chunks mean more frequent progress and less work
-    lost to — or redone by — a mid-run failure, larger ones mean less pgvector
-    round-tripping.
+    lost to — or redone by — a mid-run failure, larger ones mean fewer vector-store
+    round trips.
     """
     return max(1, params.inference_batch_size * params.nim_http_max_concurrent)
 

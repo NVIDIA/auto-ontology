@@ -13,7 +13,7 @@ Local development helpers: environment setup, database seeding, and ingest.
 | Path | What it is |
 |---|---|
 | `setup_env.sh` | Brings the docker-compose stack up. Human-invoked. |
-| `local_ingest.py` | Ingests the local Postgres source into the pgvector store. |
+| `local_ingest.py` | Ingests the local Postgres source into the vector store. |
 | `e2e_local.py` | End-to-end run of the Elasticsearch vector store: compose Postgres + Elasticsearch, the ingestion service and API on the host, pagila registered as a connection, ingested and compiled, then the result checked. Needs Docker and an `nvapi-` key. |
 | `calibrate_vdb.py` | Compares the vector-store search modes on the labelled entities in `fixtures/calibration_entities.yaml` and sweeps each relevance gate. Needs the seeded fixture and an embedding key. |
 | `fake_embedder.py` | Deterministic stand-in for NVIDIA's `/v1/embeddings`; the vector-store contract tests embed through it on both backends. |

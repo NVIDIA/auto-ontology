@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Local ingest: docker-compose Postgres source → pgvector embeddings store.
+"""Local ingest: docker-compose Postgres source → vector store embeddings.
 
 Run after ``docker compose up -d`` and ``dev_tools.fixtures.seed_local_postgres``.
 
@@ -30,7 +30,7 @@ logger = logging.getLogger("dev_tools.local_ingest")
 
 
 def run_ingest(connection_string: str) -> None:
-    """Ingest the catalog, embed it, and write the embeddings to pgvector."""
+    """Ingest the catalog, embed it, and write the embeddings to the vector store."""
     connector = create_connector(connection_string)
     database_name = connector.database_name
 
@@ -45,7 +45,7 @@ def run_ingest(connection_string: str) -> None:
 
     if result_df is not None and not result_df.empty:
         written = write_embedded_rows(vdb, result_df)
-        logger.info("Tabular ingest: %d rows written to pgvector.", written)
+        logger.info("Tabular ingest: %d rows written to the vector store.", written)
     else:
         logger.info("Tabular ingest: no rows produced.")
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     # Remote source DB to extract tabular schema/embeddings from. Kept separate
-    # from the local POSTGRES_* vars (which point at the pgvector store).
+    # from the local POSTGRES_* vars (which point at the app's own Postgres).
     _CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "")
     connection_string = _CONNECTION_STRINGS.split(",")[0].strip()
     if not connection_string:
