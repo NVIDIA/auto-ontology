@@ -21,7 +21,7 @@ import logging
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from sqlalchemy import func, literal, select, update
+from sqlalchemy import case, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.catalog.constants import Props
@@ -1020,6 +1020,62 @@ def apply_import_model(
     return summary
 
 
+def _update_imported_column_uniqueness(
+    column_items: list[tuple[str, dict[str, Any]]],
+    column_results: dict[str, tuple[str, bool]],
+) -> None:
+    """Write a payload's ``is_unique`` onto the columns it named, old or new.
+
+    A new column is created with it, but an adopted one was left with whatever
+    it already had, so a document carrying ``true`` or ``null`` -- and meaning
+    to say so -- could not change an existing catalog. Only an explicit value
+    is written: the schema defaults a missing ``is_unique`` to ``null``, so
+    ``false`` says "sampled not unique" and ``null`` says "unknown", and both
+    are real statements the payload made. What is *not* overwritten is the
+    provenance: ``is_unique_declared`` stays as the catalog holds it, because
+    a document cannot declare a source constraint.
+    """
+    declared = {
+        row["id"]
+        for row in store().query_read(
+            select(s.catalog_column.c.id).where(
+                s.catalog_column.c.id.in_(
+                    [live_id for live_id, _ in column_results.values()] or [""]
+                ),
+                s.catalog_column.c.is_unique_declared.is_(True),
+            )
+        )
+    }
+    updates: list[dict[str, Any]] = []
+    for column_id, column_props in ((cid, props) for cid, props in column_items):
+        live_id, was_created = column_results[column_id]
+        if was_created or live_id in declared:
+            continue
+        updates.append(
+            {
+                "id": live_id,
+                "is_unique": column_props.get("is_unique"),
+            }
+        )
+    if not updates:
+        return
+
+    # A VALUES() alias cannot be bound to ``values(is_unique=...)``: SQLAlchemy
+    # resolves the keyword against the literal table and strict type-checks the
+    # alias column as the value. One CASE statement per batch has neither
+    # problem and is what ``_set_column_property`` already uses.
+    by_id = {row["id"]: row["is_unique"] for row in updates}
+    store().query_write(
+        update(s.catalog_column)
+        .where(s.catalog_column.c.id.in_(list(by_id)))
+        .values(
+            is_unique=case(
+                by_id, value=s.catalog_column.c.id, else_=s.catalog_column.c.is_unique
+            )
+        )
+    )
+
+
 def _import_catalog(
     document: AutoOntologyModelDocument,
     id_map: dict[str, str],
@@ -1129,6 +1185,8 @@ def _import_catalog(
     for column_id, (live_id, was_created) in column_results.items():
         id_map[column_id] = live_id
         (created if was_created else skipped)["columns"] += 1
+
+    _update_imported_column_uniqueness(column_items, column_results)
 
     if embed_buffer is not None:
         for db in databases:

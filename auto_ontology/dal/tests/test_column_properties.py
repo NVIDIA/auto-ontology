@@ -77,6 +77,15 @@ def world():
     )
 
 
+@pytest.fixture(autouse=True)
+def _drop_imported_catalog():
+    """Imports here land in one database name; remove it however the test ends."""
+    yield
+    store().query_write(
+        s.catalog_database.delete().where(s.catalog_database.c.name == _IMPORT_DB)
+    )
+
+
 def _row(column_id: str) -> dict:
     return store().query_read(
         select(
@@ -86,6 +95,67 @@ def _row(column_id: str) -> dict:
             s.catalog_column.c.format,
         ).where(s.catalog_column.c.id == column_id)
     )[0]
+
+
+# --------------------------------------------------------------------------
+# import writes: helpers
+# --------------------------------------------------------------------------
+
+_IMPORT_DB = "import-writes"
+
+
+def import_model(yaml_text: str) -> dict:
+    """Apply a document without embedding: these tests are about writes."""
+    from auto_ontology.server.model_interchange.service import (
+        import_model as _service_import_model,
+    )
+
+    return _service_import_model(yaml_text, replace=True, embed=False)
+
+
+def _column_document(
+    *, retail_id: str, column_id: str, unique: bool | None = None
+) -> str:
+    rendered = "null" if unique is None else ("true" if unique else "false")
+    return f"""
+data_layer:
+  databases:
+    - id: {retail_id}
+      name: {_IMPORT_DB}
+      dialect: postgres
+      schemas:
+        - id: import-schema
+          name: public
+          database_name: {_IMPORT_DB}
+          tables:
+            - id: import-table
+              name: orders
+              pk: [id]
+              columns:
+                - id: {column_id}
+                  name: id
+                  type: INTEGER
+                  is_unique: {rendered}
+semantic_layer:
+  terms: []
+"""
+
+
+def _imported_column_id(table: str, name: str) -> str:
+    rows = store().query_read(
+        select(s.catalog_column.c.id)
+        .select_from(s.catalog_column.join(s.catalog_table))
+        .where(s.catalog_table.c.name == table, s.catalog_column.c.name == name)
+    )
+    return rows[0]["id"]
+
+
+def _column(column_id: str) -> dict:
+    row = _row(column_id)
+    return {
+        "is_unique": row["is_unique"],
+        "is_unique_declared": row["is_unique_declared"],
+    }
 
 
 # --------------------------------------------------------------------------
@@ -173,6 +243,72 @@ def test_store_column_uniqueness_still_writes_columns_next_to_a_declared_one(
 
     assert _row(world.columns["orders.id"])["is_unique"] is True
     assert _row(world.columns["orders.status"])["is_unique"] is False
+
+
+def test_store_column_uniqueness_does_not_touch_a_declared_column_at_all(
+    world,
+) -> None:
+    """The predicate is in the UPDATE, so a declaration made mid-run still wins."""
+    world.table("orders")
+    world.column("orders", "id")
+    world.column("orders", "status", position=2)
+    _declare_unique(world, "orders", "id")
+
+    d.store_column_uniqueness(world.tables["orders"], {"id": True, "status": True})
+
+    assert _row(world.columns["orders.id"])["is_unique"] is True
+    assert _row(world.columns["orders.status"])["is_unique"] is True
+
+
+def test_importing_a_column_writes_its_explicit_uniqueness() -> None:
+    """A document may state `true` / `false` / `null` for a column it already has.
+
+    ``_resolve_entities_batch`` adopts an existing row and leaves its properties
+    alone, so without an explicit update a re-import could only ever *not*
+    change what an earlier one wrote -- and ``null`` ("unknown") or ``false``
+    ("sampled not unique") are statements the payload made on purpose.
+    """
+    document = _column_document(retail_id="db-a", column_id="col-1")
+    import_model(document)
+    column_id = _imported_column_id("orders", "id")
+    assert _column(column_id)["is_unique"] is None
+
+    import_model(_column_document(retail_id="db-a", column_id="col-1", unique=True))
+    assert _column(column_id)["is_unique"] is True
+
+    import_model(_column_document(retail_id="db-a", column_id="col-1", unique=None))
+    assert _column(column_id)["is_unique"] is None
+
+    import_model(_column_document(retail_id="db-a", column_id="col-1", unique=False))
+    assert _column(column_id)["is_unique"] is False
+
+
+def test_importing_does_not_overwrite_a_sampled_answer_with_nothing() -> None:
+    """Provenance and sampled evidence survive an import."""
+    document = _column_document(retail_id="db-a", column_id="col-1", unique=False)
+    import_model(document)
+    column_id = _imported_column_id("orders", "id")
+
+    import_model(_column_document(retail_id="db-a", column_id="col-1", unique=None))
+
+    assert _column(column_id)["is_unique"] is None
+    assert _column(column_id)["is_unique_declared"] is None
+
+
+def test_importing_leaves_a_declared_key_alone() -> None:
+    """A document cannot withdraw a source declaration, because it never made one."""
+    document = _column_document(retail_id="db-a", column_id="col-1", unique=True)
+    import_model(document)
+    column_id = _imported_column_id("orders", "id")
+    store().query_write(
+        update(s.catalog_column)
+        .where(s.catalog_column.c.id == column_id)
+        .values(is_unique=True, is_unique_declared=True)
+    )
+
+    import_model(_column_document(retail_id="db-a", column_id="col-1", unique=False))
+
+    assert _column(column_id) == {"is_unique": True, "is_unique_declared": True}
 
 
 # --------------------------------------------------------------------------

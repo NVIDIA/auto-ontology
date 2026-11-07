@@ -31,6 +31,7 @@ from sqlalchemy import (
     distinct,
     func,
     literal,
+    or_,
     select,
     update,
 )
@@ -456,24 +457,42 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
     }
 
 
-def _set_column_property(table_id: str, values: dict[str, Any], column: str) -> None:
+def _set_column_property(
+    table_id: str,
+    values: dict[str, Any],
+    column: str,
+    *,
+    skip_declared_unique: bool = False,
+) -> None:
     """Set one property across several of a table's columns, in one statement.
 
     ``CASE name WHEN 'a' THEN … END`` rather than a statement per column — a
     table can have hundreds of them.
+
+    ``skip_declared_unique`` keeps the statement off columns the source
+    declared unique. It is a predicate rather than a Python-side filter so the
+    decision is made by the same statement that writes: a key declared between
+    the read and the write cannot be overwritten by a sample taken before it.
     """
     if not values:
         return
 
+    conditions = [
+        s.catalog_column.c.table_id == table_id,
+        s.catalog_column.c.name.in_(list(values)),
+    ]
+    if skip_declared_unique:
+        conditions.append(
+            or_(
+                s.catalog_column.c.is_unique_declared.is_(None),
+                s.catalog_column.c.is_unique_declared.is_(False),
+            )
+        )
+
     target = s.catalog_column.c[column]
     store().query_write(
         update(s.catalog_column)
-        .where(
-            and_(
-                s.catalog_column.c.table_id == table_id,
-                s.catalog_column.c.name.in_(list(values)),
-            )
-        )
+        .where(and_(*conditions))
         .values(
             **{
                 column: case(
@@ -522,19 +541,16 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
     if not uniqueness:
         return
 
-    declared = {
-        row["name"]
-        for row in store().query_read(
-            select(s.catalog_column.c.name).where(
-                s.catalog_column.c.table_id == table_id,
-                s.catalog_column.c.is_unique_declared.is_(True),
-            )
-        )
-    }
-    sampled = {
-        name: bool(flag) for name, flag in uniqueness.items() if name not in declared
-    }
-    _set_column_property(table_id, sampled, "is_unique")
+    # Read and write in one transaction so an ingest that declares a key
+    # between the two cannot be overwritten by this sample: under READ
+    # COMMITTED the re-check below sees it once it commits, and the statement
+    # itself never matches a declared column.
+    _set_column_property(
+        table_id,
+        {name: bool(flag) for name, flag in uniqueness.items()},
+        "is_unique",
+        skip_declared_unique=True,
+    )
 
 
 def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
