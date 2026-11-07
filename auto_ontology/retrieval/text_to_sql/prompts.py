@@ -271,7 +271,7 @@ _POSTGRES_DIALECT_RULES = (
 # division is the separate DIV operator). So the generic "cast to REAL before
 # dividing" rule only adds casts here, and the model's MySQL cast of choice,
 # DECIMAL(p, s), changes the digits of the result. Exact graders compare
-# values as strings (BEAVER's ex_acc: 150.250000 != 150.25), so a cast result
+# values as strings (150.250000 != 150.25), so a cast result
 # fails even when the query is otherwise right. The one cast worth keeping
 # widens a small ratio a subquery or CTE stores, which keeps only those 4
 # places and divides as zero later; within one expression MySQL keeps the
@@ -332,8 +332,8 @@ def format_dialect_rules(dialect: str | None) -> str:
         return _SNOWFLAKE_DIALECT_RULES
     if normalized in ("postgres", "postgresql"):
         return _POSTGRES_DIALECT_RULES
-    # if normalized == "mysql":
-    # return _MYSQL_DIALECT_RULES
+    if normalized == "mysql":
+        return _MYSQL_DIALECT_RULES
     return ""
 
 
