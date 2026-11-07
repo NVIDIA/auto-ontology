@@ -8749,8 +8749,26 @@
     },
     "/api/semantic-compilation/reset": {
       "post": {
-        "description": "Ask the ingestion service to rebuild every database's semantic layer.\n\nThe service deletes the semantic nodes and embeddings and compiles them\nagain, so the layer is rebuilt without waiting for the next scheduled run.",
+        "description": "Ask the ingestion service to rebuild a database's semantic layer.\n\nThe service deletes the semantic nodes and embeddings and compiles them\nagain, so the layer is rebuilt without waiting for the next scheduled run.\nOmitting ``database_name`` resets every database.",
         "operationId": "reset_api_semantic_compilation_reset_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "202": {
             "content": {
@@ -8761,6 +8779,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Reset",
