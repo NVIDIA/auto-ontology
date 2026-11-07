@@ -70,6 +70,7 @@ from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
+from auto_ontology.retrieval.text_to_sql.table_twins import attach_twins
 from auto_ontology.retrieval.text_to_sql.table_ranking import (
     EntityTableScores,
     best_score_across_entities,
@@ -124,6 +125,10 @@ _HUB_SIBLING_CAP = int(os.environ.get("HUB_SIBLING_CAP", "6"))
 # search per entity, which the hub-sibling rank shares when both are on.
 _ENTITY_TABLE_RANKING_ENABLED = os.environ.get(
     "ENTITY_TABLE_RANKING_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes")
+
+_TABLE_TWINS_ENABLED = os.environ.get(
+    "TABLE_TWINS_ENABLED", "true"
 ).strip().lower() in ("1", "true", "yes")
 
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
@@ -803,6 +808,19 @@ class CandidatePreparationAgent(BaseAgent):
                 entities,
                 lead_table_id=str(anchor_table_id) if anchor_table_id else None,
             )
+
+        if _TABLE_TWINS_ENABLED:
+            try:
+                relevant_tables, added_twins = attach_twins(relevant_tables, target_db)
+            except Exception:
+                self.logger.warning("Twin table lookup failed", exc_info=True)
+                added_twins = []
+            if added_twins:
+                self.logger.info(
+                    "Added %d twin table(s) of tables in scope: %s",
+                    len(added_twins),
+                    added_twins,
+                )
 
         self.logger.info(
             "Final %d table(s) reaching SQL generation: %s",

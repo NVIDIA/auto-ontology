@@ -34,6 +34,7 @@ NODE_LABELS: dict[str, str] = {
     "execute_sql_query": "Executing SQL",
     "check_empty_like_result": "Checking results",
     "check_value_repair": "Checking values",
+    "check_null_columns": "Checking result columns",
     "format_and_respond": "Formatting response",
     "unconstructable_sql_response": "SQL could not be constructed",
 }

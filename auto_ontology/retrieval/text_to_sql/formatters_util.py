@@ -522,6 +522,49 @@ def _format_entity_matches(matches: Any) -> str:
     return f"matches: {'; '.join(parts)}" if parts else ""
 
 
+_MAX_TWIN_COLUMNS = 12
+
+
+def _column_list(names: list[str]) -> str:
+    shown = ", ".join(_plain_cell(n) for n in names[:_MAX_TWIN_COLUMNS])
+    extra = len(names) - _MAX_TWIN_COLUMNS
+    return f"{shown} (+{extra} more)" if extra > 0 else shown or "none"
+
+
+def _format_twins(table: dict) -> str:
+    """A ``twins:`` line naming the tables with nearly the same columns.
+
+    The columns each side has alone are what separate them, so they are listed;
+    an added twin shows only those, its shared columns being the ones listed
+    under the table it was found from.
+    """
+    twins = table.get("twins")
+    if not isinstance(twins, list) or not twins:
+        return ""
+    parts = []
+    for twin in twins:
+        if not isinstance(twin, dict) or not twin.get("name"):
+            continue
+        parts.append(
+            f"{_plain_cell(twin['name'])} (only here: "
+            f"{_column_list(twin.get('only_here') or [])}; only there: "
+            f"{_column_list(twin.get('only_there') or [])})"
+        )
+    if not parts:
+        return ""
+    line = f"twins: {'; '.join(parts)}"
+    if table.get("twin_of"):
+        line += (
+            f". Shares every other column with {_plain_cell(table['twin_of'])}, "
+            "under the same names; only its own columns are listed below"
+        )
+    return (
+        line + ". Twins hold near-identical data: use the one whose own columns, "
+        "or the rows those columns imply (a period, a status, a wider range), "
+        "the question needs."
+    )
+
+
 def _full_table_name(table: dict, target_db: str | None, dialect: str | None) -> str:
     return qualify_table(
         table.get("database_name") or target_db or "",
@@ -628,10 +671,20 @@ def format_tables_for_prompt(
         entity_line = _format_entity_matches(table.get("entity_matches"))
         if entity_line:
             blocks.append(entity_line)
+        twin_line = _format_twins(table)
+        if twin_line:
+            blocks.append(twin_line)
 
         columns = table.get("columns")
         if not isinstance(columns, list):
             columns = []
+        if table.get("twin_of"):
+            own = {
+                str(name).casefold()
+                for twin in table.get("twins") or []
+                for name in twin.get("only_here") or []
+            }
+            columns = [c for c in columns if str(c.get("name", "")).casefold() in own]
         if columns:
             column_rows = [_column_row(column) for column in columns]
             blocks.append(_pipe_table(_COLUMN_HEADERS, column_rows))

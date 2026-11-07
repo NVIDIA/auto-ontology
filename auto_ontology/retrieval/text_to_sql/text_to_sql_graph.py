@@ -46,6 +46,9 @@ from auto_ontology.retrieval.text_to_sql.agents.kumo_prediction import (
 from auto_ontology.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
+from auto_ontology.retrieval.text_to_sql.agents.null_column_check import (
+    NullColumnCheckAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
@@ -420,6 +423,9 @@ def create_graph():
     check_empty_like_result_node = _make_node(
         "check_empty_like_result", agent_wrapper(empty_like_result_check_agent)
     )
+    check_null_columns_node = _make_node(
+        "check_null_columns", agent_wrapper(NullColumnCheckAgent())
+    )
     format_and_respond_node = _make_node(
         "format_and_respond", agent_wrapper(response_agent)
     )
@@ -459,6 +465,7 @@ def create_graph():
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("execute_sql_query", execute_sql_query_node)
     graph.add_node("check_empty_like_result", check_empty_like_result_node)
+    graph.add_node("check_null_columns", check_null_columns_node)
     graph.add_node("format_and_respond", format_and_respond_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
@@ -589,6 +596,14 @@ def create_graph():
     graph.add_conditional_edges(
         "check_value_repair",
         _make_soft_check_router("check_value_repair"),
+        {
+            "valid_sql": "check_null_columns",
+            "invalid_sql": "reconstruct_sql",
+        },
+    )
+    graph.add_conditional_edges(
+        "check_null_columns",
+        _make_soft_check_router("check_null_columns"),
         {
             "valid_sql": "format_and_respond",
             "invalid_sql": "reconstruct_sql",
