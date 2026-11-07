@@ -24,6 +24,7 @@ Design Decisions:
 
 import logging
 import os
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -156,6 +157,54 @@ def _new_single_hop_paths(
             shown.add(key)
             fresh.append(path)
     return fresh
+
+
+def _tables_joined_to(
+    tables: list[dict],
+    joins: list[list[dict]],
+    anchor_table_id: str,
+    keep_ids: set[str],
+) -> tuple[list[dict], list[dict]]:
+    """Split *tables* into those a chain of *joins* links to the anchor's
+    table, plus every table in *keep_ids*, and the rest.
+
+    *joins* are single-hop paths between tables in scope. A table no listed
+    join reaches cannot be used in the SQL, so it only crowds the prompt.
+    Returns ``(kept, dropped)``; everything is kept when the anchor's table
+    is not among *tables*.
+    """
+
+    def key(schema: str, name: str) -> tuple[str, str]:
+        return (schema or "").casefold(), (name or "").casefold()
+
+    by_key = {key(t.get("schema_name", ""), t.get("name", "")): t for t in tables}
+    anchor = next((t for t in tables if t.get("id") == anchor_table_id), None)
+    if anchor is None:
+        return tables, []
+
+    neighbours: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    for path in joins:
+        for hop in path:
+            a = key(hop.get("source_schema", ""), hop.get("source_table", ""))
+            b = key(hop.get("target_schema", ""), hop.get("target_table", ""))
+            if a in by_key and b in by_key:
+                neighbours[a].add(b)
+                neighbours[b].add(a)
+
+    start = key(anchor.get("schema_name", ""), anchor.get("name", ""))
+    reached = {start}
+    frontier = [start]
+    while frontier:
+        for nxt in neighbours[frontier.pop()] - reached:
+            reached.add(nxt)
+            frontier.append(nxt)
+
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for table in tables:
+        joined = key(table.get("schema_name", ""), table.get("name", "")) in reached
+        (kept if joined or table.get("id") in keep_ids else dropped).append(table)
+    return kept, dropped
 
 
 def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
@@ -501,10 +550,14 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
+        # Tables whose own SQL joins them: kept even when no listed join does.
+        sql_linked_ids: set[str] = set()
+
         # --- 4a. Add tables referenced by custom analyses via the store ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
+            sql_linked_ids.update(t["id"] for t in ca_linked_tables if t.get("id"))
             prev_len = len(relevant_tables)
             relevant_tables = _merge_tables(relevant_tables, ca_linked_tables)
             self.logger.info(
@@ -528,6 +581,7 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
             sa_linked_tables = fetch_tables_from_sql_attributes(sa_ids)
+            sql_linked_ids.update(t["id"] for t in sa_linked_tables if t.get("id"))
             prev_len = len(relevant_tables)
             relevant_tables = _merge_tables(relevant_tables, sa_linked_tables)
             self.logger.info(
@@ -712,12 +766,32 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in forced_tables],
             )
 
-        if _ENTITY_TABLE_RANKING_ENABLED:
-            anchor_table_id = (
-                attr_contexts.get(primary_attribute["id"], {}).get("table_id")
-                if primary_attribute
-                else None
+        anchor_table_id = (
+            attr_contexts.get(primary_attribute["id"], {}).get("table_id")
+            if primary_attribute
+            else None
+        )
+        direct_joins = find_direct_table_joins(
+            [t["id"] for t in relevant_tables if t.get("id")]
+        )
+        if anchor_table_id:
+            relevant_tables, unjoined = _tables_joined_to(
+                relevant_tables,
+                direct_joins + [p["path"] for p in attribute_join_paths],
+                str(anchor_table_id),
+                sql_linked_ids,
             )
+            if unjoined:
+                self.logger.info(
+                    "Dropped %d table(s) no join links to the anchor's table: %s",
+                    len(unjoined),
+                    [_qualified_name(t) for t in unjoined],
+                )
+                direct_joins = find_direct_table_joins(
+                    [t["id"] for t in relevant_tables if t.get("id")]
+                )
+
+        if _ENTITY_TABLE_RANKING_ENABLED:
             relevant_tables = rank_tables_by_entity(
                 relevant_tables,
                 entity_scores(),
@@ -736,10 +810,7 @@ class CandidatePreparationAgent(BaseAgent):
         # second column pair joining the same two tables -- a different role --
         # never reached SQL generation. List every one-hop join between any two
         # tables in scope, skipping hops an earlier step already shows.
-        direct_paths = _new_single_hop_paths(
-            find_direct_table_joins([t["id"] for t in relevant_tables if t.get("id")]),
-            attribute_join_paths,
-        )
+        direct_paths = _new_single_hop_paths(direct_joins, attribute_join_paths)
         if direct_paths:
             attribute_join_paths.extend({"path": hops} for hops in direct_paths)
             self.logger.info(

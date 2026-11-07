@@ -654,3 +654,41 @@ def test_the_table_an_anchor_points_at_reaches_sql_generation(
     # The anchor still names data, so §6 keeps it: the table arriving in scope
     # is not what the schema-naming check looks at.
     assert result["value_anchors"] == [human]
+
+
+def test_tables_no_join_links_to_the_anchor_are_dropped() -> None:
+    def table(name: str) -> dict:
+        return {"id": name, "name": name, "schema_name": "public"}
+
+    def hop(source: str, target: str) -> list[dict]:
+        return [
+            {
+                "source_schema": "public",
+                "source_table": source,
+                "target_schema": "PUBLIC",
+                "target_table": target.upper(),
+            }
+        ]
+
+    tables = [
+        table(name) for name in ("shipments", "depots", "regions", "weather", "tariffs")
+    ]
+    joins = [hop("shipments", "depots"), hop("depots", "regions")]
+
+    kept, dropped = candidates_preparation._tables_joined_to(
+        tables, joins, "shipments", keep_ids={"tariffs"}
+    )
+
+    assert [t["id"] for t in kept] == ["shipments", "depots", "regions", "tariffs"]
+    assert [t["id"] for t in dropped] == ["weather"]
+
+
+def test_everything_is_kept_when_the_anchor_table_is_not_in_scope() -> None:
+    tables = [{"id": "depots", "name": "depots", "schema_name": "public"}]
+
+    kept, dropped = candidates_preparation._tables_joined_to(
+        tables, [], "customers", keep_ids=set()
+    )
+
+    assert kept == tables
+    assert dropped == []
