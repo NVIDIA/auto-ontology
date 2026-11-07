@@ -202,17 +202,16 @@ jobs:
       # A skip guard naming the wrong dependency turns a suite off silently and
       # still reports green -- which is how the golden replay and the live
       # connector tests sat unrun. Only the two live-warehouse tests
-      # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) and the live
-      # NVIDIA embedding test (AUTO_ONTOLOGY_LIVE_NVIDIA_ES) may skip here.
+      # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) may skip here.
       - name: Fail if the fixture-backed tests silently skipped
         run: |
           skipped=$(uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
             | grep -c '^SKIPPED' || true)
           echo "skipped: $skipped"
-          if [ "$skipped" -gt 3 ]; then
-            echo "::error::$skipped tests skipped; expected at most 3 (live" \
-                 "Databricks, MySQL and NVIDIA). A fixture is probably" \
-                 "unreachable, so this run proved less than it appears to."
+          if [ "$skipped" -gt 2 ]; then
+            echo "::error::$skipped tests skipped; expected at most 2 (live" \
+                 "Databricks and MySQL). A fixture is probably unreachable, so" \
+                 "this run proved less than it appears to."
             uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
               | grep '^SKIPPED' || true
             exit 1

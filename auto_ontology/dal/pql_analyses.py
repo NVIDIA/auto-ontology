@@ -28,7 +28,7 @@ from auto_ontology.semantic.constants import LABEL_PQL_ANALYSIS
 
 if TYPE_CHECKING:
     from auto_ontology.utils.embedding import EmbedParams
-    from auto_ontology.vdb.base import VectorStore
+    from auto_ontology.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ def _pql_analysis_docs(analysis_id: str | None) -> list[dict[str, Any]]:
 
 def embed_pql_analyses(
     embed_params: "EmbedParams",
-    vdb: "VectorStore",
+    vdb: "PostgresVDB",
     analysis_id: str | None = None,
     database_name: str | None = None,
 ) -> None:

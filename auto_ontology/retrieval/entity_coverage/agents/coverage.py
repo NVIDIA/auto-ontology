@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 def _within_distance(hit: dict[str, Any], max_distance: float) -> bool:
-    """Whether *hit* is a match; for a hybrid hit, by its vector distance or an exact name."""
     return passes_relevance_gate(hit, max_distance)
 
 

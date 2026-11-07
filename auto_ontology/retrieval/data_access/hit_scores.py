@@ -33,10 +33,9 @@ Each use of a score therefore has its own rule:
 
 Why the hybrid gate is not on ``rrf``: a fused score is built from ranks, and
 every search ranks *something* first, so no RRF threshold can turn away an
-entity the catalog has no answer for. Measured by ``dev_tools.calibrate_vdb``
-on the fixture, an RRF gate of 0.5 (ranked first by at least one branch)
-accepted all 15 such entities, and even 1.0 (first in both) accepted 4. The
-vector distance, the one absolute relevance signal a hybrid hit has, accepted
+entity the catalog has no answer for. Measured on the seeded fixture, an RRF
+gate of 0.5 (ranked first by at least one branch) accepted all 15 such
+entities, and even 1.0 (first in both) accepted 4. The vector distance, the one absolute relevance signal a hybrid hit has, accepted
 none of them at today's 0.65. RRF still decides the order.
 
 Why an exact name passes the hybrid gate: identifiers are what hybrid is for,

@@ -20,8 +20,8 @@ The vectors are *dense*, like a real model's, and that matters. An earlier
 version hashed each feature into one of 2048 buckets, leaving a handful of
 non-zero dimensions; Elasticsearch's default index quantises vectors to one
 bit per dimension (BBQ), which suits dense embeddings and loses a third of the
-true neighbours on sparse ones -- a recall gap the real NVIDIA embeddings,
-measured on the calibration fixture, do not have.
+true neighbours on sparse ones -- a recall gap the real NVIDIA embeddings do
+not have.
 
 Every request is recorded with its ``input_type``. NVIDIA's models are
 asymmetric, and a store that embeds a row as a ``query`` raises no error -- it

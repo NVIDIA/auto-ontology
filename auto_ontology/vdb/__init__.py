@@ -19,7 +19,7 @@ from auto_ontology.infra.elasticsearch import (
     get_embed_endpoint,
 )
 from auto_ontology.infra.postgres import get_postgres_connection_string
-from auto_ontology.vdb.backend import embeds_server_side, vdb_backend, vdb_search_mode
+from auto_ontology.vdb.backend import vdb_backend, vdb_search_mode
 from auto_ontology.vdb.base import VectorStore
 from auto_ontology.vdb.elasticsearch import (
     DEFAULT_RANK_CONSTANT,
@@ -27,19 +27,6 @@ from auto_ontology.vdb.elasticsearch import (
     ElasticsearchVDB,
 )
 from auto_ontology.vdb.postgres import PostgresVDB
-
-__all__ = [
-    "DATA_VDB_COLLECTION",
-    "SEMANTIC_VDB_COLLECTION",
-    "VDB_SCHEMA",
-    "VectorStore",
-    "embeds_server_side",
-    "get_data_vdb",
-    "get_semantic_vdb",
-    "get_vdb",
-    "vdb_backend",
-    "vdb_search_mode",
-]
 
 DATA_VDB_COLLECTION: str = "data_objects_layer"
 SEMANTIC_VDB_COLLECTION: str = "semantic_layer"

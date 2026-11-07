@@ -14,8 +14,6 @@ Local development helpers: environment setup, database seeding, and ingest.
 |---|---|
 | `setup_env.sh` | Brings the docker-compose stack up. Human-invoked. |
 | `local_ingest.py` | Ingests the local Postgres source into the vector store. |
-| `e2e_local.py` | End-to-end run of the Elasticsearch vector store: compose Postgres + Elasticsearch, the ingestion service and API on the host, pagila registered as a connection, ingested and compiled, then the result checked. Needs Docker and an `nvapi-` key. |
-| `calibrate_vdb.py` | Compares the vector-store search modes on the labelled entities in `fixtures/calibration_entities.yaml` and sweeps each relevance gate. Needs the seeded fixture and an embedding key. |
 | `fake_embedder.py` | Deterministic stand-in for NVIDIA's `/v1/embeddings`; the vector-store contract tests embed through it on both backends. |
 | `generate_backend_openapi.py` | Dumps the FastAPI OpenAPI specs to `docs/openapi/`. Run by `ci-openapi.yml`. |
 | `release_helm_chart.py` | Packages the chart and publishes it to the NGC Helm registry. Run by `release-helm.yml`. |
@@ -104,24 +102,6 @@ ES_URL=http://localhost:9201
 The trial license matters: the `nvidia` inference service the app writes
 through is an Enterprise feature, and on a basic license creating it fails with
 `403 current license is non-compliant for [inference]`.
-
-### End-to-end check
-
-`e2e_local.py` exercises the whole Elasticsearch path the way the UI does and
-reports what was built: the inference endpoint and index sizes, the Terms the
-semantic layer got, recall on the pagila entities in
-`fixtures/calibration_entities.yaml`, and the search and entity-coverage APIs.
-It pins the vector store to the compose cluster (port 9201 by default), so an
-`ES_URL` in `.env` is never written to, and takes only the model settings from
-`.env`.
-
-```bash
-uv run --no-sync python -m dev_tools.e2e_local --output .e2e/report.md
-uv run --no-sync python -m dev_tools.e2e_local --search-mode hybrid --skip-compile
-```
-
-`--fresh` deletes the compose Postgres and Elasticsearch, volumes included,
-before starting. Logs go to `.e2e/`.
 
 ### Endpoints
 

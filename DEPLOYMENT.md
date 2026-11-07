@@ -146,5 +146,3 @@ and, for a new model, the `auto-ontology-*` indices, then re-ingest.
 `docker-compose.yml` has the same single-node cluster behind the
 `elasticsearch` profile, and `dev_tools/setup_env.sh` starts it when `.env` has
 `VDB_BACKEND=elasticsearch`; see [`dev_tools/README.md`](./dev_tools/README.md).
-`dev_tools/e2e_local.py` runs the whole path end to end and reports what it
-built.
