@@ -51,6 +51,14 @@ from auto_ontology.retrieval.text_to_sql.state import (
 
 logger = logging.getLogger(__name__)
 
+#: Largest semantic distance at which a ColumnAttribute hit is kept. Past it
+#: the match is noise, and every hit brings its table into the prompt.
+_MAX_COLUMN_ATTRIBUTE_DISTANCE = 0.7
+#: How much further than a query's best ColumnAttribute hit another of its hits
+#: may be and still be kept: a close runner-up is a second candidate for the
+#: same thing, a distant one is a different thing.
+_COLUMN_ATTRIBUTE_RUNNER_UP_MARGIN = 0.05
+
 
 # ---------------------------------------------------------------------------
 # Search / dedup helpers
@@ -78,6 +86,33 @@ def _search_by_label(
     except Exception:
         logger.warning("%s search failed for entity %r", label, entity, exc_info=True)
         return []
+
+
+def _close_column_attribute_hits(hits: list[dict]) -> list[dict]:
+    """One query's ColumnAttribute hits within reach: none further than
+    ``_MAX_COLUMN_ATTRIBUTE_DISTANCE``, and none further than the best kept hit
+    by more than ``_COLUMN_ATTRIBUTE_RUNNER_UP_MARGIN``. Hits without a score
+    cannot be judged and are kept."""
+    scored = [h for h in hits if h.get("score") is not None]
+    within = [h for h in scored if _score(h) <= _MAX_COLUMN_ATTRIBUTE_DISTANCE]
+    if not within:
+        return [h for h in hits if h.get("score") is None]
+    cutoff = min(_score(h) for h in within) + _COLUMN_ATTRIBUTE_RUNNER_UP_MARGIN
+    return [h for h in hits if h.get("score") is None or _score(h) <= cutoff]
+
+
+def _close_hits_per_query(hits: list[dict]) -> list[dict]:
+    """:func:`_close_column_attribute_hits` applied to each query's hits apart,
+    a query being the entity or evidence text a hit was retrieved for."""
+    by_query: dict[str, list[dict]] = defaultdict(list)
+    for hit in hits:
+        query = hit.get("query_entity") or hit.get("query_evidence") or ""
+        by_query[str(query)].append(hit)
+    return [
+        hit
+        for query_hits in by_query.values()
+        for hit in _close_column_attribute_hits(query_hits)
+    ]
 
 
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
@@ -693,6 +728,7 @@ class CandidateRetrievalAgent(BaseAgent):
                 llm, question, all_custom_hits, all_sql_attr_hits
             )
 
+        all_col_attr_hits = _close_hits_per_query(all_col_attr_hits)
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)

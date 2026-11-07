@@ -311,6 +311,48 @@ def test_explicit_target_db_preserves_existing_search_behavior(
     assert len(result["path_state"]["retrieved_column_attributes"]) == 2
 
 
+def test_column_attribute_hits_are_capped_by_distance_and_runner_up_margin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = "Count only active depots."
+    hits_by_query = {
+        "shipment weight": [
+            _hit("weight", "db-a", 0.40),
+            _hit("gross-weight", "db-a", 0.43),
+        ],
+        "region": [_hit("region", "db-a", 0.50), _hit("region-name", "db-a", 0.64)],
+        evidence: [_hit("depot-count", "db-a", 0.82), _hit("depot-id", "db-a", 0.84)],
+    }
+
+    def fake_search(
+        _retriever: object,
+        query: str,
+        label: str,
+        _k: int,
+        database_name: str | None = None,
+    ) -> list[dict]:
+        if label != LABEL_COLUMN_ATTRIBUTE:
+            return []
+        return [dict(h) for h in hits_by_query[query]]
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda _llm, _question, custom, sql: (custom, sql),
+    )
+    monkeypatch.setattr(
+        candidates_retrieval, "custom_analysis_exists", lambda *_: False
+    )
+
+    result = CandidateRetrievalAgent().execute(
+        _state(["shipment weight", "region"], target_db="db-a", evidence=evidence)
+    )
+
+    kept = {h["id"] for h in result["path_state"]["retrieved_column_attributes"]}
+    assert kept == {"weight", "gross-weight", "region"}
+
+
 def test_full_evidence_adds_column_attribute_vector_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
