@@ -24,7 +24,6 @@ Design Decisions:
 
 import logging
 import os
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -159,51 +158,40 @@ def _new_single_hop_paths(
     return fresh
 
 
-def _tables_joined_to(
+def _split_unjoined_tables(
     tables: list[dict],
     joins: list[list[dict]],
-    anchor_table_id: str,
     keep_ids: set[str],
 ) -> tuple[list[dict], list[dict]]:
-    """Split *tables* into those a chain of *joins* links to the anchor's
-    table, plus every table in *keep_ids*, and the rest.
+    """Split *tables* into those some listed join touches, plus every table
+    in *keep_ids*, and the rest.
 
-    *joins* are single-hop paths between tables in scope. A table no listed
-    join reaches cannot be used in the SQL, so it only crowds the prompt.
-    Returns ``(kept, dropped)``; everything is kept when the anchor's table
-    is not among *tables*.
+    *joins* are single-hop paths between tables in scope. A table no join
+    touches cannot be combined with the others in the SQL. Tables that only
+    join among themselves are kept: missing keys split real groups apart too
+    often to treat a separate group as noise. Returns ``(kept, dropped)``;
+    everything is kept when no join touches any table.
     """
 
     def key(schema: str, name: str) -> tuple[str, str]:
         return (schema or "").casefold(), (name or "").casefold()
 
-    by_key = {key(t.get("schema_name", ""), t.get("name", "")): t for t in tables}
-    anchor = next((t for t in tables if t.get("id") == anchor_table_id), None)
-    if anchor is None:
-        return tables, []
-
-    neighbours: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    in_scope = {key(t.get("schema_name", ""), t.get("name", "")) for t in tables}
+    joined: set[tuple[str, str]] = set()
     for path in joins:
         for hop in path:
             a = key(hop.get("source_schema", ""), hop.get("source_table", ""))
             b = key(hop.get("target_schema", ""), hop.get("target_table", ""))
-            if a in by_key and b in by_key:
-                neighbours[a].add(b)
-                neighbours[b].add(a)
-
-    start = key(anchor.get("schema_name", ""), anchor.get("name", ""))
-    reached = {start}
-    frontier = [start]
-    while frontier:
-        for nxt in neighbours[frontier.pop()] - reached:
-            reached.add(nxt)
-            frontier.append(nxt)
+            if a != b and a in in_scope and b in in_scope:
+                joined.update((a, b))
+    if not joined:
+        return tables, []
 
     kept: list[dict] = []
     dropped: list[dict] = []
     for table in tables:
-        joined = key(table.get("schema_name", ""), table.get("name", "")) in reached
-        (kept if joined or table.get("id") in keep_ids else dropped).append(table)
+        touched = key(table.get("schema_name", ""), table.get("name", "")) in joined
+        (kept if touched or table.get("id") in keep_ids else dropped).append(table)
     return kept, dropped
 
 
@@ -774,22 +762,17 @@ class CandidatePreparationAgent(BaseAgent):
         direct_joins = find_direct_table_joins(
             [t["id"] for t in relevant_tables if t.get("id")]
         )
-        if anchor_table_id:
-            relevant_tables, unjoined = _tables_joined_to(
-                relevant_tables,
-                direct_joins + [p["path"] for p in attribute_join_paths],
-                str(anchor_table_id),
-                sql_linked_ids,
+        relevant_tables, unjoined = _split_unjoined_tables(
+            relevant_tables,
+            direct_joins + [p["path"] for p in attribute_join_paths],
+            sql_linked_ids | ({str(anchor_table_id)} if anchor_table_id else set()),
+        )
+        if unjoined:
+            self.logger.info(
+                "Dropped %d table(s) no join links to another table in scope: %s",
+                len(unjoined),
+                [_qualified_name(t) for t in unjoined],
             )
-            if unjoined:
-                self.logger.info(
-                    "Dropped %d table(s) no join links to the anchor's table: %s",
-                    len(unjoined),
-                    [_qualified_name(t) for t in unjoined],
-                )
-                direct_joins = find_direct_table_joins(
-                    [t["id"] for t in relevant_tables if t.get("id")]
-                )
 
         if _ENTITY_TABLE_RANKING_ENABLED:
             relevant_tables = rank_tables_by_entity(

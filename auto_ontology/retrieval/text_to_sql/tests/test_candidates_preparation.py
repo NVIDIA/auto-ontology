@@ -656,38 +656,44 @@ def test_the_table_an_anchor_points_at_reaches_sql_generation(
     assert result["value_anchors"] == [human]
 
 
-def test_tables_no_join_links_to_the_anchor_are_dropped() -> None:
-    def table(name: str) -> dict:
-        return {"id": name, "name": name, "schema_name": "public"}
+def _table(name: str) -> dict:
+    return {"id": name, "name": name, "schema_name": "public"}
 
-    def hop(source: str, target: str) -> list[dict]:
-        return [
-            {
-                "source_schema": "public",
-                "source_table": source,
-                "target_schema": "PUBLIC",
-                "target_table": target.upper(),
-            }
-        ]
 
-    tables = [
-        table(name) for name in ("shipments", "depots", "regions", "weather", "tariffs")
+def _hop(source: str, target: str) -> list[dict]:
+    return [
+        {
+            "source_schema": "public",
+            "source_table": source,
+            "target_schema": "PUBLIC",
+            "target_table": target.upper(),
+        }
     ]
-    joins = [hop("shipments", "depots"), hop("depots", "regions")]
 
-    kept, dropped = candidates_preparation._tables_joined_to(
-        tables, joins, "shipments", keep_ids={"tariffs"}
+
+def test_tables_no_join_touches_are_dropped_but_separate_groups_stay() -> None:
+    names = ("shipments", "depots", "carriers", "fleets", "weather", "tariffs")
+    joins = [_hop("shipments", "depots"), _hop("carriers", "fleets")]
+
+    kept, dropped = candidates_preparation._split_unjoined_tables(
+        [_table(name) for name in names], joins, keep_ids={"tariffs"}
     )
 
-    assert [t["id"] for t in kept] == ["shipments", "depots", "regions", "tariffs"]
+    assert [t["id"] for t in kept] == [
+        "shipments",
+        "depots",
+        "carriers",
+        "fleets",
+        "tariffs",
+    ]
     assert [t["id"] for t in dropped] == ["weather"]
 
 
-def test_everything_is_kept_when_the_anchor_table_is_not_in_scope() -> None:
-    tables = [{"id": "depots", "name": "depots", "schema_name": "public"}]
+def test_everything_is_kept_when_no_join_touches_any_table() -> None:
+    tables = [_table("depots"), _table("weather")]
 
-    kept, dropped = candidates_preparation._tables_joined_to(
-        tables, [], "customers", keep_ids=set()
+    kept, dropped = candidates_preparation._split_unjoined_tables(
+        tables, [_hop("depots", "depots")], keep_ids=set()
     )
 
     assert kept == tables
