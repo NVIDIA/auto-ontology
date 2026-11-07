@@ -175,7 +175,10 @@ create_sql_user_prompt = (
     "add LIMIT with that number; "
     "otherwise do not add LIMIT.\n"
     "- Do NOT include comments in the SQL.\n"
-    "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
+    "- Do NOT use ellipsis as placeholder — output the complete SQL.\n\n"
+    "## Goal\n"
+    "Your goal is to generate SQL for the question:\n"
+    "{main_question}\n"
 )
 
 

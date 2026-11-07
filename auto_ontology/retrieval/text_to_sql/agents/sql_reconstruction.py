@@ -774,7 +774,9 @@ class SQLReconstructionAgent(BaseAgent):
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "
-            "writing the final answer."
+            "writing the final answer.\n\n"
+            "## Goal\n"
+            f"Your goal is to generate SQL for the question:\n{question_block}\n"
         )
 
         # Local copy only. Returning it would make the next inner-loop attempt
