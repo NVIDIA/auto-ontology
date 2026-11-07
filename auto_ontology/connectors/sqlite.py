@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 # enough to stop within milliseconds, rare enough to cost nothing measurable.
 _PROGRESS_INTERVAL = 10_000
 
+# SQLite matches identifiers case-insensitively for ASCII letters only, so "Ä"
+# and "ä" stay distinct tables; ``str.casefold`` would merge them.
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _fold_identifier(name: str) -> str:
+    return name.translate(_ASCII_LOWER)
+
 
 def _sqlite_path_from_connection_string(connection_string: str) -> Path:
     """Resolve a ``sqlite:///`` URI or bare filesystem path to a ``.sqlite`` file."""
@@ -216,7 +224,7 @@ class SQLiteDatabase(SQLDatabase):
         instead of silently dropping the key.
         """
         tables = self.get_tables()
-        declared = {name.casefold(): name for name in tables["table_name"]}
+        declared = {_fold_identifier(name): name for name in tables["table_name"]}
         table_info: dict[str, list] = {}
 
         def columns_of(table_name: str) -> list:
@@ -228,7 +236,7 @@ class SQLiteDatabase(SQLDatabase):
 
         def declared_column(table_name: str, column_name: str) -> str:
             for column in columns_of(table_name):
-                if column[1].casefold() == column_name.casefold():
+                if _fold_identifier(column[1]) == _fold_identifier(column_name):
                     return column[1]
             return column_name
 
@@ -238,7 +246,7 @@ class SQLiteDatabase(SQLDatabase):
                 f'PRAGMA foreign_key_list("{table_name}")'
             ).fetchall()
             for _id, seq, ref_table, from_col, ref_col, *_rest in fks:
-                parent = declared.get(ref_table.casefold())
+                parent = declared.get(_fold_identifier(ref_table))
                 if parent is not None:
                     if ref_col is None:
                         key = sorted(

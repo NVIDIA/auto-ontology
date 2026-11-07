@@ -102,6 +102,18 @@ def test_names_are_resolved_to_their_declared_case(connector_factory) -> None:
     assert _references(db) == {("orders", "customer_id", "Customer", "Id")}
 
 
+def test_non_ascii_names_are_not_folded_together(connector_factory) -> None:
+    """SQLite folds ASCII letters only, so "Ä" and "ä" are different tables."""
+    db = connector_factory(
+        """
+        CREATE TABLE "Ä" (upper_key INTEGER PRIMARY KEY);
+        CREATE TABLE "ä" (lower_key INTEGER PRIMARY KEY);
+        CREATE TABLE child (x INTEGER REFERENCES "Ä");
+        """
+    )
+    assert _references(db) == {("child", "x", "Ä", "upper_key")}
+
+
 def test_unresolvable_parent_is_passed_through(connector_factory) -> None:
     """A parent that isn't in the database keeps the name the DDL gave it."""
     db = connector_factory(
