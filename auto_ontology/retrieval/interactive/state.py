@@ -20,6 +20,9 @@ class InteractiveSessionState:
     original_question: str
     working_question: str
     max_clarify_turns: int = 5
+    # JSON object "db|table|column" -> meaning. When set, the clarify prompt
+    # lists tables and columns from it instead of from db_schema.
+    column_meanings: str = ""
     clarify_history: list[dict] = field(default_factory=list)  # [{"q": ..., "a": ...}]
     phase: InteractivePhase = InteractivePhase.ROUND1_CLARIFY
     prior_round_sql: Optional[str] = None

@@ -25,7 +25,7 @@ from .entity_resolution import (
     _CONNECTIVES,
     _KB_VDB_DISAMBIG_THRESHOLD,
 )
-from .kb_coverage import _parse_kb_entries, _compact_schema
+from .kb_coverage import _compact_column_meanings, _compact_schema, _parse_kb_entries
 
 if TYPE_CHECKING:
     from .state import InteractiveSessionState
@@ -234,6 +234,13 @@ def prune_resolved_terms(
     if resolved:
         logger.info("Clarify — persistent terms resolved: %s", resolved)
     return remaining
+
+
+def _schema_overview(session: "InteractiveSessionState") -> str:
+    """The tables and columns shown to the decide-LLM."""
+    if session.column_meanings:
+        return _compact_column_meanings(session.column_meanings)
+    return _compact_schema(session.db_schema)
 
 
 def should_clarify(
@@ -482,7 +489,7 @@ def should_clarify(
     turns_remaining = session.max_clarify_turns - turns_used
 
     prompt = _CLARIFY_PROMPT.format(
-        db_schema=_compact_schema(session.db_schema),
+        db_schema=_schema_overview(session),
         relevant_knowledge=grounded_knowledge_for_prompt,
         resolved_schema_terms=resolved_schema_text,
         question=session.working_question,

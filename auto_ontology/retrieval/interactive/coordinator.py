@@ -673,6 +673,7 @@ def create_session(
     external_kb_children_map: dict | None = None,
     skip_evidence_refinement: bool = False,
     numeric_type_alignment: bool = False,
+    column_meanings: str = "",
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -680,6 +681,7 @@ def create_session(
         db_name=db_name,
         db_schema=db_schema,
         external_kb=external_kb,
+        column_meanings=column_meanings,
         original_question=question,
         working_question=question,
         max_clarify_turns=max_clarify_turns,
