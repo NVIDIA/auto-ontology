@@ -360,9 +360,46 @@ def _compact_schema(db_schema: str) -> str:
     return "\n".join(result) or db_schema[:3000]
 
 
+_MEANING_TYPE = re.compile(
+    r"\s*(BIGSERIAL|SERIAL|BIGINT|SMALLINT|INTEGER|INT|REAL|DOUBLE PRECISION|FLOAT"
+    r"|NUMERIC(?:\(\d+(?:,\s*\d+)?\))?|DECIMAL(?:\(\d+(?:,\s*\d+)?\))?"
+    r"|VARCHAR(?:\(\d+\))?|CHAR(?:\(\d+\))?|TEXT|DATE|TIMESTAMPTZ|TIMESTAMP|TIME"
+    r"|BOOLEAN|BOOL|UUID|JSONB|JSON)\b",
+    re.IGNORECASE,
+)
+_MEANING_EXAMPLE = re.compile(r"Example:\s*(.+?)\.(?:\s|$)")
+_EXAMPLE_CHARS = 30
+
+
+def _meaning_example(meaning: str) -> str:
+    m = _MEANING_EXAMPLE.search(meaning)
+    return f" (e.g. {m.group(1)[:_EXAMPLE_CHARS]})" if m else ""
+
+
+def _json_fields(fields: dict, prefix: str = "") -> list[str]:
+    out: list[str] = []
+    for name, meaning in fields.items():
+        if isinstance(meaning, dict):
+            out.extend(_json_fields(meaning, f"{prefix}{name}."))
+        else:
+            out.append(f"{prefix}{name}{_meaning_example(str(meaning))}")
+    return out
+
+
+def _meaning_column(column: str, meaning) -> str:
+    if isinstance(meaning, dict):
+        fields = _json_fields(meaning.get("fields_meaning") or {})
+        return f"{column} JSONB {{{', '.join(fields)}}}"
+    meaning = str(meaning)
+    # Meanings usually open with the type ("TEXT. ..."); some are prose only.
+    sql_type = _MEANING_TYPE.match(meaning)
+    type_part = f" {sql_type.group(1).upper()}" if sql_type else ""
+    return f"{column}{type_part}{_meaning_example(meaning)}"
+
+
 def _compact_column_meanings(column_meanings: str) -> str:
-    """The same 'table: col1, col2, ...' lines as :func:`_compact_schema`, read
-    from the keys of a column-meanings JSON object ("db|table|column" -> meaning)."""
+    """'table: col TYPE (e.g. value), ...' lines from a column-meanings JSON
+    object ("db|table|column" -> meaning), with the field paths of JSONB columns."""
     try:
         meanings = json.loads(column_meanings)
     except (TypeError, ValueError):
@@ -370,12 +407,12 @@ def _compact_column_meanings(column_meanings: str) -> str:
     if not isinstance(meanings, dict):
         return ""
     tables: dict[str, list[str]] = {}
-    for key in meanings:
+    for key, meaning in meanings.items():
         parts = str(key).split("|")
         if len(parts) != 3:
             continue
         _, table, column = parts
-        tables.setdefault(table, []).append(column)
+        tables.setdefault(table, []).append(_meaning_column(column, meaning))
     return "\n".join(f"{table}: {', '.join(cols)}" for table, cols in tables.items())
 
 

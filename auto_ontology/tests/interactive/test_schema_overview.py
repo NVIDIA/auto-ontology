@@ -51,14 +51,34 @@ def test_compact_schema_reads_ddl_with_quoted_keywords():
     )
 
 
-def test_compact_column_meanings_groups_columns_by_table():
+def test_compact_column_meanings_lists_types_examples_and_json_fields_by_table():
     meanings = {
-        "cross_border|DataFlow|RecordRegistry": "TEXT. Primary key.",
-        "cross_border|DataFlow|flow_overview": {"column_meaning": "JSONB column."},
-        "cross_border|RiskManagement|RISKTRACE": "BIGINT.",
+        "cross_border|DataFlow|RecordRegistry": "TEXT. Flow id. PK. Example: CB932064.",
+        "cross_border|DataFlow|flow_overview": {
+            "column_meaning": "JSONB column. Routing and performance.",
+            "fields_meaning": {
+                "routing": {"protocol": "TEXT. Channel. Example: SFTP."},
+                "error_count": "BIGINT. Errors seen.",
+            },
+        },
+        "cross_border|RiskManagement|RISKTRACE": "BIGINT. Risk record id.",
     }
     assert _compact_column_meanings(json.dumps(meanings)) == (
-        "DataFlow: RecordRegistry, flow_overview\nRiskManagement: RISKTRACE"
+        "DataFlow: RecordRegistry TEXT (e.g. CB932064), "
+        "flow_overview JSONB {routing.protocol (e.g. SFTP), error_count}\n"
+        "RiskManagement: RISKTRACE BIGINT"
+    )
+
+
+def test_compact_column_meanings_leaves_out_a_type_the_meaning_does_not_open_with():
+    meanings = {"hulushows|companies|short_name": "Abbreviated company name."}
+    assert _compact_column_meanings(json.dumps(meanings)) == "companies: short_name"
+
+
+def test_compact_column_meanings_clips_long_examples():
+    meanings = {"db|t|title": "TEXT. Title. Example: " + "x" * 80 + "."}
+    assert _compact_column_meanings(json.dumps(meanings)) == (
+        "t: title TEXT (e.g. " + "x" * 30 + ")"
     )
 
 
@@ -87,7 +107,7 @@ def _session(**kwargs):
 def test_clarify_lists_columns_from_column_meanings_when_given():
     meanings = json.dumps({"cross_border|DataFlow|RecordRegistry": "TEXT."})
     session = _session(db_schema=_PLAIN_DDL, column_meanings=meanings)
-    assert _schema_overview(session) == "DataFlow: RecordRegistry"
+    assert _schema_overview(session) == "DataFlow: RecordRegistry TEXT"
 
 
 def test_clarify_falls_back_to_the_schema_without_column_meanings():
