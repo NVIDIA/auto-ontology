@@ -14,6 +14,7 @@ index *most* of the time.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -167,7 +168,9 @@ def _store(client: FakeClient, **kwargs: Any) -> tuple[ElasticsearchVDB, list[fl
     slept: list[float] = []
     store = ElasticsearchVDB(
         client=client,  # type: ignore[arg-type]
-        index_name=f"ao-test-{id(client)}",
+        # Unique per store: the module caches indices it has already checked,
+        # and id(client) can repeat once an earlier client is collected.
+        index_name=f"ao-test-{uuid.uuid4().hex}",
         endpoint=_ENDPOINT,
         sleep=slept.append,
         **kwargs,
