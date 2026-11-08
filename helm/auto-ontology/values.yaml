@@ -118,8 +118,9 @@ vectorStore:
   # the catalog either way. Configure the cluster under `elasticsearch` below.
   backend: postgres
   # semantic (default): vector search only. hybrid (elasticsearch only, ES
-  # 9.5+ or Serverless): BM25 and vector search fused with RRF in one ES|QL
-  # query. Better on exact identifiers, slightly behind on paraphrases.
+  # 9.5+ or Serverless): an entity that looks like an identifier (rental_rate,
+  # MediaTypeId) gets BM25 and vector search fused with RRF in one ES|QL
+  # query; anything else gets the vector search alone.
   searchMode: semantic
 
 # ------------------------------------------------------------------

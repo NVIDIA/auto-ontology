@@ -289,6 +289,17 @@ def test_a_reset_replaces_one_database_and_keeps_the_others(backend) -> None:
 # Hybrid search
 # ---------------------------------------------------------------------------
 
+#: The same rows with their column name in the text, as catalog rows carry it,
+#: so BM25 has an identifier to match. Hybrid only runs for identifier-shaped
+#: queries; anything else takes the vector search alone.
+_HYBRID_ROWS = [
+    ("c_email", "Column", "pagila", "customer_email: customer email address"),
+    ("c_rate", "Column", "pagila", "rental_rate: film rental rate in dollars"),
+    ("t_customer", "Table", "pagila", "customer: customer table with names"),
+    ("c_billing", "Column", "chinook", "billing_address: invoice billing address"),
+    ("c_length", "Column", "pagila", "film_length: film length in minutes"),
+]
+
 
 @pytest.fixture
 def hybrid(
@@ -299,7 +310,7 @@ def hybrid(
     for store, params in _elasticsearch(fake):
         assert isinstance(store, ElasticsearchVDB)
         store.search_mode = "hybrid"
-        _write(store, params, _rows())
+        _write(store, params, _rows(_HYBRID_ROWS))
         yield store, params
 
 
@@ -313,7 +324,7 @@ def _rows_for(
 def test_hybrid_puts_the_row_both_searches_rank_first_at_the_top(hybrid) -> None:
     store, params = hybrid
 
-    [top, *_] = _rows_for(store, params, "customer email")
+    [top, *_] = _rows_for(store, params, "customer_email")
 
     assert top["id"] == "c_email"
     assert top["rrf"] == pytest.approx(1.0)
@@ -322,10 +333,10 @@ def test_hybrid_puts_the_row_both_searches_rank_first_at_the_top(hybrid) -> None
 
 def test_a_hybrid_rows_vector_distance_is_the_semantic_searchs(hybrid) -> None:
     store, params = hybrid
-    hybrid_rows = {r["id"]: r for r in _rows_for(store, params, "film rental")}
+    hybrid_rows = {r["id"]: r for r in _rows_for(store, params, "rental_rate")}
 
     store.search_mode = "semantic"
-    semantic_rows = {r["id"]: r for r in _rows_for(store, params, "film rental")}
+    semantic_rows = {r["id"]: r for r in _rows_for(store, params, "rental_rate")}
 
     for row_id, row in hybrid_rows.items():
         assert row["semantic_distance"] == pytest.approx(
@@ -336,7 +347,7 @@ def test_a_hybrid_rows_vector_distance_is_the_semantic_searchs(hybrid) -> None:
 def test_the_hybrid_gate_reads_the_vector_distance_not_the_rank(hybrid) -> None:
     store, params = hybrid
 
-    rows = {r["id"]: r for r in _rows_for(store, params, "film length")}
+    rows = {r["id"]: r for r in _rows_for(store, params, "film_length")}
     top = min(rows.values(), key=lambda r: r["score"])
 
     # Ranked first, yet held to the same max_distance as a semantic hit.
@@ -351,8 +362,8 @@ def test_the_hybrid_gate_reads_the_vector_distance_not_the_rank(hybrid) -> None:
 def test_hybrid_filters_narrow_both_searches(hybrid) -> None:
     store, params = hybrid
 
-    tables = _rows_for(store, params, "customer", label_filter=["Table"])
-    chinook = _rows_for(store, params, "address", database_name="chinook")
+    tables = _rows_for(store, params, "customer_id", label_filter=["Table"])
+    chinook = _rows_for(store, params, "billing_address", database_name="chinook")
 
     assert [r["id"] for r in tables] == ["t_customer"]
     assert [r["id"] for r in chinook] == ["c_billing"]
@@ -364,7 +375,7 @@ def test_a_hybrid_search_embeds_the_query_once_as_a_query(
     store, params = hybrid
     fake.reset()
 
-    _rows_for(store, params, "customer email", label_filter=["Column"])
+    _rows_for(store, params, "customer_email", label_filter=["Column"])
 
     assert fake.input_types() == ["query"]
 
@@ -376,4 +387,13 @@ def test_a_hybrid_search_of_an_empty_store_finds_nothing(
     for store, params in _elasticsearch(fake):
         assert isinstance(store, ElasticsearchVDB)
         store.search_mode = "hybrid"
-        assert _search(store, params, "customer email") == []
+        assert _search(store, params, "customer_email") == []
+
+
+def test_a_phrase_in_hybrid_mode_gets_semantic_hits(hybrid) -> None:
+    store, params = hybrid
+
+    rows = _rows_for(store, params, "customer email")
+
+    assert rows[0]["id"] == "c_email"
+    assert all("rrf" not in row for row in rows)

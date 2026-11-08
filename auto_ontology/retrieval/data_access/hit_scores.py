@@ -9,8 +9,9 @@ better), and every threshold in the clarification flow was tuned on that
 scale: ``CLARIFY_MAX_DISTANCE``, the ambiguity gap, the collision margins, the
 KB-vs-column cutoff.
 
-A **hybrid** hit (``VDB_SEARCH_MODE=hybrid``) was ranked by reciprocal rank
-fusion of a BM25 and a vector search. Its ``score`` is ``1 - rrf`` -- still
+A **hybrid** hit (``VDB_SEARCH_MODE=hybrid``, for an identifier-shaped
+query; other queries get semantic hits in that mode too) was ranked by
+reciprocal rank fusion of a BM25 and a vector search. Its ``score`` is ``1 - rrf`` -- still
 lower-is-better, so sorting by it is right -- but it is a function of *ranks*,
 not of distance, and two hits' scores say nothing about how far apart they
 are. A hybrid hit also carries the fields in :data:`HYBRID_SCORE_FIELDS`.

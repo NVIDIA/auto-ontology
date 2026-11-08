@@ -7,8 +7,9 @@
 ``VDB_BACKEND`` picks the store: ``postgres`` (pgvector, the default) or
 ``elasticsearch`` (``semantic_text`` over an NVIDIA inference endpoint). Both
 implement :class:`~auto_ontology.vdb.base.VectorStore`. ``VDB_SEARCH_MODE=hybrid``
-(Elasticsearch only) fuses BM25 with the vector search; ``HYBRID_RRF_RANK_CONSTANT``
-and ``HYBRID_RRF_RANK_WINDOW`` tune the fusion.
+(Elasticsearch only) fuses BM25 with the vector search for identifier-shaped
+queries; ``HYBRID_RRF_RANK_CONSTANT`` and ``HYBRID_RRF_RANK_WINDOW`` tune the
+fusion.
 """
 
 import os

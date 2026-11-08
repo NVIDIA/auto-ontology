@@ -30,7 +30,11 @@ from auto_ontology.infra.elasticsearch import (
 from auto_ontology.retrieval.data_access.semantic_search import _is_retryable
 from auto_ontology.utils.embedding_rows import build_embed_row
 from auto_ontology.vdb.backend import vdb_search_mode
-from auto_ontology.vdb.elasticsearch import ElasticsearchVDB, score_to_distance
+from auto_ontology.vdb.elasticsearch import (
+    ElasticsearchVDB,
+    looks_like_identifier,
+    score_to_distance,
+)
 from auto_ontology.vdb.records import to_vdb_records
 
 _ENDPOINT = EmbedEndpoint(
@@ -495,7 +499,7 @@ def test_hybrid_forks_bm25_and_vector_search_and_fuses_on_the_server() -> None:
     client = FakeClient()
     store = _hybrid_store(client)
 
-    store.retrieval(["film length"], top_k=3, where={"label": "Column"})
+    store.retrieval(["film_length"], top_k=3, where={"label": "Column"})
 
     [call] = client.named("esql")
     query = call["query"]
@@ -503,7 +507,7 @@ def test_hybrid_forks_bm25_and_vector_search_and_fuses_on_the_server() -> None:
     assert '| FUSE RRF WITH {"rank_constant": 60}' in query
     # The filter is on both branches, as parameters.
     assert query.count("AND metadata.label == ?f0") == 2
-    assert {"query": "film length"} in call["params"]
+    assert {"query": "film_length"} in call["params"]
     assert {"f0": "Column"} in call["params"]
     assert {"top_k": 3} in call["params"]
     # Each branch contributes more than top_k rows to the fusion.
@@ -515,7 +519,7 @@ def test_hybrid_filters_on_several_values_with_in() -> None:
     store = _hybrid_store(client)
 
     store.retrieval(
-        ["x"], where={"label": ["Table", "Column"], "database_name": "shop"}
+        ["x_id"], where={"label": ["Table", "Column"], "database_name": "shop"}
     )
 
     query = client.named("esql")[0]["query"]
@@ -527,7 +531,7 @@ def test_hybrid_refuses_to_put_an_unindexed_key_into_the_query() -> None:
     store = _hybrid_store(FakeClient())
 
     with pytest.raises(ValueError, match="content_metadata"):
-        store.retrieval(["x"], where={"content_metadata": "y"})
+        store.retrieval(["x_id"], where={"content_metadata": "y"})
 
 
 def test_hybrid_hits_carry_normalised_rrf_and_each_branch_score() -> None:
@@ -542,7 +546,7 @@ def test_hybrid_hits_carry_normalised_rrf_and_each_branch_score() -> None:
     }
     store = _hybrid_store(client)
 
-    [[first, second]] = store.retrieval(["film length"], top_k=2)
+    [[first, second]] = store.retrieval(["film_length"], top_k=2)
 
     assert first["metadata"] == {"id": "c1", "extra": 1}, "full metadata, from mget"
     assert first["_rrf"] == pytest.approx(1.0)
@@ -560,7 +564,7 @@ def test_a_hybrid_row_deleted_before_its_metadata_was_read_is_dropped() -> None:
     client.sources = {"d2": {"text": "t", "metadata": {"id": "c2"}}}
     store = _hybrid_store(client)
 
-    [hits] = store.retrieval(["x"])
+    [hits] = store.retrieval(["x_id"])
 
     assert [h["metadata"]["id"] for h in hits] == ["c2"]
 
@@ -572,8 +576,45 @@ def test_a_hybrid_search_before_anything_was_ingested_finds_nothing() -> None:
     )
     store = _hybrid_store(client)
 
-    assert store.retrieval(["x"]) == [[]]
+    assert store.retrieval(["x_id"]) == [[]]
     assert client.named("mget") == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["rental_rate", "MediaTypeId", "address2", " film_id ", "last_rented_at"],
+)
+def test_identifiers_look_like_identifiers(text: str) -> None:
+    assert looks_like_identifier(text)
+
+
+@pytest.mark.parametrize(
+    "text", ["when the payment was made", "rental rate", "Milliseconds", "email", ""]
+)
+def test_words_do_not_look_like_identifiers(text: str) -> None:
+    assert not looks_like_identifier(text)
+
+
+def test_hybrid_mode_runs_the_vector_search_alone_for_a_phrase() -> None:
+    client = FakeClient()
+    store = _hybrid_store(client)
+
+    store.retrieval(["when the payment was made"], top_k=3)
+
+    assert client.named("esql") == []
+    [call] = client.named("search")
+    knn = call["query"]["knn"]["query_vector_builder"]["text_embedding"]
+    assert knn["model_text"] == "when the payment was made"
+
+
+def test_hybrid_mode_routes_each_query_on_its_own() -> None:
+    client = FakeClient()
+    store = _hybrid_store(client)
+
+    store.retrieval(["rental_rate", "price to rent a movie"], top_k=3)
+
+    assert [c["params"][0] for c in client.named("esql")] == [{"query": "rental_rate"}]
+    assert len(client.named("search")) == 1
 
 
 def test_hybrid_search_needs_elasticsearch(monkeypatch: pytest.MonkeyPatch) -> None:

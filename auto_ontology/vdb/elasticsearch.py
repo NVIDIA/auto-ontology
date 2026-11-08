@@ -179,6 +179,27 @@ def _esql_filters(where: dict[str, Any] | None) -> tuple[str, list[dict]]:
     return "".join(f" AND {c}" for c in conditions), params
 
 
+_INNER_CAPITAL = re.compile(r"[a-z][A-Z]")
+
+
+def looks_like_identifier(text: str) -> bool:
+    """Whether *text* reads as a column or field name rather than words.
+
+    One token with an underscore, an inner capital or a digit: ``rental_rate``,
+    ``MediaTypeId``, ``address2``. Hybrid search only runs for these. On
+    phrases, BM25 matches the common words in row descriptions and pulls the
+    vector search's answer down, so they go to the vector search alone.
+    """
+    text = text.strip()
+    if not text or any(char.isspace() for char in text):
+        return False
+    return (
+        "_" in text
+        or bool(_INNER_CAPITAL.search(text))
+        or any(char.isdigit() for char in text)
+    )
+
+
 def score_to_distance(score: float) -> float:
     """Cosine distance from an Elasticsearch kNN score.
 
@@ -545,10 +566,11 @@ class ElasticsearchVDB:
     ) -> list[list[dict]]:
         """The best rows for each query *text*, best first.
 
-        In ``semantic`` mode, the nearest rows by cosine; in ``hybrid`` mode,
-        BM25 and vector results fused by reciprocal rank (see
-        :meth:`_hybrid_search`). Either way ``_distance`` orders the hits,
-        lower first.
+        In ``semantic`` mode, the nearest rows by cosine. In ``hybrid`` mode
+        the same, except for a query that looks like an identifier
+        (:func:`looks_like_identifier`), which gets BM25 and vector results
+        fused by reciprocal rank (see :meth:`_hybrid_search`). Either way
+        ``_distance`` orders the hits, lower first.
 
         Raises on any error but a missing index (nothing ingested yet, which is
         an empty result). That differs from :class:`PostgresVDB`, which logs
@@ -556,13 +578,14 @@ class ElasticsearchVDB:
         endpoint failing to embed the query, and
         ``semantic_search._query_with_retry`` needs to see it to retry.
         """
-        search = (
-            self._hybrid_search
-            if self.search_mode == "hybrid"
-            else self._semantic_search
-        )
+        where = kwargs.get("where")
         started = time.perf_counter()
-        results = [search(text, top_k, kwargs.get("where")) for text in queries]
+        results = [
+            self._hybrid_search(text, top_k, where)
+            if self.search_mode == "hybrid" and looks_like_identifier(text)
+            else self._semantic_search(text, top_k, where)
+            for text in queries
+        ]
         logger.debug(
             "vdb.retrieval mode=%s total=%.3fs queries=%d",
             self.search_mode,
