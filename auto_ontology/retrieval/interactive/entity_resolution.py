@@ -24,6 +24,20 @@ from auto_ontology.retrieval.entity_coverage.graph import (
     create_graph as _create_entity_coverage_graph,
 )
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
+
+# Every score in this module goes through hit_scores rather than being read
+# straight off hit["score"]. A semantic hit's score is its cosine distance, and
+# the thresholds here were all tuned on that: CLARIFY_MAX_DISTANCE, the
+# ambiguity gap, the collision margins and the KB cutoff. A hybrid hit's score
+# is 1 - fused_score instead. That's right for ordering but it isn't a
+# distance, so comparing it with those thresholds means nothing.
+#
+# So we sort with rank_score, gate with passes_relevance_gate, and use
+# cosine_distance wherever a threshold is involved, which for a hybrid hit is
+# its vector search's distance. rank_score also fixes the old
+# `score or inf` sort: a hybrid hit both searches rank first scores exactly
+# 0.0, and `or` treated that as missing and sorted the best hit last. For
+# semantic hits all of this works out the same as before.
 from auto_ontology.retrieval.data_access.hit_scores import (
     ambiguous_pair,
     cosine_distance,
