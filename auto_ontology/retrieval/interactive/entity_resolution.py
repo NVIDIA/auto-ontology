@@ -215,9 +215,9 @@ def _ambiguity_check(
     happened to qualify). These are demoted to unresolvable even if
     CoverageGradeAgent counted them covered.
 
-    Hybrid hits are gated on their vector distance or an exact name, and are
-    a tie when the BM25 and vector searches disagree on their order, unless
-    only the best names the entity -- see ``hit_scores.ambiguous_pair``.
+    Hybrid hits are gated on their vector distance, and are a tie when the
+    BM25 and vector searches disagree on their order -- see
+    ``hit_scores.ambiguous_pair``.
     """
     hits: list[dict] = path_state.get("retrieved_column_attributes") or []
     # Group best and second-best hit per query_entity.
@@ -239,9 +239,7 @@ def _ambiguity_check(
             elif entity not in second or score < float(second[entity]["score"]):
                 second[entity] = hit
     ambiguous = {
-        e
-        for e, s in second.items()
-        if ambiguous_pair(best[e], s, _AMBIGUITY_MAX_GAP, entity=e)
+        e for e, s in second.items() if ambiguous_pair(best[e], s, _AMBIGUITY_MAX_GAP)
     }
     if ambiguous:
         logger.info("Clarify — ambiguous entities (2+ close VDB hits): %s", ambiguous)
