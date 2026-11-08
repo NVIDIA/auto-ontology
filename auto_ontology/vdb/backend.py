@@ -50,10 +50,8 @@ _SEARCH_MODES: tuple[SearchMode, ...] = ("semantic", "hybrid")
 def vdb_search_mode() -> SearchMode:
     """The configured search mode: ``VDB_SEARCH_MODE``, defaulting to ``semantic``.
 
-    ``hybrid`` fuses a BM25 search over the row text with the vector search,
-    by reciprocal rank fusion, for queries that look like identifiers (see
-    :func:`~auto_ontology.vdb.elasticsearch.looks_like_identifier`). It needs
-    Elasticsearch, and it changes what a
+    ``hybrid`` fuses a BM25 search over row names with the vector search, by
+    a weighted sum of their normalised scores. It needs Elasticsearch, and it changes what a
     hit's score means -- see
     :mod:`auto_ontology.retrieval.data_access.hit_scores` -- so asking for it
     on Postgres is an error rather than something to quietly ignore.

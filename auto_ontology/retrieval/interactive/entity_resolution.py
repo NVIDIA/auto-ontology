@@ -968,7 +968,7 @@ def _resolve_collisions(
 
         def _distance_for_shared(e: str) -> float:
             # The margins below are in cosine units. A hybrid hit's score is
-            # an RRF ordering, so the margins read its vector distance instead
+            # a fused ordering, so the margins read its vector distance instead
             # (hit_scores); a semantic hit's score already is one.
             hit = _shared_hit(e)
             return cosine_distance(hit) if is_hybrid_hit(hit) else _score_for_shared(e)

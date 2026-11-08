@@ -30,11 +30,7 @@ from auto_ontology.infra.elasticsearch import (
 from auto_ontology.retrieval.data_access.semantic_search import _is_retryable
 from auto_ontology.utils.embedding_rows import build_embed_row
 from auto_ontology.vdb.backend import vdb_search_mode
-from auto_ontology.vdb.elasticsearch import (
-    ElasticsearchVDB,
-    looks_like_identifier,
-    score_to_distance,
-)
+from auto_ontology.vdb.elasticsearch import ElasticsearchVDB, score_to_distance
 from auto_ontology.vdb.records import to_vdb_records
 
 _ENDPOINT = EmbedEndpoint(
@@ -486,9 +482,6 @@ def test_cluster_errors_are_classified_for_the_query_retry(
 # Hybrid search
 # ---------------------------------------------------------------------------
 
-#: The fused score of a row ranked first by both branches, at k = 60.
-_MAX_RRF = 2 / 61
-
 
 def _hybrid_store(client: FakeClient) -> ElasticsearchVDB:
     store, _ = _store(client, search_mode="hybrid")
@@ -499,15 +492,19 @@ def test_hybrid_forks_bm25_and_vector_search_and_fuses_on_the_server() -> None:
     client = FakeClient()
     store = _hybrid_store(client)
 
-    store.retrieval(["film_length"], top_k=3, where={"label": "Column"})
+    store.retrieval(["film length"], top_k=3, where={"label": "Column"})
 
     [call] = client.named("esql")
     query = call["query"]
-    assert "MATCH(text, ?query)" in query and "MATCH(content, ?query)" in query
-    assert '| FUSE RRF WITH {"rank_constant": 60}' in query
+    # BM25 reads names, not descriptions; the vector search reads the text.
+    assert "MATCH(name_text, ?query)" in query and "MATCH(content, ?query)" in query
+    assert (
+        '| FUSE LINEAR WITH {"normalizer": "minmax", '
+        '"weights": {"fork1": 0.3, "fork2": 0.7}}' in query
+    )
     # The filter is on both branches, as parameters.
     assert query.count("AND metadata.label == ?f0") == 2
-    assert {"query": "film_length"} in call["params"]
+    assert {"query": "film length"} in call["params"]
     assert {"f0": "Column"} in call["params"]
     assert {"top_k": 3} in call["params"]
     # Each branch contributes more than top_k rows to the fusion.
@@ -519,7 +516,7 @@ def test_hybrid_filters_on_several_values_with_in() -> None:
     store = _hybrid_store(client)
 
     store.retrieval(
-        ["x_id"], where={"label": ["Table", "Column"], "database_name": "shop"}
+        ["x"], where={"label": ["Table", "Column"], "database_name": "shop"}
     )
 
     query = client.named("esql")[0]["query"]
@@ -531,14 +528,14 @@ def test_hybrid_refuses_to_put_an_unindexed_key_into_the_query() -> None:
     store = _hybrid_store(FakeClient())
 
     with pytest.raises(ValueError, match="content_metadata"):
-        store.retrieval(["x_id"], where={"content_metadata": "y"})
+        store.retrieval(["x"], where={"content_metadata": "y"})
 
 
-def test_hybrid_hits_carry_normalised_rrf_and_each_branch_score() -> None:
+def test_hybrid_hits_carry_the_fused_score_and_each_branch_score() -> None:
     client = FakeClient()
     client.esql_rows = [
-        ("d1", _MAX_RRF, 4.2, 0.9),  # first in both
-        ("d2", 1 / 61, None, 0.6),  # first in the vector search only
+        ("d1", 1.0, 4.2, 0.9),  # first in both
+        ("d2", 0.35, None, 0.6),  # only the vector search found it
     ]
     client.sources = {
         "d1": {"text": "film length", "metadata": {"id": "c1", "extra": 1}},
@@ -546,25 +543,26 @@ def test_hybrid_hits_carry_normalised_rrf_and_each_branch_score() -> None:
     }
     store = _hybrid_store(client)
 
-    [[first, second]] = store.retrieval(["film_length"], top_k=2)
+    [[first, second]] = store.retrieval(["film length"], top_k=2)
 
     assert first["metadata"] == {"id": "c1", "extra": 1}, "full metadata, from mget"
-    assert first["_rrf"] == pytest.approx(1.0)
+    assert first["_fused_score"] == pytest.approx(1.0)
     assert first["_distance"] == pytest.approx(0.0)
     assert first["_lexical_score"] == 4.2
     assert first["_semantic_distance"] == pytest.approx(0.2)
-    assert second["_rrf"] == pytest.approx(0.5)
+    assert second["_fused_score"] == pytest.approx(0.35)
+    assert second["_distance"] == pytest.approx(0.65)
     assert second["_lexical_score"] is None
     assert second["_semantic_distance"] == pytest.approx(0.8)
 
 
 def test_a_hybrid_row_deleted_before_its_metadata_was_read_is_dropped() -> None:
     client = FakeClient()
-    client.esql_rows = [("gone", _MAX_RRF, 1.0, 0.9), ("d2", 1 / 61, None, 0.6)]
+    client.esql_rows = [("gone", 1.0, 1.0, 0.9), ("d2", 0.35, None, 0.6)]
     client.sources = {"d2": {"text": "t", "metadata": {"id": "c2"}}}
     store = _hybrid_store(client)
 
-    [hits] = store.retrieval(["x_id"])
+    [hits] = store.retrieval(["x"])
 
     assert [h["metadata"]["id"] for h in hits] == ["c2"]
 
@@ -576,45 +574,37 @@ def test_a_hybrid_search_before_anything_was_ingested_finds_nothing() -> None:
     )
     store = _hybrid_store(client)
 
-    assert store.retrieval(["x_id"]) == [[]]
+    assert store.retrieval(["x"]) == [[]]
     assert client.named("mget") == []
 
 
-@pytest.mark.parametrize(
-    "text",
-    ["rental_rate", "MediaTypeId", "address2", " film_id ", "last_rented_at"],
-)
-def test_identifiers_look_like_identifiers(text: str) -> None:
-    assert looks_like_identifier(text)
-
-
-@pytest.mark.parametrize(
-    "text", ["when the payment was made", "rental rate", "Milliseconds", "email", ""]
-)
-def test_words_do_not_look_like_identifiers(text: str) -> None:
-    assert not looks_like_identifier(text)
-
-
-def test_hybrid_mode_runs_the_vector_search_alone_for_a_phrase() -> None:
+def test_the_lexical_weight_sets_the_fusion_weights() -> None:
     client = FakeClient()
-    store = _hybrid_store(client)
+    store, _ = _store(client, search_mode="hybrid", lexical_weight=0.5)
 
-    store.retrieval(["when the payment was made"], top_k=3)
+    store.retrieval(["film length"])
 
-    assert client.named("esql") == []
-    [call] = client.named("search")
-    knn = call["query"]["knn"]["query_vector_builder"]["text_embedding"]
-    assert knn["model_text"] == "when the payment was made"
+    assert '"weights": {"fork1": 0.5, "fork2": 0.5}' in client.named("esql")[0]["query"]
 
 
-def test_hybrid_mode_routes_each_query_on_its_own() -> None:
-    client = FakeClient()
-    store = _hybrid_store(client)
+def test_a_lexical_weight_outside_zero_to_one_is_refused() -> None:
+    with pytest.raises(ValueError, match="lexical_weight"):
+        _store(FakeClient(), search_mode="hybrid", lexical_weight=1.5)
 
-    store.retrieval(["rental_rate", "price to rent a movie"], top_k=3)
 
-    assert [c["params"][0] for c in client.named("esql")] == [{"query": "rental_rate"}]
-    assert len(client.named("search")) == 1
+def test_names_are_indexed_split_into_words() -> None:
+    client = FakeClient(index_exists=False)
+    store, _ = _store(client)
+
+    store.create_index()
+
+    [call] = client.named("create")
+    assert call["mappings"]["properties"]["metadata"]["properties"]["name"] == {
+        "type": "keyword",
+        "copy_to": "name_text",
+    }
+    analyzer = call["settings"]["analysis"]["analyzer"]["name_words"]
+    assert analyzer["filter"] == ["name_parts", "lowercase"]
 
 
 def test_hybrid_search_needs_elasticsearch(monkeypatch: pytest.MonkeyPatch) -> None:

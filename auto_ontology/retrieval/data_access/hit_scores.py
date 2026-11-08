@@ -9,12 +9,12 @@ better), and every threshold in the clarification flow was tuned on that
 scale: ``CLARIFY_MAX_DISTANCE``, the ambiguity gap, the collision margins, the
 KB-vs-column cutoff.
 
-A **hybrid** hit (``VDB_SEARCH_MODE=hybrid``, for an identifier-shaped
-query; other queries get semantic hits in that mode too) was ranked by
-reciprocal rank fusion of a BM25 and a vector search. Its ``score`` is ``1 - rrf`` -- still
-lower-is-better, so sorting by it is right -- but it is a function of *ranks*,
-not of distance, and two hits' scores say nothing about how far apart they
-are. A hybrid hit also carries the fields in :data:`HYBRID_SCORE_FIELDS`.
+A **hybrid** hit (``VDB_SEARCH_MODE=hybrid``) was ranked by a weighted sum of
+a BM25 and a vector search's scores, each min-max-normalised over that
+search's candidates. Its ``score`` is ``1 - fused_score`` -- still
+lower-is-better, so sorting by it is right -- but it is relative to the other
+candidates, not a distance, and two hits' scores say nothing about how far
+apart they are. A hybrid hit also carries the fields in :data:`HYBRID_SCORE_FIELDS`.
 
 Each use of a score therefore has its own rule:
 
@@ -32,12 +32,13 @@ Each use of a score therefore has its own rule:
   under ``max_gap``. Hybrid: when exactly one of them names the entity, that
   one decides it; otherwise, the two branches do not agree on their order.
 
-Why the hybrid gate is not on ``rrf``: a fused score is built from ranks, and
-every search ranks *something* first, so no RRF threshold can turn away an
-entity the catalog has no answer for. Measured on the seeded fixture, an RRF
-gate of 0.5 (ranked first by at least one branch) accepted all 15 such
-entities, and even 1.0 (first in both) accepted 4. The vector distance, the one absolute relevance signal a hybrid hit has, accepted
-none of them at today's 0.65. RRF still decides the order.
+Why the hybrid gate is not on ``fused_score``: min-max normalisation gives
+each search's best candidate full marks whether or not it is any good, so no
+fused threshold can turn away an entity the catalog has no answer for. (A
+reciprocal-rank-fusion gate, measured on the seeded fixture, accepted all 15
+such entities.) The vector distance, the one absolute relevance signal a
+hybrid hit has, accepted none of them at today's 0.65. The fused score still
+decides the order.
 
 Why an exact name passes the hybrid gate: identifiers are what hybrid is for,
 and an entity spelled like a column (``rental_rate``, ``MediaTypeId``) is the
@@ -54,11 +55,16 @@ import re
 from typing import Any
 
 #: Fields a hybrid hit carries besides ``score``, as search rows name them.
-HYBRID_SCORE_FIELDS = ("rrf", "lexical_score", "semantic_score", "semantic_distance")
+HYBRID_SCORE_FIELDS = (
+    "fused_score",
+    "lexical_score",
+    "semantic_score",
+    "semantic_distance",
+)
 
 
 def is_hybrid_hit(hit: dict[str, Any]) -> bool:
-    return hit.get("rrf") is not None
+    return hit.get("fused_score") is not None
 
 
 def _float(value: Any, missing: float) -> float:

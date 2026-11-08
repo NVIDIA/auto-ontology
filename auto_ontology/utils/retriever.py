@@ -50,7 +50,7 @@ class Retriever:
 
         Each hit is ``{"text", "metadata", "_distance"}``, with ``metadata``
         the row's full stored metadata, plus any other ``_``-prefixed scores
-        the store returns (a hybrid search's ``_rrf`` and per-branch scores). ``vdb_kwargs["where"]``, when given,
+        the store returns (a hybrid search's ``_fused_score`` and per-branch scores). ``vdb_kwargs["where"]``, when given,
         is the store's metadata filter. Raises when the query cannot be
         embedded, with the endpoint's HTTP status in the message, so callers
         can tell a transient failure from an empty result.
@@ -75,7 +75,7 @@ class Retriever:
         hits = self.vdb.retrieval([query], top_k=top_k, where=where)[0]
         return [
             {
-                # Store-specific scores (a hybrid hit's ``_rrf`` and per-branch
+                # Store-specific scores (a hybrid hit's ``_fused_score`` and per-branch
                 # scores) ride along; see retrieval.data_access.hit_scores.
                 **{k: v for k, v in hit.items() if k.startswith("_")},
                 "text": (hit.get("text") or "").strip(),

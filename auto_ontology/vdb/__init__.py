@@ -7,9 +7,8 @@
 ``VDB_BACKEND`` picks the store: ``postgres`` (pgvector, the default) or
 ``elasticsearch`` (``semantic_text`` over an NVIDIA inference endpoint). Both
 implement :class:`~auto_ontology.vdb.base.VectorStore`. ``VDB_SEARCH_MODE=hybrid``
-(Elasticsearch only) fuses BM25 with the vector search for identifier-shaped
-queries; ``HYBRID_RRF_RANK_CONSTANT`` and ``HYBRID_RRF_RANK_WINDOW`` tune the
-fusion.
+(Elasticsearch only) fuses BM25 over row names with the vector search;
+``HYBRID_LEXICAL_WEIGHT`` and ``HYBRID_RANK_WINDOW`` tune the fusion.
 """
 
 import os
@@ -23,7 +22,7 @@ from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.vdb.backend import vdb_backend, vdb_search_mode
 from auto_ontology.vdb.base import VectorStore
 from auto_ontology.vdb.elasticsearch import (
-    DEFAULT_RANK_CONSTANT,
+    DEFAULT_LEXICAL_WEIGHT,
     DEFAULT_RANK_WINDOW,
     ElasticsearchVDB,
 )
@@ -55,11 +54,11 @@ def get_vdb(
             database_name=database_name,
             reset=reset,
             search_mode=search_mode,
-            rank_constant=int(
-                os.environ.get("HYBRID_RRF_RANK_CONSTANT") or DEFAULT_RANK_CONSTANT
+            lexical_weight=float(
+                os.environ.get("HYBRID_LEXICAL_WEIGHT") or DEFAULT_LEXICAL_WEIGHT
             ),
             rank_window=int(
-                os.environ.get("HYBRID_RRF_RANK_WINDOW") or DEFAULT_RANK_WINDOW
+                os.environ.get("HYBRID_RANK_WINDOW") or DEFAULT_RANK_WINDOW
             ),
         )
 

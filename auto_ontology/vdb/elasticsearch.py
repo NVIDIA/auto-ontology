@@ -12,10 +12,12 @@ each row on write as a ``passage`` and each search string as a ``query``, so
 the asymmetric ``input_type`` handling the app otherwise does itself is the
 endpoint's job here.
 
-``text`` stays a lexical field for hybrid search (``VDB_SEARCH_MODE=hybrid``):
-an ES|QL ``FORK`` runs BM25 over ``text`` and a vector search over
-``content``, and ``FUSE`` merges them by reciprocal rank fusion on the
-server. See :meth:`ElasticsearchVDB._hybrid_search` for what a hybrid hit
+Each row's ``metadata.name`` is also copied into ``name_text``, split into
+words (``rental_rate`` and ``rentalRate`` both index as ``rental rate``), for
+hybrid search (``VDB_SEARCH_MODE=hybrid``): an ES|QL ``FORK`` runs BM25 over
+``name_text`` and a vector search over ``content``, and ``FUSE LINEAR`` merges
+their min-max-normalised scores on the server, weighted towards the vector
+search. See :meth:`ElasticsearchVDB._hybrid_search` for what a hybrid hit
 carries and :mod:`auto_ontology.retrieval.data_access.hit_scores` for how the
 app reads it.
 """
@@ -65,6 +67,27 @@ _RETRY_MAX_SECONDS = 120.0
 #: A bulk request waits for every row in it to be embedded; at ingest sizes
 #: that is minutes, not the client's default ten seconds.
 _REQUEST_TIMEOUT_S = 600.0
+
+#: ``name_words`` splits a name into words, so BM25 matches ``rental rate``,
+#: ``rental_rate`` and ``rentalRate`` alike.
+_INDEX_SETTINGS = {
+    "analysis": {
+        "filter": {
+            "name_parts": {
+                "type": "word_delimiter_graph",
+                "split_on_case_change": True,
+                "split_on_numerics": False,
+            }
+        },
+        "analyzer": {
+            "name_words": {
+                "type": "custom",
+                "tokenizer": "whitespace",
+                "filter": ["name_parts", "lowercase"],
+            }
+        },
+    }
+}
 
 # Indices and endpoints this process has already checked, so a store built
 # per request does not cost two round trips each time.
@@ -131,22 +154,25 @@ def _filter_clauses(where: dict[str, Any] | None) -> list[dict]:
 _INDEX_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
 #: Rows each branch of a hybrid search contributes to the fusion. Larger than
-#: any per-label ``top_k`` the app asks for: a row's fused rank depends on its
-#: rank in each branch, and a branch cut at ``top_k`` would drop the rows that
+#: any per-label ``top_k`` the app asks for: a row's fused score depends on its
+#: score in each branch, and a branch cut at ``top_k`` would drop the rows that
 #: the *other* branch ranks highly.
 DEFAULT_RANK_WINDOW = 50
 
-#: Elasticsearch's own RRF default.
-DEFAULT_RANK_CONSTANT = 60
+#: The BM25 branch's share of a hybrid score; the vector search gets the rest.
+#: Measured on the calibration fixture: an even split loses paraphrases to
+#: name matches on common words, and 0.3 keeps the vector search's answers
+#: while still putting an exact identifier first.
+DEFAULT_LEXICAL_WEIGHT = 0.3
 
 _HYBRID_QUERY = """
 FROM {index} METADATA _id, _index, _score
 | FORK
-    ( WHERE MATCH(text, ?query){filters}
+    ( WHERE MATCH(name_text, ?query){filters}
       | SORT _score DESC | LIMIT ?window | EVAL lexical_score = _score )
     ( WHERE MATCH(content, ?query){filters}
       | SORT _score DESC | LIMIT ?window | EVAL semantic_score = _score )
-| FUSE RRF WITH {{"rank_constant": {rank_constant}}}
+| FUSE LINEAR WITH {{"normalizer": "minmax", "weights": {{"fork1": {lexical_weight}, "fork2": {semantic_weight}}}}}
 | SORT _score DESC
 | LIMIT ?top_k
 | KEEP _id, _score, lexical_score, semantic_score
@@ -179,27 +205,6 @@ def _esql_filters(where: dict[str, Any] | None) -> tuple[str, list[dict]]:
     return "".join(f" AND {c}" for c in conditions), params
 
 
-_INNER_CAPITAL = re.compile(r"[a-z][A-Z]")
-
-
-def looks_like_identifier(text: str) -> bool:
-    """Whether *text* reads as a column or field name rather than words.
-
-    One token with an underscore, an inner capital or a digit: ``rental_rate``,
-    ``MediaTypeId``, ``address2``. Hybrid search only runs for these. On
-    phrases, BM25 matches the common words in row descriptions and pulls the
-    vector search's answer down, so they go to the vector search alone.
-    """
-    text = text.strip()
-    if not text or any(char.isspace() for char in text):
-        return False
-    return (
-        "_" in text
-        or bool(_INNER_CAPITAL.search(text))
-        or any(char.isdigit() for char in text)
-    )
-
-
 def score_to_distance(score: float) -> float:
     """Cosine distance from an Elasticsearch kNN score.
 
@@ -227,7 +232,7 @@ class ElasticsearchVDB:
         database_name: str | None = None,
         reset: bool = False,
         search_mode: SearchMode = "semantic",
-        rank_constant: int = DEFAULT_RANK_CONSTANT,
+        lexical_weight: float = DEFAULT_LEXICAL_WEIGHT,
         rank_window: int = DEFAULT_RANK_WINDOW,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -239,7 +244,9 @@ class ElasticsearchVDB:
         self._endpoint = endpoint
         self.database_name = database_name
         self.search_mode = search_mode
-        self._rank_constant = int(rank_constant)
+        if not 0.0 <= lexical_weight <= 1.0:
+            raise ValueError(f"lexical_weight must be in [0, 1], not {lexical_weight}")
+        self._lexical_weight = float(lexical_weight)
         self._rank_window = int(rank_window)
         self._sleep = sleep
         # Every row this store writes carries the generation, so a reset can
@@ -262,6 +269,7 @@ class ElasticsearchVDB:
             "dynamic": False,
             "properties": {
                 "text": {"type": "text", "copy_to": "content"},
+                "name_text": {"type": "text", "analyzer": "name_words"},
                 "content": {
                     "type": "semantic_text",
                     "inference_id": self._endpoint.inference_id,
@@ -271,7 +279,12 @@ class ElasticsearchVDB:
                     "type": "object",
                     "dynamic": False,
                     "properties": {
-                        key: {"type": "keyword"} for key in _FILTERABLE_METADATA
+                        key: (
+                            {"type": "keyword", "copy_to": "name_text"}
+                            if key == "name"
+                            else {"type": "keyword"}
+                        )
+                        for key in _FILTERABLE_METADATA
                     },
                 },
             },
@@ -287,7 +300,9 @@ class ElasticsearchVDB:
         if not self._client.indices.exists(index=self.index_name):
             try:
                 self._client.indices.create(
-                    index=self.index_name, mappings=self._mappings()
+                    index=self.index_name,
+                    mappings=self._mappings(),
+                    settings=_INDEX_SETTINGS,
                 )
                 logger.info("Created Elasticsearch index %s", self.index_name)
             except BadRequestError as exc:
@@ -566,10 +581,9 @@ class ElasticsearchVDB:
     ) -> list[list[dict]]:
         """The best rows for each query *text*, best first.
 
-        In ``semantic`` mode, the nearest rows by cosine. In ``hybrid`` mode
-        the same, except for a query that looks like an identifier
-        (:func:`looks_like_identifier`), which gets BM25 and vector results
-        fused by reciprocal rank (see :meth:`_hybrid_search`). Either way
+        In ``semantic`` mode, the nearest rows by cosine; in ``hybrid`` mode,
+        BM25 over row names and vector results, fused by a weighted sum of
+        their normalised scores (see :meth:`_hybrid_search`). Either way
         ``_distance`` orders the hits, lower first.
 
         Raises on any error but a missing index (nothing ingested yet, which is
@@ -578,14 +592,13 @@ class ElasticsearchVDB:
         endpoint failing to embed the query, and
         ``semantic_search._query_with_retry`` needs to see it to retry.
         """
-        where = kwargs.get("where")
+        search = (
+            self._hybrid_search
+            if self.search_mode == "hybrid"
+            else self._semantic_search
+        )
         started = time.perf_counter()
-        results = [
-            self._hybrid_search(text, top_k, where)
-            if self.search_mode == "hybrid" and looks_like_identifier(text)
-            else self._semantic_search(text, top_k, where)
-            for text in queries
-        ]
+        results = [search(text, top_k, kwargs.get("where")) for text in queries]
         logger.debug(
             "vdb.retrieval mode=%s total=%.3fs queries=%d",
             self.search_mode,
@@ -634,20 +647,22 @@ class ElasticsearchVDB:
     def _hybrid_search(
         self, text: str, top_k: int, where: dict[str, Any] | None
     ) -> list[dict]:
-        """BM25 and vector results fused by reciprocal rank, on the server.
+        """BM25 over row names and vector results, fused on the server.
 
-        Each hit carries, beside ``text`` and ``metadata``:
+        ``FUSE LINEAR`` min-max-normalises each branch's scores to [0, 1] and
+        adds them, weighted ``lexical_weight`` to BM25 and the rest to the
+        vector search. Each hit carries, beside ``text`` and ``metadata``:
 
-        * ``_rrf`` -- the fused score normalised to (0, 1]: the raw RRF score
-          over its maximum, ``2 / (k + 1)``, which a row ranked first by both
-          branches reaches.
-        * ``_distance`` -- ``1 - _rrf``, so the app's lower-is-better ordering
+        * ``_fused_score`` -- that weighted sum, in [0, 1]. A row both
+          branches rank first scores 1. It is relative to the other
+          candidates, not a measure of relevance.
+        * ``_distance`` -- ``1 - _fused_score``, so the app's lower-is-better ordering
           still sorts hybrid hits correctly. It is *not* a cosine distance and
           must not be compared with the cosine thresholds; ``hit_scores`` reads
           the fields below for that.
         * ``_lexical_score`` / ``_semantic_score`` -- each branch's own score,
           ``None`` when that branch did not return the row. Comparing two
-          rows' scores within a branch is comparing their ranks in it.
+          rows' scores within a branch says which one it ranks higher.
         * ``_semantic_distance`` -- the cosine distance, from
           ``_semantic_score``, or ``None``.
 
@@ -658,7 +673,8 @@ class ElasticsearchVDB:
         query = _HYBRID_QUERY.format(
             index=self.index_name,
             filters=filters,
-            rank_constant=self._rank_constant,
+            lexical_weight=self._lexical_weight,
+            semantic_weight=round(1.0 - self._lexical_weight, 6),
         )
         params = [
             {"query": text},
@@ -686,21 +702,20 @@ class ElasticsearchVDB:
             )["docs"]
             if doc.get("found")
         }
-        max_rrf = 2.0 / (self._rank_constant + 1)
         hits: list[dict] = []
         for row in rows:
             source = sources.get(row["_id"])
             if source is None:
                 # Deleted between the search and the mget.
                 continue
-            rrf = min(float(row["_score"]) / max_rrf, 1.0)
+            fused = min(max(float(row["_score"]), 0.0), 1.0)
             semantic = row.get("semantic_score")
             hits.append(
                 {
                     "text": source.get("text", ""),
                     "metadata": source.get("metadata") or {},
-                    "_distance": 1.0 - rrf,
-                    "_rrf": rrf,
+                    "_distance": 1.0 - fused,
+                    "_fused_score": fused,
                     "_lexical_score": row.get("lexical_score"),
                     "_semantic_score": semantic,
                     "_semantic_distance": (

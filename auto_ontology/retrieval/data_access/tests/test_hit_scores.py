@@ -6,7 +6,7 @@
 
 The cosine cases pin that nothing changed for ``VDB_SEARCH_MODE=semantic``;
 the hybrid cases pin that the gate and the cosine-tuned cutoffs read a hybrid
-hit's vector distance rather than its RRF ordering -- a hit only BM25 found
+hit's vector distance rather than its fused ordering -- a hit only BM25 found
 must never look "close" -- the exact-name exception to the hybrid gate, and
 the branch-agreement tie rule.
 """
@@ -40,14 +40,14 @@ def _cosine(score: float, **extra: Any) -> dict:
 
 
 def _hybrid(
-    rrf: float,
+    fused: float,
     lexical: float | None = None,
     semantic: float | None = None,
     **extra: Any,
 ) -> dict:
     return {
-        "score": 1 - rrf,
-        "rrf": rrf,
+        "score": 1 - fused,
+        "fused_score": fused,
         "lexical_score": lexical,
         "semantic_score": semantic,
         "semantic_distance": None if semantic is None else 2 * (1 - semantic),
@@ -77,8 +77,8 @@ def test_a_hybrid_hit_is_gated_on_its_vector_distance(
     assert passes_relevance_gate(hit, max_distance=0.65) is passes
 
 
-def test_a_hybrid_hits_rrf_does_not_get_it_past_the_gate() -> None:
-    # First in both searches (rrf 1.0, score 0.0), but semantically far: the
+def test_a_hybrid_hits_fused_score_does_not_get_it_past_the_gate() -> None:
+    # First in both searches (fused 1.0, score 0.0), but semantically far: the
     # catalog has no answer, and a fused rank cannot say so.
     hit = _hybrid(1.0, lexical=5.0, semantic=0.5)
 
@@ -160,7 +160,7 @@ def test_a_cosine_hit_is_its_own_distance() -> None:
     assert cosine_distance(_cosine(0.3)) == 0.3
 
 
-def test_a_hybrid_hit_reports_its_vector_distance_not_its_rrf() -> None:
+def test_a_hybrid_hit_reports_its_vector_distance_not_its_fused_score() -> None:
     hit = _hybrid(0.95, lexical=2.0, semantic=0.8)
 
     assert cosine_distance(hit) == pytest.approx(0.4)
@@ -255,7 +255,7 @@ def test_ambiguity_check_reads_branch_agreement_for_hybrid_hits() -> None:
         # Searches disagree on the top two: a tie.
         _hybrid(0.99, lexical=5.0, semantic=0.80, query_entity="tie"),
         _hybrid(0.98, lexical=4.0, semantic=0.90, query_entity="tie"),
-        # Searches agree, however close the RRF scores: not a tie.
+        # Searches agree, however close the fused scores: not a tie.
         _hybrid(0.99, lexical=5.0, semantic=0.90, query_entity="clear"),
         _hybrid(0.98, lexical=4.0, semantic=0.89, query_entity="clear"),
         # Second hit too far by vector distance: not a contender.

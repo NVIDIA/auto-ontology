@@ -283,7 +283,7 @@ def _hits_to_semantic_rows(
     be a single int (same cap for every label) or a ``{label: k}`` dict.
 
     ``score`` is the raw vector ``_distance`` (lower is better). On a hybrid
-    search that is ``1 - rrf``, an ordering only; the row then also carries
+    search that is ``1 - fused_score``, an ordering only; the row then also carries
     the fields in ``HYBRID_SCORE_FIELDS`` (see ``hit_scores``).
     """
     label_counts: dict[str, int] = {}
