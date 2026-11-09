@@ -249,6 +249,9 @@ def test_non_reasoning_thinking_is_on_unless_turned_off(monkeypatch: Any) -> Non
         llm_invoke, "_build_client", lambda **kwargs: built.append(kwargs) or object()
     )
 
+    # The module reads the variable at import, so pin the unset default here
+    # rather than inherit whatever the test process was started with.
+    monkeypatch.setattr(llm_invoke, "NON_REASONING_THINKING", "")
     llm_invoke.get_non_reasoning_llm_client()
     monkeypatch.setattr(llm_invoke, "NON_REASONING_THINKING", "off")
     llm_invoke.get_non_reasoning_llm_client()
