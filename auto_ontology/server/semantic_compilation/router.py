@@ -45,7 +45,7 @@ async def trigger() -> dict[str, str]:
 @router.post(
     "/semantic-compilation/reset", status_code=202, response_model=StatusResponse
 )
-async def reset(
+def reset(
     database_name: str | None = Query(
         default=None,
         description=(

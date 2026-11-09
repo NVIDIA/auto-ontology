@@ -12,6 +12,8 @@ database's semantic layer and custom analyses.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -54,3 +56,23 @@ def test_unscoped_reset_still_resets_everything(
     resp = client.post("/api/semantic-compilation/reset")
     assert resp.status_code == 202
     assert resets == [None]
+
+
+def test_reset_proxy_runs_outside_the_event_loop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worker_calls: list[str | None] = []
+
+    def blocking_reset(database_name: str | None = None) -> None:
+        # Synchronous HTTP must run in FastAPI's worker, not its event loop.
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        worker_calls.append(database_name)
+
+    monkeypatch.setattr(module, "trigger_semantic_reset", blocking_reset)
+    resp = client.post(
+        "/api/semantic-compilation/reset", params={"database_name": "sales"}
+    )
+    assert resp.status_code == 202
+    assert resp.json() == {"status": "accepted"}
+    assert worker_calls == ["sales"]
