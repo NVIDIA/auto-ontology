@@ -11,11 +11,16 @@ from auto_ontology.pii_detection.models import ColumnInput, PiiDecision, PiiStat
 
 
 def normalize(value: str | None) -> str:
-    """Normalize SQL identifiers into words suitable for rule matching."""
+    """Normalize SQL identifiers into words suitable for rule matching.
+
+    The split is Unicode-aware: ``\\W`` keeps letters from any script, so a
+    non-Latin column name survives normalization instead of collapsing to an
+    empty string. ASCII names normalize exactly as before.
+    """
 
     if not value:
         return ""
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+    return " ".join(re.sub(r"[\W_]+", " ", value.casefold()).split())
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,13 +209,12 @@ def evaluate_rules(column: ColumnInput) -> PiiDecision | None:
     table_name = normalize(column.table_name)
 
     if not column_name:
-        return PiiDecision(
-            PiiStatus.REVIEW,
-            None,
-            0.0,
-            "Column name is empty.",
-            "rules",
-        )
+        # No signal for the rules to judge: a missing name, or one made only
+        # of separators. Stay silent so the detector falls through to the LLM
+        # classifier, or to the fallback review. A REVIEW decision from the
+        # rules would mark the column processed and hide it from the
+        # classifier and from later ingests.
+        return None
 
     if NON_PII_COLUMN_PATTERN.fullmatch(
         column_name
