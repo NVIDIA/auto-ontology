@@ -14,6 +14,7 @@ Local development helpers: environment setup, database seeding, and ingest.
 |---|---|
 | `setup_env.sh` | Brings the docker-compose stack up. Human-invoked. |
 | `local_ingest.py` | Ingests the local Postgres source into the pgvector store. |
+| `copy_vdb_to_qdrant.py` | Copies the pgvector collections into Qdrant when a deployment switches to `AUTO_ONTOLOGY_VDB_BACKEND=qdrant`. |
 | `generate_backend_openapi.py` | Dumps the FastAPI OpenAPI specs to `docs/openapi/`. Run by `ci-openapi.yml`. |
 | `release_helm_chart.py` | Packages the chart and publishes it to the NGC Helm registry. Run by `release-helm.yml`. |
 | `_add_spdx_headers.py` | One-off OSRB helper; kept so the header insertion is reproducible. |

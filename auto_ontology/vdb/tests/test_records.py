@@ -171,3 +171,18 @@ def test_written_rows_come_back_from_a_search(
     assert (
         retriever.query("who buys", vdb_kwargs={"where": {"database_name": "x"}}) == []
     )
+
+
+def test_delete_by_ids_removes_every_listed_id(vdb: Any) -> None:
+    write_embedded_rows(
+        vdb,
+        [
+            _row("orders", _unit(0)),
+            _row("customers", _unit(1)),
+            _row("products", _unit(2)),
+        ],
+    )
+
+    assert vdb.delete_by_ids(iter(["orders", "customers", "orders"])) == 2
+    assert vdb.delete_by_ids([]) == 0
+    assert vdb.delete_by_database("shop") == 1

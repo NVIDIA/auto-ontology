@@ -85,9 +85,9 @@ class _StubVdb:
         self.deleted_all += 1
         return 7
 
-    def delete_by_database(self, database_name: str) -> list[str]:
+    def delete_by_database(self, database_name: str) -> int:
         self.deleted_databases.append(database_name)
-        return ["a", "b", "c"]
+        return 3
 
 
 @pytest.fixture(autouse=True)

@@ -194,12 +194,10 @@ def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> N
         return
 
     vdb = embedder.vdb
-    vdb.delete_by_id(term_id)
+    stale_ids = [term_id]
     if refresh_dependent_attrs:
-        for attr in column_attrs:
-            attr_id = attr.get("id")
-            if attr_id:
-                vdb.delete_by_id(attr_id)
+        stale_ids += [attr["id"] for attr in column_attrs if attr.get("id")]
+    vdb.delete_by_ids(stale_ids)
 
     embedder.embed_term(term, column_attrs if refresh_dependent_attrs else [])
 

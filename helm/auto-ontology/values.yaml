@@ -33,6 +33,12 @@ podAnnotations: {}
 postgresUser: auto_ontology
 postgresPassword: ""
 postgresDatabase: auto_ontology
+# Vector store backend: "postgres" (pgvector in the bundled Postgres) or
+# "qdrant". The chart does not deploy Qdrant. Point qdrantUrl at a cluster
+# installed with the official Qdrant Helm chart, or at Qdrant Cloud.
+vdbBackend: postgres
+qdrantUrl: ""
+qdrantApiKey: ""
 # pgAdmin
 pgadminEmail: admin@example.com
 pgadminPassword: admin
