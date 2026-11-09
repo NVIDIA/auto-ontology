@@ -70,6 +70,14 @@ logger = logging.getLogger(__name__)
 # reconstructions, but intent validation continues through every inner attempt.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
 
+# Shown when the intent check could not run at all (exception or no result
+# after retries and the reasoning-model fallback). See
+# ``SQLValidationAgent._intent_validation_unavailable``.
+INTENT_VALIDATION_UNAVAILABLE_MESSAGE = (
+    "The query could not be checked against your question because SQL "
+    "validation was unavailable, so it was not run. Please try again."
+)
+
 # See the former intent_validation.py for the rationale. When a deterministic
 # live join-path check is enabled, intent validation does not need to re-judge
 # whether every relationship exists.
@@ -982,6 +990,29 @@ class SQLValidationAgent(BaseAgent):
             result.update({"error": str(error), "another_try": 1})
         return result
 
+    def _intent_validation_unavailable(
+        self, path_state: dict, reason: str
+    ) -> Dict[str, Any]:
+        """Fail closed when the intent check could not run.
+
+        ``invoke_with_structured_output`` has already retried and fallen back to
+        the reasoning model, so no verdict means the check is unavailable, not
+        that the SQL passed. Running it anyway would present unverified SQL as
+        validated. End the attempt with an explicit explanation instead; the
+        full-pipeline retry still gives a transient failure one more chance.
+        """
+        self.logger.error(
+            "Intent validation unavailable (%s); not running unverified SQL", reason
+        )
+        return {
+            "decision": "unconstructable",
+            "path_state": {
+                **path_state,
+                "intent_validation": "unavailable",
+                "unconstructable_explanation": INTENT_VALIDATION_UNAVAILABLE_MESSAGE,
+            },
+        }
+
     def _validate_intent(
         self,
         state: AgentState,
@@ -1074,20 +1105,20 @@ class SQLValidationAgent(BaseAgent):
                 state["llm"], messages, IntentValidationModel
             )
         except Exception as error:
-            self.logger.error("Intent validation LLM call failed: %s", error)
-            return {"decision": "valid_sql", "path_state": path_state}
+            return self._intent_validation_unavailable(path_state, repr(error))
+        if validation_result is None:
+            return self._intent_validation_unavailable(
+                path_state, "the validator returned no result"
+            )
 
-        if (
-            validation_result is not None
-            and (validation_result.reasoning or "").strip()
-        ):
+        if (validation_result.reasoning or "").strip():
             record_thought(
                 path_state,
                 "validate_sql_query",
                 validation_result.reasoning.strip(),
             )
 
-        if validation_result is None or (
+        if (
             validation_result.is_valid
             and not validation_result.evidence_issues
             and not validation_result.projection_issues

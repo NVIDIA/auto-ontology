@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     INTENT_VALIDATION_SKIPPED_AFTER,
+    INTENT_VALIDATION_UNAVAILABLE_MESSAGE,
     IntentValidationModel,
     SQLValidationAgent,
 )
@@ -384,7 +385,7 @@ def test_retry_threshold_still_runs_intent_llm(
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
-    mock_invoke.return_value = None
+    mock_invoke.return_value = IntentValidationModel(is_valid=True)
     agent = SQLValidationAgent()
     agent._sql_parse_validation = MagicMock(
         return_value={
@@ -432,7 +433,7 @@ def test_final_full_pipeline_attempt_still_runs_intent_llm(
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
-    mock_invoke.return_value = None
+    mock_invoke.return_value = IntentValidationModel(is_valid=True)
     agent = SQLValidationAgent()
     agent._sql_parse_validation = MagicMock(
         return_value={
@@ -474,3 +475,69 @@ def test_unconstructable_decision_passes_through_unified_validation() -> None:
         "decision": "unconstructable",
         "path_state": {"error": "gave up"},
     }
+
+
+def _statically_valid_agent() -> SQLValidationAgent:
+    agent = SQLValidationAgent()
+    agent._sql_parse_validation = MagicMock(
+        return_value={
+            "success": True,
+            "sql_tables": ["table-id"],
+            "sql_columns": ["column-id"],
+            "used_tables": ["public.orders"],
+            "used_columns": ["public.orders.total"],
+        }
+    )
+    return agent
+
+
+def _validation_state() -> dict:
+    return {
+        "llm": MagicMock(),
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code="SELECT total FROM orders"
+            ),
+            "relevant_tables": [],
+        },
+    }
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_schemas_by_ids",
+    return_value={},
+)
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
+    return_value=[],
+)
+def test_unavailable_intent_validation_does_not_pass_the_sql(
+    _mock_schema_ids: MagicMock,
+    _mock_schemas: MagicMock,
+) -> None:
+    """No verdict (exception or ``None`` after retries and the reasoning
+    fallback) must not be read as a pass: the SQL is not run, and the user is
+    told why rather than shown unverified rows."""
+    target = (
+        "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation"
+        ".invoke_with_structured_output"
+    )
+    for outcome in (None, RuntimeError("endpoint unavailable")):
+        kwargs = (
+            {"side_effect": outcome}
+            if isinstance(outcome, Exception)
+            else {"return_value": outcome}
+        )
+        with patch(target, **kwargs):
+            result = _statically_valid_agent().execute(_validation_state())
+
+        assert result["decision"] == "unconstructable", outcome
+        assert result["path_state"]["intent_validation"] == "unavailable"
+        assert (
+            result["path_state"]["unconstructable_explanation"]
+            == INTENT_VALIDATION_UNAVAILABLE_MESSAGE
+        )
+        # Not recorded as intent-rejected, so the exhausted-retry fallback
+        # cannot hand this SQL back either.
+        assert "last_intent_rejected_sql" not in result["path_state"]
