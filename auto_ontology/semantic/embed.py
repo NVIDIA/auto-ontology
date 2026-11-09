@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from auto_ontology.utils.embedding import EmbedParams, batch_embed
+from auto_ontology.utils.embedding import EmbedParams, batch_embed, get_embed_params
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.vdb import get_semantic_vdb
@@ -102,11 +102,10 @@ def build_semantic_embedder(
         )
         return None
 
-    embed_params = EmbedParams(
-        embed_invoke_url=resolve("EMBED", "ENDPOINT"),
-        model_name=resolve("EMBED", "MODEL"),
-        api_key=api_key,
-    )
+    # The shared params, not a local copy: a copy drops the optional request
+    # settings (``dimensions``, ``max_input_chars``) and writes vectors the
+    # store's column rejects.
+    embed_params = get_embed_params()
     vdb = get_semantic_vdb(database_name=database_name, reset=reset)
     return SemanticEmbedder(
         database_name=database_name,
