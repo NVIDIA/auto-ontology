@@ -21,7 +21,7 @@ import logging
 import math
 import os
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from auto_ontology.connectors.registry import (
     get_connectors,
@@ -43,27 +43,32 @@ INGEST_INTERVAL_ENV = "INGEST_INTERVAL_HOURS"
 def resolve_ingest_interval() -> timedelta:
     """The ingest cadence from ``INGEST_INTERVAL_HOURS``, or 24h.
 
-    Unset or blank means the default. A value that is not a positive number
-    is logged and ignored rather than raised: the scheduler runs unattended,
-    and a typo in ``.env`` should not keep the catalog from ever being built.
+    Unset or blank means the default. Invalid values, including intervals that
+    round to zero or cannot produce a representable next-run datetime, are
+    logged and ignored rather than stopping the unattended scheduler.
     """
     raw = os.environ.get(INGEST_INTERVAL_ENV, "").strip()
     if not raw:
         return DEFAULT_INGEST_INTERVAL
     try:
         hours = float(raw)
-    except ValueError:
-        hours = 0.0
-    if not math.isfinite(hours) or hours <= 0:
+        if not math.isfinite(hours) or hours <= 0:
+            raise ValueError("hours must be finite and positive")
+        interval = timedelta(hours=hours)
+        if interval <= timedelta(0) or interval > (
+            datetime.max.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)
+        ):
+            raise ValueError("interval is outside the scheduling range")
+    except (ValueError, OverflowError):
         logger.warning(
-            "ingest: ignoring %s=%r (expected a positive number of hours); "
+            "ingest: ignoring %s=%r (expected positive, schedulable hours); "
             "using the %gh default",
             INGEST_INTERVAL_ENV,
             raw,
             DEFAULT_INGEST_INTERVAL.total_seconds() / 3600,
         )
         return DEFAULT_INGEST_INTERVAL
-    return timedelta(hours=hours)
+    return interval
 
 
 class DataScheduler(IntervalScheduler):

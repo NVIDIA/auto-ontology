@@ -35,6 +35,7 @@ def test_unset_means_24h(monkeypatch: pytest.MonkeyPatch) -> None:
         ("6", timedelta(hours=6)),
         ("0.5", timedelta(minutes=30)),
         (" 12 ", timedelta(hours=12)),
+        ("1e-9", timedelta(microseconds=4)),
     ],
 )
 def test_positive_hours_are_honoured(
@@ -45,13 +46,16 @@ def test_positive_hours_are_honoured(
     assert DataScheduler()._interval == expected
 
 
-@pytest.mark.parametrize("raw", ["0", "-3", "daily", "nan", "inf"])
+@pytest.mark.parametrize(
+    "raw", ["0", "-3", "daily", "nan", "inf", "1e-12", "1e11", "1e8"]
+)
 def test_invalid_value_warns_and_defaults(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, raw: str
 ) -> None:
     monkeypatch.setenv(INGEST_INTERVAL_ENV, raw)
     with caplog.at_level(logging.WARNING):
         assert resolve_ingest_interval() == DEFAULT_INGEST_INTERVAL
+        assert DataScheduler()._interval == DEFAULT_INGEST_INTERVAL
     assert INGEST_INTERVAL_ENV in caplog.text
 
 
