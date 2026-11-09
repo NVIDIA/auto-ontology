@@ -5,6 +5,7 @@
 """High-confidence, metadata-only PII classification rules."""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from auto_ontology.pii_detection.models import ColumnInput, PiiDecision, PiiStatus
@@ -13,14 +14,26 @@ from auto_ontology.pii_detection.models import ColumnInput, PiiDecision, PiiStat
 def normalize(value: str | None) -> str:
     """Normalize SQL identifiers into words suitable for rule matching.
 
-    The split is Unicode-aware: ``\\W`` keeps letters from any script, so a
-    non-Latin column name survives normalization instead of collapsing to an
-    empty string. ASCII names normalize exactly as before.
+    The split is Unicode-aware: letters from any script survive, so a
+    non-Latin column name stays intact instead of collapsing to an empty
+    string. ASCII names normalize exactly as before.
+
+    Case-folded text is normalized to NFC first, and combining marks stay
+    attached to their base characters when splitting: a decomposed name
+    such as ``product_name`` plus a combining acute must normalize like
+    its composed form, not split on the mark and match an unrelated rule.
+    Only letters, numbers, and marks form tokens; everything else,
+    including underscores, is a separator.
     """
 
     if not value:
         return ""
-    return " ".join(re.sub(r"[\W_]+", " ", value.casefold()).split())
+    folded = unicodedata.normalize("NFC", value.casefold())
+    kept = "".join(
+        char if unicodedata.category(char).startswith(("L", "N", "M")) else " "
+        for char in folded
+    )
+    return " ".join(kept.split())
 
 
 @dataclass(frozen=True, slots=True)

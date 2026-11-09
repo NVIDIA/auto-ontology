@@ -291,6 +291,30 @@ def test_non_latin_column_reaches_backend(column_name: str) -> None:
     assert backend.calls == 1
 
 
+def test_decomposed_name_reaches_backend_unchanged() -> None:
+    """When the rules fall through, the classifier must receive the original
+    column name, byte for byte, not the normalized form."""
+    seen: list[ColumnInput] = []
+
+    class RecordingBackend:
+        def classify(self, column: ColumnInput) -> PiiDecision:
+            seen.append(column)
+            return PiiDecision(
+                status=PiiStatus.NOT_PII,
+                category=None,
+                confidence=0.8,
+                reason="Stub classification.",
+                source="stub",
+            )
+
+    column = ColumnInput(column_name="product_name\u0301", table_name="products")
+    decision = PiiDetector(RecordingBackend()).detect(column)
+
+    assert decision.source == "stub"
+    assert seen == [column]
+    assert seen[0].column_name == "product_name\u0301"
+
+
 def test_non_latin_column_is_fallback_review_without_backend() -> None:
     """Without a classifier the column still needs review, but the review
     must come from the fallback, which the service never marks processed."""
