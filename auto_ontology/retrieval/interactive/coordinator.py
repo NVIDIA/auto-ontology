@@ -261,25 +261,39 @@ def _apply_follow_up_seed(
 
 
 def _format_user_clarifications(session: InteractiveSessionState) -> str:
-    """Render usable clarification Q&A verbatim for the SQL evidence payload."""
+    """Render usable clarification Q&A verbatim for the SQL evidence payload,
+    followed by the questions the user could not answer."""
     clarifications: list[str] = []
+    unanswered: list[str] = []
     for turn in session.clarify_history:
         question = str(turn.get("q") or "").strip()
         answer = str(turn.get("a") or "").strip()
-        if not answer or any(phrase in answer.lower() for phrase in _STUCK_PHRASES):
+        if not answer:
+            continue
+        if any(phrase in answer.lower() for phrase in _STUCK_PHRASES):
+            unanswered.append(f"- {question}")
             continue
         number = len(clarifications) + 1
         clarifications.append(
             f"Clarification {number}:\nQuestion: {question}\nAnswer: {answer}"
         )
 
-    if not clarifications:
-        return ""
-    return (
-        "## User Clarifications (verbatim — authoritative)\n"
-        + "\n\n".join(clarifications)
-        + "\n\n"
-    )
+    sections: list[str] = []
+    if clarifications:
+        sections.append(
+            "## User Clarifications (verbatim — authoritative)\n"
+            + "\n\n".join(clarifications)
+        )
+    if unanswered:
+        sections.append(
+            "## Questions the User Could Not Answer\n"
+            "The expected answer does not depend on these details, so take the "
+            "simplest reading: use stored values as they are, and add no handling "
+            "for missing values, ties, duplicates, letter case or units beyond what "
+            "the question, the clarifications above and the other evidence call "
+            "for.\n" + "\n".join(unanswered)
+        )
+    return "".join(section + "\n\n" for section in sections)
 
 
 def _run_sql_generation(session: InteractiveSessionState) -> str:

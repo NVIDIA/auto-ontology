@@ -90,14 +90,14 @@ STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, history, or scientific tautologies: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results", "show basic information", "show some info", "show their details", "key details", "a report", "a summary", or "I need a list of <entities>" without naming which specific attributes or metrics to display) and the prior clarifications have not settled it, make this your first question. Cover the whole output in that one question: which fields or metrics to show for each result, how many results to return (for example what "top" means), and how to order them.
-4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
+4. A topic listed under "Topics already asked about that went UNANSWERED" is one the task does not depend on. If it was an edge case — missing values, ties, letter case, units, duplicates, which of several records or readings to use, or which identifier to show — never ask about it again in any form: the simplest reading applies (stored values used as they are, with no extra handling). If it was the meaning or formula of a term, you MAY ask about that term once more from a different angle, and only when no other unresolved terms or formulas persist — e.g. if asking for a formula went unanswered, ask for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
 7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
 8. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, unspecified limits, normalization methods, or preferred output format.
 9. Each question covers exactly one topic: one term, one formula, or the output described in rule 3. It may have up to three short parts about that same topic, for example a formula together with how missing values and ties are handled. Never combine unrelated topics in one question, because the user answers only one topic per question.
 10. Questions are limited (see "Clarification questions you can still ask"). Ask first about what would change the SQL most: the output in rule 3 and missing formulas or thresholds. Edge cases such as ties, missing values or letter case come last, and are best folded into the question about the term they belong to. With one question left, ask about the single most critical unresolved item.
-11. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
+11. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None" or only items marked [UNANSWERED]. If any condition fails, ASK about the most critical unresolved item before proceeding.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -159,6 +159,35 @@ def should_inject_default_sort(question: str) -> bool:
     an ORDER BY").
     """
     return not bool(_SORT_DIRECTION.search(question))
+
+
+def _question_tokens(text: str) -> set[str]:
+    return {tok.lower() for tok in _TOKEN_SPLIT.split(text) if tok}
+
+
+def _term_tokens(term: str) -> set[str]:
+    return {
+        tok
+        for tok in _TOKEN_SPLIT.split(term.lower())
+        if tok and tok not in _FILLER and tok not in _CONNECTIVES
+    }
+
+
+def _format_incomplete_formulas(
+    gaps: list[tuple[str, str]], unanswered_questions: list[str]
+) -> str:
+    """One line per gap; a gap a refused question already asked about is marked
+    [UNANSWERED] so the decide-LLM can PROCEED past it (rules 4 and 11)."""
+    if not gaps:
+        return "None"
+    unanswered_tokens = {
+        tok for q in unanswered_questions for tok in _question_tokens(q)
+    }
+    return "\n".join(
+        f"- {term}: {missing}"
+        + (" [UNANSWERED]" if _term_tokens(term) & unanswered_tokens else "")
+        for term, missing in gaps
+    )
 
 
 def _last_answer_is_stuck(history: list[dict]) -> bool:
@@ -471,12 +500,9 @@ def should_clarify(
             session.incomplete_formula_terms = gaps
             logger.info("Completeness (turn-0 scan) — gaps: %s", gaps)
 
-    if session.incomplete_formula_terms:
-        incomplete_formulas_note = "\n".join(
-            f"- {term}: {missing}" for term, missing in session.incomplete_formula_terms
-        )
-    else:
-        incomplete_formulas_note = "None"
+    incomplete_formulas_note = _format_incomplete_formulas(
+        session.incomplete_formula_terms, unanswered
+    )
 
     turns_used = len(session.clarify_history)
     turns_remaining = session.max_clarify_turns - turns_used
@@ -509,10 +535,7 @@ def should_clarify(
         # terms like "X-to-Y join" into one token that could never match how the
         # words appear, split apart, in a real sentence).
         asked_tokens = {
-            tok.lower()
-            for h in session.clarify_history
-            for tok in _TOKEN_SPLIT.split(h["q"])
-            if tok
+            tok for h in session.clarify_history for tok in _question_tokens(h["q"])
         }
         for term, description in session.incomplete_formula_terms:
             term_key = term.strip().lower()
@@ -522,11 +545,7 @@ def should_clarify(
                 # language (see _FORCED_QUESTION_PROMPT), so lexical overlap with
                 # that question is not a reliable "already asked" signal on its own.
                 continue
-            term_tokens = {
-                tok
-                for tok in _TOKEN_SPLIT.split(term.lower())
-                if tok and tok not in _FILLER and tok not in _CONNECTIVES
-            }
+            term_tokens = _term_tokens(term)
             if term_tokens and not (term_tokens & asked_tokens):
                 question = _generate_forced_question(term, description, llm)
                 session._forced_terms_asked.add(term_key)

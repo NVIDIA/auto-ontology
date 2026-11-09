@@ -202,7 +202,38 @@ def test_format_user_clarifications_excludes_unusable_answers():
 
     assert "out of scope" not in evidence
     assert "Which region?" not in evidence
-    assert "Question: Which year?\nAnswer: 2024" in evidence
+    assert "Clarification 1:\nQuestion: Which year?\nAnswer: 2024" in evidence
+
+
+def test_format_user_clarifications_lists_refused_questions_after_answers():
+    sess = _make_session()
+    sess.clarify_history = [
+        {
+            "q": "Should missing scores count as 0?",
+            "a": "Sorry, this question is out of scope.",
+        },
+        {"q": "Which year?", "a": "2024"},
+    ]
+
+    evidence = _format_user_clarifications(sess)
+
+    answered, refused = evidence.split("## Questions the User Could Not Answer\n")
+    assert "Question: Which year?\nAnswer: 2024" in answered
+    assert "simplest reading" in refused
+    assert refused.rstrip().endswith("- Should missing scores count as 0?")
+
+
+def test_format_user_clarifications_with_only_refused_questions():
+    sess = _make_session()
+    sess.clarify_history = [
+        {"q": "Which ID?", "a": "Sorry, this question is out of scope."},
+    ]
+
+    evidence = _format_user_clarifications(sess)
+
+    assert "## User Clarifications" not in evidence
+    assert evidence.startswith("## Questions the User Could Not Answer\n")
+    assert "- Which ID?" in evidence
 
 
 def test_sql_generation_includes_raw_clarifications_in_evidence():
