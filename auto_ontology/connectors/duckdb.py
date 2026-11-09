@@ -240,22 +240,35 @@ class DuckDBDatabase(SQLDatabase):
 
         Two ``UNNEST`` calls in one select list are zipped by position, which
         pairs each column of a composite key with the column it references.
+        Rows keep each key's declared column order, so a key declared
+        ``(site, area)`` comes back in that order rather than alphabetically.
         DuckDB refuses foreign keys across schemas, so the referenced schema
         is always the referencing table's own.
         """
         return self.execute(
             """
             SELECT
-                schema_name AS table_schema,
+                table_schema,
                 table_name,
-                UNNEST(constraint_column_names) AS column_name,
-                schema_name AS referenced_schema,
+                column_name,
+                referenced_schema,
                 referenced_table,
-                UNNEST(referenced_column_names) AS referenced_column
-            FROM duckdb_constraints()
-            WHERE constraint_type = 'FOREIGN KEY'
-              AND database_name = current_database()
-            ORDER BY table_schema, table_name, column_name
+                referenced_column
+            FROM (
+                SELECT
+                    schema_name AS table_schema,
+                    table_name,
+                    constraint_index,
+                    UNNEST(constraint_column_names) AS column_name,
+                    schema_name AS referenced_schema,
+                    referenced_table,
+                    UNNEST(referenced_column_names) AS referenced_column,
+                    UNNEST(range(len(constraint_column_names))) AS key_position
+                FROM duckdb_constraints()
+                WHERE constraint_type = 'FOREIGN KEY'
+                  AND database_name = current_database()
+            )
+            ORDER BY table_schema, table_name, constraint_index, key_position
         """
         )
 
