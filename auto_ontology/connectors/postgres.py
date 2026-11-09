@@ -270,27 +270,48 @@ class PostgresDatabase(SQLDatabase):
         """)
 
     def get_fks(self) -> pd.DataFrame:
-        # constraint_column_usage.table_schema is the *referenced* table's schema, so the
-        # constraint is matched on constraint_schema: joining on table_schema dropped every
-        # foreign key that points into another schema.
+        """One row per (column, referenced column) pair of every declared foreign key.
+
+        Read from ``pg_constraint`` rather than ``information_schema``, which got
+        three things wrong:
+
+        * ``constraint_column_usage`` has no owning table, so matching it by
+          constraint *name* paired columns across constraints that share a name
+          on different tables (names are only unique per table), and attached
+          a cross-schema reference to the wrong table.
+        * It has no column position either, so a composite key came back as
+          the cross product of its columns instead of position-matched pairs.
+        * ``information_schema.table_constraints`` hides constraints from a
+          role that only holds ``SELECT``, so a read-only user saw no foreign
+          keys at all.
+
+        ``conkey`` and ``confkey`` list the referencing and referenced columns
+        in declared order; ``unnest`` over both zips them by position. Foreign
+        keys whose tables are not catalogued are dropped later, in ``add_fks``.
+        """
         return self.execute("""
             SELECT
-                kcu.table_schema         AS table_schema,
-                kcu.table_name           AS table_name,
-                kcu.column_name          AS column_name,
-                ccu.table_schema         AS referenced_schema,
-                ccu.table_name           AS referenced_table,
-                ccu.column_name          AS referenced_column
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-             AND tc.table_schema    = kcu.table_schema
-            JOIN information_schema.constraint_column_usage ccu
-              ON tc.constraint_name   = ccu.constraint_name
-             AND tc.constraint_schema = ccu.constraint_schema
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY kcu.table_schema, kcu.table_name, kcu.column_name
+                src_ns.nspname   AS table_schema,
+                src.relname      AS table_name,
+                src_col.attname  AS column_name,
+                ref_ns.nspname   AS referenced_schema,
+                ref.relname      AS referenced_table,
+                ref_col.attname  AS referenced_column
+            FROM pg_constraint con
+            CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
+                AS key(src_attnum, ref_attnum)
+            JOIN pg_class src         ON src.oid = con.conrelid
+            JOIN pg_namespace src_ns  ON src_ns.oid = src.relnamespace
+            JOIN pg_attribute src_col ON src_col.attrelid = con.conrelid
+                                     AND src_col.attnum = key.src_attnum
+            JOIN pg_class ref         ON ref.oid = con.confrelid
+            JOIN pg_namespace ref_ns  ON ref_ns.oid = ref.relnamespace
+            JOIN pg_attribute ref_col ON ref_col.attrelid = con.confrelid
+                                     AND ref_col.attnum = key.ref_attnum
+            WHERE con.contype = 'f'
+              AND src_ns.nspname NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY table_schema, table_name, column_name,
+                     referenced_schema, referenced_table, referenced_column
         """)
 
     # ------------------------------------------------------------------

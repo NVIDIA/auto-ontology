@@ -17,10 +17,14 @@ Set up with::
 from __future__ import annotations
 
 import os
+import uuid
+from collections.abc import Iterator
 
+import psycopg
 import pytest
 
 from auto_ontology.catalog.constants import TableTypes
+from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.registry import create_connector
 
 
@@ -146,7 +150,7 @@ def test_nullability_is_a_real_boolean(pagila) -> None:
     assert 0 < int(columns.is_nullable.sum()) < len(columns)
 
 
-def test_foreign_key_into_another_schema_is_reported(pagila) -> None:
+def test_foreign_key_into_another_schema_is_reported(pagila: PostgresDatabase) -> None:
     """``analytics.film_performance.film_id`` references ``public.film``.
 
     ``constraint_column_usage.table_schema`` is the *referenced* table's schema,
@@ -162,7 +166,9 @@ def test_foreign_key_into_another_schema_is_reported(pagila) -> None:
     ].values.tolist() == [["film_id", "public", "film", "film_id"]]
 
 
-def test_cross_and_same_schema_foreign_keys_on_one_table(pagila) -> None:
+def test_cross_and_same_schema_foreign_keys_on_one_table(
+    pagila: PostgresDatabase,
+) -> None:
     """``analytics.category_rollup`` has one of each: ``category_id`` into
     ``public.category`` and the ``parent_rollup_id`` self-reference."""
     fks = pagila.get_fks()
@@ -175,3 +181,114 @@ def test_cross_and_same_schema_foreign_keys_on_one_table(pagila) -> None:
         ["category_id", "public", "category"],
         ["parent_rollup_id", "analytics", "category_rollup"],
     ]
+
+
+# ----------------------------------------------------------------------------
+# Foreign-key shapes the Pagila fixture does not have. Each test gets a scratch
+# database so the shared fixture (and the DAL goldens recorded from it) stay put.
+# ----------------------------------------------------------------------------
+
+_FK_SHAPES_DDL = """
+CREATE SCHEMA s;
+CREATE SCHEMA w;
+CREATE TABLE w.warehouses (id int PRIMARY KEY);
+CREATE TABLE s.customers (id int PRIMARY KEY);
+-- Same constraint name on two tables of one schema: legal, names are per table.
+CREATE TABLE s.orders (
+    cust_id int CONSTRAINT fk_ref REFERENCES s.customers (id)
+);
+CREATE TABLE s.shipments (
+    warehouse_id int CONSTRAINT fk_ref REFERENCES w.warehouses (id)
+);
+-- A composite key that crosses schemas, declared in a different column order
+-- from the referenced table's.
+CREATE TABLE w.bins (bin_no int, warehouse_id int, PRIMARY KEY (warehouse_id, bin_no));
+CREATE TABLE s.picks (
+    pick_bin int,
+    pick_warehouse int,
+    FOREIGN KEY (pick_warehouse, pick_bin) REFERENCES w.bins (warehouse_id, bin_no)
+);
+"""
+
+
+def _admin_dsn(database: str) -> str:
+    host = os.environ.get("POSTGRES_HOST", "localhost")
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    user = os.environ["POSTGRES_USER"]
+    password = os.environ["POSTGRES_PASSWORD"]
+    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+
+@pytest.fixture(scope="module")
+def fk_shapes_db() -> Iterator[str]:
+    """A scratch database with the shapes above, plus a SELECT-only role."""
+    if not os.environ.get("POSTGRES_USER"):
+        pytest.skip("POSTGRES_* not set")
+    name = f"fk_shapes_{uuid.uuid4().hex[:8]}"
+    reader = f"{name}_reader"
+    maintenance = os.environ.get("POSTGRES_DATABASE", "postgres")
+    try:
+        admin = psycopg.connect(_admin_dsn(maintenance), autocommit=True)
+    except Exception as exc:  # noqa: BLE001 — any failure means "no fixture DB"
+        pytest.skip(f"postgres not reachable: {exc}")
+    with admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+        admin.execute(f"CREATE ROLE \"{reader}\" LOGIN PASSWORD 'reader'")
+        try:
+            with psycopg.connect(_admin_dsn(name), autocommit=True) as scratch:
+                scratch.execute(_FK_SHAPES_DDL)
+                for schema in ("s", "w"):
+                    scratch.execute(f'GRANT USAGE ON SCHEMA {schema} TO "{reader}"')
+                    scratch.execute(
+                        f'GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO "{reader}"'
+                    )
+            yield name
+        finally:
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            admin.execute(f'DROP ROLE IF EXISTS "{reader}"')
+
+
+def _fk_rows(connector: PostgresDatabase) -> list[list[str]]:
+    fks = connector.get_fks()
+    return fks[
+        [
+            "table_schema",
+            "table_name",
+            "column_name",
+            "referenced_schema",
+            "referenced_table",
+            "referenced_column",
+        ]
+    ].values.tolist()
+
+
+_EXPECTED_FK_ROWS = [
+    ["s", "orders", "cust_id", "s", "customers", "id"],
+    ["s", "picks", "pick_bin", "w", "bins", "bin_no"],
+    ["s", "picks", "pick_warehouse", "w", "bins", "warehouse_id"],
+    ["s", "shipments", "warehouse_id", "w", "warehouses", "id"],
+]
+
+
+def test_foreign_keys_pair_by_owning_constraint_and_position(fk_shapes_db: str) -> None:
+    """Two tables' ``fk_ref`` constraints stay separate, and the composite key
+    pairs each column with the one it references -- not the cross product."""
+    connector = create_connector(_admin_dsn(fk_shapes_db))
+    try:
+        assert _fk_rows(connector) == _EXPECTED_FK_ROWS
+    finally:
+        connector.close()
+
+
+def test_select_only_role_sees_foreign_keys(fk_shapes_db: str) -> None:
+    """``information_schema.table_constraints`` hides constraints from a role
+    that holds only ``SELECT``; a read-only catalog user must still see them."""
+    host = os.environ.get("POSTGRES_HOST", "localhost")
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    connector = create_connector(
+        f"postgresql://{fk_shapes_db}_reader:reader@{host}:{port}/{fk_shapes_db}"
+    )
+    try:
+        assert _fk_rows(connector) == _EXPECTED_FK_ROWS
+    finally:
+        connector.close()
