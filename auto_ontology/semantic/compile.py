@@ -14,7 +14,8 @@ from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attribu
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
-from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
+from auto_ontology.semantic.semantic_fk import _resolve_connector, resolve_semantic_fks
+from auto_ontology.semantic.table_families import resolve_table_families
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
@@ -90,6 +91,14 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
+
+    logger.info("=" * 60)
+    logger.info("Resolving table families…")
+    logger.info("=" * 60)
+    family_count = resolve_table_families(
+        database_name, _resolve_connector(database_name)
+    )
+    logger.info("Table family pairs found: %d", family_count)
 
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 

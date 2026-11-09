@@ -1086,6 +1086,50 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     return list(tables.values())
 
 
+def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
+    """Every table in *database_name* (all databases when ``None``) with its
+    column names: ``{id, name, schema_name, database_name, columns}``.
+
+    Names only, so a whole catalog is cheap to compare table against table.
+    Returns ``[]`` if the query fails, like :func:`fetch_tables_by_ids`.
+    """
+    query = select(
+        s.catalog_table.c.id,
+        s.catalog_table.c.name,
+        s.catalog_database.c.name.label("database_name"),
+        s.catalog_schema.c.name.label("schema_name"),
+        s.catalog_column.c.name.label("column_name"),
+    ).select_from(
+        _table_join().join(
+            s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
+        )
+    )
+    if database_name:
+        query = query.where(s.catalog_database.c.name == database_name)
+    try:
+        rows = store().query_read(
+            query.order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+        )
+    except Exception:
+        logger.warning("fetch_table_column_names: query failed", exc_info=True)
+        return []
+
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            str(row["id"]),
+            {
+                "id": str(row["id"]),
+                "name": row["name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "database_name": row["database_name"] or "",
+                "columns": [],
+            },
+        )
+        table["columns"].append(row["column_name"])
+    return list(tables.values())
+
+
 def fetch_table_context(table_id: str) -> dict[str, Any]:
     """``{columns, fks}`` for one table — what the SQL generator is handed.
 
