@@ -92,7 +92,7 @@ class LlmPiiClassifier:
             self._get_llm(),
             [
                 SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=json.dumps(payload)),
+                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
             ],
             _PiiResponse,
         )

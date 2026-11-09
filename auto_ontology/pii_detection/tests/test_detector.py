@@ -274,6 +274,34 @@ def test_uncertain_column_uses_backend() -> None:
     assert backend.calls == 1
 
 
+@pytest.mark.parametrize(
+    "column_name",
+    ["주민등록번호", "電話番号", "телефон", "البريد_الإلكتروني", "téléphone"],
+)
+def test_non_latin_column_reaches_backend(column_name: str) -> None:
+    """A non-Latin name used to be answered by the rules with a REVIEW
+    decision, so the backend never saw it. The rules must stay silent and
+    let the classifier decide."""
+    backend = StubBackend()
+    decision = PiiDetector(backend).detect(
+        ColumnInput(column_name=column_name, table_name="고객")
+    )
+
+    assert decision.source == "stub"
+    assert backend.calls == 1
+
+
+def test_non_latin_column_is_fallback_review_without_backend() -> None:
+    """Without a classifier the column still needs review, but the review
+    must come from the fallback, which the service never marks processed."""
+    decision = PiiDetector().detect(
+        ColumnInput(column_name="주민등록번호", table_name="고객")
+    )
+
+    assert decision.status is PiiStatus.REVIEW
+    assert decision.source == "fallback"
+
+
 def test_backend_failure_becomes_review() -> None:
     class FailingBackend:
         def classify(self, column: ColumnInput) -> PiiDecision:
@@ -322,6 +350,36 @@ def test_batch_classifies_distinct_columns_concurrently() -> None:
     results = PiiDetector(ConcurrentBackend(), max_workers=3).detect_many(columns)
 
     assert [column for column, _ in results] == columns
+
+
+def test_llm_classifier_sends_unescaped_column_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The classifier payload must carry the real characters, not ``\\uXXXX``
+    escapes, so the LLM sees the name the way a reader would."""
+    seen: list[str] = []
+
+    def invoke(_llm: object, messages: list, schema: type) -> object:
+        seen.append(str(messages[-1].content))
+        return schema.model_validate(
+            {
+                "status": "pii",
+                "category": "government_id",
+                "confidence": 0.93,
+                "reason": "National identifier.",
+            }
+        )
+
+    monkeypatch.setattr(detector_module, "invoke_with_structured_output", invoke)
+    classifier = LlmPiiClassifier(llm=object())  # type: ignore[arg-type]
+
+    decision = classifier.classify(
+        ColumnInput(column_name="주민등록번호", table_name="고객")
+    )
+
+    assert decision.status is PiiStatus.PII
+    assert "주민등록번호" in seen[0]
+    assert "\\uc8fc" not in seen[0]
 
 
 def test_llm_classifier_uses_structured_output(
