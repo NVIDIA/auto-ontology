@@ -58,8 +58,16 @@ spec:
       securityContext:
         # The image runs as uid 1000; the data volume has to be writable by it.
         fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: elasticsearch
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           image: "{{ $bundled.image.repository }}:{{ $bundled.image.tag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:

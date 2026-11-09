@@ -149,7 +149,9 @@ def _ids(hits: list[dict]) -> list[str]:
     return [hit["metadata"]["id"] for hit in hits]
 
 
-def test_the_nearest_row_comes_first_at_cosine_distance(backend) -> None:
+def test_the_nearest_row_comes_first_at_cosine_distance(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
     assert _write(store, params, _rows()) == len(_ROWS)
 
@@ -166,7 +168,7 @@ def test_the_nearest_row_comes_first_at_cosine_distance(backend) -> None:
 
 
 def test_rows_are_passages_and_searches_are_queries(
-    backend, fake: FakeEmbedder
+    backend: tuple[VectorStore, EmbedParams], fake: FakeEmbedder
 ) -> None:
     store, params = backend
     _write(store, params, _rows())
@@ -179,7 +181,9 @@ def test_rows_are_passages_and_searches_are_queries(
     assert {call.model for call in fake.calls} == {_ES_MODEL}
 
 
-def test_filters_narrow_by_label_and_database(backend) -> None:
+def test_filters_narrow_by_label_and_database(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
     _write(store, params, _rows())
 
@@ -190,7 +194,9 @@ def test_filters_narrow_by_label_and_database(backend) -> None:
     assert _ids(chinook) == ["c_billing"]
 
 
-def test_deleting_by_id_removes_only_that_row(backend) -> None:
+def test_deleting_by_id_removes_only_that_row(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
     _write(store, params, _rows())
 
@@ -200,7 +206,9 @@ def test_deleting_by_id_removes_only_that_row(backend) -> None:
     assert len(_search(store, params, "customer email", top_k=10)) == len(_ROWS) - 1
 
 
-def test_deleting_everything_leaves_an_empty_searchable_store(backend) -> None:
+def test_deleting_everything_leaves_an_empty_searchable_store(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
     _write(store, params, _rows())
 
@@ -209,7 +217,9 @@ def test_deleting_everything_leaves_an_empty_searchable_store(backend) -> None:
     assert _search(store, params, "customer email") == []
 
 
-def test_deleting_a_database_returns_the_deleted_rows_ids(backend) -> None:
+def test_deleting_a_database_returns_the_deleted_rows_ids(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     # dal.reset counts them with len(); Elasticsearch once returned an int.
     store, params = backend
     _write(store, params, _rows())
@@ -229,7 +239,9 @@ def _replace(store: VectorStore, params: EmbedParams, node_id: str, text: str) -
     )
 
 
-def test_replacing_a_row_swaps_it_for_the_new_text(backend) -> None:
+def test_replacing_a_row_swaps_it_for_the_new_text(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
     _write(store, params, _rows())
 
@@ -244,7 +256,7 @@ def test_replacing_a_row_swaps_it_for_the_new_text(backend) -> None:
 
 
 def test_a_replacement_that_cannot_be_embedded_keeps_the_old_row(
-    backend, fake: FakeEmbedder
+    backend: tuple[VectorStore, EmbedParams], fake: FakeEmbedder
 ) -> None:
     # Elasticsearch embeds in the write, so the store has to write before it
     # deletes.
@@ -261,13 +273,17 @@ def test_a_replacement_that_cannot_be_embedded_keeps_the_old_row(
     assert len(hits) == len(_ROWS)
 
 
-def test_searching_an_empty_store_finds_nothing(backend) -> None:
+def test_searching_an_empty_store_finds_nothing(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
 
     assert _search(store, params, "customer email") == []
 
 
-def test_a_reset_replaces_one_database_and_keeps_the_others(backend) -> None:
+def test_a_reset_replaces_one_database_and_keeps_the_others(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
     store, params = backend
     _write(store, params, _rows())
 
@@ -336,7 +352,9 @@ def _rows_for(
     return search_semantic_index(Retriever(store, params), text, **kwargs)
 
 
-def test_hybrid_puts_the_row_both_searches_rank_first_at_the_top(hybrid) -> None:
+def test_hybrid_puts_the_row_both_searches_rank_first_at_the_top(
+    hybrid: tuple[ElasticsearchVDB, EmbedParams],
+) -> None:
     store, params = hybrid
 
     [top, *_] = _rows_for(store, params, "customer email")
@@ -346,7 +364,9 @@ def test_hybrid_puts_the_row_both_searches_rank_first_at_the_top(hybrid) -> None
     assert top["score"] == pytest.approx(0.0)
 
 
-def test_a_hybrid_rows_vector_distance_is_the_semantic_searchs(hybrid) -> None:
+def test_a_hybrid_rows_vector_distance_is_the_semantic_searchs(
+    hybrid: tuple[ElasticsearchVDB, EmbedParams],
+) -> None:
     store, params = hybrid
     hybrid_rows = {r["id"]: r for r in _rows_for(store, params, "film rental")}
 
@@ -359,7 +379,9 @@ def test_a_hybrid_rows_vector_distance_is_the_semantic_searchs(hybrid) -> None:
         )
 
 
-def test_the_hybrid_gate_reads_the_vector_distance_not_the_rank(hybrid) -> None:
+def test_the_hybrid_gate_reads_the_vector_distance_not_the_rank(
+    hybrid: tuple[ElasticsearchVDB, EmbedParams],
+) -> None:
     store, params = hybrid
 
     rows = {r["id"]: r for r in _rows_for(store, params, "film length")}
@@ -374,7 +396,9 @@ def test_the_hybrid_gate_reads_the_vector_distance_not_the_rank(hybrid) -> None:
     assert passes_relevance_gate(rows["c_email"], max_distance=2.0)
 
 
-def test_hybrid_filters_narrow_both_searches(hybrid) -> None:
+def test_hybrid_filters_narrow_both_searches(
+    hybrid: tuple[ElasticsearchVDB, EmbedParams],
+) -> None:
     store, params = hybrid
 
     tables = _rows_for(store, params, "customer", label_filter=["Table"])
@@ -385,7 +409,7 @@ def test_hybrid_filters_narrow_both_searches(hybrid) -> None:
 
 
 def test_a_hybrid_search_embeds_the_query_once_as_a_query(
-    hybrid, fake: FakeEmbedder
+    hybrid: tuple[ElasticsearchVDB, EmbedParams], fake: FakeEmbedder
 ) -> None:
     store, params = hybrid
     fake.reset()

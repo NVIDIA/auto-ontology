@@ -17,7 +17,11 @@ env_value() {
 	if [[ -n "${!name:-}" ]]; then
 		echo "${!name}"
 	elif [[ -f .env ]]; then
-		sed -n "s/^[[:space:]]*${name}=//p" .env | tail -n 1 | sed -e 's/^["'\'']//' -e 's/["'\'']$//'
+		# Drop an unquoted trailing comment and surrounding whitespace, then
+		# the quotes.
+		sed -n "s/^[[:space:]]*${name}=//p" .env | tail -n 1 |
+			sed -E -e 's/^[[:space:]]+//' -e '/^["'\'']/!s/[[:space:]]+#.*$//' -e 's/[[:space:]]+$//' \
+				-e 's/^["'\'']//' -e 's/["'\'']$//'
 	fi
 }
 

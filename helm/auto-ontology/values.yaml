@@ -135,6 +135,10 @@ elasticsearch:
   # Authenticate with an API key, or with username/password.
   apiKey: ""
   username: ""
+  # With bundled.enabled and no password, the chart generates one and keeps it
+  # across upgrades by reading the existing Secret. `helm template` and
+  # --dry-run can't read it, so set a password if you apply rendered output:
+  # otherwise each render makes a new one and the app can't authenticate.
   password: ""
   verifyCerts: true
   # A Secret holding the cluster's CA certificate, mounted into the backend and

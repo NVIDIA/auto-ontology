@@ -33,7 +33,9 @@ services:
     profiles: ["elasticsearch"]
     restart: unless-stopped
     ports:
-      - "${ES_PORT:-9200}:9200"
+      # Loopback only: security is off, so the port must not be reachable
+      # from the network. Containers use the service name.
+      - "127.0.0.1:${ES_PORT:-9200}:9200"
     healthcheck:
       test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s' >/dev/null"]
       interval: 5s

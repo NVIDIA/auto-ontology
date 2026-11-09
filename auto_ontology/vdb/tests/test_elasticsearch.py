@@ -64,7 +64,9 @@ class _Namespace:
 class FakeClient:
     """Records every call; ``bulk_statuses`` scripts each bulk's per-row status."""
 
-    def __init__(self, *, index_exists: bool = True, endpoint: dict | None = None):
+    def __init__(
+        self, *, index_exists: bool = True, endpoint: dict | None = None
+    ) -> None:
         self.calls: list[tuple[str, dict]] = []
         self.bulk_statuses: list[list[int]] = []
         self.search_hits: list[dict] = []
@@ -323,6 +325,11 @@ def test_a_rate_limited_row_is_retried_alone_after_a_wait() -> None:
     first, second = client.named("bulk")
     assert len(first["operations"]) == 4
     assert [d["metadata"]["id"] for d in second["operations"][1::2]] == ["b"]
+    # The resend keeps the row's _id, so it overwrites rather than duplicates.
+    assert (
+        second["operations"][0]["index"]["_id"]
+        == first["operations"][2]["index"]["_id"]
+    )
     assert slept == [15.0]
 
 

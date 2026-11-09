@@ -346,27 +346,31 @@ class ElasticsearchVDB:
         the first reason Elasticsearch gave; a bad key or an unknown model
         fails every row the same way, and one line says so.
         """
-        pending = docs
+        # Each row gets its _id once, here. The client retries a bulk that
+        # timed out, and the loop below resends failed rows, so a row can
+        # reach Elasticsearch more than once. With a fixed _id the resend
+        # overwrites the row instead of indexing a duplicate.
+        pending = [(uuid.uuid4().hex, doc) for doc in docs]
         written = 0
         delay = _RETRY_BASE_SECONDS
         last_error: object = None
         for attempt in range(1, _RETRY_ATTEMPTS + 1):
             operations: list[dict] = []
-            for doc in pending:
-                operations.append({"index": {"_index": self.index_name}})
+            for doc_id, doc in pending:
+                operations.append({"index": {"_index": self.index_name, "_id": doc_id}})
                 operations.append(doc)
             response = self._client.options(request_timeout=_REQUEST_TIMEOUT_S).bulk(
                 operations=operations, refresh=refresh
             )
-            retry: list[dict] = []
+            retry: list[tuple[str, dict]] = []
             fatal: list[dict] = []
-            for doc, item in zip(pending, response["items"]):
+            for row, item in zip(pending, response["items"]):
                 result = item.get("index") or {}
                 status = int(result.get("status", 500))
                 if status < 300:
                     written += 1
                 elif is_retryable_failure(status, result.get("error")):
-                    retry.append(doc)
+                    retry.append(row)
                     last_error = result.get("error")
                 else:
                     fatal.append(result)
