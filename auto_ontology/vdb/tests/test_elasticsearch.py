@@ -84,6 +84,8 @@ class FakeClient:
         self.esql_error: Exception | None = None
         #: _source per _id for mget; ids absent here come back not found.
         self.sources: dict[str, dict] = {}
+        #: Rows per metadata.id, for a search's ``ids`` terms aggregation.
+        self.id_counts: dict[str, int] = {}
 
     def options(self, **kwargs: Any) -> "FakeClient":
         return self
@@ -137,6 +139,9 @@ class FakeClient:
         self.calls.append(("search", kwargs))
         if self.index_missing_on_search:
             raise _not_found()
+        if "aggs" in kwargs:
+            buckets = [{"key": k, "doc_count": n} for k, n in self.id_counts.items()]
+            return {"hits": {"hits": []}, "aggregations": {"ids": {"buckets": buckets}}}
         return {"hits": {"hits": self.search_hits}}
 
     def _esql(self, **kwargs: Any) -> dict:
@@ -626,3 +631,35 @@ def test_hybrid_search_needs_elasticsearch(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setenv("VDB_BACKEND", "elasticsearch")
     assert vdb_search_mode() == "hybrid"
+
+
+def _two_rows_for_a() -> list:
+    [[first]] = _records("a")
+    [[second]] = _records("a")
+    second["metadata"]["content"] = "a table, again"
+    return [[first, second]]
+
+
+def test_an_id_with_a_rejected_new_row_keeps_its_old_rows() -> None:
+    # Two new rows for "a"; the second is rejected for good, so only one is in
+    # the new generation and "a" must not lose its old rows.
+    client = FakeClient()
+    client.bulk_statuses = [[201, 400]]
+    client.bulk_errors = [{"type": "document_parsing_exception"}]
+    client.id_counts = {"a": 1}
+    store, _ = _store(client)
+
+    assert store.replace_rows(["a"], _two_rows_for_a()) == 1
+
+    assert client.named("delete_by_query") == []
+
+
+def test_an_id_whose_new_rows_were_all_written_loses_its_old_rows() -> None:
+    client = FakeClient()
+    client.id_counts = {"a": 2}
+    store, _ = _store(client)
+
+    assert store.replace_rows(["a"], _two_rows_for_a()) == 2
+
+    [delete] = client.named("delete_by_query")
+    assert delete["query"]["bool"]["filter"] == [{"terms": {"metadata.id": ["a"]}}]

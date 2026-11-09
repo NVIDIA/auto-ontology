@@ -29,6 +29,7 @@ import re
 import threading
 import time
 import uuid
+from collections import Counter
 from typing import Any, Callable, Iterable
 
 from elasticsearch import BadRequestError, Elasticsearch, NotFoundError, helpers
@@ -364,7 +365,9 @@ class ElasticsearchVDB:
             )
             retry: list[tuple[str, dict]] = []
             fatal: list[dict] = []
-            for row, item in zip(pending, response["items"]):
+            # One item per action; strict, so a short response can't drop rows
+            # without them being counted, retried or logged.
+            for row, item in zip(pending, response["items"], strict=True):
                 result = item.get("index") or {}
                 status = int(result.get("status", 500))
                 if status < 300:
@@ -474,22 +477,30 @@ class ElasticsearchVDB:
         return self.write_to_index(records)
 
     def replace_rows(self, node_ids: Iterable[str], records: list) -> int:
-        """Write *records*, then drop the older rows of the ids that got a new one.
+        """Write *records*, then drop the older rows of the ids fully rewritten.
 
         Write first, the order a reset uses: the write is the embed here, so
         deleting first would leave an edit the endpoint rejects with no row at
         all. The new rows carry their own generation, which is what tells them
-        apart from the old ones sharing their id. An id whose new row was
-        rejected keeps its old one.
+        apart from the old ones sharing their id. An id keeps its old rows
+        unless every one of its new rows was written: one with two rows and
+        one rejected would otherwise be left half replaced.
         """
         ids = sorted({str(node_id) for node_id in node_ids})
         if not ids:
             return 0
         generation = uuid.uuid4().hex
+        expected = Counter(
+            str(doc["metadata"].get("id")) for doc in self._documents(records)
+        )
         self.create_index()
         # Raises when nothing was written, before anything is deleted.
         written = self.write_to_index(records, generation=generation)
-        rewritten = self._ids_in_generation(ids, generation)
+        rewritten = [
+            node_id
+            for node_id, count in self._row_counts(ids, generation).items()
+            if count == expected[node_id]
+        ]
         if rewritten:
             self._delete(
                 {
@@ -501,8 +512,8 @@ class ElasticsearchVDB:
             )
         return written
 
-    def _ids_in_generation(self, ids: list[str], generation: str) -> list[str]:
-        """Which of *ids* have a row in *generation*."""
+    def _row_counts(self, ids: list[str], generation: str) -> dict[str, int]:
+        """How many rows each of *ids* has in *generation*; absent ids are left out."""
         response = self._client.search(
             index=self.index_name,
             size=0,
@@ -516,7 +527,10 @@ class ElasticsearchVDB:
             },
             aggs={"ids": {"terms": {"field": "metadata.id", "size": len(ids)}}},
         )
-        return [bucket["key"] for bucket in response["aggregations"]["ids"]["buckets"]]
+        return {
+            bucket["key"]: bucket["doc_count"]
+            for bucket in response["aggregations"]["ids"]["buckets"]
+        }
 
     # ------------------------------------------------------------------
     # Delete
