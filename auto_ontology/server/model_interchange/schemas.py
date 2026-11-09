@@ -55,7 +55,12 @@ class ModelColumn(BaseModel):
     # ``auto_ontology.utils.sample_values.dump_sample_values``).
     sample_values: list[Any] = Field(default_factory=list)
     is_nullable: bool = True
-    is_unique: bool = False
+    # Three states, because the catalog's are three: true, false, and "the
+    # source did not say". Defaulting an unknown column to false makes an
+    # export claim a non-uniqueness nobody established -- a declared
+    # single-column primary key exports as true, a composite key's members as
+    # null.
+    is_unique: bool | None = None
 
 
 class ModelTable(BaseModel):

@@ -23,6 +23,7 @@ import yaml
 from ossie_nvidia_auto_ontology import (
     AutoOntologyConversionError,
     convert_auto_ontology_to_ossie,
+    convert_ossie_to_auto_ontology,
 )
 from pydantic import ValidationError
 
@@ -210,6 +211,122 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.table) == 1
     assert len(document.semantic_layer.sql_attributes.sql) == 1
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
+
+
+def test_assemble_export_document_preserves_unknown_uniqueness() -> None:
+    """Unknown is not false: a column nothing established exports as null."""
+    rows = _export_rows()
+    rows["catalog"][0]["is_unique"] = None
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: ["col-1"],
+    )
+
+    column = document.data_layer.databases[0].schemas[0].tables[0].columns[0]
+    assert column.is_unique is None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "upstream ossie-converters cb4b46b: native_converter.py rebuilds a column "
+        "with bool(preserved.get('is_unique', single_unique)), so an explicit null "
+        "comes back as false. Drop this marker when the converter preserves null."
+    ),
+)
+def test_ossie_round_trip_keeps_unknown_uniqueness_unknown() -> None:
+    """Exporting through Ossie and back must not turn `null` into `false`.
+
+    Ossie itself has no way to say "the source declared nothing", so the
+    converter rebuilds each column from the ``native_document`` it stashes in
+    the model; that is where the third state is lost.
+    """
+    source = yaml.safe_dump(
+        {
+            "data_layer": {
+                "databases": [
+                    {
+                        "id": "db-1",
+                        "name": "retail",
+                        "dialect": "postgres",
+                        "schemas": [
+                            {
+                                "id": "sch-1",
+                                "name": "public",
+                                "database_name": "retail",
+                                "tables": [
+                                    {
+                                        "id": "tbl-1",
+                                        "name": "orders",
+                                        "pk": ["order_id"],
+                                        "columns": [
+                                            {
+                                                "id": "col-pk",
+                                                "name": "order_id",
+                                                "type": "INTEGER",
+                                                "is_unique": True,
+                                            },
+                                            {
+                                                "id": "col-false",
+                                                "name": "status",
+                                                "type": "TEXT",
+                                                "is_unique": False,
+                                            },
+                                            {
+                                                "id": "col-null",
+                                                "name": "note",
+                                                "type": "TEXT",
+                                                "is_unique": None,
+                                            },
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            "semantic_layer": {
+                "terms": [
+                    {
+                        "id": "term-1",
+                        "name": "Order",
+                        "description": "An order",
+                        "represents": ["tbl-1"],
+                        "columns_attributes": [
+                            {
+                                "id": f"attr-{index}",
+                                "name": name,
+                                "description": name,
+                                "column_id": column_id,
+                            }
+                            for index, (name, column_id) in enumerate(
+                                [
+                                    ("order id", "col-pk"),
+                                    ("status", "col-false"),
+                                    ("note", "col-null"),
+                                ]
+                            )
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+
+    ossie = convert_auto_ontology_to_ossie(source)
+    round_tripped = yaml.safe_load(convert_ossie_to_auto_ontology(ossie))
+    columns = round_tripped["data_layer"]["databases"][0]["schemas"][0]["tables"][0][
+        "columns"
+    ]
+
+    assert {column["name"]: column["is_unique"] for column in columns} == {
+        "order_id": True,
+        "status": False,
+        "note": None,
+    }
 
 
 def test_semantic_fk_without_join_path_flag_defaults_to_enabled() -> None:
