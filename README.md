@@ -230,8 +230,8 @@ server calls the same public API. Full pipeline detail, with tool-flow diagrams
 for generating an ontology and answering a question, now and next:
 [docs/architecture.md](./docs/architecture.md).
 
-Auto-Ontology works in three stages: it generates an ontology, people certify
-it, and the agent answers questions from it.
+Auto-Ontology works in two stages: it generates an ontology, with people in
+the loop to review and certify it, and the agent answers questions from it.
 
 The ontology holds three kinds of definition:
 
@@ -244,18 +244,23 @@ The ontology holds three kinds of definition:
   keys and from the data.
 
 **Generate.** The ingestion service builds a first draft from the source
-databases. Semantic compilation starts once you turn it on in **Settings →
-Semantic Compilation**.
+databases, and people refine it. Semantic compilation starts once you turn it
+on in **Settings → Semantic Compilation**.
 
-1. Ingest the catalog: tables, columns, keys, views, and query history, with
-   optional PII tagging, embedded in pgvector.
-2. Per table: profile values with SQL; a model finds foreign key candidates and
-   junction tables, writes column descriptions, and names the terms.
-3. Across tables: link foreign keys to the terms they reference, drop links
-   whose columns share no values, and suggest SQL attributes from query history
-   and for bridge tables.
-4. Write the ontology to Postgres and pgvector, ready to review, certify, and
-   import or export as Ossie YAML. Edits are kept across runs.
+- **Catalog ingest:** read tables, columns, keys, views, and query history; tag
+  PII if you turn on PII detection; embed tables and columns in pgvector.
+- **Per table:** profile values with SQL. A model finds foreign key candidates
+  and junction tables, writes column descriptions, and names the terms.
+- **Across tables:** link foreign keys to the terms they reference and drop
+  links whose columns share no values. A model suggests SQL attributes from
+  query history and for bridge tables.
+- **Output:** the ontology in Postgres with embeddings in pgvector, which you
+  can import or export as Ossie YAML.
+- **Human in the loop:** test the draft with real questions in Chat, or with
+  `check_answerable` and `ask_question` over MCP. Refine terms, descriptions,
+  and SQL attributes in the UI or through the API, and certify them once
+  they're correct. Edits are re-embedded right away, and the next compilation
+  keeps them.
 
 The [Generate tool flow](./docs/architecture.md#generate-an-ontology) shows
 which steps call a model and which are SQL or rules.
@@ -268,30 +273,26 @@ its description, related terms, mapped columns, and SQL attributes:
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
 </p>
 
-**Certify.** People make the draft trustworthy:
+**Answer.** Today the agent runs the same steps for every question:
 
-1. Test with real questions in Chat, or with `check_answerable` and
-   `ask_question` over MCP.
-2. Refine terms, descriptions, and SQL attributes in the UI or through the API.
-3. Certify names, descriptions, and SQL attributes once they're correct.
-
-**Answer.** For each question, the agent:
-
-1. Classifies the intent and separates any evidence written into the question.
-2. Finds candidate terms, columns, and SQL attributes by embedding search, and
-   keeps the ones a model judges relevant.
-3. Finds join paths over the ontology's semantic foreign keys, with no model
-   involved.
-4. Writes SQL and a plain-language explanation with the reasoning model.
-5. Checks the SQL with static checks and a model judge, repairs a rejected or
-   failing query, and probes the filter values when a result comes back empty.
-6. Returns the answer with its SQL and the steps it took, and a chart in Chat.
+- **Classify:** a model labels the intent and separates any evidence written
+  into the question.
+- **Retrieve:** embedding search finds candidate terms, columns, and SQL
+  attributes, and a model keeps the relevant ones.
+- **Join:** join paths come from the ontology's semantic foreign keys, with no
+  model involved.
+- **Write:** the reasoning model writes SQL and a plain-language explanation.
+- **Check and repair:** static checks and a model judge review the SQL. A
+  rejected or failing query is repaired, and an empty result triggers a probe of
+  the filter values.
+- **Answer:** the answer comes back with its SQL and the steps it took, and a
+  chart in Chat.
 
 If no valid query comes out, the agent reports that the question can't be
 answered from this data. Predictive questions go to KumoRFM when
 `KUMO_RFM_API_URL` is set (see [Predictions](#predictions)).
 
-Next, a ReAct agent in development replaces steps 1 through 5 with a loop in
+Next, a ReAct agent in development replaces these fixed steps with a loop in
 which the reasoning model picks its own tools: `retrieve` to search the
 ontology, `run_sql` to check and test queries, and `submit` to answer. The
 [Answer tool flows](./docs/architecture.md#answer-a-question-now-fixed-chain)
