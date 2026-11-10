@@ -232,9 +232,12 @@ def fk_shapes_db() -> Iterator[str]:
     except Exception as exc:  # noqa: BLE001 — any failure means "no fixture DB"
         pytest.skip(f"postgres not reachable: {exc}")
     with admin:
-        admin.execute(f'CREATE DATABASE "{name}"')
-        admin.execute(f"CREATE ROLE \"{reader}\" LOGIN PASSWORD 'reader'")
+        # Both CREATEs sit inside the try: the DROP ... IF EXISTS cleanup
+        # tolerates a partial setup, so a failed CREATE ROLE can't leak the
+        # scratch database.
         try:
+            admin.execute(f'CREATE DATABASE "{name}"')
+            admin.execute(f"CREATE ROLE \"{reader}\" LOGIN PASSWORD 'reader'")
             with psycopg.connect(_admin_dsn(name), autocommit=True) as scratch:
                 scratch.execute(_FK_SHAPES_DDL)
                 for schema in ("s", "w"):
