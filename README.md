@@ -230,8 +230,8 @@ server calls the same public API. Full pipeline detail, with tool-flow diagrams
 for generating an ontology and answering a question, now and next:
 [docs/architecture.md](./docs/architecture.md).
 
-Auto-Ontology works in two stages: it generates an ontology that people edit
-and certify, and the agent answers questions from it.
+Auto-Ontology works in two stages: it generates an ontology that people
+certify, and the agent answers questions from it.
 
 The ontology holds three kinds of definition:
 
@@ -256,7 +256,7 @@ on in **Settings → Semantic Compilation**.
   query history and for bridge tables.
 - **Output:** the ontology in Postgres with embeddings in pgvector, which you
   can import or export as Ossie YAML.
-- **Edit and certify:** test the draft with real questions in Chat, or with
+- **Certify:** test the draft with real questions in Chat, or with
   `check_answerable` and `ask_question` over MCP. Refine terms, descriptions,
   and SQL attributes in the UI or through the API, and certify them once
   they're correct. Edits are re-embedded right away, and the next compilation
