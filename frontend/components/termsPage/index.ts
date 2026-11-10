@@ -2,4 +2,4 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { TermsLoadingSkeleton, TermsView } from './TermsView';
+export { TermsView } from './TermsView';

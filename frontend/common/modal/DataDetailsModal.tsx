@@ -25,6 +25,7 @@ import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
+import { termHref } from '@/lib/termHref';
 
 export type DataDetailsType = 'columns' | 'queries' | 'terms';
 
@@ -163,7 +164,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 			width: 'w-10',
 			cell: (row) => (
 				<NextLink
-					href={`/terms?focus=${encodeURIComponent(row.id)}`}
+					href={termHref(row.id)}
 					className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
 					aria-label={`Open ${row.name} term`}
 					title={`Open ${row.name} term`}

@@ -39,6 +39,8 @@ export type SinglePageViewProps = {
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 	headerActions?: ReactNode;
+	/** Narrow-column layout; see `SinglePageComposerProps.compact`. */
+	compact?: boolean;
 };
 
 export const SinglePageView = ({
@@ -59,6 +61,7 @@ export const SinglePageView = ({
 	inlineSaveSectionId,
 	hideEditToolbar,
 	headerActions,
+	compact = false,
 }: SinglePageViewProps): React.JSX.Element | null => {
 	const [loading, setLoading] = useState(true);
 	const [props, setProps] = useState<SinglePageFormat | null>(null);
@@ -125,6 +128,7 @@ export const SinglePageView = ({
 				sections={props.sections}
 				rightPanel={props?.rightPanel}
 				leftPanel={props?.leftPanel}
+				compact={compact}
 				entityUpdatingProperties={props?.entityUpdatingProperties}
 				isEditingMode={isEditing}
 				onPatchEdits={onPatchEdits}

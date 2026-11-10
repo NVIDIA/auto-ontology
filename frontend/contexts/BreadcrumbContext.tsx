@@ -19,7 +19,6 @@ import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 const SECTION_LABELS: Record<string, string> = {
 	'/chat': 'Chat',
 	'/discovery': 'Discovery',
-	'/terms': 'Terms',
 	'/analysis': 'Analysis',
 	'/exploration': 'Exploration',
 	'/data': 'All Data',

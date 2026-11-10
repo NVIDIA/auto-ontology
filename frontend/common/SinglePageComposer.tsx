@@ -47,6 +47,7 @@ import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { TextVariant } from '@/enums/text';
 import { ToastVariant } from '@/enums/toast';
+import { termHref } from '@/lib/termHref';
 
 export type ComposerEditValue = string | string[];
 
@@ -105,6 +106,12 @@ export type SinglePageComposerProps = {
 	};
 	leftPanel?: { bulks: SidePanelBulk[]; width: string; slot?: ReactNode };
 	rightPanel?: { bulks: SidePanelBulk[]; width: string; slot?: ReactNode };
+	/**
+	 * Lay the page out for a narrow column (the Exploration side panel): one
+	 * scrolling column with the side panels stacked under the sections, a
+	 * header that wraps, and tighter padding.
+	 */
+	compact?: boolean;
 	pdfProps?: {
 		isPDFView: boolean;
 		headerProps: Record<string, unknown>;
@@ -911,6 +918,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			header,
 			leftPanel,
 			rightPanel,
+			compact = false,
 			pdfProps,
 			entityUpdatingProperties,
 			isEditingMode: controlledEditingMode = false,
@@ -931,7 +939,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 		const handleTermClick = useCallback(
 			(termId: string) => {
-				router.push(`/terms?focus=${encodeURIComponent(termId)}`);
+				router.push(termHref(termId));
 			},
 			[router],
 		);
@@ -1060,8 +1068,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
 		const isPDFView = pdfProps?.isPDFView ?? false;
 
-		const gridTemplate =
-			leftPanel && rightPanel
+		const gridTemplate = compact
+			? '1fr'
+			: leftPanel && rightPanel
 				? `[full-start] ${leftPanel.width} [main-start] 1fr [main-end] ${rightPanel.width} [full-end]`
 				: leftPanel
 					? `[full-start] ${leftPanel.width} [main-start] 1fr [main-end full-end]`
@@ -1231,7 +1240,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
+				<header
+					className={
+						compact
+							? 'flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-200 px-5 py-3 dark:border-zinc-800'
+							: 'flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800'
+					}
+				>
 					{titleBlock}
 					{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
 					{editControls != null || headerActions != null ? (
@@ -1243,11 +1258,17 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				</header>
 
 				<div
-					className="grid min-h-0 w-full min-w-0 flex-1 gap-0 overflow-hidden"
+					className={`grid min-h-0 w-full min-w-0 flex-1 gap-0 ${compact ? 'content-start overflow-y-auto' : 'overflow-hidden'}`}
 					style={{ gridTemplateColumns: gridTemplate }}
 				>
 					{leftPanel ? (
-						<aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
+						<aside
+							className={
+								compact
+									? 'order-2 flex min-w-0 flex-col border-t border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+									: 'flex min-h-0 min-w-0 flex-col overflow-y-auto border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+							}
+						>
 							{leftPanel.slot ? (
 								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0">
 									{leftPanel.slot}
@@ -1264,7 +1285,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						</aside>
 					) : null}
 
-					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
+					<main
+						className={
+							compact
+								? 'order-1 min-w-0 overflow-x-clip px-5 py-5'
+								: 'min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]'
+						}
+					>
 						<div className="space-y-5">
 							{sections.length === 0 ? (
 								<EmptyState
@@ -1418,7 +1445,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</main>
 
 					{rightPanel ? (
-						<aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
+						<aside
+							className={
+								compact
+									? 'order-3 flex min-w-0 flex-col border-t border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+									: 'flex min-h-0 min-w-0 flex-col overflow-y-auto border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+							}
+						>
 							{rightPanel.slot ? (
 								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5">
 									{rightPanel.slot}
