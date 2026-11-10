@@ -450,6 +450,10 @@ def upsert_table_term(
             return None
 
         table = tables[0]
+        # An empty proposal would be stored as "" (never embedded, so never
+        # retrieved), and the next one as " (db.schema.table)". Use the
+        # physical table name instead.
+        name = name.strip() or table["table_name"]
         qualified_table = ".".join(
             part
             for part in (

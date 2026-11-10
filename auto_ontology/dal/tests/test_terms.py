@@ -445,6 +445,26 @@ def test_upsert_table_term_is_idempotent_for_one_table(world) -> None:
     assert row["description"] == "rebuilt"
 
 
+def test_upsert_table_term_never_stores_an_empty_name(world) -> None:
+    """An empty proposal falls back to the physical table name instead of
+    being stored as "" (never embedded) or the next as " (db.schema.table)"."""
+    world.table("orders")
+
+    persisted = [
+        t.upsert_table_term(proposed, "orders", world.tables["orders"])
+        for proposed in ("", "   ")
+    ]
+
+    assert persisted[0] is not None
+    assert persisted[1] == persisted[0]
+    term_id, name = persisted[0]
+    # "orders", or "orders (<db>.public.orders)" if a shared fixture already
+    # owns that name -- either way, never blank or space-led.
+    assert name.split(" (")[0] == "orders"
+    stored = store().query_read(select(s.term.c.name).where(s.term.c.id == term_id))
+    assert stored[0]["name"] == name
+
+
 def test_upsert_table_term_qualifies_only_a_cross_table_name_collision(world) -> None:
     world.table("orders")
     world.table("invoices")

@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from unittest.mock import patch
 
-import pytest
 
 from auto_ontology.semantic.deterministic import (
     column_attribute_specs,
@@ -123,6 +124,27 @@ def test_to_term_name() -> None:
     assert to_term_name("gtl_ui_event") == "Gtl Ui Event"
     assert to_term_name("GtlImagingEvent") == "Gtl Imaging Event"
     assert to_term_name("XMLHttpRequest") == "XML Http Request"
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        ("고객", "고객"),
+        ("주문_내역", "주문 내역"),
+        ("TB_고객", "TB 고객"),
+        ("顧客マスタ", "顧客マスタ"),
+        ("клиенты", "Клиенты"),
+        ("Société_Générale", "Société Générale"),
+        # Decomposed accents (as macOS tooling often writes them) stay in the word.
+        ("Socie\u0301te\u0301", "Société"),
+        # Devanagari vowel signs and virama are marks, not separators.
+        ("ग्राहक_सूची", "ग्राहक सूची"),
+        # Nothing word-like left: the name itself, never "".
+        ("___", "___"),
+    ],
+)
+def test_to_term_name_keeps_words_in_any_script(table: str, expected: str) -> None:
+    assert to_term_name(table) == expected
 
 
 def test_fk_targets_deduped() -> None:
