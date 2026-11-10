@@ -17,6 +17,7 @@ class ToolName(StrEnum):
     RUN_SQL = "run_sql"
     SUBMIT = "submit"
     PREDICT = "predict"
+    GREP = "grep"
 
 
 ANSWERING_TOOLS = frozenset({ToolName.SUBMIT, ToolName.PREDICT})

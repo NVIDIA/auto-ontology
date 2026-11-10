@@ -12,6 +12,7 @@ learn conventions from reward, not from a list.
 
 from __future__ import annotations
 
+from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.retrieve import KIND_LABELS
 
@@ -33,6 +34,13 @@ Return exactly the requested output fields and no others.
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
 choose one."""
+
+_GREP_LINE = """\
+- grep: search all rows of a run_sql result too long to show (run_sql says \
+which page it saved it as), or read rows past the first ones with offset.
+"""
+
+GREP_SYSTEM_PROMPT = SYSTEM_PROMPT.replace("- submit:", _GREP_LINE + "- submit:", 1)
 
 PREDICT_SYSTEM_PROMPT = """\
 You answer a question that asks what will happen in a database's data, with a \
@@ -154,20 +162,55 @@ PREDICT_TOOL = {
 
 TOOLS = [RETRIEVE_TOOL, RUN_SQL_TOOL, SUBMIT_TOOL]
 
+GREP_TOOL = {
+    "type": "function",
+    "function": {
+        "name": ToolName.GREP,
+        "description": (
+            "Search a saved run_sql result: the rows matching a pattern, each "
+            "with its row number. With no pattern, reads rows in order."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer",
+                    "description": "The page run_sql saved the result as.",
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Text or a regular expression, case-insensitive. Empty for all rows.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Skip this many matching rows first, to read further.",
+                },
+            },
+            "required": ["page"],
+        },
+    },
+}
+
 
 def tools_for(mode: EpisodeMode, *, last_turn: bool = False) -> list[dict]:
     """The tools offered in *mode*; on the last turn, only the ones that answer."""
     if mode == EpisodeMode.PREDICT:
         return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
+    sql_tools = (
+        [RETRIEVE_TOOL, RUN_SQL_TOOL, GREP_TOOL, SUBMIT_TOOL]
+        if config.grep_enabled()
+        else TOOLS
+    )
     if mode == EpisodeMode.AUTO:
-        return [SUBMIT_TOOL, PREDICT_TOOL] if last_turn else [*TOOLS, PREDICT_TOOL]
-    return [SUBMIT_TOOL] if last_turn else TOOLS
+        return [SUBMIT_TOOL, PREDICT_TOOL] if last_turn else [*sql_tools, PREDICT_TOOL]
+    return [SUBMIT_TOOL] if last_turn else sql_tools
 
 
 def system_prompt_for(mode: EpisodeMode, dialect: str | None) -> str:
     if mode == EpisodeMode.PREDICT:
         return PREDICT_SYSTEM_PROMPT
-    prompt = SYSTEM_PROMPT.format(dialect=dialect or "SQL")
+    base = GREP_SYSTEM_PROMPT if config.grep_enabled() else SYSTEM_PROMPT
+    prompt = base.format(dialect=dialect or "SQL")
     return prompt + _PREDICT_WHEN if mode == EpisodeMode.AUTO else prompt
 
 

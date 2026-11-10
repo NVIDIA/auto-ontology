@@ -34,6 +34,9 @@ class ToolContext:
     view, in the shape KumoRFM links its graph with. ``question`` and
     ``prediction_llm`` are what ``predict`` hands KumoRFM: the question as the
     user asked it, not as the model rephrased it.
+
+    ``pages`` holds the ``run_sql`` results too long to show, for ``grep`` to
+    search; page *n* is ``pages[n - 1]``.
     """
 
     retriever: Any
@@ -54,3 +57,4 @@ class ToolContext:
     sql_runs: int = 0
     predict_calls: int = 0
     prediction_refusal: str = ""
+    pages: list[Any] = field(default_factory=list)

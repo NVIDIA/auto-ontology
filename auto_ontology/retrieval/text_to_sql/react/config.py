@@ -82,6 +82,20 @@ def siblings_enabled() -> bool:
     return value in _TRUTHY or not value
 
 
+def grep_enabled() -> bool:
+    """Whether a ``run_sql`` result too long to show is kept for ``grep``.
+
+    Off by default; ``TEXT_TO_SQL_REACT_GREP=true`` saves such a result as a
+    page and gives the model a ``grep`` tool to search it.
+    """
+    return os.environ.get("TEXT_TO_SQL_REACT_GREP", "").strip().lower() in _TRUTHY
+
+
+def max_page_rows() -> int:
+    """Rows of one result kept for ``grep``; the rest are dropped."""
+    return _int_env("TEXT_TO_SQL_REACT_MAX_PAGE_ROWS", 100_000)
+
+
 def max_columns_per_table() -> int:
     """Columns shown per table when the table is wider than this.
 

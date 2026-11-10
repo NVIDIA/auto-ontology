@@ -251,4 +251,34 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
     except Exception as error:  # noqa: BLE001 — the model must see the failure
         logger.info("ReAct run_sql failed: %s", error)
         return _clip(f"Error from the database: {' '.join(str(error).split())}")
-    return _clip(render_rows(_deduplicate_result_columns(frame)))
+    frame = _deduplicate_result_columns(frame)
+    text = render_rows(frame)
+    if config.grep_enabled():
+        text = _save_page(ctx, frame, text)
+    return _clip(text)
+
+
+def _save_page(ctx: ToolContext, frame: Any, text: str) -> str:
+    """Keep a result too long to show for ``grep``, and say so on its first line.
+
+    The note goes on the summary line because clipping keeps the start.
+    """
+    if (
+        len(frame) <= config.max_result_rows()
+        and len(text) <= config.max_observation_chars()
+    ):
+        return text
+    kept = frame.head(config.max_page_rows())
+    ctx.pages.append(kept)
+    page = len(ctx.pages)
+    rows = (
+        f"all {len(kept)} rows"
+        if len(kept) == len(frame)
+        else f"its first {len(kept)} rows"
+    )
+    summary, _, rest = text.partition("\n")
+    note = (
+        f"{summary}. Saved as page {page}: grep(page={page}, pattern=...) "
+        f"searches {rows}, and offset reads further rows."
+    )
+    return note + "\n" + rest

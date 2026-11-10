@@ -46,6 +46,8 @@ def _tool_thought(call: dict[str, Any]) -> str:
         return "Running a query to check the data."
     if name == ToolName.PREDICT:
         return "Predicting with KumoRFM."
+    if name == ToolName.GREP:
+        return f"Searching a saved result for: {args.get('pattern', '')}"
     return "Submitting the final query."
 
 

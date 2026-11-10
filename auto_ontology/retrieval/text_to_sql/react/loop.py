@@ -36,6 +36,7 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.mode import (
     ANSWERING_TOOLS,
     EpisodeMode,
@@ -126,6 +127,9 @@ def _dispatch(
     handlers: dict[str, Callable[..., str]] = {
         ToolName.RETRIEVE: lambda query="", kinds=None: retrieve(ctx, query, kinds),
         ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
+        ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
+            ctx, page, pattern, offset
+        ),
     }
     try:
         if name not in offered:
