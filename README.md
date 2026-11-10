@@ -19,7 +19,11 @@ It enables developers to:
 ## Benchmarks
 
 To run a text-to-SQL benchmark such as BIRD, refer to
-[auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval).
+[auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval). It runs
+each question twice on [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym), with
+the same model given only the schema and through Auto-Ontology, and scores both
+with one deterministic verifier. Its README diagrams that run and the planned
+setup where Gym's policy model calls the ReAct agent's tools directly.
 
 > **Licensing & contributions.** Auto Ontology is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
