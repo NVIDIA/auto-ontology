@@ -22,8 +22,8 @@ To run a text-to-SQL benchmark such as BIRD, refer to
 [auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval). It runs
 each question twice on [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym), with
 the same model given only the schema and through Auto-Ontology, and scores both
-with one deterministic verifier. Its README diagrams that run and the planned
-setup where Gym's policy model calls the ReAct agent's tools directly.
+with one deterministic verifier. Its README diagrams that run now, and next, a
+planned setup where Gym's policy model calls the ReAct agent's tools directly.
 
 > **Licensing & contributions.** Auto Ontology is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
@@ -301,6 +301,12 @@ flowchart TD
 
 Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
+Next, with the ReAct work in development, compilation adds two steps after
+semantic foreign keys: keep links inside a table family (copies of one schema
+that differ by a name prefix, such as `OLD_` and `NEW_`), and re-embed tables
+and columns with their terms. See
+[docs/architecture.md](./docs/architecture.md#next-generate-react-in-development).
+
 The result is a semantic graph you can explore in the UI. In this example, one
 compilation of Wide World Importers produced 31 terms; selecting **Order** shows
 its description, related terms, mapped columns, and SQL attributes:
@@ -343,7 +349,7 @@ call `check_answerable` first and ask the user to clarify (see step 6 of the
 [Quickstart](#quickstart)). Predictive questions go to KumoRFM when
 `KUMO_RFM_API_URL` is set (see [Predictions](#predictions)).
 
-**Today: fixed chain (LangGraph).** Every question runs the same steps in the
+**Now: fixed chain (LangGraph).** Every question runs the same steps in the
 same order.
 
 ```mermaid
@@ -381,8 +387,8 @@ flowchart TD
 
 Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
-**In development: ReAct, model-chosen tools.** The reasoning model decides what
-to search, what to run, and when it's done.
+**Next: ReAct, model-chosen tools (in development).** The reasoning model
+decides what to search, what to run, and when it's done.
 
 ```mermaid
 flowchart TD
@@ -418,7 +424,7 @@ flowchart TD
 
 Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
-The ReAct agent, in development, replaces steps 1 through 6 with a loop. The
+The next agent replaces steps 1 through 6 with a loop. The
 reasoning model starts with no schema and calls tools: `retrieve` searches the
 ontology by meaning and by name and shows matching tables with their columns,
 stored values, definitions, and join paths; `run_sql` checks a query's table
