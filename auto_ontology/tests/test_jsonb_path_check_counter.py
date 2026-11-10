@@ -10,6 +10,11 @@ equivalent early return. Only a mismatch that still needs reconstruction
 after the self-apply pass should increment the counter.
 """
 
+from typing import Any, Dict, List, Tuple
+from unittest.mock import MagicMock
+
+import pytest
+
 from auto_ontology.retrieval.text_to_sql.agents import jsonb_path_check
 from auto_ontology.retrieval.text_to_sql.agents.jsonb_path_check import (
     JsonbPathCheckAgent,
@@ -22,92 +27,76 @@ class _NullProbeExecutor:
     below, so this never needs to touch a real connector.
     """
 
-    def __init__(self, connector):
+    def __init__(self, connector: Any) -> None:
         pass
 
-    def __enter__(self):
+    def __enter__(self) -> "_NullProbeExecutor":
         return self
 
-    def __exit__(self, *exc_info):
+    def __exit__(self, *exc_info: Any) -> bool:
         return False
 
 
-def _make_state(attempts: int) -> dict:
-    return {
-        "path_state": {
-            "sql_code": "SELECT data->>'flattened.key' FROM aliens",
-            "jsonb_path_repair_attempts": attempts,
-            "relevant_tables": [],
-        },
-        "connectors": [],
-    }
+def _make_state(path_state: Dict[str, Any]) -> Dict[str, Any]:
+    return {"path_state": path_state, "connectors": []}
 
 
-def _patch_common(monkeypatch):
+def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jsonb_path_check, "ProbeExecutor", _NullProbeExecutor)
     monkeypatch.setattr(
         jsonb_path_check, "resolve_connector_from_tables", lambda *a, **k: None
     )
 
 
-def test_two_fully_self_applied_fixes_preserve_counter(monkeypatch):
-    """Two calls in a row where try_self_apply_fixes resolves every
-    mismatch must each return valid_sql without touching the counter.
+def test_counter_preserved_for_two_self_applied_fixes_then_spent_on_third(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three calls in sequence, carrying the returned path_state forward
+    each time: the first two fully self-apply (counter untouched, valid_sql),
+    the third leaves a mismatch after the self-apply pass (counter spent,
+    invalid_sql).
     """
     _patch_common(monkeypatch)
-    monkeypatch.setattr(
-        jsonb_path_check,
-        "find_jsonb_path_mismatches",
-        lambda *a, **k: [{"table": "aliens", "column": "data", "used_key": "x"}],
-    )
-    monkeypatch.setattr(
-        jsonb_path_check,
-        "try_self_apply_fixes",
-        lambda mismatches, sql: ("SELECT data->'flattened'->>'key' FROM aliens", []),
-    )
+
+    # One mismatch list per call: the first two are always resolvable by
+    # try_self_apply_fixes, the third survives it.
+    mismatch = {
+        "table": "aliens",
+        "column": "data",
+        "container": None,
+        "used_key": "x",
+        "available_keys": ["y"],
+    }
+    find_mismatches = MagicMock(side_effect=[[mismatch], [mismatch], [mismatch]])
+    monkeypatch.setattr(jsonb_path_check, "find_jsonb_path_mismatches", find_mismatches)
+
+    def fake_self_apply(
+        mismatches: List[Dict[str, Any]], sql: str
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        call_index = find_mismatches.call_count
+        if call_index <= 2:
+            return "SELECT data->'flattened'->>'key' FROM aliens", []
+        return sql, mismatches
+
+    monkeypatch.setattr(jsonb_path_check, "try_self_apply_fixes", fake_self_apply)
 
     agent = JsonbPathCheckAgent()
+    path_state: Dict[str, Any] = {
+        "sql_code": "SELECT data->>'flattened.key' FROM aliens",
+        "jsonb_path_repair_attempts": 0,
+        "relevant_tables": [],
+    }
 
-    state = _make_state(attempts=0)
-    result = agent.execute(state)
-    assert result["decision"] == "valid_sql"
-    assert result["path_state"]["jsonb_path_repair_attempts"] == 0
+    first = agent.execute(_make_state(path_state))
+    assert first["decision"] == "valid_sql"
+    assert first["path_state"]["jsonb_path_repair_attempts"] == 0
+    path_state = first["path_state"]
 
-    state = _make_state(attempts=0)
-    result = agent.execute(state)
-    assert result["decision"] == "valid_sql"
-    assert result["path_state"]["jsonb_path_repair_attempts"] == 0
+    second = agent.execute(_make_state(path_state))
+    assert second["decision"] == "valid_sql"
+    assert second["path_state"]["jsonb_path_repair_attempts"] == 0
+    path_state = second["path_state"]
 
-
-def test_remaining_mismatch_after_self_apply_increments_and_fails(monkeypatch):
-    """When a mismatch survives the self-apply pass, this call does spend
-    a repair attempt and routes to reconstruction (invalid_sql) — the
-    counter and decision a third, non-self-fixable call should produce
-    after the two free passes above.
-    """
-    _patch_common(monkeypatch)
-    monkeypatch.setattr(
-        jsonb_path_check,
-        "find_jsonb_path_mismatches",
-        lambda *a, **k: [
-            {
-                "table": "aliens",
-                "column": "data",
-                "container": None,
-                "used_key": "x",
-                "available_keys": ["y"],
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        jsonb_path_check,
-        "try_self_apply_fixes",
-        lambda mismatches, sql: (sql, mismatches),
-    )
-
-    agent = JsonbPathCheckAgent()
-    state = _make_state(attempts=0)
-    result = agent.execute(state)
-
-    assert result["decision"] == "invalid_sql"
-    assert result["path_state"]["jsonb_path_repair_attempts"] == 1
+    third = agent.execute(_make_state(path_state))
+    assert third["decision"] == "invalid_sql"
+    assert third["path_state"]["jsonb_path_repair_attempts"] == 1
