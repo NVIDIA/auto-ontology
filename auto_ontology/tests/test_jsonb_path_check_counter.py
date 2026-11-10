@@ -10,7 +10,7 @@ equivalent early return. Only a mismatch that still needs reconstruction
 after the self-apply pass should increment the counter.
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 from unittest.mock import MagicMock
 
 import pytest
@@ -70,14 +70,14 @@ def test_counter_preserved_for_two_self_applied_fixes_then_spent_on_third(
     find_mismatches = MagicMock(side_effect=[[mismatch], [mismatch], [mismatch]])
     monkeypatch.setattr(jsonb_path_check, "find_jsonb_path_mismatches", find_mismatches)
 
-    def fake_self_apply(
-        mismatches: List[Dict[str, Any]], sql: str
-    ) -> Tuple[str, List[Dict[str, Any]]]:
-        call_index = find_mismatches.call_count
-        if call_index <= 2:
-            return "SELECT data->'flattened'->>'key' FROM aliens", []
-        return sql, mismatches
-
+    fixed_sql = "SELECT data->'flattened'->>'key' FROM aliens"
+    fake_self_apply = MagicMock(
+        side_effect=[
+            (fixed_sql, []),
+            (fixed_sql, []),
+            (fixed_sql, [mismatch]),
+        ]
+    )
     monkeypatch.setattr(jsonb_path_check, "try_self_apply_fixes", fake_self_apply)
 
     agent = JsonbPathCheckAgent()
