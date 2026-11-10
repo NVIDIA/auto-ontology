@@ -82,6 +82,8 @@ forwards, and the ingestion service has no authentication of its own.
 
 ## Generate an ontology
 
+**Now.**
+
 ```mermaid
 flowchart TD
   subgraph inputs["Inputs"]
@@ -240,6 +242,45 @@ This is the current agent, a LangGraph graph built in
 Every question runs the same steps in the same order; the routing between them
 is fixed in code.
 
+**Now: fixed chain (LangGraph), overview.**
+
+```mermaid
+flowchart TD
+  q["Question: chat, REST, MCP ask_question, or eval"]
+  intent["LLM: classify intent, separate evidence"]
+  ret["EMBED + LLM: extract entities, search the ontology, keep relevant candidates"]
+  meta["LLM: answer from metadata"]
+  join["Find join paths: shortest route over semantic foreign keys"]
+  gen["Reasoning LLM: write SQL and its explanation"]
+  judge{"SQL checks + LLM: judge the query against the question"}
+  fix["LLM: repair SQL"]
+  run["Execute SQL"]
+  check["LLM + SQL: if the result is empty, probe filter values"]
+  ans["Answer + SQL + chart"]
+  ref["Refusal: no valid query from this data"]
+  kumo["LLM: write PQL; KumoRFM: forecast or score"]
+  q --> intent --> ret
+  ret -- "metadata question" --> meta
+  ret --> join --> gen --> judge
+  judge -- "accept" --> run --> check --> ans
+  judge -- "reject" --> fix --> judge
+  run -- "error" --> fix
+  check -- "near-miss value" --> fix
+  gen -- "cannot be built" --> ref
+  judge -- "still failing after 7 repairs" --> ref
+  join -. "predictive question, KUMO_RFM_API_URL set" .-> kumo
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef optional stroke-dasharray:5 5
+  class intent,ret,meta,gen,judge,fix,check,kumo model
+  class join,run det
+  class kumo optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
+
+**Now: fixed chain (LangGraph), full detail.**
+
 ```mermaid
 flowchart TD
   q["Question"]
@@ -331,7 +372,8 @@ added to the agent's prompts.
 
 ## Answer a question, next: ReAct (in development)
 
-The ReAct agent replaces the fixed chain with one loop: the `REASONING` model
+**Next: ReAct, model-chosen tools (in development).** The ReAct agent replaces
+the fixed chain with one loop: the `REASONING` model
 starts with no schema and decides which tool to call next. It is being built
 on the `feat/react-ontology-agent_clean` branch and isn't in a release yet, so
 the details below can change.
