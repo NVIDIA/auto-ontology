@@ -89,3 +89,21 @@ def max_columns_per_table() -> int:
     that reference other tables; the rest are reachable by a narrower query.
     """
     return _int_env("TEXT_TO_SQL_REACT_MAX_COLUMNS_PER_TABLE", 25)
+
+
+def prediction_enabled() -> bool:
+    """Whether this deployment can answer with a KumoRFM prediction.
+
+    ``KUMO_RFM_API_URL`` must name a Universal TFM NIM serving the
+    ``kumo-relational`` model; without it the ``predict`` tool is never offered.
+    """
+    return bool(os.environ.get("KUMO_RFM_API_URL", "").strip())
+
+
+def max_predict_calls() -> int:
+    """``predict`` calls allowed per episode.
+
+    Each one reads the tables and builds a graph, which takes far longer than
+    a search, so a refused build gets one retry after retrieving what it lacked.
+    """
+    return _int_env("TEXT_TO_SQL_REACT_MAX_PREDICT_CALLS", 2)

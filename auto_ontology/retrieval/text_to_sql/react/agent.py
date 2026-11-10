@@ -4,22 +4,27 @@
 
 """The pipeline step that answers a question with one ReAct episode.
 
-It hands its result to ``format_and_respond`` in the shape that node reads, or
-to ``unconstructable_sql_response`` when the episode ends without an answer.
+It hands a query to ``format_and_respond`` in the shape that node reads, ends
+the run itself with a KumoRFM prediction's response, or hands off to
+``unconstructable_sql_response`` when the episode ends without an answer.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
+from langchain_core.messages import AIMessage
+
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.loop import run_episode
+from auto_ontology.retrieval.text_to_sql.react.mode import ToolName, episode_mode
 from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
+    get_standalone_question,
 )
 
 STEP_NAME = "react_sql_agent"
@@ -34,10 +39,13 @@ _NO_ASSUMPTIONS = "No assumptions were needed beyond what the question states."
 
 def _tool_thought(call: dict[str, Any]) -> str:
     args = call.get("args") or {}
-    if call.get("name") == "retrieve":
+    name = call.get("name")
+    if name == ToolName.RETRIEVE:
         return f"Searching for: {args.get('query', '')}"
-    if call.get("name") == "run_sql":
+    if name == ToolName.RUN_SQL:
         return "Running a query to check the data."
+    if name == ToolName.PREDICT:
+        return "Predicting with KumoRFM."
     return "Submitting the final query."
 
 
@@ -58,6 +66,8 @@ class ReactSQLAgent(BaseAgent):
             connectors=list(state.get("connectors") or []),
             database_name=path_state.get("target_db"),
             numeric_type_alignment=bool(state.get("numeric_type_alignment")),
+            question=get_standalone_question(state),
+            prediction_llm=state.get("llm"),
         )
         connector = connector_for(ctx)
         result = run_episode(
@@ -66,6 +76,7 @@ class ReactSQLAgent(BaseAgent):
             question=get_question_for_processing(state),
             evidence=state.get("evidence"),
             dialect=getattr(connector, "dialect", None),
+            mode=episode_mode(state.get("prediction_override")),
         )
 
         for step in result.trajectory:
@@ -75,10 +86,24 @@ class ReactSQLAgent(BaseAgent):
         path_state["react_end_reason"] = result.reason
         path_state["relevant_tables"] = list(ctx.seen_tables.values())
 
+        if result.prediction is not None:
+            response = result.prediction.response
+            markdown = str(response.get("response") or "")
+            path_state["formatted_response"] = markdown
+            path_state["final_response"] = response
+            return {
+                "decision": "predicted",
+                "messages": list(state.get("messages") or [])
+                + [AIMessage(content=markdown)],
+                "path_state": path_state,
+            }
+
         submission = result.submission
         if submission is None:
             self.logger.info("ReAct episode ended without an answer: %s", result.reason)
-            path_state["unconstructable_explanation"] = _UNANSWERED
+            path_state["unconstructable_explanation"] = (
+                ctx.prediction_refusal or _UNANSWERED
+            )
             return {"decision": "unconstructable", "path_state": path_state}
 
         path_state["sql_code"] = submission.sql

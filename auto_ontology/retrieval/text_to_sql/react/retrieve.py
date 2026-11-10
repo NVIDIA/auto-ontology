@@ -345,6 +345,7 @@ def _join_lines(ctx: ToolContext, new_tables: list[dict]) -> list[str]:
                 continue
             hops = find_join_path(anchor, dest)
             if hops:
+                ctx.join_paths.append({"path": hops})
                 lines.append(
                     f"JOIN {_qualified(table)} ↔ {_qualified(other)}: "
                     + " → ".join(_hop_text(h) for h in hops)

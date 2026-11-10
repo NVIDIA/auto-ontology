@@ -34,12 +34,14 @@ class TextToSQLPayload(TypedDict):
     path_state: NotRequired[dict]
     connectors: NotRequired[list[SQLDatabase]]
     target_db: NotRequired[str]
+    # True forces a KumoRFM prediction, False forbids one, None lets the agent
+    # choose when KumoRFM is configured.
+    prediction: NotRequired[bool | None]
     # Accepted from callers but not read by the ReAct agent.
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
-    prediction: NotRequired[bool | None]
 
 
 class AgentState(TypedDict):
@@ -56,6 +58,7 @@ class AgentState(TypedDict):
     path_state: dict
     data_retriever: Retriever
     semantic_retriever: Retriever
+    prediction_override: NotRequired[bool | None]
     # Read by the entity-coverage pipeline, which shares this state type.
     domain_rules: NotRequired[list[dict[str, str]]]
     # User-curated Glossary definitions (the ``acronyms`` table), kept apart from

@@ -29,6 +29,11 @@ class ToolContext:
 
     ``retriever`` searches the semantic collection (definitions, analyses);
     ``data_retriever`` the one tables and columns are embedded in.
+
+    ``join_paths`` keeps the catalog joins ``retrieve`` found between tables in
+    view, in the shape KumoRFM links its graph with. ``question`` and
+    ``prediction_llm`` are what ``predict`` hands KumoRFM: the question as the
+    user asked it, not as the model rephrased it.
     """
 
     retriever: Any
@@ -36,11 +41,16 @@ class ToolContext:
     database_name: str | None = None
     data_retriever: Any = None
     numeric_type_alignment: bool = False
+    question: str = ""
+    prediction_llm: Any = None
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
+    join_paths: list[dict[str, Any]] = field(default_factory=list)
     anchor_column_ids: dict[str, str | None] = field(default_factory=dict)
     sibling_pairs: set[frozenset[str]] = field(default_factory=set)
     catalog_tables: list[dict[str, Any]] | None = None
     row_counts: dict[str, int | None] = field(default_factory=dict)
     schemas: dict[str, Any] | None = None
     sql_runs: int = 0
+    predict_calls: int = 0
+    prediction_refusal: str = ""

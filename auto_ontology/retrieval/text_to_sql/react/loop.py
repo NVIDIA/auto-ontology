@@ -36,6 +36,12 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.mode import (
+    ANSWERING_TOOLS,
+    EpisodeMode,
+    ToolName,
+)
+from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predict
 from auto_ontology.retrieval.text_to_sql.react.retrieve import retrieve
 from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
@@ -69,6 +75,7 @@ class EpisodeResult:
     reason: str
     tool_calls: int
     trajectory: list[dict[str, Any]] = field(default_factory=list)
+    prediction: Prediction | None = None
 
 
 def submit(
@@ -113,18 +120,21 @@ def _call_key(name: str, args: dict) -> str:
     return f"{name}:{json.dumps(args, sort_keys=True, default=str)}"
 
 
-def _dispatch(ctx: ToolContext, name: str, args: dict) -> tuple[str, Submission | None]:
+def _dispatch(
+    ctx: ToolContext, name: str, args: dict, offered: list[str]
+) -> tuple[str, Submission | Prediction | None]:
     handlers: dict[str, Callable[..., str]] = {
-        "retrieve": lambda query="", kinds=None: retrieve(ctx, query, kinds),
-        "run_sql": lambda sql="": run_sql(ctx, sql),
+        ToolName.RETRIEVE: lambda query="", kinds=None: retrieve(ctx, query, kinds),
+        ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
     }
     try:
-        if name == "submit":
+        if name not in offered:
+            return f"Unknown tool {name!r}. Use {', '.join(offered)}.", None
+        if name == ToolName.SUBMIT:
             return submit(ctx, **args)
-        handler = handlers.get(name)
-        if handler is None:
-            return f"Unknown tool {name!r}. Use retrieve, run_sql or submit.", None
-        return handler(**args), None
+        if name == ToolName.PREDICT:
+            return predict(ctx)
+        return handlers[name](**args), None
     except TypeError as error:
         return f"Wrong arguments for {name}: {error}", None
     except Exception as error:  # noqa: BLE001 — a failing tool must not end the question
@@ -138,12 +148,19 @@ def run_episode(
     question: str,
     evidence: str | None = None,
     dialect: str | None = None,
+    mode: EpisodeMode = EpisodeMode.SQL,
 ) -> EpisodeResult:
-    """Run the model with the three tools until it submits or the budget ends."""
+    """Run the model with *mode*'s tools until it answers or the budget ends.
+
+    ``sql`` answers with ``submit``, ``predict`` with ``predict``, and ``auto``
+    offers both and lets the model choose.
+    """
+    system_prompt = prompts.system_prompt_for(mode, dialect)
     # Dialect rules, e.g. for MySQL: do not CAST or ROUND computed values,
     # which changes the digits an exact grader compares.
-    system_prompt = prompts.SYSTEM_PROMPT.format(dialect=dialect or "SQL")
-    dialect_rules = format_dialect_rules(dialect).strip()
+    dialect_rules = (
+        format_dialect_rules(dialect).strip() if mode != EpisodeMode.PREDICT else ""
+    )
     if dialect_rules:
         system_prompt = f"{system_prompt}\n\n{dialect_rules}"
     messages: list[BaseMessage] = [
@@ -153,7 +170,9 @@ def run_episode(
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
     ]
-    bound = llm.bind_tools(prompts.TOOLS)
+    tools = prompts.tools_for(mode)
+    offered = [t["function"]["name"] for t in tools]
+    bound = llm.bind_tools(tools)
     budget = config.max_tool_calls()
     calls = 0
     nudges = 0
@@ -162,9 +181,12 @@ def run_episode(
     while True:
         last_turn = calls >= budget
         if last_turn:
-            messages.append(HumanMessage(content=prompts.LAST_CALL))
-            trajectory.append({"role": "human", "content": prompts.LAST_CALL})
-            bound = llm.bind_tools([prompts.SUBMIT_TOOL])
+            last_call = prompts.last_call_for(mode)
+            messages.append(HumanMessage(content=last_call))
+            trajectory.append({"role": "human", "content": last_call})
+            tools = prompts.tools_for(mode, last_turn=True)
+            offered = [t["function"]["name"] for t in tools]
+            bound = llm.bind_tools(tools)
         try:
             reply = invoke_with_retry(
                 bound, messages, max_attempts=config.model_retries()
@@ -190,8 +212,9 @@ def run_episode(
             nudges += 1
             if last_turn or nudges > _MAX_CONSECUTIVE_NUDGES:
                 return EpisodeResult(None, "no_submission", calls, trajectory)
-            messages.append(HumanMessage(content=prompts.NUDGE))
-            trajectory.append({"role": "human", "content": prompts.NUDGE})
+            nudge = prompts.nudge_for(mode)
+            messages.append(HumanMessage(content=nudge))
+            trajectory.append({"role": "human", "content": nudge})
             continue
         nudges = 0
 
@@ -199,23 +222,28 @@ def run_episode(
             name = call.get("name") or ""
             args = call.get("args") or {}
             key = _call_key(name, args)
-            if key in made and name != "submit":
-                observation, submission = (
+            answer: Submission | Prediction | None
+            if key in made and name not in ANSWERING_TOOLS:
+                observation, answer = (
                     "You already made this exact call; its result is above.",
                     None,
                 )
-            elif calls >= budget and name != "submit":
-                observation, submission = ("No tool calls left; submit.", None)
+            elif calls >= budget and name not in ANSWERING_TOOLS:
+                observation, answer = (prompts.out_of_calls_for(mode), None)
             else:
                 made.add(key)
                 calls += 1
-                observation, submission = _dispatch(ctx, name, args)
+                observation, answer = _dispatch(ctx, name, args, offered)
             messages.append(
                 ToolMessage(content=observation, tool_call_id=call.get("id") or name)
             )
             trajectory.append({"role": "tool", "name": name, "content": observation})
-            if submission is not None:
-                return EpisodeResult(submission, "submitted", calls, trajectory)
+            if isinstance(answer, Submission):
+                return EpisodeResult(answer, "submitted", calls, trajectory)
+            if isinstance(answer, Prediction):
+                return EpisodeResult(
+                    None, "predicted", calls, trajectory, prediction=answer
+                )
 
         if last_turn:
             return EpisodeResult(None, "budget_exhausted", calls, trajectory)

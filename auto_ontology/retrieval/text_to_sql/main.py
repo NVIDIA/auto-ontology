@@ -14,6 +14,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.node_labels import NODE_LABELS
 from auto_ontology.retrieval.text_to_sql.react.agent import STEP_NAME as REACT_STEP
+from auto_ontology.retrieval.text_to_sql.react.config import prediction_enabled
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     TextToSQLPayload,
@@ -77,6 +78,13 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
             "ColumnAttribute, CustomAnalysis, and SqlAttribute searches will be skipped."
         )
 
+    prediction_override = payload.get("prediction")
+    if prediction_override is True and not prediction_enabled():
+        raise ValueError(
+            "prediction=true was requested but the prediction flow is not "
+            "configured on this deployment (KUMO_RFM_API_URL is unset)."
+        )
+
     initial_path_state = dict(payload.get("path_state") or {})
 
     target_db = payload.get("target_db")
@@ -108,6 +116,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "data_retriever": data_retriever,
         "semantic_retriever": semantic_retriever,
         "decision": "",
+        "prediction_override": prediction_override,
     }
     return state
 

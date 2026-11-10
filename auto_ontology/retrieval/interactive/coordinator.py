@@ -359,6 +359,8 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         # The grader compares numbers exactly, so a float and a numeric holding
         # the same value disagree: keep our explicit casts on the numeric side.
         "numeric_type_alignment": session.numeric_type_alignment,
+        # The interactive grader scores SQL, so a prediction is never an answer.
+        "prediction": False,
     }
     result = get_agent_response_with_state(payload)
 

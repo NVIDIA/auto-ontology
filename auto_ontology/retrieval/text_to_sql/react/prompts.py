@@ -12,6 +12,7 @@ learn conventions from reward, not from a list.
 
 from __future__ import annotations
 
+from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.retrieve import KIND_LABELS
 
 SYSTEM_PROMPT = """\
@@ -33,6 +34,26 @@ Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
 choose one."""
 
+PREDICT_SYSTEM_PROMPT = """\
+You answer a question that asks what will happen in a database's data, with a \
+KumoRFM prediction.
+
+You start with no schema. Find what you need with the tools:
+- retrieve: search the ontology. Find the entity the question is about \
+(customers, users, products) and the tables that record its history \
+(orders, events, transactions). Search again whenever something is missing.
+- predict: build a graph over every table retrieve has shown you and answer \
+the question. If it is refused, retrieve what it says is missing and call it \
+again.
+
+Call predict once the entity and its history tables are in view."""
+
+_PREDICT_WHEN = """
+
+If the question asks what will happen (a future value, a likelihood, churn, \
+the next purchase), do not write SQL: retrieve the entity and the tables that \
+record its history, then call predict."""
+
 USER_TEMPLATE = """\
 QUESTION
 {question}
@@ -42,12 +63,14 @@ NUDGE = "Call a tool: retrieve, run_sql, or submit your final query."
 
 LAST_CALL = "No tool calls left. Call submit now with your best query."
 
+PREDICT_LAST_CALL = "No tool calls left. Call predict now."
+
 _KINDS = sorted(KIND_LABELS)
 
 RETRIEVE_TOOL = {
     "type": "function",
     "function": {
-        "name": "retrieve",
+        "name": ToolName.RETRIEVE,
         "description": (
             "Search tables, columns, definitions and analyses by meaning "
             "and by name. Returns matching tables with their columns, stored "
@@ -76,7 +99,7 @@ RETRIEVE_TOOL = {
 RUN_SQL_TOOL = {
     "type": "function",
     "function": {
-        "name": "run_sql",
+        "name": ToolName.RUN_SQL,
         "description": (
             "Check a read-only query for unknown tables and columns, then run it "
             "and return the first rows."
@@ -94,7 +117,7 @@ RUN_SQL_TOOL = {
 SUBMIT_TOOL = {
     "type": "function",
     "function": {
-        "name": "submit",
+        "name": ToolName.SUBMIT,
         "description": "Submit the final query that answers the question.",
         "parameters": {
             "type": "object",
@@ -117,7 +140,55 @@ SUBMIT_TOOL = {
     },
 }
 
+PREDICT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": ToolName.PREDICT,
+        "description": (
+            "Answer a question about the future with a KumoRFM prediction over "
+            "the tables retrieve has shown. Ends the episode once it runs."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
 TOOLS = [RETRIEVE_TOOL, RUN_SQL_TOOL, SUBMIT_TOOL]
+
+
+def tools_for(mode: EpisodeMode, *, last_turn: bool = False) -> list[dict]:
+    """The tools offered in *mode*; on the last turn, only the ones that answer."""
+    if mode == EpisodeMode.PREDICT:
+        return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
+    if mode == EpisodeMode.AUTO:
+        return [SUBMIT_TOOL, PREDICT_TOOL] if last_turn else [*TOOLS, PREDICT_TOOL]
+    return [SUBMIT_TOOL] if last_turn else TOOLS
+
+
+def system_prompt_for(mode: EpisodeMode, dialect: str | None) -> str:
+    if mode == EpisodeMode.PREDICT:
+        return PREDICT_SYSTEM_PROMPT
+    prompt = SYSTEM_PROMPT.format(dialect=dialect or "SQL")
+    return prompt + _PREDICT_WHEN if mode == EpisodeMode.AUTO else prompt
+
+
+def last_call_for(mode: EpisodeMode) -> str:
+    return PREDICT_LAST_CALL if mode == EpisodeMode.PREDICT else LAST_CALL
+
+
+def nudge_for(mode: EpisodeMode) -> str:
+    if mode == EpisodeMode.PREDICT:
+        return "Call a tool: retrieve, or predict once the tables are in view."
+    if mode == EpisodeMode.AUTO:
+        return "Call a tool: retrieve, run_sql, submit your final query, or predict."
+    return NUDGE
+
+
+def out_of_calls_for(mode: EpisodeMode) -> str:
+    if mode == EpisodeMode.PREDICT:
+        return "No tool calls left; predict."
+    if mode == EpisodeMode.AUTO:
+        return "No tool calls left; submit or predict."
+    return "No tool calls left; submit."
 
 
 def user_message(question: str, evidence: str | None) -> str:
