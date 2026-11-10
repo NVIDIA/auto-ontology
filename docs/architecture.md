@@ -105,7 +105,7 @@ flowchart TD
   end
   subgraph output["Output"]
     direction LR
-    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Human in the loop: test, refine, certify in the UI or REST"]
+    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Edit and certify: test with questions, refine in the UI or REST"]
     o1 <--> o3["Import or export: Ossie YAML"]
   end
   inputs --> ingest --> pertable --> cross --> output
@@ -208,7 +208,7 @@ flowchart TD
   end
   subgraph output["Output"]
     direction LR
-    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Human in the loop: test, refine, certify in the UI or REST"]
+    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Edit and certify: test with questions, refine in the UI or REST"]
     o1 <--> o3["Import or export: Ossie YAML"]
   end
   inputs --> ingest --> pertable --> cross --> output
@@ -223,7 +223,7 @@ flowchart TD
 
 Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
-### Output and human in the loop
+### Output, edit, and certify
 
 - The ontology lives in Postgres (terms, column attributes, SQL attributes,
   semantic foreign keys) with embeddings in pgvector.
