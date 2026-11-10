@@ -37,11 +37,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
-from auto_ontology.retrieval.text_to_sql.react.mode import (
-    ANSWERING_TOOLS,
-    EpisodeMode,
-    ToolName,
-)
+from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predict
 from auto_ontology.retrieval.text_to_sql.react.retrieve import retrieve
 from auto_ontology.utils.llm_invoke import invoke_with_retry
@@ -80,7 +76,11 @@ class EpisodeResult:
 
 
 def submit(
-    ctx: ToolContext, sql: str, response: str = "", assumptions: str = ""
+    ctx: ToolContext,
+    sql: str,
+    response: str = "",
+    assumptions: str = "",
+    resubmit: str = "submit this version",
 ) -> tuple[str, Submission | None]:
     """Check and run a final query; the submission when it ran cleanly.
 
@@ -106,8 +106,8 @@ def submit(
         )
     if db_response.sql_correction:
         return (
-            "Not accepted. The query only runs as rewritten here; submit this "
-            f"version instead:\n{db_response.sql_correction}"
+            f"Not accepted. The query only runs as rewritten here; {resubmit} "
+            f"instead:\n{db_response.sql_correction}"
         ), None
     submission = Submission(sql, (response or "").strip(), assumptions, db_response)
     return "Accepted.", submission
@@ -136,6 +136,13 @@ def _dispatch(
             return f"Unknown tool {name!r}. Use {', '.join(offered)}.", None
         if name == ToolName.SUBMIT:
             return submit(ctx, **args)
+        if name == ToolName.RUN_SQL and prompts.is_answer(name, args):
+            final_args = {k: v for k, v in args.items() if k != "final"}
+            return submit(
+                ctx, **final_args, resubmit="run this version with final=true"
+            )
+        if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
+            args = {k: v for k, v in args.items() if k == "sql"}
         if name == ToolName.PREDICT:
             return predict(ctx)
         return handlers[name](**args), None
@@ -227,12 +234,13 @@ def run_episode(
             args = call.get("args") or {}
             key = _call_key(name, args)
             answer: Submission | Prediction | None
-            if key in made and name not in ANSWERING_TOOLS:
+            answers = prompts.is_answer(name, args)
+            if key in made and not answers:
                 observation, answer = (
                     "You already made this exact call; its result is above.",
                     None,
                 )
-            elif calls >= budget and name not in ANSWERING_TOOLS:
+            elif calls >= budget and not answers:
                 observation, answer = (prompts.out_of_calls_for(mode), None)
             else:
                 made.add(key)

@@ -42,7 +42,7 @@ def _tool_thought(call: dict[str, Any]) -> str:
     name = call.get("name")
     if name == ToolName.RETRIEVE:
         return f"Searching for: {args.get('query', '')}"
-    if name == ToolName.RUN_SQL:
+    if name == ToolName.RUN_SQL and str(args.get("final")).lower() != "true":
         return "Running a query to check the data."
     if name == ToolName.PREDICT:
         return "Predicting with KumoRFM."

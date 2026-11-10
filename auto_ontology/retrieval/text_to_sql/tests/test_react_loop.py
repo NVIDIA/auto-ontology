@@ -11,6 +11,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import loop, prompts
 from auto_ontology.retrieval.text_to_sql.react import run_sql as run_sql_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode
 from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
     SHOP_CATALOG,
     SHOP_SCRIPT,
@@ -187,6 +188,110 @@ def test_dialect_rules_reach_the_model(ctx: ToolContext, dialect: str) -> None:
     # the base prompt alone.
     assert system == (f"{base}\n\n{rules}" if rules else base)
     assert ("Do NOT CAST a computed value" in system) == (dialect == "mysql")
+
+
+@pytest.fixture
+def no_submit_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_SUBMIT_TOOL", "false")
+
+
+def test_without_submit_a_final_run_is_the_answer(
+    ctx: ToolContext, no_submit_tool: None
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("run_sql", "2", sql=FINAL_SQL, final=True, response="r")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.submission.sql == FINAL_SQL
+    assert result.submission.response == "r"
+    assert model.bound_tool_names[0] == ["retrieve", "run_sql"]
+    assert "final=true" in model.seen[0][0].content
+    assert "submit:" not in model.seen[0][0].content
+
+
+def test_without_submit_a_failed_final_run_lets_the_model_fix_it(
+    ctx: ToolContext, no_submit_tool: None
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT revenue FROM orders", final=True)),
+            _reply(call("run_sql", "2", sql=FINAL_SQL, final="true")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    rejection = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert rejection.startswith("Not accepted.")
+
+
+def test_without_submit_the_sql_run_cap_does_not_block_the_answer(
+    ctx: ToolContext, no_submit_tool: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_SQL_RUNS", "1")
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT 1")),
+            _reply(call("run_sql", "2", sql="SELECT 2")),
+            _reply(call("run_sql", "3", sql=FINAL_SQL, final=True)),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert "final=true" in observations[1]
+    assert result.reason == "submitted"
+    assert result.submission.sql == FINAL_SQL
+
+
+def test_without_submit_the_last_turn_offers_only_run_sql(
+    ctx: ToolContext, no_submit_tool: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="a")),
+            _reply(call("run_sql", "2", sql=FINAL_SQL, final=True)),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert model.bound_tool_names[-1] == ["run_sql"]
+
+
+def test_without_submit_auto_mode_answers_with_run_sql_or_predict(
+    monkeypatch: pytest.MonkeyPatch, no_submit_tool: None
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "true")
+    names = lambda **kw: [  # noqa: E731
+        t["function"]["name"] for t in prompts.tools_for(EpisodeMode.AUTO, **kw)
+    ]
+
+    assert names() == ["retrieve", "run_sql", "grep", "predict"]
+    assert names(last_turn=True) == ["run_sql", "predict"]
+    prompt = prompts.system_prompt_for(EpisodeMode.AUTO, None)
+    assert "- grep:" in prompt and "submit" not in prompt
+
+
+def test_by_default_submit_is_offered() -> None:
+    assert [t["function"]["name"] for t in prompts.tools_for(EpisodeMode.SQL)] == [
+        "retrieve",
+        "run_sql",
+        "submit",
+    ]
+    assert prompts.system_prompt_for(EpisodeMode.SQL, None) == (
+        prompts.SYSTEM_PROMPT.format(dialect="SQL")
+    )
 
 
 class InternalServerError(Exception):

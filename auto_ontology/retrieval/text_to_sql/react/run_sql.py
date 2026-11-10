@@ -232,7 +232,14 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
     if not sql:
         return "Error: sql is empty."
     if ctx.sql_runs >= config.max_sql_runs():
-        return "Error: no run_sql calls left in this episode. Submit your best query."
+        if config.submit_tool_enabled():
+            return (
+                "Error: no run_sql calls left in this episode. Submit your best query."
+            )
+        return (
+            "Error: no exploratory run_sql calls left in this episode. Run your "
+            "best query with final=true."
+        )
     connector = connector_for(ctx)
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first."

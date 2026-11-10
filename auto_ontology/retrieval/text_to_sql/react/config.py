@@ -82,6 +82,16 @@ def siblings_enabled() -> bool:
     return value in _TRUTHY or not value
 
 
+def submit_tool_enabled() -> bool:
+    """Whether the model answers SQL with a separate ``submit`` tool.
+
+    On by default; ``TEXT_TO_SQL_REACT_SUBMIT_TOOL=false`` drops it, and the
+    model answers with ``run_sql(final=true)`` instead.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_SUBMIT_TOOL", "").strip().lower()
+    return value in _TRUTHY or not value
+
+
 def grep_enabled() -> bool:
     """Whether a ``run_sql`` result too long to show is kept for ``grep``.
 

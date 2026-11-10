@@ -13,7 +13,11 @@ learn conventions from reward, not from a list.
 from __future__ import annotations
 
 from auto_ontology.retrieval.text_to_sql.react import config
-from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
+from auto_ontology.retrieval.text_to_sql.react.mode import (
+    ANSWERING_TOOLS,
+    EpisodeMode,
+    ToolName,
+)
 from auto_ontology.retrieval.text_to_sql.react.retrieve import KIND_LABELS
 
 SYSTEM_PROMPT = """\
@@ -40,7 +44,19 @@ _GREP_LINE = """\
 which page it saved it as), or read rows past the first ones with offset.
 """
 
-GREP_SYSTEM_PROMPT = SYSTEM_PROMPT.replace("- submit:", _GREP_LINE + "- submit:", 1)
+_SUBMIT_LINES = """\
+- run_sql: check a query against the catalog and run it. Use it to look at \
+stored values before filtering on them, and to test a draft.
+- submit: give your final query. It is checked and run; if it fails you get \
+the error and can keep working.
+"""
+
+_FINAL_RUN_LINES = """\
+- run_sql: check a query against the catalog and run it. Use it to look at \
+stored values before filtering on them, and to test a draft. When you have the \
+query that answers the question, run it with final=true: if it runs cleanly it \
+is your answer; if it fails you get the error and can keep working.
+"""
 
 PREDICT_SYSTEM_PROMPT = """\
 You answer a question that asks what will happen in a database's data, with a \
@@ -70,6 +86,14 @@ QUESTION
 NUDGE = "Call a tool: retrieve, run_sql, or submit your final query."
 
 LAST_CALL = "No tool calls left. Call submit now with your best query."
+
+FINAL_RUN_NUDGE = (
+    "Call a tool: retrieve, run_sql, or run_sql with final=true on your final query."
+)
+
+FINAL_RUN_LAST_CALL = (
+    "No tool calls left. Call run_sql with final=true now with your best query."
+)
 
 PREDICT_LAST_CALL = "No tool calls left. Call predict now."
 
@@ -192,46 +216,101 @@ GREP_TOOL = {
 }
 
 
+FINAL_RUN_SQL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": ToolName.RUN_SQL,
+        "description": (
+            "Check a read-only query for unknown tables and columns, then run it "
+            "and return the first rows. Set final=true on the query that answers "
+            "the question: if it runs cleanly it is your answer and you are done."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sql": {"type": "string", "description": "One SELECT query."},
+                "final": {
+                    "type": "boolean",
+                    "description": "True when this query is your answer.",
+                },
+                "response": SUBMIT_TOOL["function"]["parameters"]["properties"][
+                    "response"
+                ],
+                "assumptions": SUBMIT_TOOL["function"]["parameters"]["properties"][
+                    "assumptions"
+                ],
+            },
+            "required": ["sql"],
+        },
+    },
+}
+
+
 def tools_for(mode: EpisodeMode, *, last_turn: bool = False) -> list[dict]:
     """The tools offered in *mode*; on the last turn, only the ones that answer."""
     if mode == EpisodeMode.PREDICT:
         return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
-    sql_tools = (
-        [RETRIEVE_TOOL, RUN_SQL_TOOL, GREP_TOOL, SUBMIT_TOOL]
-        if config.grep_enabled()
-        else TOOLS
-    )
+    if config.submit_tool_enabled():
+        answer, sql_tools = SUBMIT_TOOL, [RETRIEVE_TOOL, RUN_SQL_TOOL, SUBMIT_TOOL]
+    else:
+        answer, sql_tools = FINAL_RUN_SQL_TOOL, [RETRIEVE_TOOL, FINAL_RUN_SQL_TOOL]
+    if config.grep_enabled():
+        sql_tools.insert(2, GREP_TOOL)
     if mode == EpisodeMode.AUTO:
-        return [SUBMIT_TOOL, PREDICT_TOOL] if last_turn else [*sql_tools, PREDICT_TOOL]
-    return [SUBMIT_TOOL] if last_turn else sql_tools
+        return [answer, PREDICT_TOOL] if last_turn else [*sql_tools, PREDICT_TOOL]
+    return [answer] if last_turn else sql_tools
 
 
 def system_prompt_for(mode: EpisodeMode, dialect: str | None) -> str:
     if mode == EpisodeMode.PREDICT:
         return PREDICT_SYSTEM_PROMPT
-    base = GREP_SYSTEM_PROMPT if config.grep_enabled() else SYSTEM_PROMPT
-    prompt = base.format(dialect=dialect or "SQL")
+    lines = _SUBMIT_LINES if config.submit_tool_enabled() else _FINAL_RUN_LINES
+    if config.grep_enabled():
+        lines += _GREP_LINE
+    prompt = SYSTEM_PROMPT.replace(_SUBMIT_LINES, lines, 1).format(
+        dialect=dialect or "SQL"
+    )
     return prompt + _PREDICT_WHEN if mode == EpisodeMode.AUTO else prompt
 
 
+def is_answer(name: str, args: dict) -> bool:
+    """Whether this call answers: ``submit``, ``predict``, or, without a submit
+    tool, ``run_sql(final=true)``."""
+    if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
+        return str(args.get("final")).lower() == "true"
+    return name in ANSWERING_TOOLS
+
+
 def last_call_for(mode: EpisodeMode) -> str:
-    return PREDICT_LAST_CALL if mode == EpisodeMode.PREDICT else LAST_CALL
+    if mode == EpisodeMode.PREDICT:
+        return PREDICT_LAST_CALL
+    return LAST_CALL if config.submit_tool_enabled() else FINAL_RUN_LAST_CALL
 
 
 def nudge_for(mode: EpisodeMode) -> str:
     if mode == EpisodeMode.PREDICT:
         return "Call a tool: retrieve, or predict once the tables are in view."
+    final = (
+        "submit your final query"
+        if config.submit_tool_enabled()
+        else "run_sql with final=true on your final query"
+    )
     if mode == EpisodeMode.AUTO:
-        return "Call a tool: retrieve, run_sql, submit your final query, or predict."
-    return NUDGE
+        return f"Call a tool: retrieve, run_sql, {final}, or predict."
+    return NUDGE if config.submit_tool_enabled() else FINAL_RUN_NUDGE
 
 
 def out_of_calls_for(mode: EpisodeMode) -> str:
     if mode == EpisodeMode.PREDICT:
         return "No tool calls left; predict."
+    final = (
+        "submit"
+        if config.submit_tool_enabled()
+        else "run your best query with final=true"
+    )
     if mode == EpisodeMode.AUTO:
-        return "No tool calls left; submit or predict."
-    return "No tool calls left; submit."
+        return f"No tool calls left; {final} or predict."
+    return f"No tool calls left; {final}."
 
 
 def user_message(question: str, evidence: str | None) -> str:
