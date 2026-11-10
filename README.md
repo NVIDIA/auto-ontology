@@ -14,22 +14,18 @@ It enables developers to:
 - Ground: give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
 - Validate: check generated queries against certified definitions and lineage; return provenance with every answer.
 - Expose: serve context to any agent harness through MCP, CLI, and API.
-Learn: fold certified corrections and usage back into the ontology, so shared context improves with every question.
+- Learn: fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
 ## Benchmarks
 
-To run a text-to-SQL benchmark such as BIRD, refer to the
-[ontology SQL evaluation repository](https://github.com/NVIDIA/ontology-sql-eval/).
+To run a text-to-SQL benchmark such as BIRD, refer to
+[auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval).
 
 > **Licensing & contributions.** Auto Ontology is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
 > bundled, linked, or otherwise used by this project are listed in
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
 > is currently not accepting external contributions.**
-
-<p>
-<img src="./docs/assets/arch.png" alt="Auto Ontology Architecture" width="800">
-</p>
 
 ## Key Features
 
@@ -77,7 +73,7 @@ Each model role is configured by a **triplet** of environment variables —
 | `REASONING`      | Main chat / NL-to-SQL model.                                |
 | `NON_REASONING`  | Lighter model used for entity extraction.                   |
 | `EMBED`          | Text-embedding model (must match between ingest and query). |
-| `RERANK`         | Reranker used by the retrieval flow.                        |
+| `RERANK`         | Reranker used to build bridge-table SQL attributes.         |
 
 You can set a full triplet, only some of its fields, or none at all — any field
 left unset falls back to the matching `DEFAULT_MODELS_<FIELD>`. So the simplest
@@ -189,9 +185,47 @@ again. For other setup failures, see the
 
 ## How it works
 
-<p>
-<img src="./docs/assets/arch.png" alt="Auto-Ontology architecture" width="800">
-</p>
+```mermaid
+flowchart LR
+  subgraph clients["Clients"]
+    direction TB
+    ui["Browser: web UI"]
+    rest["Scripts: REST API with API tokens"]
+    mcpc["MCP clients: Cursor, Claude Desktop, agents"]
+  end
+  mcp["MCP server: read-only tools (FastMCP, port 3003)"]
+  fe["Web app, auth, API gateway (Next.js, port 3000)"]
+  subgraph private["Private network"]
+    direction TB
+    be["Backend: text-to-SQL agent, catalog and ontology APIs (FastAPI, port 3001)"]
+    ing["Ingestion and semantic compilation (FastAPI, port 3002)"]
+    pg[("Postgres + pgvector: app data, catalog, ontology, embeddings")]
+  end
+  src[("Source databases: 10 connectors")]
+  models["Model endpoints: NVIDIA NIM or OpenAI-compatible (reasoning, non-reasoning, embed, rerank)"]
+  vault["Vault (optional): connection credentials"]
+  kumo["KumoRFM (optional): predictions"]
+  ui --> fe
+  rest --> fe
+  mcpc --> mcp
+  mcp -- "public API" --> fe
+  fe --> be
+  fe -- "users, sessions, settings" --> pg
+  be -- "trigger ingest and compile" --> ing
+  be --> pg
+  ing --> pg
+  be -- "run SQL" --> src
+  ing -- "read schema, sample values" --> src
+  be --> models
+  ing --> models
+  be -.-> vault
+  ing -.-> vault
+  be -.-> kumo
+```
+
+Clients reach Auto-Ontology only through the web app on port 3000; the MCP
+server calls the same public API. Full pipeline detail:
+[docs/architecture.md](./docs/architecture.md).
 
 Auto-Ontology works in three stages: it generates an ontology, people certify
 it, and the agent answers questions from it.
@@ -207,15 +241,61 @@ The ontology holds three kinds of definition:
   keys and from the data.
 
 **Generate.** The ingestion service builds a first draft from the source
-databases:
+databases. Catalog ingest runs at startup and for each new connection;
+semantic compilation runs once you turn it on in **Settings → Semantic
+Compilation**, then every 24 hours.
 
-1. Read sources: extract schemas, profile columns, and sample values into the
-   catalog.
-2. Name entities: extract terms table by table and map each to columns.
-3. Resolve relationships: infer joins between tables and bridge tables, and
-   suggest SQL attributes from query history.
-4. Write the ontology: store terms, relationships, and SQL attributes in
-   Postgres, with embeddings in pgvector for retrieval.
+1. Ingest the catalog: extract each source's tables, columns, keys, views, and
+   query history; tag PII if you turn on PII detection (rules first, then a
+   model); embed tables and columns in pgvector.
+2. Per table: sample values, distinct values, and date formats with SQL. A
+   model proposes foreign key candidates and junction tables, then writes
+   column descriptions and names the terms, with synonyms.
+3. Across tables: link each foreign key column to the term it references
+   (declared keys first, otherwise embedding search and a model), and drop any
+   link whose columns share no values. A model then suggests SQL attributes
+   from query history and writes SQL attributes for bridge tables, with the
+   reranker choosing which term owns each.
+4. Write the ontology: terms, relationships, and SQL attributes in Postgres,
+   with embeddings in pgvector. Review, edit, and certify them in the UI or
+   through the API, or import and export them as Ossie YAML. Edits are kept:
+   the next run compiles only tables that don't have a term yet.
+
+```mermaid
+flowchart TD
+  subgraph inputs["Inputs"]
+    direction LR
+    i1[("Schema, keys, declared foreign keys")]
+    i2[("Query history")]
+  end
+  subgraph ingest["Catalog ingest"]
+    direction LR
+    c1["SQL: extract tables, columns, keys, views, queries"] --> c2["Rules + LLM: detect PII"] --> c3["EMBED: index tables and columns"]
+  end
+  subgraph pertable["Semantic compilation: per-table pass"]
+    direction LR
+    p1["SQL: sample values, distinct values, date formats"] --> p2["LLM: foreign key candidates, junction tables"] --> p3["LLM: column descriptions, terms, synonyms"]
+  end
+  subgraph cross["Semantic compilation: cross-table pass"]
+    direction LR
+    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL: drop foreign keys with no shared values"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"]
+  end
+  subgraph output["Output"]
+    direction LR
+    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Review, edit, certify: UI or REST"]
+    o1 <--> o3["Import or export: Ossie YAML"]
+  end
+  inputs --> ingest --> pertable --> cross --> output
+  output -. "edits are kept; the next run compiles only tables without a term" .-> pertable
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef optional stroke-dasharray:5 5
+  class c2,c3,p2,p3,x1,x3,x4 model
+  class c1,p1,x2 det
+  class c2 optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
 The result is a semantic graph you can explore in the UI. In this example, one
 compilation of Wide World Importers produced 31 terms; selecting **Order** shows
@@ -234,16 +314,115 @@ its description, related terms, mapped columns, and SQL attributes:
 
 **Answer.** For each question, the agent:
 
-1. Classifies the intent and extracts the entities the question names.
-2. Retrieves candidate terms, columns, and SQL attributes by embedding search.
-3. Writes SQL from those candidates.
-4. Checks the filter values and the query against the database, repairing the
-   SQL when a check fails.
-5. Runs the query and returns the answer with its SQL and the steps it took.
+1. Classifies the intent (a data question, a question about the metadata, or a
+   prediction) and separates any evidence written into the question.
+2. Extracts the entities the question names, finds candidate terms, columns,
+   and SQL attributes by embedding search, and keeps the ones a model judges
+   relevant. Questions about the metadata itself are answered here from the
+   catalog.
+3. Finds join paths between the candidate tables: the shortest route over the
+   ontology's semantic foreign keys. No model is involved.
+4. Writes SQL and a plain-language explanation with the reasoning model.
+5. Checks the SQL: parses it, runs static checks, and has a model judge whether
+   it answers the question. A rejected query goes to a repair step.
+6. Runs the query. An error goes back to repair. An empty result triggers a
+   probe of the filter values against the database, and a near-miss value
+   (wrong case or spelling) goes back to repair.
+7. Returns the answer with its SQL and the steps it took. In Chat, it also
+   draws a chart.
 
-When the candidates can't support a query, the agent reports that the question
-can't be answered from this data. Predictive questions go to KumoRFM when it's
-configured (see [Predictions](#predictions)).
+When the candidates can't support a query, or the SQL still fails after seven
+repairs, the agent reruns the chain once, then reports that the question can't
+be answered from this data.
+Chat doesn't check answerability up front; an agent connected through MCP can
+call `check_answerable` first and ask the user to clarify (see step 6 of the
+[Quickstart](#quickstart)). Predictive questions go to KumoRFM when
+`KUMO_RFM_API_URL` is set (see [Predictions](#predictions)).
+
+**Today: fixed chain (LangGraph).** Every question runs the same steps in the
+same order.
+
+```mermaid
+flowchart TD
+  q["Question: chat, REST, MCP ask_question, or eval"]
+  intent["LLM: classify intent, separate evidence"]
+  ret["EMBED + LLM: extract entities, search the ontology, keep relevant candidates"]
+  meta["LLM: answer from metadata"]
+  join["Find join paths: shortest route over semantic foreign keys"]
+  gen["Reasoning LLM: write SQL and its explanation"]
+  judge{"SQL checks + LLM: judge the query against the question"}
+  fix["LLM: repair SQL"]
+  run["Execute SQL"]
+  check["LLM + SQL: if the result is empty, probe filter values"]
+  ans["Answer + SQL + chart"]
+  ref["Refusal: no valid query from this data"]
+  kumo["LLM: write PQL; KumoRFM: forecast or score"]
+  q --> intent --> ret
+  ret -- "metadata question" --> meta
+  ret --> join --> gen --> judge
+  judge -- "accept" --> run --> check --> ans
+  judge -- "reject" --> fix --> judge
+  run -- "error" --> fix
+  check -- "near-miss value" --> fix
+  gen -- "cannot be built" --> ref
+  judge -- "still failing after 7 repairs" --> ref
+  join -. "predictive question, KUMO_RFM_API_URL set" .-> kumo
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef optional stroke-dasharray:5 5
+  class intent,ret,meta,gen,judge,fix,check,kumo model
+  class join,run det
+  class kumo optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
+
+**In development: ReAct, model-chosen tools.** The reasoning model decides what
+to search, what to run, and when it's done.
+
+```mermaid
+flowchart TD
+  q["Question: chat, REST, MCP ask_question, or eval"]
+  agent{"Reasoning model: choose the next tool"}
+  subgraph tools["Tools"]
+    direction LR
+    retrieve["retrieve: search the ontology by meaning and name; show tables, values, definitions, join paths"]
+    runsql["run_sql: check names against the catalog, run read-only, return rows"]
+    grep["grep: search a saved result too long to show"]
+  end
+  submit{"submit: check names, run the final query"}
+  ans["Answer + SQL + chart"]
+  ref["Refusal: no accepted query"]
+  predict["predict: LLM writes PQL; KumoRFM forecast or score"]
+  q --> agent
+  agent -- "tool call" --> tools
+  tools -- "result" --> agent
+  agent -- "final query" --> submit
+  submit -- "accepted" --> ans
+  submit -- "error, back to the model" --> agent
+  agent -- "out of tool calls, or stops calling tools" --> ref
+  agent -. "predictive question, KUMO_RFM_API_URL set" .-> predict
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef react fill:#efe6f7,stroke:#7b3fa0,color:#111
+  classDef optional stroke-dasharray:5 5
+  class agent react
+  class retrieve,predict model
+  class runsql,grep,submit det
+  class grep,predict optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
+
+The ReAct agent, in development, replaces steps 1 through 6 with a loop. The
+reasoning model starts with no schema and calls tools: `retrieve` searches the
+ontology by meaning and by name and shows matching tables with their columns,
+stored values, definitions, and join paths; `run_sql` checks a query's table
+and column names against the catalog, then runs it read-only so the model can
+look at values or test a draft; `submit` checks and runs the final query and
+returns any error to the model. No tool calls a language model except
+`predict`. The loop ends when a submitted query runs cleanly, or with a refusal
+when the model runs out of tool calls (24 by default) or stops calling tools.
 
 In Chat, each answer shows its SQL, and you can view the rows, download them as
 CSV, or read them as a chart:
@@ -409,10 +588,10 @@ NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 
 | Role            | Default model                           | What it does                                                                                                                   |
 | --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes), writes each answer's SQL and explanation, and grades answerability |
+| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes) and writes each answer's SQL and explanation                       |
 | `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
 | `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
-| `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Ranks candidate tables when compilation builds bridge-table SQL attributes                                                     |
+| `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Picks the term that owns each bridge-table SQL attribute during compilation; not used to answer questions                      |
 
 To use self-hosted NIM or any OpenAI-compatible endpoint, set
 `<ROLE>_ENDPOINT`, `<ROLE>_API_KEY`, and `<ROLE>_MODEL`. Any field you leave
@@ -424,7 +603,8 @@ variable.
 
 ### Predictions
 
-Set `KUMO_RFM_API_KEY` and the agent routes predictive questions to KumoRFM.
+Set `KUMO_RFM_API_URL` (and `KUMO_RFM_API_KEY` if your endpoint requires
+one) and the agent routes predictive questions to KumoRFM.
 KumoRFM is a hosted service: to answer, the agent uploads the connected tables
 to it, capped by `KUMO_MAX_TABLES` (20 by default) and
 `KUMO_MAX_ROWS_PER_TABLE` (unlimited unless set). Review what that sends, and
@@ -446,6 +626,7 @@ workflow is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 | Topic                                   | Doc                                                  |
 | --------------------------------------- | ---------------------------------------------------- |
 | Kubernetes deployment with Helm         | [DEPLOYMENT.md](./DEPLOYMENT.md)                     |
+| Architecture and pipeline steps         | [docs/architecture.md](./docs/architecture.md)       |
 | Connections, scoping, and Vault         | [docs/connections.md](./docs/connections.md)         |
 | Authentication, SSO, and API tokens     | [docs/authentication.md](./docs/authentication.md)   |
 | Conversation API                        | [docs/conversation-api.md](./docs/conversation-api.md) |
