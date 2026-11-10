@@ -110,6 +110,9 @@ class InteractiveSessionState:
     _last_ambiguous_hits: dict = field(
         default_factory=dict
     )  # norm -> [candidate hit dicts]
+    _still_ambiguous: set[str] = field(
+        default_factory=set
+    )  # norms in _last_ambiguous_hits that no collision or KB entry settled; shown to the decide-LLM as open
     _ambiguity_resolution_notes: list[str] = field(
         default_factory=list
     )  # injected verbatim into evidence, computed once

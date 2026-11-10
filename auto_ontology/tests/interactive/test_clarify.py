@@ -4,8 +4,42 @@
 
 from auto_ontology.retrieval.interactive.clarify import (
     _CLARIFY_PROMPT,
+    _format_ambiguous_terms,
     _format_incomplete_formulas,
+    _open_ambiguous_terms,
 )
+
+
+def test_open_ambiguous_term_lists_candidate_meanings():
+    open_terms = _open_ambiguous_terms(
+        {"profile growth speed"},
+        {
+            "profile growth speed": [
+                {"text": "ColumnAttribute: FollGrow. Follower growth rate per day"},
+                {"text": "ColumnAttribute: FingGrow. Following growth rate per day"},
+            ]
+        },
+    )
+
+    assert _format_ambiguous_terms(open_terms) == (
+        '- "profile growth speed" could mean: '
+        "(1) Follower growth rate per day (2) Following growth rate per day"
+    )
+
+
+def test_term_with_one_describable_candidate_is_not_open():
+    open_terms = _open_ambiguous_terms(
+        {"risk level"},
+        {"risk level": [{"text": "Risk level"}, {"text": ""}]},
+    )
+
+    assert open_terms == {}
+    assert _format_ambiguous_terms(open_terms) == "None"
+
+
+def test_prompt_has_the_ambiguous_terms_section_and_rule():
+    assert "{ambiguous_terms}" in _CLARIFY_PROMPT
+    assert "12. For a term under" in _CLARIFY_PROMPT
 
 
 def test_no_gaps_is_none():

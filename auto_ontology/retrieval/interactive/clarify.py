@@ -79,6 +79,9 @@ Topics already asked about that went UNANSWERED:
 Terms not found in the database schema or external knowledge (ask the user to define these):
 {unresolvable_terms}
 
+Terms that match several stored values almost equally well (see rule 12):
+{ambiguous_terms}
+
 Formulas or conditions whose exact specification is still missing, ranked most-critical first (ask about the first unasked item before proceeding):
 {incomplete_formulas_note}
 
@@ -93,11 +96,12 @@ STRICT RULES — follow every one of these exactly:
 4. A topic listed under "Topics already asked about that went UNANSWERED" is one the task does not depend on. If it was an edge case — missing values, ties, letter case, units, duplicates, which of several records or readings to use, or which identifier to show — never ask about it again in any form: the simplest reading applies (stored values used as they are, with no extra handling). If it was the meaning or formula of a term, you MAY ask about that term once more from a different angle, and only when no other unresolved terms or formulas persist — e.g. if asking for a formula went unanswered, ask for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
-7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
+7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose. The one exception is rule 12.
 8. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, unspecified limits, normalization methods, or preferred output format.
 9. Each question covers exactly one topic: one term, one formula, or the output described in rule 3. It may have up to three short parts about that same topic, for example a formula together with how missing values and ties are handled. Never combine unrelated topics in one question, because the user answers only one topic per question.
 10. Questions are limited (see "Clarification questions you can still ask"). Ask first about what would change the SQL most: the output in rule 3 and missing formulas or thresholds. Edge cases such as ties, missing values or letter case come last, and are best folded into the question about the term they belong to. With one question left, ask about the single most critical unresolved item.
 11. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None" or only items marked [UNANSWERED]. If any condition fails, ASK about the most critical unresolved item before proceeding.
+12. For a term under "Terms that match several stored values almost equally well": if the candidates mean different things to the business and nothing in the question, external knowledge or prior clarifications settles which one is meant, ask what the term means. Offer the alternatives by their business meaning (e.g. "followers gained, accounts followed, or both combined?") and never by column name (rule 1). If the candidates are near-synonyms or one clearly fits, pick it yourself and do not ask.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -171,6 +175,41 @@ def _term_tokens(term: str) -> set[str]:
         for tok in _TOKEN_SPLIT.split(term.lower())
         if tok and tok not in _FILLER and tok not in _CONNECTIVES
     }
+
+
+_AMBIGUOUS_CANDIDATES_SHOWN = 3
+_AMBIGUOUS_CANDIDATE_CHARS = 200
+
+
+def _open_ambiguous_terms(
+    still_ambiguous: set[str], ambiguous_hits: dict[str, list[dict]]
+) -> dict[str, list[str]]:
+    """Open ambiguous term -> what each of its top candidates means, for terms
+    with at least two describable candidates."""
+    open_terms: dict[str, list[str]] = {}
+    for term in sorted(still_ambiguous):
+        meanings = []
+        for hit in (ambiguous_hits.get(term) or [])[:_AMBIGUOUS_CANDIDATES_SHOWN]:
+            text = re.sub(
+                r"^ColumnAttribute:[^.]+\.\s*", "", str(hit.get("text") or "")
+            )
+            text = " ".join(text.split())[:_AMBIGUOUS_CANDIDATE_CHARS]
+            if text:
+                meanings.append(text)
+        if len(meanings) > 1:
+            open_terms[term] = meanings
+    return open_terms
+
+
+def _format_ambiguous_terms(open_terms: dict[str, list[str]]) -> str:
+    return (
+        "\n".join(
+            f'- "{term}" could mean: '
+            + " ".join(f"({i}) {m}" for i, m in enumerate(meanings, 1))
+            for term, meanings in open_terms.items()
+        )
+        or "None"
+    )
 
 
 def _format_incomplete_formulas(
@@ -306,6 +345,7 @@ def should_clarify(
             session._collision_hit_verdicts,
             session._last_ambiguous_hits,
             session._kb_vdb_adjudicated_norms,
+            session._still_ambiguous,
         )
         session._cached_unresolvable = unresolvable
         session._cached_unresolvable_for = session.working_question
@@ -448,7 +488,16 @@ def should_clarify(
         "\n".join(f"- {t}" for t in all_unresolvable) if all_unresolvable else "None"
     )
 
-    resolved_schema_text = _format_resolved_schema_terms(resolved_hits) or "None"
+    open_ambiguous = _open_ambiguous_terms(
+        session._still_ambiguous, session._last_ambiguous_hits
+    )
+    resolved_schema_text = (
+        _format_resolved_schema_terms(
+            [h for h in resolved_hits if h[0] not in open_ambiguous]
+        )
+        or "None"
+    )
+    ambiguous_terms_text = _format_ambiguous_terms(open_ambiguous)
 
     sort_direction_note = (
         ""  # Sort direction is handled by the default DESC hint at SQL gen time.
@@ -515,6 +564,7 @@ def should_clarify(
         history=history_text,
         unanswered_topics=unanswered_topics_text,
         unresolvable_terms=unresolvable_text,
+        ambiguous_terms=ambiguous_terms_text,
         incomplete_formulas_note=incomplete_formulas_note,
         turns_remaining=max(turns_remaining, 0),
         sort_direction_note=sort_direction_note,
@@ -614,6 +664,7 @@ def refresh_grounded_knowledge(session: "InteractiveSessionState") -> None:
         session._collision_hit_verdicts,
         session._last_ambiguous_hits,
         session._kb_vdb_adjudicated_norms,
+        session._still_ambiguous,
     )
     session._cached_unresolvable = unresolvable
     session._cached_unresolvable_for = session.working_question

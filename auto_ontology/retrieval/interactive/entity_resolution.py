@@ -237,6 +237,35 @@ def _ambiguity_check(
     return ambiguous
 
 
+def _collided_entities(best_hit_per_entity: dict[str, dict]) -> set[str]:
+    """Entities whose best hit is shared with another entity — the ones
+    _resolve_collisions decides."""
+    by_id: dict[str, list[str]] = {}
+    for entity, hit in best_hit_per_entity.items():
+        by_id.setdefault(str(hit.get("id") or ""), []).append(entity)
+    return {e for ents in by_id.values() if len(ents) > 1 for e in ents}
+
+
+def _still_ambiguous_norms(
+    ambiguous_entities: set[str],
+    best_hit_per_entity: dict[str, dict],
+    collided_entities: set[str],
+    kb_covered_norms: set[str],
+) -> set[str]:
+    """Normalized ambiguous terms that neither collision resolution nor
+    external knowledge settled."""
+    ambiguous_norms = {
+        _normalize_entity(e) or e.lower().strip() for e in ambiguous_entities
+    }
+    return {
+        norm
+        for entity in best_hit_per_entity
+        if entity not in collided_entities
+        and (norm := _normalize_entity(entity) or entity.lower().strip())
+        in ambiguous_norms
+    } - kb_covered_norms
+
+
 _AMBIGUOUS_HITS_TOP_K = 5  # candidates kept per ambiguous entity — enough for the
 # resolver LLM to see every real contender without a prompt bloated by noise hits.
 
@@ -1099,6 +1128,7 @@ def _find_unresolvable_entities(
     hit_verdicts: dict[str, bool] | None = None,
     ambiguous_hits_out: dict[str, list[dict]] | None = None,
     adjudicated_norms_out: set[str] | None = None,
+    still_ambiguous_out: set[str] | None = None,
 ) -> tuple[
     list[tuple[str, str | None]],
     list[tuple[str, str, float, str]],
@@ -1114,14 +1144,16 @@ def _find_unresolvable_entities(
     Flow:
       1. Entity-coverage pipeline (reasoning LLM): extracts entities + runs VDB for all
          of them against column attributes, SQL attributes, and custom analyses.
-      2. Ambiguity check: any entity with 2+ column-attribute hits within CLARIFY_MAX_DISTANCE
-         is demoted to unresolvable regardless of coverage grade.
+      2. Ambiguity check: flags any entity with 2+ close column-attribute hits within
+         CLARIFY_MAX_DISTANCE. Collision resolution (3b) decides the flagged entities
+         that collided with another entity; the rest that external knowledge does not
+         cover are reported through *still_ambiguous_out*, not as unresolvable.
       3. KB check on ALL extracted entities (not just VDB-uncovered): populates
          relevant_knowledge_text for the prompt and identifies KB-covered entities.
       3b. Collision resolution: entities whose best hit collided with another
           entity's are auto-resolved (JSON-shared / margin-based) or sent to a
           small LLM disambiguation call — see _resolve_collisions.
-      4. Final unresolvable = (VDB-uncovered ∪ ambiguous) − KB-covered.
+      4. Final unresolvable = (VDB-uncovered ∪ dropped by collision resolution) − KB-covered.
 
     resolved_hits contains (entity, hit_text, score, hit_id) for entities cleanly resolved
     by VDB (score <= CLARIFY_MAX_DISTANCE, unambiguous, post-collision-resolution); the
@@ -1152,9 +1184,17 @@ def _find_unresolvable_entities(
     decision. Pass ``session._kb_vdb_adjudicated_norms`` so clarify.py's
     standalone KB+VDB disambiguation note can skip a term already decided
     here instead of re-deciding it off a possibly-stale VDB score.
+
+    *still_ambiguous_out*, if given, is reset to the normalized terms that Step 2
+    flagged, that kept a best hit, that were not part of any collision, and that
+    external knowledge does not cover — the ones neither the KB nor collision
+    resolution settled, so clarify.py can show them as open rather than resolved.
+    Their candidates are in *ambiguous_hits_out*.
     """
     if ambiguous_hits_out is not None:
         ambiguous_hits_out.clear()
+    if still_ambiguous_out is not None:
+        still_ambiguous_out.clear()
     if semantic_retriever is None:
         return [], [], "", set(), {}, set(), []
 
@@ -1302,6 +1342,7 @@ def _find_unresolvable_entities(
 
     # Resolve any entities that collided on the same best hit, in place.
     entities_before_resolution = set(best_hit_per_entity.keys())
+    collided_entities = _collided_entities(best_hit_per_entity)
     json_notes = _resolve_collisions(
         question,
         relevant_knowledge_text,
@@ -1356,7 +1397,20 @@ def _find_unresolvable_entities(
                 (norm, hit_text, float(hit.get("score", 1.0)), str(hit.get("id") or ""))
             )
 
-    # --- Step 4: final unresolvable = (VDB-uncovered ∪ ambiguous) − KB-covered ---
+    still_ambiguous = _still_ambiguous_norms(
+        ambiguous_entities,
+        best_hit_per_entity,
+        collided_entities,
+        kb_covered_norms,
+    )
+    if still_ambiguous:
+        logger.info(
+            "Clarify — still ambiguous after collisions/KB: %s", sorted(still_ambiguous)
+        )
+    if still_ambiguous_out is not None:
+        still_ambiguous_out.update(still_ambiguous)
+
+    # --- Step 4: final unresolvable = (VDB-uncovered ∪ dropped) − KB-covered ---
     final_unresolvable_norms = needs_kb_rescue - kb_covered_norms
     # Also mark generics as unresolvable (they were never sent to VDB).
     final_unresolvable_norms |= {_normalize_entity(e) or e for e in generic_skipped}
