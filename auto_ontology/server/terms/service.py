@@ -13,16 +13,105 @@ from auto_ontology.dal import attributes as attributes_dal
 from auto_ontology.dal import sql_attributes as sql_attr_dal
 from auto_ontology.dal import terms as terms_dal
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
+from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
+from auto_ontology.semantic.constants import LABEL_TERM
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.server.datasources import service as datasources_service
 from auto_ontology.utils import (
     get_embed_params,
+    get_semantic_objects_retriever,
     sample_values_edit_error,
     stringify_sample_values,
 )
 from auto_ontology.utils.embedding import embed_docs_into_vdb
 
 logger = logging.getLogger(__name__)
+
+
+def _name_rank(name: str | None, needle: str) -> int:
+    """0 for an exact name, 1 for a prefix, 2 for any other substring."""
+    lowered = (name or "").lower()
+    if lowered == needle:
+        return 0
+    if lowered.startswith(needle):
+        return 1
+    return 2
+
+
+def search_terms(query: str, *, limit: int = 10) -> dict[str, Any]:
+    """Terms for a search box: name matches first, then matches by meaning.
+
+    Two reads, blended. The name read is the same literal substring filter the
+    Terms list uses, so typing an exact term name always puts it on top. The
+    meaning read embeds *query* and ranks Terms in the semantic vector index by
+    cosine distance, which finds "client" for *Customer* or "revenue" for
+    *Invoice Line* — names a substring can't reach.
+
+    Vector hits are hydrated through :func:`terms_dal.fetch_all_terms`, so a
+    hit outside the visible glossary is dropped rather than returned bare.
+
+    The embedding call can fail (endpoint down, key rejected); the name matches
+    are still returned and ``semantic`` is ``False`` so the caller can say so.
+
+    Each item carries ``match`` (``"name"`` or ``"meaning"``) and
+    ``similarity`` (``1 - cosine distance``, ``None`` when the term had no
+    vector hit).
+    """
+    needle = query.strip()
+    if not needle:
+        return {"data": [], "count": 0, "semantic": True}
+
+    by_name = terms_dal.fetch_all_terms(search=needle, limit=limit)
+
+    distance: dict[str, float] = {}
+    semantic = True
+    try:
+        hits = search_semantic_index(
+            get_semantic_objects_retriever(),
+            needle,
+            label_filter=[LABEL_TERM],
+            per_label_k=limit,
+        )
+    except Exception:  # noqa: BLE001 - name matches still answer the search
+        logger.warning("Semantic term search failed for %r", needle, exc_info=True)
+        hits = []
+        semantic = False
+    for hit in hits:
+        term_id = hit.get("id")
+        score = hit.get("score")
+        if term_id and isinstance(score, (int, float)) and term_id not in distance:
+            distance[term_id] = float(score)
+
+    name_ids = {row["id"] for row in by_name}
+    by_meaning = (
+        terms_dal.fetch_all_terms(
+            term_ids=[tid for tid in distance if tid not in name_ids]
+        )
+        if any(tid not in name_ids for tid in distance)
+        else []
+    )
+
+    def similarity(term_id: str) -> float | None:
+        return round(1 - distance[term_id], 4) if term_id in distance else None
+
+    lowered = needle.lower()
+    ranked_names = sorted(
+        by_name,
+        key=lambda row: (
+            _name_rank(row.get("name"), lowered),
+            (row.get("name") or "").lower(),
+        ),
+    )
+    ranked_meaning = sorted(by_meaning, key=lambda row: distance[row["id"]])
+    items = [
+        {**row, "match": "name", "similarity": similarity(row["id"])}
+        for row in ranked_names
+    ] + [
+        {**row, "match": "meaning", "similarity": similarity(row["id"])}
+        for row in ranked_meaning
+    ]
+    items = items[:limit]
+    return {"data": items, "count": len(items), "semantic": semantic}
 
 
 def list_terms_page(

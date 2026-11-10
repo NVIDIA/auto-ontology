@@ -128,6 +128,7 @@ def _semantic_terms(
     data_ids_by_zone: dict[str, set[str]] | None = None,
     *,
     term_id: str | None = None,
+    term_ids: list[str] | None = None,
 ):
     """The predicate list every read of the visible Term set applies.
 
@@ -142,6 +143,8 @@ def _semantic_terms(
         conditions.append(scope)
     if term_id is not None:
         conditions.append(s.term.c.id == term_id)
+    if term_ids is not None:
+        conditions.append(s.term.c.id.in_(term_ids))
     if search:
         # Escaped: the caller means a literal substring. Unescaped, `_`
         # matches any character (so `customer_id` also finds `customerXid`)
@@ -563,8 +566,12 @@ def fetch_all_terms(
     *,
     skip: int = 0,
     limit: int | None = None,
+    term_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """The glossary, paged.
+
+    *term_ids*, when given, narrows the read to those terms — still through the
+    same visibility filter, so an id the caller cannot see is simply absent.
 
     *zone_ids* is a hard authorization boundary. A Term can be represented by
     more than one table, so it is returned only when **every** representing
@@ -607,7 +614,7 @@ def fetch_all_terms(
             s.term.c.owner_id,
             _certification(table_ids).label("certification"),
         )
-        .where(*_semantic_terms(zone_ids, search, data_ids_by_zone))
+        .where(*_semantic_terms(zone_ids, search, data_ids_by_zone, term_ids=term_ids))
         .order_by(func.lower(s.term.c.name), s.term.c.id)
         .offset(skip)
     )

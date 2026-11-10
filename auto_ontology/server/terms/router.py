@@ -24,6 +24,7 @@ from auto_ontology.server.responses import (
     SqlAttributePageResponse,
     TermDetailResponse,
     TermResponse,
+    TermSearchResponse,
     TermsPageResponse,
 )
 
@@ -80,6 +81,29 @@ def list_terms(
     return term_service.list_terms_page(
         zone_ids=None, search=query, skip=skip, limit=limit
     )
+
+
+# Declared before ``/terms/{term_id}`` so "search" is never read as a term id.
+@router.get("/terms/search", response_model=TermSearchResponse)
+def search_terms(
+    q: str = Query(
+        min_length=1,
+        max_length=200,
+        description="What the user typed: a term name, a synonym, or a phrase.",
+    ),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> dict:
+    """Search Terms by name and by meaning, for a search box's dropdown.
+
+    Name matches (case-insensitive substring) come first, exact names before
+    prefixes before other substrings. Then come Terms the semantic index ranks
+    close to *q* by embedding similarity, best first, so "client" can find
+    *Customer*. Each item says which way it matched.
+
+    When the embedding service is unavailable the name matches are still
+    returned and ``semantic`` is ``false``.
+    """
+    return term_service.search_terms(q, limit=limit)
 
 
 @router.get(
