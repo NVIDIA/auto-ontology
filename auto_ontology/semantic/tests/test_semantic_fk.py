@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import duckdb
 
 import pandas as pd
 import pytest
 
+from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.semantic import semantic_fk
 from auto_ontology.semantic.embed import _build_rows
 from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
@@ -525,3 +529,106 @@ def test_prune_removes_disjoint_and_empty_source_fks(
         assert semantic_fk.prune_disjoint_semantic_fks("database") == int(pruned)
 
     assert delete.called is pruned
+
+
+def _prune_with(connector: object, row: dict) -> tuple[int, MagicMock]:
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=connector,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[row],
+        ),
+        patch("auto_ontology.semantic.semantic_fk.delete_semantic_fk") as delete,
+    ):
+        return semantic_fk.prune_disjoint_semantic_fks("database"), delete
+
+
+def _duckdb_connector(tmp_path: Path, ddl: str) -> DuckDBDatabase:
+    path = tmp_path / "overlap.duckdb"
+    with duckdb.connect(str(path)) as conn:
+        conn.execute(ddl)
+    return DuckDBDatabase(str(path))
+
+
+_TYPE_MISMATCH_ROW = {
+    "source_column_id": "col",
+    "target_attribute_id": "attr",
+    "source_schema_name": "main",
+    "source_table_name": "repositories",
+    "source_column_name": "wave_count",
+    "target_schema_name": "main",
+    "target_table_name": "waves",
+    "target_column_name": "wave_id",
+}
+
+
+def test_prune_removes_disjoint_fk_across_incomparable_types(tmp_path: Path) -> None:
+    """DuckDB refuses ``INTEGER IN (VARCHAR)``. The edge used to survive that
+    error and be offered as a join path again on every pass."""
+    connector = _duckdb_connector(
+        tmp_path,
+        "CREATE TABLE repositories (wave_count INTEGER);"
+        "INSERT INTO repositories VALUES (201), (44);"
+        "CREATE TABLE waves (wave_id VARCHAR);"
+        "INSERT INTO waves VALUES ('astrolabe/agent_work/waves/W083-x');",
+    )
+    try:
+        pruned, delete = _prune_with(connector, _TYPE_MISMATCH_ROW)
+    finally:
+        connector.close()
+
+    assert pruned == 1
+    delete.assert_called_once_with("col", "attr")
+
+
+def test_prune_keeps_fk_whose_values_match_as_text(tmp_path: Path) -> None:
+    """A real reference stored under a different type still overlaps."""
+    connector = _duckdb_connector(
+        tmp_path,
+        "CREATE TABLE repositories (wave_count INTEGER);"
+        "INSERT INTO repositories VALUES (201), (44);"
+        "CREATE TABLE waves (wave_id VARCHAR);"
+        "INSERT INTO waves VALUES ('44');",
+    )
+    try:
+        pruned, delete = _prune_with(connector, _TYPE_MISMATCH_ROW)
+    finally:
+        connector.close()
+
+    assert pruned == 0
+    delete.assert_not_called()
+
+
+def test_prune_keeps_unverifiable_fk_and_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """If neither comparison runs, the edge is unverified, not disjoint."""
+    connector = MagicMock(dialect="duckdb")
+    connector.qualify.side_effect = lambda schema, table: table
+    connector.execute.side_effect = RuntimeError("source unreachable")
+
+    with caplog.at_level(logging.WARNING, logger=semantic_fk.logger.name):
+        pruned, delete = _prune_with(connector, _TYPE_MISMATCH_ROW)
+
+    assert pruned == 0
+    delete.assert_not_called()
+    assert connector.execute.call_count == 2
+    assert "could not run" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("dialect", "expected"),
+    [
+        ("duckdb", 'CAST("c" AS TEXT)'),
+        ("postgres", 'CAST("c" AS TEXT)'),
+        ("mysql", "CAST(`c` AS CHAR)"),
+        ("databricks", "CAST(`c` AS STRING)"),
+        ("snowflake", 'CAST("c" AS VARCHAR)'),
+    ],
+)
+def test_text_cast_uses_the_dialect_text_type(dialect: str, expected: str) -> None:
+    quoted = "`c`" if dialect in ("mysql", "databricks") else '"c"'
+    assert semantic_fk._as_text(quoted, dialect) == expected

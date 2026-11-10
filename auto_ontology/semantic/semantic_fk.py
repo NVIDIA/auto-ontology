@@ -30,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+import sqlglot
 from sqlglot import exp
 
 from auto_ontology.connectors import get_connectors
@@ -100,6 +101,52 @@ def resolve_semantic_fks(database_name: str) -> int:
     return created
 
 
+def _overlap_sql(source: str, target: str, sc: str, tc: str) -> str:
+    return (
+        f"SELECT COUNT(*) AS n FROM (SELECT {sc} FROM {source} "
+        f"WHERE {sc} IS NOT NULL LIMIT 1) AS present "
+        f"UNION ALL SELECT COUNT(*) FROM (SELECT {sc} FROM {source} "
+        f"WHERE {sc} IN (SELECT {tc} FROM {target}) LIMIT 1) AS shared"
+    )
+
+
+def _as_text(column_sql: str, dialect: str | None) -> str:
+    """*column_sql* cast to the dialect's text type (``TEXT``, ``CHAR``, ``STRING``...).
+
+    The connector's ``dialect`` is a sqlglot dialect name. Plain ``VARCHAR`` is
+    the fallback for anything sqlglot cannot render.
+    """
+    try:
+        column = sqlglot.parse_one(column_sql, read=dialect or None)
+        return exp.cast(column, exp.DataType.build("text")).sql(dialect=dialect or None)
+    except Exception:  # noqa: BLE001 — any rendering failure gets the generic cast
+        return f"CAST({column_sql} AS VARCHAR)"
+
+
+def _overlap_counts(
+    connector: Any, source: str, target: str, sc: str, tc: str
+) -> tuple[int, int]:
+    """``(present, shared)`` for one semantic FK: does the source column hold any
+    value, and does any of them appear in the target column?
+
+    The native comparison runs first. Engines such as DuckDB and Postgres
+    refuse ``IN`` across types like ``INTEGER``/``VARCHAR``, and an edge that
+    can't be checked was kept and re-offered as a join path on every pass. So
+    a failed native comparison is retried with both sides cast to text.
+    Text is the fallback, not the default, because it would stop ``1`` and
+    ``1.0`` from matching on types the engine can already compare.
+    """
+    try:
+        frame = connector.execute(_overlap_sql(source, target, sc, tc))
+    except Exception:
+        dialect = getattr(connector, "dialect", None)
+        frame = connector.execute(
+            _overlap_sql(source, target, _as_text(sc, dialect), _as_text(tc, dialect))
+        )
+    present, shared = (int(v) for v in frame.iloc[:, 0])
+    return present, shared
+
+
 def prune_disjoint_semantic_fks(database_name: str) -> int:
     """Delete semantic FKs whose column shares no value with its target.
 
@@ -125,19 +172,18 @@ def prune_disjoint_semantic_fks(database_name: str) -> int:
         )
         sc = quoted_identifier(row["source_column_name"], dialect)
         tc = quoted_identifier(row["target_column_name"], dialect)
-        sql = (
-            f"SELECT COUNT(*) AS n FROM (SELECT {sc} FROM {source} "
-            f"WHERE {sc} IS NOT NULL LIMIT 1) AS present "
-            f"UNION ALL SELECT COUNT(*) FROM (SELECT {sc} FROM {source} "
-            f"WHERE {sc} IN (SELECT {tc} FROM {target}) LIMIT 1) AS shared"
-        )
         try:
-            present, shared = (int(v) for v in connector.execute(sql).iloc[:, 0])
+            present, shared = _overlap_counts(connector, source, target, sc, tc)
         except Exception:
-            logger.info(
-                "semantic FK overlap check skipped for %s.%s",
+            # Unverified, not disjoint: the edge stays. WARNING, because an
+            # edge nobody could check is still offered as a join path.
+            logger.warning(
+                "semantic FK overlap check could not run for %s.%s -> %s.%s; "
+                "keeping the edge unverified",
                 row["source_table_name"],
                 row["source_column_name"],
+                row["target_table_name"],
+                row["target_column_name"],
                 exc_info=True,
             )
             continue
