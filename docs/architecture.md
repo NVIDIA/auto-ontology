@@ -105,7 +105,7 @@ flowchart TD
   end
   subgraph output["Output"]
     direction LR
-    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Review, edit, certify: UI or REST"]
+    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Human in the loop: test, refine, certify in the UI or REST"]
     o1 <--> o3["Import or export: Ossie YAML"]
   end
   inputs --> ingest --> pertable --> cross --> output
@@ -208,7 +208,7 @@ flowchart TD
   end
   subgraph output["Output"]
     direction LR
-    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Review, edit, certify: UI or REST"]
+    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Human in the loop: test, refine, certify in the UI or REST"]
     o1 <--> o3["Import or export: Ossie YAML"]
   end
   inputs --> ingest --> pertable --> cross --> output
@@ -223,13 +223,16 @@ flowchart TD
 
 Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
-### Output and feedback loop
+### Output and human in the loop
 
 - The ontology lives in Postgres (terms, column attributes, SQL attributes,
   semantic foreign keys) with embeddings in pgvector.
-- Review terms, descriptions, SQL attributes, and relationships in the UI or
+- Test the draft with real questions in Chat, or with `check_answerable` and
+  `ask_question` over MCP.
+- Refine terms, descriptions, SQL attributes, and relationships in the UI or
   through the REST API. Edits are re-embedded when saved, so the next question
-  uses them.
+  uses them, and the next compilation keeps them: it compiles only tables that
+  don't have a term yet.
 - Certifying a name, description, or attribute marks it as reviewed in the UI
   and in search results. It doesn't change how the agent retrieves.
 - Import and export model definitions as Ossie YAML with **Settings → Import /
