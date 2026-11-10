@@ -34,7 +34,7 @@ import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
-import { OwnerLabel } from '@/common/OwnerLabel';
+import { OwnerAvatar, OwnerLabel } from '@/common/OwnerLabel';
 import { OwnersSelect } from '@/common/OwnersSelect';
 import { ownerChoices } from '@/lib/owners';
 import { ownerQueries } from '@/lib/queries/owners';
@@ -48,6 +48,7 @@ import { Size, ButtonTheme } from '@/enums/button';
 import { TextVariant } from '@/enums/text';
 import { ToastVariant } from '@/enums/toast';
 import { termHref } from '@/lib/termHref';
+import { InfoTip, SectionChromeContext, SectionTitle } from '@/common/SectionChrome';
 
 export type ComposerEditValue = string | string[];
 
@@ -82,6 +83,8 @@ export type ComposerPageHeader = {
 	/** Rendered as the page title. Every composed page names the entity it shows. */
 	title: string;
 	icon?: IconName;
+	/** What the page is about ("Term"), shown as a small pill above the title in the compact layout. */
+	kind?: string;
 	/** Catalog node the default save path patches. Without it the Edit button stays hidden. */
 	entityId?: string;
 	titleEditable?: boolean;
@@ -159,6 +162,16 @@ export type SinglePageComposerProps = {
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 	headerActions?: ReactNode;
+	/**
+	 * Edit one section at a time: every editable section (and the title, and
+	 * the owner and tags in a side panel) gets its own pencil, and Save/Cancel
+	 * appear on that section's title row. Replaces the page-wide Edit button.
+	 */
+	editPerSection?: boolean;
+	/** Tooltip text per section id (`'name'` for the title), shown as an "i" beside the heading. */
+	sectionInfo?: Record<string, string>;
+	/** Controls placed at the right of a section's title row, keyed by section id. */
+	sectionActions?: Record<string, ReactNode>;
 };
 
 function composerSectionHeading(section: ComposerSection): string {
@@ -293,9 +306,7 @@ const EditableTextCard = ({
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
 			<div className="flex items-start justify-between gap-3">
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-					{section.title}
-				</h2>
+				<SectionTitle id={section.id}>{section.title}</SectionTitle>
 				{certificationSlot}
 			</div>
 			<textarea
@@ -351,9 +362,7 @@ const EditableTagListCard = ({
 
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<SectionTitle id={section.id}>{section.title}</SectionTitle>
 			<div className="mt-3">
 				<TagInput
 					value={tags}
@@ -389,7 +398,7 @@ const ReadOnlyTagList = ({
 			id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
 			className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
 		>
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">{title}</h2>
+			<SectionTitle id={sectionId}>{title}</SectionTitle>
 			{nonEmptyValues.length === 0 ? (
 				<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
 			) : (
@@ -446,9 +455,9 @@ const EditableEntityTagsCard = ({
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
 			<div className="flex items-center justify-between gap-3">
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+				<SectionTitle id={section.id}>
 					{section.title} ({tags.length})
-				</h2>
+				</SectionTitle>
 				<PopoverMenu
 					items={unassigned.map((tag) => ({
 						label: tag.name,
@@ -515,14 +524,183 @@ const useLiveOwnerOptions = (section: ComposerOwnerSection): ComposerOwnerOption
 	return source.map(ownerOption);
 };
 
+/**
+ * The page title as text that turns into an input on click. Leaving the
+ * field (or Enter) saves; Escape, or a blank or unchanged name, reverts.
+ */
+const InlineTitle = ({
+	title,
+	onCommit,
+	compact = false,
+}: {
+	title: string;
+	onCommit: (next: string) => Promise<boolean>;
+	/** Smaller text that wraps to two lines instead of truncating. */
+	compact?: boolean;
+}) => {
+	const [editing, setEditing] = useState(false);
+	const [busy, setBusy] = useState(false);
+	// What the last save sent, shown until the refetched title catches up.
+	const [pending, setPending] = useState<string | null>(null);
+	const [prevTitle, setPrevTitle] = useState(title);
+	if (title !== prevTitle) {
+		setPrevTitle(title);
+		setPending(null);
+	}
+	const skipCommit = useRef(false);
+	const shown = pending ?? title;
+
+	const commit = async (value: string) => {
+		const next = value.trim();
+		if (skipCommit.current || next === '' || next === shown) {
+			skipCommit.current = false;
+			setEditing(false);
+			return;
+		}
+		setBusy(true);
+		const ok = await onCommit(next);
+		setBusy(false);
+		if (ok) {
+			setPending(next);
+			setEditing(false);
+		}
+	};
+
+	if (editing) {
+		return (
+			<input
+				type="text"
+				autoFocus
+				defaultValue={shown}
+				disabled={busy}
+				onBlur={(e) => {
+					void commit(e.currentTarget.value);
+				}}
+				onKeyDown={(e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						e.currentTarget.blur();
+					} else if (e.key === 'Escape') {
+						e.preventDefault();
+						skipCommit.current = true;
+						e.currentTarget.blur();
+					}
+				}}
+				className={`-mx-1.5 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-1.5 py-0.5 ${compact ? 'text-lg' : 'text-2xl'} font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100`}
+				aria-label="Name"
+			/>
+		);
+	}
+	return (
+		<div
+			role="button"
+			tabIndex={0}
+			title="Click to rename"
+			aria-label={`Rename ${shown}`}
+			onClick={() => setEditing(true)}
+			onKeyDown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					setEditing(true);
+				}
+			}}
+			className="-mx-1.5 min-w-0 cursor-text rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#76b900]/40 dark:hover:bg-zinc-800"
+		>
+			{compact ? (
+				<h1 className="line-clamp-2 break-words text-lg font-semibold leading-snug tracking-tight text-heading dark:text-zinc-100">
+					{shown}
+				</h1>
+			) : (
+				<Text as="h1" text={shown} variant={TextVariant.PageTitle} />
+			)}
+		</div>
+	);
+};
+
+/**
+ * The owner's circle beside the title. Click it to reassign the owner from
+ * the same directory the Owner box offers; the pick saves straight away.
+ */
+const HeaderOwnerPicker = ({
+	section,
+	onPick,
+}: {
+	section: ComposerOwnerSection;
+	onPick: (ownerId: string) => Promise<boolean>;
+}) => {
+	const options = useLiveOwnerOptions(section);
+	const [pending, setPending] = useState<string | null>(null);
+	const [prevOwnerId, setPrevOwnerId] = useState(section.ownerId);
+	if (section.ownerId !== prevOwnerId) {
+		setPrevOwnerId(section.ownerId);
+		setPending(null);
+	}
+	const currentId = pending ?? section.ownerId ?? '';
+	const owner = options.find((option) => option.id === currentId);
+	const editable = section.editable !== false;
+	const label = owner ? `Owner: ${owner.name}` : 'Unassigned';
+
+	if (!editable) {
+		return (
+			<span title={label} className="inline-flex">
+				<OwnerAvatar owner={owner} className="h-6 w-6" />
+			</span>
+		);
+	}
+
+	const pick = async (id: string) => {
+		if (id === currentId) return;
+		if (await onPick(id)) setPending(id);
+	};
+
+	return (
+		<PopoverMenu
+			items={[
+				...options.map((option) => ({
+					label: option.name,
+					icon: <OwnerAvatar owner={option} className="h-5 w-5" />,
+					onClick: () => {
+						void pick(option.id);
+					},
+				})),
+				...(currentId !== ''
+					? [
+							{
+								label: 'Unassign',
+								icon: <OwnerAvatar owner={null} className="h-5 w-5" />,
+								onClick: () => {
+									void pick('');
+								},
+							},
+						]
+					: []),
+			]}
+			header={
+				<p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-secondary dark:text-zinc-400">
+					Assign owner
+				</p>
+			}
+			trigger={({ toggle }) => (
+				<button
+					type="button"
+					onClick={toggle}
+					title={`${label} · click to reassign`}
+					aria-label={`${label}. Reassign owner`}
+					className="inline-flex rounded-full outline-none ring-offset-2 transition-shadow hover:ring-2 hover:ring-[#76b900]/50 focus-visible:ring-2 focus-visible:ring-[#76b900]"
+				>
+					<OwnerAvatar owner={owner} className="h-6 w-6" />
+				</button>
+			)}
+		/>
+	);
+};
+
 const OwnerSection = ({ section }: { section: ComposerOwnerSection }) => {
 	const options = useLiveOwnerOptions(section);
 	const owner = options.find((option) => option.id === section.ownerId);
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<SectionTitle id={section.id}>{section.title}</SectionTitle>
 			<div className="mt-3">
 				<OwnerLabel owner={owner} />
 			</div>
@@ -541,9 +719,7 @@ const EditableOwnerCard = ({
 	const [ownerId, setOwnerId] = useState(section.ownerId ?? '');
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<SectionTitle id={section.id}>{section.title}</SectionTitle>
 			<div className="mt-3">
 				<OwnersSelect
 					owners={options}
@@ -560,9 +736,9 @@ const EditableOwnerCard = ({
 
 const EntityTagsSection = ({ section }: { section: ComposerEntityTagsSection }) => (
 	<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-		<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+		<SectionTitle id={section.id}>
 			{section.title} ({section.tags.length})
-		</h2>
+		</SectionTitle>
 		{section.tags.length === 0 ? (
 			<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
 		) : (
@@ -582,9 +758,9 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+			<SectionTitle id={section.id}>
 				{section.title} ({displayedZones.length})
-			</h2>
+			</SectionTitle>
 			{displayedZones.length === 0 ? (
 				<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
 			) : (
@@ -622,9 +798,7 @@ function renderComposerSection(
 					className="space-y-3 rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
 				>
 					<div className="flex items-start justify-between gap-3">
-						<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-							{section.title}
-						</h2>
+						<SectionTitle id={section.id}>{section.title}</SectionTitle>
 						{section.certification ? (
 							<CertificationBadge
 								status={fieldStatus(section.certification.certified)}
@@ -649,9 +823,7 @@ function renderComposerSection(
 		case ComposerSectionKind.INFO_GRID:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{section.title}
-					</h2>
+					<SectionTitle id={section.id}>{section.title}</SectionTitle>
 					<dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
 						{section.items.map((item) => (
 							<div
@@ -674,9 +846,7 @@ function renderComposerSection(
 				section.rowIdKey != null && onDataTableRowClick != null && section.rowIdKey !== '';
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{section.title}
-					</h2>
+					<SectionTitle id={section.id}>{section.title}</SectionTitle>
 					<Table
 						className="mt-4"
 						containerClassName="overflow-x-auto rounded-md border border-zinc-200/90 dark:border-zinc-700"
@@ -817,9 +987,9 @@ function renderComposerSection(
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+					<SectionTitle id={section.id}>
 						{section.title} ({section.terms.length})
-					</h2>
+					</SectionTitle>
 					{section.terms.length === 0 ? (
 						<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
 					) : (
@@ -841,9 +1011,9 @@ function renderComposerSection(
 		case ComposerSectionKind.ENTITY_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+					<SectionTitle id={section.id}>
 						{section.title} ({section.entities.length})
-					</h2>
+					</SectionTitle>
 					{section.entities.length === 0 ? (
 						<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
 					) : (
@@ -934,6 +1104,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			inlineSaveSectionId,
 			hideEditToolbar = false,
 			headerActions,
+			editPerSection = false,
+			sectionInfo,
+			sectionActions,
 		} = props;
 		const router = useRouter();
 
@@ -954,6 +1127,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const {
 			title,
 			icon: headerIcon,
+			kind: headerKind,
 			entityId = '',
 			certification: headerCertification,
 			status: headerStatus,
@@ -986,10 +1160,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const [localEditingMode, setLocalEditingMode] = useState(false);
 		const [saving, setSaving] = useState(false);
 		const [saveError, setSaveError] = useState<string | null>(null);
-		const isEditingActive = controlledEditingMode || localEditingMode;
+		// Per-section mode: the one section being edited, or null.
+		const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+		const isEditingActive =
+			controlledEditingMode || localEditingMode || editingSectionId != null;
+		const isEditing = (id: string): boolean =>
+			editPerSection ? editingSectionId === id : isEditingActive;
 
 		const renderCertControl = (id: string, cert: ComposerCertification): ReactNode =>
-			onCertificationChange && isEditingActive ? (
+			onCertificationChange && isEditing(id) ? (
 				<CertificationSelect
 					certified={cert.certified}
 					showLabel={cert.showLabel}
@@ -1043,6 +1222,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 			if (usesDefaultCatalogSave && hasNothingToSave) {
 				setLocalEditingMode(false);
+				setEditingSectionId(null);
 				setSaveError(null);
 				onSave?.(edits);
 				return;
@@ -1061,8 +1241,138 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			}
 
 			setLocalEditingMode(false);
+			setEditingSectionId(null);
 			onSave?.(edits);
 		};
+
+		const startSectionEdit = (id: string) => {
+			pendingEditsRef.current = {};
+			setSaveError(null);
+			setEditingSectionId(id);
+		};
+
+		const cancelSectionEdit = () => {
+			if (saving) return;
+			setEditingSectionId(null);
+			setSaveError(null);
+			onCancel?.();
+		};
+
+		// Title and owner changes in per-section mode save on their own.
+		const saveImmediately = async (edits: Record<string, ComposerEditValue>) => {
+			if (onPatchEdits == null) return false;
+			setSaving(true);
+			setSaveError(null);
+			const res = await onPatchEdits(edits);
+			setSaving(false);
+			if (res.error) {
+				setSaveError(res.message ?? 'Failed to save changes');
+				return false;
+			}
+			onSave?.(edits);
+			return true;
+		};
+
+		// Sections that get a pencil in per-section mode.
+		const perSectionEditableIds = new Set<string>();
+		if (editPerSection) {
+			for (const s of sections) {
+				if (
+					isComposerSection(s) &&
+					(s.type === ComposerSectionKind.TEXT_CARD ||
+						s.type === ComposerSectionKind.TAG_LIST ||
+						s.type === ComposerSectionKind.ENTITY_TAGS ||
+						s.type === ComposerSectionKind.OWNER) &&
+					s.editable === true
+				) {
+					perSectionEditableIds.add(s.id);
+				}
+			}
+			for (const panel of [leftPanel, rightPanel]) {
+				for (const bulk of panel?.bulks ?? []) {
+					if (bulk.kind !== 'activity' && bulk.section.editable !== false) {
+						perSectionEditableIds.add(bulk.section.id);
+					}
+				}
+			}
+		}
+
+		const sectionChrome = (id: string, label: string): ReactNode => {
+			const info = sectionInfo?.[id];
+			const action = sectionActions?.[id];
+			const editable = perSectionEditableIds.has(id);
+			const editingThis = editingSectionId === id;
+			if (info == null && action == null && !editable) return null;
+			return (
+				<>
+					{info != null ? <InfoTip text={info} label={label} /> : null}
+					<span className="ml-auto flex shrink-0 items-center gap-1.5">
+						{editingThis ? null : action}
+						{editable && editingThis ? (
+							<>
+								<Button
+									theme={ButtonTheme.Secondary}
+									size={Size.SMALL}
+									type="button"
+									disabled={saving}
+									onClick={cancelSectionEdit}
+								>
+									Cancel
+								</Button>
+								<Button
+									theme={ButtonTheme.Primary}
+									size={Size.SMALL}
+									type="button"
+									disabled={saving}
+									onClick={() => {
+										void handleSave();
+									}}
+									iconPosition="left"
+								>
+									{saving ? (
+										<>
+											<Spinner aria-label="Saving" className="h-3 w-3" />
+											Saving…
+										</>
+									) : (
+										'Save'
+									)}
+								</Button>
+							</>
+						) : editable && editingSectionId == null ? (
+							<Button
+								theme={ButtonTheme.Icon}
+								size={Size.SMALL}
+								iconOnly
+								type="button"
+								onClick={() => startSectionEdit(id)}
+								aria-label={`Edit ${label}`}
+								title={`Edit ${label}`}
+							>
+								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+							</Button>
+						) : null}
+					</span>
+				</>
+			);
+		};
+
+		const sectionLabels = new Map<string, string>([['name', 'Name']]);
+		for (const s of sections) {
+			if (isComposerSection(s) && 'title' in s && typeof s.title === 'string') {
+				sectionLabels.set(s.id, s.title);
+			}
+		}
+		for (const panel of [leftPanel, rightPanel]) {
+			for (const bulk of panel?.bulks ?? []) {
+				if (bulk.kind === 'activity') sectionLabels.set(bulk.title, bulk.title);
+				else sectionLabels.set(bulk.section.id, bulk.section.title);
+			}
+		}
+		const chromeProvider =
+			editPerSection || sectionInfo != null || sectionActions != null
+				? (id: string) => sectionChrome(id, sectionLabels.get(id) ?? id)
+				: null;
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -1130,6 +1440,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 		const editControls =
 			!hideEditToolbar &&
+			!editPerSection &&
 			((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
 				<>
 					{hasEditableSections && entityId && !isEditingActive && (
@@ -1190,9 +1501,24 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				</>
 			) : null;
 
-		const certControl = headerCertification
-			? renderCertControl('name', headerCertification)
-			: null;
+		const headerOwnerSection = editPerSection
+			? [leftPanel, rightPanel]
+					.flatMap((panel) => panel?.bulks ?? [])
+					.find((bulk) => bulk.kind === 'owner')?.section
+			: undefined;
+
+		const certControl = headerCertification ? (
+			editPerSection && titleEditable && onCertificationChange ? (
+				<CertificationSelect
+					certified={headerCertification.certified}
+					showLabel={headerCertification.showLabel}
+					chevronOnHover
+					onChange={(next) => onCertificationChange('name', next)}
+				/>
+			) : (
+				renderCertControl('name', headerCertification)
+			)
+		) : null;
 
 		const statusBadge =
 			headerStatus != null ? <CertificationBadge status={headerStatus} /> : null;
@@ -1201,13 +1527,19 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		// title shrinks to its text to keep the two together.
 		const titleBlock = (
 			<div className="flex min-w-0 flex-1 items-center gap-2">
-				{headerIcon ? (
+				{headerIcon && !compact ? (
 					<Icon
 						name={headerIcon}
 						className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
 					/>
 				) : null}
-				{isEditingActive && titleEditable ? (
+				{editPerSection && titleEditable ? (
+					<InlineTitle
+						compact={compact}
+						title={title}
+						onCommit={(next) => saveImmediately({ name: next })}
+					/>
+				) : isEditing('name') && titleEditable ? (
 					<input
 						ref={titleInputRef}
 						key={title}
@@ -1225,257 +1557,296 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						<Text as="h1" text={title} variant={TextVariant.PageTitle} />
 					</div>
 				)}
+				{headerOwnerSection != null ? (
+					<HeaderOwnerPicker
+						section={headerOwnerSection}
+						onPick={(ownerId) => saveImmediately({ [headerOwnerSection.id]: ownerId })}
+					/>
+				) : null}
 				{certControl ? <div className="shrink-0">{certControl}</div> : null}
+				{chromeProvider?.('name')}
 			</div>
 		);
 
 		return (
-			<div
-				ref={ref}
-				className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden bg-white dark:bg-zinc-950"
-			>
-				{header.errorBanner ? (
-					<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
-						{String(header.errorBanner)}
-					</div>
-				) : null}
-
-				<header
-					className={
-						compact
-							? 'flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-200 px-5 py-3 dark:border-zinc-800'
-							: 'flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800'
-					}
-				>
-					{titleBlock}
-					{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
-					{editControls != null || headerActions != null ? (
-						<div className="ml-auto flex shrink-0 items-center gap-2">
-							{editControls}
-							{headerActions}
-						</div>
-					) : null}
-				</header>
-
+			<SectionChromeContext.Provider value={chromeProvider}>
 				<div
-					className={`grid min-h-0 w-full min-w-0 flex-1 gap-0 ${compact ? 'content-start overflow-y-auto' : 'overflow-hidden'}`}
-					style={{ gridTemplateColumns: gridTemplate }}
+					ref={ref}
+					className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden bg-white dark:bg-zinc-950"
 				>
-					{leftPanel ? (
-						<aside
-							className={
-								compact
-									? 'order-2 flex min-w-0 flex-col border-t border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
-									: 'flex min-h-0 min-w-0 flex-col overflow-y-auto border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
-							}
-						>
-							{leftPanel.slot ? (
-								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0">
-									{leftPanel.slot}
-								</div>
-							) : (
-								<SidePanel
-									bulks={leftPanel.bulks}
-									isEditing={isEditingActive}
-									onChange={(id, value) => {
-										pendingEditsRef.current[id] = value;
-									}}
-								/>
-							)}
-						</aside>
-					) : null}
-
-					<main
-						className={
-							compact
-								? 'order-1 min-w-0 overflow-x-clip px-5 py-5'
-								: 'min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]'
-						}
-					>
-						<div className="space-y-5">
-							{sections.length === 0 ? (
-								<EmptyState
-									illustration={
-										<div
-											className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
-											aria-hidden
-										>
-											◇
-										</div>
-									}
-									title="Nothing Selected Yet"
-									description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
-								/>
-							) : (
-								sections.map((section, i) => {
-									if (!isComposerSection(section)) {
-										return (
-											<section
-												key={i}
-												className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
-											>
-												<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-													{typeof section === 'object' &&
-													section !== null &&
-													'title' in section &&
-													typeof (section as { title: unknown }).title ===
-														'string'
-														? (section as { title: string }).title
-														: 'Section'}
-												</h2>
-												<pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-100 p-2 text-xs text-body dark:bg-zinc-900 dark:text-zinc-300">
-													{JSON.stringify(section, null, 2)}
-												</pre>
-											</section>
-										);
-									}
-
-									const isEditableTextCard =
-										isEditingActive &&
-										section.type === ComposerSectionKind.TEXT_CARD &&
-										section.editable === true;
-									const isEditableTagList =
-										isEditingActive &&
-										section.type === ComposerSectionKind.TAG_LIST &&
-										section.editable === true;
-									const isEditableEntityTags =
-										isEditingActive &&
-										section.type === ComposerSectionKind.ENTITY_TAGS &&
-										section.editable === true;
-									const isEditableOwner =
-										isEditingActive &&
-										section.type === ComposerSectionKind.OWNER &&
-										section.editable === true;
-									return (
-										<div key={section.id}>
-											{isEditableTextCard ? (
-												<EditableTextCard
-													section={section}
-													autoFocus={
-														!shouldAutofocusTitle &&
-														section.id === firstEditableId
-													}
-													onChange={(id, val) => {
-														pendingEditsRef.current[id] = val;
-													}}
-													onSave={
-														section.id === inlineSaveSectionId
-															? () => {
-																	void handleSave();
-																}
-															: undefined
-													}
-													saving={saving}
-													onSuggest={
-														section.suggestable === true &&
-														onSuggestDescription != null
-															? () => onSuggestDescription(section.id)
-															: undefined
-													}
-													certificationSlot={
-														section.certification
-															? renderCertControl(
-																	section.id,
-																	section.certification,
-																)
-															: undefined
-													}
-												/>
-											) : isEditableTagList ? (
-												<EditableTagListCard
-													section={section}
-													autoFocus={
-														!shouldAutofocusTitle &&
-														section.id === firstEditableId
-													}
-													onChange={(id, val) => {
-														pendingEditsRef.current[id] = val;
-													}}
-												/>
-											) : isEditableEntityTags ? (
-												<EditableEntityTagsCard
-													section={section}
-													onChange={(id, val) => {
-														pendingEditsRef.current[id] = val;
-													}}
-												/>
-											) : isEditableOwner ? (
-												<EditableOwnerCard
-													section={section}
-													onChange={(id, val) => {
-														pendingEditsRef.current[id] = val;
-													}}
-												/>
-											) : (
-												renderComposerSection(
-													section,
-													handleTermClick,
-													onDataTableRowClick,
-													isEditingActive,
-													onEditSql,
-													handleEntityClick,
-													onDataTableCertificationChange,
-													canCertifyDataTableRow,
-												)
-											)}
-										</div>
-									);
-								})
-							)}
+					{header.errorBanner ? (
+						<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+							{String(header.errorBanner)}
 						</div>
+					) : null}
 
-						{entityUpdatingProperties &&
-						Object.keys(entityUpdatingProperties).length > 0 ? (
-							<div className="mt-6 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-600">
-								<p className="mb-2 text-xs font-semibold uppercase text-secondary">
-									Entity updates (preview)
-								</p>
-								<ul className="space-y-1 text-xs text-body dark:text-zinc-400">
-									{Object.entries(entityUpdatingProperties).map(([k, v]) => (
-										<li key={k}>
-											<span className="font-mono text-heading dark:text-zinc-200">
-												{k}
-											</span>
-											: {Array.isArray(v) ? v.join(', ') : v}
-										</li>
-									))}
-								</ul>
+					{compact ? (
+						// Kind and status on a slim first row, so the name below
+						// gets the full width. `pr-12` leaves room for a close
+						// button the host panel may float in the corner.
+						<header className="flex shrink-0 flex-col gap-1.5 border-b border-zinc-200 py-3 pl-5 pr-12 dark:border-zinc-800">
+							<div className="flex min-h-6 flex-wrap items-center gap-2">
+								{headerKind ? (
+									<span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-secondary dark:bg-zinc-800 dark:text-zinc-400">
+										{headerIcon ? (
+											<Icon name={headerIcon} className="h-3 w-3" />
+										) : null}
+										{headerKind}
+									</span>
+								) : null}
+								{headerStatus != null ? (
+									<CertificationBadge
+										status={headerStatus}
+										className="px-2! py-0.5! text-[11px]!"
+									/>
+								) : null}
+								{editControls != null || headerActions != null ? (
+									<div className="ml-auto flex shrink-0 items-center gap-2">
+										{editControls}
+										{headerActions}
+									</div>
+								) : null}
 							</div>
-						) : null}
-					</main>
+							{titleBlock}
+						</header>
+					) : (
+						<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
+							{titleBlock}
+							{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
+							{editControls != null || headerActions != null ? (
+								<div className="ml-auto flex shrink-0 items-center gap-2">
+									{editControls}
+									{headerActions}
+								</div>
+							) : null}
+						</header>
+					)}
 
-					{rightPanel ? (
-						<aside
+					<div
+						className={`grid min-h-0 w-full min-w-0 flex-1 gap-0 ${compact ? 'content-start overflow-y-auto' : 'overflow-hidden'}`}
+						style={{ gridTemplateColumns: gridTemplate }}
+					>
+						{leftPanel ? (
+							<aside
+								className={
+									compact
+										? 'order-2 flex min-w-0 flex-col border-t border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+										: 'flex min-h-0 min-w-0 flex-col overflow-y-auto border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+								}
+							>
+								{leftPanel.slot ? (
+									<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0">
+										{leftPanel.slot}
+									</div>
+								) : (
+									<SidePanel
+										bulks={leftPanel.bulks}
+										isEditing={editPerSection ? isEditing : isEditingActive}
+										onChange={(id, value) => {
+											pendingEditsRef.current[id] = value;
+										}}
+									/>
+								)}
+							</aside>
+						) : null}
+
+						<main
 							className={
 								compact
-									? 'order-3 flex min-w-0 flex-col border-t border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
-									: 'flex min-h-0 min-w-0 flex-col overflow-y-auto border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+									? 'order-1 min-w-0 overflow-x-clip px-5 py-5'
+									: 'min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]'
 							}
 						>
-							{rightPanel.slot ? (
-								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5">
-									{rightPanel.slot}
-								</div>
-							) : (
-								<SidePanel
-									bulks={rightPanel.bulks}
-									isEditing={isEditingActive}
-									onChange={(id, value) => {
-										pendingEditsRef.current[id] = value;
-									}}
-								/>
-							)}
-						</aside>
-					) : null}
-				</div>
+							<div className="space-y-5">
+								{sections.length === 0 ? (
+									<EmptyState
+										illustration={
+											<div
+												className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
+												aria-hidden
+											>
+												◇
+											</div>
+										}
+										title="Nothing Selected Yet"
+										description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
+									/>
+								) : (
+									sections.map((section, i) => {
+										if (!isComposerSection(section)) {
+											return (
+												<section
+													key={i}
+													className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
+												>
+													<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+														{typeof section === 'object' &&
+														section !== null &&
+														'title' in section &&
+														typeof (section as { title: unknown })
+															.title === 'string'
+															? (section as { title: string }).title
+															: 'Section'}
+													</h2>
+													<pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-100 p-2 text-xs text-body dark:bg-zinc-900 dark:text-zinc-300">
+														{JSON.stringify(section, null, 2)}
+													</pre>
+												</section>
+											);
+										}
 
-				<Toast
-					open={saveError != null}
-					message={saveError ?? ''}
-					variant={ToastVariant.Error}
-					onClose={() => setSaveError(null)}
-				/>
-			</div>
+										const isEditableTextCard =
+											isEditing(section.id) &&
+											section.type === ComposerSectionKind.TEXT_CARD &&
+											section.editable === true;
+										const isEditableTagList =
+											isEditing(section.id) &&
+											section.type === ComposerSectionKind.TAG_LIST &&
+											section.editable === true;
+										const isEditableEntityTags =
+											isEditing(section.id) &&
+											section.type === ComposerSectionKind.ENTITY_TAGS &&
+											section.editable === true;
+										const isEditableOwner =
+											isEditing(section.id) &&
+											section.type === ComposerSectionKind.OWNER &&
+											section.editable === true;
+										return (
+											<div key={section.id}>
+												{isEditableTextCard ? (
+													<EditableTextCard
+														section={section}
+														autoFocus={
+															editPerSection ||
+															(!shouldAutofocusTitle &&
+																section.id === firstEditableId)
+														}
+														onChange={(id, val) => {
+															pendingEditsRef.current[id] = val;
+														}}
+														onSave={
+															section.id === inlineSaveSectionId
+																? () => {
+																		void handleSave();
+																	}
+																: undefined
+														}
+														saving={saving}
+														onSuggest={
+															section.suggestable === true &&
+															onSuggestDescription != null
+																? () =>
+																		onSuggestDescription(
+																			section.id,
+																		)
+																: undefined
+														}
+														certificationSlot={
+															section.certification
+																? renderCertControl(
+																		section.id,
+																		section.certification,
+																	)
+																: undefined
+														}
+													/>
+												) : isEditableTagList ? (
+													<EditableTagListCard
+														section={section}
+														autoFocus={
+															editPerSection ||
+															(!shouldAutofocusTitle &&
+																section.id === firstEditableId)
+														}
+														onChange={(id, val) => {
+															pendingEditsRef.current[id] = val;
+														}}
+													/>
+												) : isEditableEntityTags ? (
+													<EditableEntityTagsCard
+														section={section}
+														onChange={(id, val) => {
+															pendingEditsRef.current[id] = val;
+														}}
+													/>
+												) : isEditableOwner ? (
+													<EditableOwnerCard
+														section={section}
+														onChange={(id, val) => {
+															pendingEditsRef.current[id] = val;
+														}}
+													/>
+												) : (
+													renderComposerSection(
+														section,
+														handleTermClick,
+														onDataTableRowClick,
+														isEditing(section.id),
+														onEditSql,
+														handleEntityClick,
+														onDataTableCertificationChange,
+														canCertifyDataTableRow,
+													)
+												)}
+											</div>
+										);
+									})
+								)}
+							</div>
+
+							{entityUpdatingProperties &&
+							Object.keys(entityUpdatingProperties).length > 0 ? (
+								<div className="mt-6 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-600">
+									<p className="mb-2 text-xs font-semibold uppercase text-secondary">
+										Entity updates (preview)
+									</p>
+									<ul className="space-y-1 text-xs text-body dark:text-zinc-400">
+										{Object.entries(entityUpdatingProperties).map(([k, v]) => (
+											<li key={k}>
+												<span className="font-mono text-heading dark:text-zinc-200">
+													{k}
+												</span>
+												: {Array.isArray(v) ? v.join(', ') : v}
+											</li>
+										))}
+									</ul>
+								</div>
+							) : null}
+						</main>
+
+						{rightPanel ? (
+							<aside
+								className={
+									compact
+										? 'order-3 flex min-w-0 flex-col border-t border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+										: 'flex min-h-0 min-w-0 flex-col overflow-y-auto border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90'
+								}
+							>
+								{rightPanel.slot ? (
+									<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5">
+										{rightPanel.slot}
+									</div>
+								) : (
+									<SidePanel
+										bulks={rightPanel.bulks}
+										isEditing={editPerSection ? isEditing : isEditingActive}
+										onChange={(id, value) => {
+											pendingEditsRef.current[id] = value;
+										}}
+									/>
+								)}
+							</aside>
+						) : null}
+					</div>
+
+					<Toast
+						open={saveError != null}
+						message={saveError ?? ''}
+						variant={ToastVariant.Error}
+						onClose={() => setSaveError(null)}
+					/>
+				</div>
+			</SectionChromeContext.Provider>
 		);
 	},
 );

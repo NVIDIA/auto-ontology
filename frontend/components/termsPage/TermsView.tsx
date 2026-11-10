@@ -41,6 +41,26 @@ import { Toast } from '@/common/Toast';
 import type { ColumnAttribute, SqlAttribute, Term, TermDetail } from '@/types/terms';
 import { termHref } from '@/lib/termHref';
 
+/** What each box on a term's page is for, shown as its info tooltip. */
+const TERM_SECTION_INFO: Record<string, string> = {
+	description:
+		'What the term means, in plain language. The answering agent reads it to decide whether a question is about this term, so certify it once it is accurate.',
+	synonyms:
+		'Other words people use for this term. Search and the answering agent match them too. Generated with the ontology.',
+	entities:
+		'The tables whose rows are instances of this term. Click one to open it in the data catalog.',
+	zones: 'Access zones that cover this term’s tables. People only see data in the zones they have been granted.',
+	related_terms:
+		'Terms connected to this one by a join between their tables. Click one to jump to it.',
+	column_attributes:
+		'Columns that describe a property of this term. Certify a row when the column really means that property for this term, not merely because it holds values of the right type. Click a row to edit it.',
+	sql_attributes:
+		'Properties computed by a SQL expression, such as a total or a flag. Add one with + SQL Attribute; click a row to edit it.',
+	owner_id: 'The person or group responsible for keeping this term accurate.',
+	tags: 'Free-form labels for organising and filtering terms.',
+	'Last Modified': 'Who last changed this term, and when.',
+};
+
 const termFocusTrail = ({
 	focusId,
 	sqlAttrId,
@@ -119,7 +139,6 @@ export const TermsView = () => {
 	const [deletingSqlAttr, setDeletingSqlAttr] = useState<SqlAttributeDeleteTarget | null>(null);
 	const [deletingSqlAttrBusy, setDeletingSqlAttrBusy] = useState(false);
 	const [deleteSqlAttrError, setDeleteSqlAttrError] = useState<string | null>(null);
-	const [termEditing, setTermEditing] = useState(false);
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
 	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
@@ -135,7 +154,6 @@ export const TermsView = () => {
 		setPrevFocusId(focusId);
 		setPrevSqlAttrId(sqlAttrId);
 		setPrevColAttrId(colAttrId);
-		setTermEditing(false);
 		setSqlAttrEditing(false);
 		setSqlAttrEditError(null);
 		setColumnAttrEditing(false);
@@ -933,6 +951,7 @@ export const TermsView = () => {
 					header: {
 						title: term.name,
 						icon: IconName.Terms,
+						kind: 'Term',
 						titleEditable: true,
 						certification: { certified: term.name_certified },
 						// Same server-rolled-up value the list card shows, so the two
@@ -1293,45 +1312,30 @@ export const TermsView = () => {
 						dataId={focusId}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
-						headerActions={
-							<>
-								{termEditing || !canEditFocusedTerm ? null : (
-									<Button
-										theme={ButtonTheme.Primary}
-										size={Size.REGULAR}
-										type="button"
-										onClick={() => {
-											setTermEditing(true);
-										}}
-										iconPosition="left"
-									>
-										<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-										Edit
-									</Button>
-								)}
-								{canEditCatalog ? (
-									<Button
-										theme={ButtonTheme.Primary}
-										size={Size.REGULAR}
-										type="button"
-										onClick={() => setCreateSqlAttrModalOpen(true)}
-										iconPosition="left"
-										shadow
-									>
-										<Icon name={IconName.Plus} className="h-4 w-4" />
-										SQL Attribute
-									</Button>
-								) : null}
-							</>
+						editPerSection={canEditFocusedTerm}
+						sectionInfo={TERM_SECTION_INFO}
+						sectionActions={
+							canEditCatalog
+								? {
+										sql_attributes: (
+											<Button
+												theme={ButtonTheme.Soft}
+												size={Size.SMALL}
+												type="button"
+												onClick={() => setCreateSqlAttrModalOpen(true)}
+												iconPosition="left"
+											>
+												<Icon
+													name={IconName.Plus}
+													className="h-3.5 w-3.5"
+												/>
+												SQL Attribute
+											</Button>
+										),
+									}
+								: undefined
 						}
-						isEditing={termEditing}
 						onPatchEdits={handleTermEditSave}
-						onSave={() => {
-							setTermEditing(false);
-						}}
-						onCancel={() => {
-							setTermEditing(false);
-						}}
 						onDataTableRowClick={handleDataTableRowClick}
 						onCertificationChange={handleTermCertificationChange}
 						onDataTableCertificationChange={handleTermTableCertificationChange}

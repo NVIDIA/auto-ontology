@@ -2443,21 +2443,16 @@ export const ExplorationView = () => {
 			{termPanelId != null && (
 				<aside
 					aria-label="Term details"
-					className="flex h-full w-[520px] max-w-[50%] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+					className="relative flex h-full w-[520px] max-w-[50%] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
 				>
-					<div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-5 py-2 dark:border-zinc-800">
-						<span className="text-xs font-semibold uppercase tracking-wide text-secondary dark:text-zinc-400">
-							Term
-						</span>
-						<button
-							type="button"
-							aria-label="Close term details"
-							onClick={() => handleSelectNode(null)}
-							className="rounded p-1 text-secondary hover:bg-zinc-100 hover:text-heading dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-						>
-							<Icon name={IconName.Close} className="h-4 w-4" />
-						</button>
-					</div>
+					<button
+						type="button"
+						aria-label="Close term details"
+						onClick={() => handleSelectNode(null)}
+						className="absolute right-3 top-3 z-10 rounded p-1 text-secondary hover:bg-zinc-100 hover:text-heading dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					>
+						<Icon name={IconName.Close} className="h-4 w-4" />
+					</button>
 					<div className="flex min-h-0 flex-1 flex-col">
 						<TermsView />
 					</div>
