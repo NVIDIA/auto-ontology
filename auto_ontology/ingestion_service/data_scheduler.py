@@ -82,7 +82,9 @@ class DataScheduler(IntervalScheduler):
     name = "ingest"
 
     def __init__(self, interval: timedelta | None = None) -> None:
-        super().__init__(interval or resolve_ingest_interval())
+        super().__init__(
+            interval if interval is not None else resolve_ingest_interval()
+        )
 
     async def _run_once(self) -> None:
         # Reload connectors each pass so newly added connections are picked up

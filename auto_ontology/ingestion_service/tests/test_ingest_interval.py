@@ -59,6 +59,10 @@ def test_invalid_value_warns_and_defaults(
     assert INGEST_INTERVAL_ENV in caplog.text
 
 
-def test_explicit_interval_wins_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
+# timedelta(0) is falsy: an explicit argument must win on presence, not truthiness.
+@pytest.mark.parametrize("interval", [timedelta(hours=1), timedelta(0)])
+def test_explicit_interval_wins_over_env(
+    monkeypatch: pytest.MonkeyPatch, interval: timedelta
+) -> None:
     monkeypatch.setenv(INGEST_INTERVAL_ENV, "6")
-    assert DataScheduler(timedelta(hours=1))._interval == timedelta(hours=1)
+    assert DataScheduler(interval)._interval == interval
