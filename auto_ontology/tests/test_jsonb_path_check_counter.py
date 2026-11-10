@@ -11,7 +11,7 @@ after the self-apply pass should increment the counter.
 """
 
 from typing import Any, Dict
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock, call
 
 import pytest
 
@@ -100,3 +100,15 @@ def test_counter_preserved_for_two_self_applied_fixes_then_spent_on_third(
     third = agent.execute(_make_state(path_state))
     assert third["decision"] == "invalid_sql"
     assert third["path_state"]["jsonb_path_repair_attempts"] == 1
+
+    original_sql = "SELECT data->>'flattened.key' FROM aliens"
+    assert find_mismatches.call_args_list == [
+        call(ANY, None, original_sql, known_types={}),
+        call(ANY, None, fixed_sql, known_types={}),
+        call(ANY, None, fixed_sql, known_types={}),
+    ]
+    assert fake_self_apply.call_args_list == [
+        call([mismatch], original_sql),
+        call([mismatch], fixed_sql),
+        call([mismatch], fixed_sql),
+    ]
