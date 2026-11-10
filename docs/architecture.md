@@ -17,8 +17,8 @@ two a step uses.
 
 - [Services](#services)
 - [Generate an ontology](#generate-an-ontology)
-- [Answer a question: fixed chain](#answer-a-question-fixed-chain)
-- [Answer a question: ReAct (in development)](#answer-a-question-react-in-development)
+- [Answer a question, now: fixed chain](#answer-a-question-now-fixed-chain)
+- [Answer a question, next: ReAct (in development)](#answer-a-question-next-react-in-development)
 - [Check answerability](#check-answerability)
 - [Settings](#settings)
 
@@ -175,6 +175,52 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 
 `RERANK` is used only in the bridge-table step. Answering doesn't call it.
 
+### Next: Generate (ReAct, in development)
+
+The ReAct work in development adds two cross-table steps after the semantic
+foreign key steps. Both run by default on that branch.
+
+| Step | Kind | Code |
+| --- | --- | --- |
+| Keep links inside a table family: when two copies of a schema differ only by a name prefix (`OLD_ROOMS`, `NEW_ROOMS`), move a link that crosses families onto the twin in its own family, or drop it | Rules + SQL | `semantic/table_families.py` (`resolve_table_families`) |
+| Re-embed tables and columns with their terms and attributes, so a table's search text carries its term | `EMBED` | `server/datasources/service.py` (`refresh_catalog_embeddings`) |
+
+```mermaid
+flowchart TD
+  subgraph inputs["Inputs"]
+    direction LR
+    i1[("Schema, keys, declared foreign keys")]
+    i2[("Query history")]
+  end
+  subgraph ingest["Catalog ingest"]
+    direction LR
+    c1["SQL: extract tables, columns, keys, views, queries"] --> c2["Rules + LLM: detect PII"] --> c3["EMBED: index tables and columns"]
+  end
+  subgraph pertable["Semantic compilation: per-table pass"]
+    direction LR
+    p1["SQL: sample values, distinct values, date formats"] --> p2["LLM: foreign key candidates, junction tables"] --> p3["LLM: column descriptions, terms, synonyms"]
+  end
+  subgraph cross["Semantic compilation: cross-table pass"]
+    direction LR
+    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL + rules: drop keys with no shared values; keep keys inside a table family"] --> x5["EMBED: re-index tables and columns with their terms"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"]
+  end
+  subgraph output["Output"]
+    direction LR
+    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Review, edit, certify: UI or REST"]
+    o1 <--> o3["Import or export: Ossie YAML"]
+  end
+  inputs --> ingest --> pertable --> cross --> output
+  output -. "edits are kept; the next run compiles only tables without a term" .-> pertable
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef optional stroke-dasharray:5 5
+  class c2,c3,p2,p3,x1,x5,x3,x4 model
+  class c1,p1,x2 det
+  class c2 optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
+
 ### Output and feedback loop
 
 - The ontology lives in Postgres (terms, column attributes, SQL attributes,
@@ -187,7 +233,7 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 - Import and export model definitions as Ossie YAML with **Settings → Import /
   Export**, `POST /api/model/import`, or `POST /api/model/export`.
 
-## Answer a question: fixed chain
+## Answer a question, now: fixed chain
 
 This is the current agent, a LangGraph graph built in
 `auto_ontology/retrieval/text_to_sql/text_to_sql_graph.py` (`create_graph`).
@@ -283,7 +329,7 @@ that passed the static checks but not the intent judge, unexecuted
 Glossary definitions and custom prompts from **Settings → Semantic Input** are
 added to the agent's prompts.
 
-## Answer a question: ReAct (in development)
+## Answer a question, next: ReAct (in development)
 
 The ReAct agent replaces the fixed chain with one loop: the `REASONING` model
 starts with no schema and decides which tool to call next. It is being built
@@ -407,6 +453,6 @@ user to clarify.
 | **Settings → Single Sign-On** | SSO | Access |
 | Environment (`.env`, Helm values) | `REASONING_*`, `NON_REASONING_*`, `EMBED_*`, `RERANK_*`, `DEFAULT_MODELS_*` | Every model call |
 | Environment | `KUMO_RFM_API_URL`, `KUMO_RFM_API_KEY`, `KUMO_MAX_*` | Predictions |
-| Environment | `DB_PROBE_*`, `SEMANTIC_LLM_MAX_INFLIGHT`, `TEXT_TO_SQL_REACT_*` (ReAct, in development) | Fixed-chain probes, compilation concurrency, ReAct limits |
+| Environment | `DB_PROBE_*`, `SEMANTIC_LLM_MAX_INFLIGHT`, `TEXT_TO_SQL_REACT_*` (next) | Now: fixed-chain probes and compilation concurrency. Next: ReAct limits |
 
 [`.env.example`](../.env.example) documents every environment variable.
