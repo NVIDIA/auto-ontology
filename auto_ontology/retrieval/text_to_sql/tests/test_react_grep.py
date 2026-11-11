@@ -18,6 +18,7 @@ from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
     ScriptedModel,
     SQLiteConnector,
     call,
+    show_shop_tables,
 )
 
 ALL_ORDERS = "SELECT order_id, amount FROM orders ORDER BY order_id"
@@ -29,8 +30,9 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_RESULT_ROWS", "2")
     catalog = FakeCatalog(SHOP_CATALOG)
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
-    monkeypatch.setattr(loop, "catalog_for", lambda *_: catalog)
-    return ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
+    return show_shop_tables(
+        ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
+    )
 
 
 def test_a_result_too_long_to_show_is_saved_as_a_page(ctx: ToolContext) -> None:

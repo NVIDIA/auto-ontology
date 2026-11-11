@@ -191,6 +191,36 @@ def catalog_for(ctx: ToolContext, connector: SQLDatabase) -> CatalogNames:
     return SchemaCatalog(ctx.schemas[database_name])
 
 
+def tables_not_shown(statement: exp.Expression, ctx: ToolContext) -> list[str]:
+    """Catalog tables *statement* reads that no ``retrieve`` result named.
+
+    The prompt tells the model to use only what ``retrieve`` showed, and this
+    is what holds it to that: a real table it never retrieved comes without
+    its description, its term or the SIMILAR line that says it is one of two
+    copies.
+    """
+    derived = _derived_names(statement)
+    problems = [
+        f"Not in view: {'.'.join(p for p in (table.db, table.name) if p)}. "
+        "Retrieve it (its exact name works) before using it."
+        for table in statement.find_all(exp.Table)
+        if table.name
+        and table.name.lower() not in derived
+        and not ctx.was_shown(table.db or None, table.name)
+    ]
+    return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
+
+
+def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResult:
+    """:func:`check_sql` against *connector*'s catalog, then against what is in view."""
+    check = check_sql(
+        sql, getattr(connector, "dialect", None), catalog_for(ctx, connector)
+    )
+    if check.problems or check.statement is None:
+        return check
+    return CheckResult(tables_not_shown(check.statement, ctx), check.statement)
+
+
 def connector_for(ctx: ToolContext) -> SQLDatabase | None:
     """The database the episode's SQL runs on.
 
@@ -258,7 +288,7 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first."
     dialect = getattr(connector, "dialect", None)
-    check = check_sql(sql, dialect, catalog_for(ctx, connector))
+    check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not run. Fix these first:\n- " + "\n- ".join(check.problems)
 

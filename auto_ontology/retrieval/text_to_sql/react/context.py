@@ -37,6 +37,12 @@ class ToolContext:
 
     ``pages`` holds the ``run_sql`` results too long to show, for ``grep`` to
     search; page *n* is ``pages[n - 1]``.
+
+    ``shown_tables`` is every table a ``retrieve`` result named — in a table
+    block, a JOIN route, a SIMILAR line or a definition's SQL — as lowercased
+    ``(schema, name)``. It is wider than ``seen_tables`` on purpose: a bridge
+    table on a join route or the other copy on a SIMILAR line is one the model
+    is told to use, though its columns were never listed.
     """
 
     retriever: Any
@@ -58,3 +64,16 @@ class ToolContext:
     predict_calls: int = 0
     prediction_refusal: str = ""
     pages: list[Any] = field(default_factory=list)
+    shown_tables: set[tuple[str, str]] = field(default_factory=set)
+
+    def show_table(self, schema: str | None, name: str | None) -> None:
+        if name:
+            self.shown_tables.add(((schema or "").lower(), name.lower()))
+
+    def was_shown(self, schema: str | None, name: str) -> bool:
+        """Whether a ``retrieve`` result named *name*; *schema* only when both have one."""
+        wanted_schema, wanted = (schema or "").lower(), name.lower()
+        return any(
+            shown == wanted and (not wanted_schema or not s or s == wanted_schema)
+            for s, shown in self.shown_tables
+        )

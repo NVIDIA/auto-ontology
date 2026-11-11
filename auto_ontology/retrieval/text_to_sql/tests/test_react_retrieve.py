@@ -285,6 +285,51 @@ def test_a_table_the_limit_cut_comes_back_in_full(
     assert "status TEXT — values: 'ACTIVE', 'CHURNED', 'PENDING'" in again
 
 
+def test_a_table_the_limit_cut_is_not_in_view(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx()
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "60")
+    tool.retrieve(ctx, "customer status")
+
+    assert not ctx.was_shown("crm", "customers")
+
+
+def test_a_bridge_on_a_join_route_is_in_view(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hop = {"source_column": "id", "target_column": "id"}
+    monkeypatch.setattr(
+        tool,
+        "find_join_path",
+        lambda _a, _d: [
+            {**hop, "source_schema": "sales", "source_table": "orders"}
+            | {"target_schema": "sales", "target_table": "order_links"},
+            {**hop, "source_schema": "sales", "source_table": "order_links"}
+            | {"target_schema": "crm", "target_table": "customers"},
+        ],
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    tool.retrieve(ctx, "customer status")
+
+    assert ctx.was_shown("sales", "order_links")
+
+
+def test_a_table_only_a_definition_names_is_in_view(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refunds = {**REVENUE, "sql": "SELECT SUM(r.amount) FROM finance.refunds r"}
+    monkeypatch.setattr(
+        tool, "_get_candidates_information", lambda *a, **k: [dict(refunds)]
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "refunds")
+
+    assert ctx.was_shown("finance", "refunds")
+    assert ctx.was_shown("sales", "orders")
+
+
 ORDERS_ARCHIVE = {
     "id": "t-orders-archive",
     "name": "orders_archive",
@@ -335,6 +380,7 @@ def test_a_near_copy_is_named_with_rows_and_differences(
     ) in text
     assert "customers (" not in text
     assert text.count("SIMILAR") == 1
+    assert ctx.was_shown("sales", "orders_archive")
 
 
 def test_a_near_copy_is_named_once_per_episode(

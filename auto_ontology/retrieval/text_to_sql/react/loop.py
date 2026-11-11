@@ -42,8 +42,7 @@ from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predic
 from auto_ontology.retrieval.text_to_sql.react.retrieve import retrieve
 from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
-    catalog_for,
-    check_sql,
+    check_query,
     connector_for,
     run_sql,
 )
@@ -93,9 +92,7 @@ def submit(
     connector = connector_for(ctx)
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first.", None
-    check = check_sql(
-        sql, getattr(connector, "dialect", None), catalog_for(ctx, connector)
-    )
+    check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
     db_response = _run_sql(

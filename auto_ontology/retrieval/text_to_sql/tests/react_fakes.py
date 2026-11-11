@@ -52,6 +52,13 @@ SHOP_CATALOG = {
 }
 
 
+def show_shop_tables(ctx: Any) -> Any:
+    """Mark the shop tables as retrieved, as a real ``retrieve`` call would."""
+    for name in SHOP_CATALOG:
+        ctx.show_table(None, name)
+    return ctx
+
+
 def call(name: str, call_id: str, **args: Any) -> dict[str, Any]:
     return {"name": name, "args": args, "id": call_id, "type": "tool_call"}
 

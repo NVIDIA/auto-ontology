@@ -19,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
     ScriptedModel,
     SQLiteConnector,
     call,
+    show_shop_tables,
 )
 
 FINAL_SQL = (
@@ -31,13 +32,14 @@ FINAL_SQL = (
 def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     catalog = FakeCatalog(SHOP_CATALOG)
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
-    monkeypatch.setattr(loop, "catalog_for", lambda *_: catalog)
     monkeypatch.setattr(
         loop,
         "retrieve",
         lambda _ctx, query, kinds=None: f"TABLE orders (for {query})",
     )
-    return ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
+    return show_shop_tables(
+        ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
+    )
 
 
 def _reply(*calls: dict) -> AIMessage:

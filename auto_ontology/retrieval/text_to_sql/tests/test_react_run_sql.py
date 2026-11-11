@@ -12,6 +12,7 @@ from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
     SHOP_SCRIPT,
     FakeCatalog,
     SQLiteConnector,
+    show_shop_tables,
 )
 
 CATALOG = FakeCatalog(SHOP_CATALOG)
@@ -83,7 +84,9 @@ def test_render_rows_explains_an_empty_result() -> None:
 def _ctx(monkeypatch: pytest.MonkeyPatch) -> tuple[ToolContext, SQLiteConnector]:
     connector = SQLiteConnector(SHOP_SCRIPT)
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
-    return ToolContext(retriever=None, connectors=[connector]), connector
+    return show_shop_tables(
+        ToolContext(retriever=None, connectors=[connector])
+    ), connector
 
 
 def test_run_sql_checks_before_touching_the_database(
@@ -94,6 +97,41 @@ def test_run_sql_checks_before_touching_the_database(
     assert text.startswith("Not run.")
     assert connector.executed == []
     assert ctx.sql_runs == 0
+
+
+def test_run_sql_refuses_a_table_retrieve_never_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = SQLiteConnector(SHOP_SCRIPT)
+    monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
+    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx.show_table(None, "orders")
+
+    text = tool.run_sql(
+        ctx,
+        "WITH t AS (SELECT cust_ref FROM orders) "
+        "SELECT c.status FROM t JOIN customers c ON c.customer_id = t.cust_ref",
+    )
+
+    assert text.splitlines() == [
+        "Not run. Fix these first:",
+        "- Not in view: customers. Retrieve it (its exact name works) before using it.",
+    ]
+    assert connector.executed == []
+    assert ctx.sql_runs == 0
+
+
+@pytest.mark.parametrize(
+    "schema, expected",
+    [(None, True), ("sales", True), ("SALES", True), ("archive", False)],
+)
+def test_was_shown_matches_the_schema_only_when_both_name_one(
+    schema: str | None, expected: bool
+) -> None:
+    ctx = ToolContext(retriever=None, connectors=[])
+    ctx.show_table("sales", "Orders")
+
+    assert ctx.was_shown(schema, "orders") is expected
 
 
 def test_run_sql_returns_rows(monkeypatch: pytest.MonkeyPatch) -> None:

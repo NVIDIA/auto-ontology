@@ -38,6 +38,9 @@ import logging
 import re
 from typing import Any
 
+import sqlglot
+from sqlglot import exp
+
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal.attributes import find_join_path
 from auto_ontology.dal.candidates import expand_info
@@ -325,9 +328,38 @@ def _hop_text(hop: dict) -> str:
     return f"{left}.{hop.get('source_column')} = {right}.{hop.get('target_column')}"
 
 
-def _join_lines(ctx: ToolContext, new_tables: list[dict]) -> list[str]:
-    """Join routes from each new table to every table already in view."""
-    lines: list[str] = []
+def _hop_tables(hops: list[dict]) -> set[tuple[str | None, str | None]]:
+    return {
+        (hop.get(f"{side}_schema"), hop.get(f"{side}_table"))
+        for hop in hops
+        for side in ("source", "target")
+    }
+
+
+def _sql_tables(sql: str | None) -> set[tuple[str | None, str | None]]:
+    """Tables a definition's SQL names; none when it does not parse."""
+    if not sql:
+        return set()
+    try:
+        statements = sqlglot.parse(sql)
+    except sqlglot.errors.SqlglotError:
+        return set()
+    return {
+        (table.db or None, table.name)
+        for statement in statements
+        if statement is not None
+        for table in statement.find_all(exp.Table)
+    }
+
+
+def _join_lines(
+    ctx: ToolContext, new_tables: list[dict]
+) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
+    """Join routes from each new table to every table already in view.
+
+    Each route comes with every table on it, bridges included.
+    """
+    lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
     lookups = 0
     others = list(ctx.seen_tables.values()) + new_tables
     for table in new_tables:
@@ -346,10 +378,10 @@ def _join_lines(ctx: ToolContext, new_tables: list[dict]) -> list[str]:
             hops = find_join_path(anchor, dest)
             if hops:
                 ctx.join_paths.append({"path": hops})
-                lines.append(
-                    f"JOIN {_qualified(table)} ↔ {_qualified(other)}: "
-                    + " → ".join(_hop_text(h) for h in hops)
+                line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
+                    _hop_text(h) for h in hops
                 )
+                lines.append((line, _hop_tables(hops)))
     return lines
 
 
@@ -404,30 +436,44 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if tid in ctx.seen_tables and matched.get(tid)
     ]
 
-    definitions = [
-        block for hit in hits if (block := _definition_block(hit)) is not None
-    ]
+    def own(table: dict) -> set[tuple[str | None, str | None]]:
+        return {(table.get("schema_name"), table.get("name"))}
+
     # Most useful first, since the limit cuts from the end: new tables, how they
-    # join, definitions that carry SQL, then tables seen before.
+    # join, definitions that carry SQL, then tables seen before. Each block
+    # carries the tables it names.
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
-    blocks = list(new_blocks.values())
-    blocks += _join_lines(ctx, new_tables)
+    named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
+        (new_blocks[str(t["id"])], own(t)) for t in new_tables
+    ]
+    named += _join_lines(ctx, new_tables)
     if config.siblings_enabled():
-        blocks += sibling_lines(ctx, new_tables)
-    blocks += definitions
-    blocks += [_table_block(t, matched[str(t["id"])], True) for t in revisited]
-    if not blocks:
+        named += [
+            (line, set().union(*(own(t) for t in tables)))
+            for line, tables in sibling_lines(ctx, new_tables)
+        ]
+    named += [
+        (block, _sql_tables(hit.get("sql")))
+        for hit in hits
+        if (block := _definition_block(hit)) is not None
+    ]
+    named += [(_table_block(t, matched[str(t["id"])], True), own(t)) for t in revisited]
+    if not named:
         return (
             f"No matches for {query!r}. Try other words, an exact column or table "
             "name, or a broader query."
         )
-    result = _cap(blocks)
+    result = _cap([block for block, _ in named])
     # Only a table the model was actually shown counts as seen; one the limit
     # cut must come back in full when a later search finds it again.
     ctx.seen_tables.update(
         {str(t["id"]): t for t in new_tables if new_blocks[str(t["id"])] in result}
     )
+    for block, tables in named:
+        if block in result:
+            for schema, name in tables:
+                ctx.show_table(schema, name)
     return result

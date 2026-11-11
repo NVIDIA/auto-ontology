@@ -140,9 +140,14 @@ def _only(table: dict, columns: list[str]) -> str:
     return f"only {_qualified(table)} has {listed}"
 
 
-def sibling_lines(ctx: ToolContext, new_tables: list[dict]) -> list[str]:
-    """A line for each near-copy of each new table, once per pair per episode."""
-    lines: list[str] = []
+def sibling_lines(
+    ctx: ToolContext, new_tables: list[dict]
+) -> list[tuple[str, list[dict]]]:
+    """A line for each near-copy of each new table, once per pair per episode.
+
+    Each line comes with the two tables it names.
+    """
+    lines: list[tuple[str, list[dict]]] = []
     catalog = _catalog(ctx) if new_tables else []
     for table in new_tables:
         for sibling in find_siblings(table, catalog):
@@ -150,10 +155,11 @@ def sibling_lines(ctx: ToolContext, new_tables: list[dict]) -> list[str]:
             if pair in ctx.sibling_pairs:
                 continue
             ctx.sibling_pairs.add(pair)
-            lines.append(
+            line = (
                 f"SIMILAR {_with_rows(ctx, table)} ~ {_with_rows(ctx, sibling.table)}: "
                 f"{sibling.shared} shared columns; "
                 f"{_only(table, sibling.only_here)}; "
                 f"{_only(sibling.table, sibling.only_there)}"
             )
+            lines.append((line, [table, sibling.table]))
     return lines
