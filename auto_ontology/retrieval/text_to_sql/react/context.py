@@ -27,9 +27,6 @@ class ToolContext:
     checks resolve names against, per database, loaded on first use because a
     question that never drafts SQL should not pay for it.
 
-    ``retriever`` searches the semantic collection (definitions, analyses);
-    ``data_retriever`` the one tables and columns are embedded in.
-
     ``join_paths`` keeps the catalog joins ``retrieve`` found between tables in
     view, in the shape KumoRFM links its graph with. ``question`` and
     ``prediction_llm`` are what ``predict`` hands KumoRFM: the question as the
@@ -46,6 +43,9 @@ class ToolContext:
     ``(schema, name)``. It is wider than ``seen_tables`` on purpose: a bridge
     table on a join route or the other copy on a SIMILAR line is one the model
     is told to use, though its columns were never listed.
+
+    ``retriever`` searches the semantic collection; ``data_retriever`` the one
+    tables and columns are embedded in, for what the semantic layer leaves out.
     """
 
     retriever: Any

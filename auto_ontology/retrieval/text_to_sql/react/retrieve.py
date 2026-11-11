@@ -14,19 +14,26 @@ ones training can improve.
 
 One call does three things, all through existing data-access functions:
 
-1. **Search by meaning** — :func:`_get_candidates_information`, the vector
-   search plus graph enrichment candidate retrieval already uses.
+1. **Search by meaning** — :func:`_get_candidates_information` over the
+   semantic layer: Terms stand for tables and ColumnAttributes for columns,
+   since their text is the processed, natural-language description of the
+   data; definitions and analyses are searched as themselves. Tables and
+   columns the semantic layer has no row for — foreign keys, all-key link
+   tables — are searched in the data collection instead.
 2. **Search by name** — :func:`fetch_global_search`, the catalog's substring
-   search, which finds codes an embedding misses (``CDSCode``, ``T-BIL``).
-3. **Expand one step along the graph** — each hit's tables with their columns,
-   stored values and semantic FKs (:func:`fetch_tables_by_ids`), the join route
-   from every new table to the tables earlier calls already showed
+   search, which finds codes an embedding misses (``CDSCode``, ``T-BIL``). A
+   word that looks copied from a schema is also matched against physical table
+   and column names, which attribute display names do not carry.
+3. **Expand one step along the graph** — a term's tables
+   (:func:`fetch_term_table_pairs`) and an attribute's owning column
+   (:func:`fetch_attr_column_contexts`), each table with its columns, stored
+   values and semantic FKs (:func:`fetch_tables_by_ids`), the join route from
+   every new table to the tables earlier calls already showed
    (:func:`find_join_path`), and the near-copies of every new table
    (:mod:`.siblings`).
 
-Terms and column attributes are not searched: a table's search text carries
-its term and a column's carries its attribute, so the table or column itself
-is the hit.
+The model still sees tables and columns, with the Term or attribute each
+stands for in brackets.
 
 The result is rendered as text and capped in size. The same query against the
 same catalog returns the same text.
@@ -42,39 +49,58 @@ import sqlglot
 from sqlglot import exp
 
 from auto_ontology.catalog.constants import Labels
-from auto_ontology.dal.attributes import find_join_path
+from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_path
 from auto_ontology.dal.candidates import expand_info
 from auto_ontology.dal.datasources import (
     fetch_tables_by_ids,
     find_column_id_by_table_and_name,
 )
 from auto_ontology.dal.search import fetch_global_search, search_tokens
+from auto_ontology.dal.terms import fetch_semantic_coverage, fetch_term_table_pairs
 from auto_ontology.retrieval.data_access.candidates import _get_candidates_information
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.siblings import sibling_lines
-from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
+from auto_ontology.semantic.constants import (
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
+    LABEL_TERM,
+    REL_REPRESENTS,
+)
 
 logger = logging.getLogger(__name__)
 
-#: What the model may narrow a search to, and the graph labels each covers.
+#: What the model may narrow a search to, and the semantic labels each covers.
 KIND_LABELS: dict[str, list[str]] = {
-    "table": [Labels.TABLE],
-    "column": [Labels.COLUMN],
+    "term": [LABEL_TERM],
+    "attribute": [LABEL_COLUMN_ATTRIBUTE],
     "definition": [LABEL_SQL_ATTRIBUTE],
     "analysis": [Labels.CUSTOM_ANALYSIS],
 }
 
-#: Hits kept per label from the meaning search. Columns get the most because
-#: they are what a query is written from; definitions are few and long.
+#: The physical names an identifier-like word is also matched against.
+_PHYSICAL_LABELS: dict[str, str] = {
+    LABEL_TERM: Labels.TABLE,
+    LABEL_COLUMN_ATTRIBUTE: Labels.COLUMN,
+}
+
+#: Hits kept per label from the meaning search. Attributes get the most because
+#: columns are what a query is written from; definitions are few and long.
 _PER_LABEL_K: dict[str, int] = {
-    Labels.TABLE: 8,
-    Labels.COLUMN: 15,
+    LABEL_TERM: 8,
+    LABEL_COLUMN_ATTRIBUTE: 15,
     LABEL_SQL_ATTRIBUTE: 3,
     Labels.CUSTOM_ANALYSIS: 3,
 }
 
+#: Physical rows searched, then kept, for what the semantic layer leaves out.
+#: More are searched than kept because covered rows are dropped after ranking,
+#: and would otherwise crowd an uncovered one out of a small top k.
+_PHYSICAL_SEARCH_K: dict[str, int] = {Labels.TABLE: 10, Labels.COLUMN: 20}
+_PHYSICAL_KEEP: dict[str, int] = {Labels.TABLE: 3, Labels.COLUMN: 5}
+
 _NAME_SEARCH_LIMIT = 10
+_TERM_TABLE_LIMIT = 3
 _JOIN_PAIRS_PER_CALL = 10
 _MAX_DESCRIPTION_CHARS = 160
 _MAX_DEFINITION_CHARS = 500
@@ -98,31 +124,53 @@ def _identifier_words(query: str) -> list[str]:
     return list(dict.fromkeys(w for w in words if w and _IDENTIFIER_RE.match(w)))
 
 
-#: Labels embedded in the data collection rather than the semantic one.
-_DATA_LABELS = (Labels.TABLE, Labels.COLUMN)
-
-
 def _meaning_hits(ctx: ToolContext, query: str, labels: list[str]) -> list[dict]:
-    """Vector hits for *labels*, each label searched in the collection it lives in."""
-    searches = [
-        (
-            ctx.data_retriever or ctx.retriever,
-            [lb for lb in labels if lb in _DATA_LABELS],
-        ),
-        (ctx.retriever, [lb for lb in labels if lb not in _DATA_LABELS]),
-    ]
-    hits: list[dict] = []
-    for retriever, group in searches:
-        if not group or retriever is None:
-            continue
-        hits += _get_candidates_information(
-            retriever,
+    return list(
+        _get_candidates_information(
+            ctx.retriever,
             query,
-            list_of_semantic=group,
+            list_of_semantic=labels,
             database_name=ctx.database_name,
-            per_label_k={label: _PER_LABEL_K.get(label, 5) for label in group},
+            per_label_k={label: _PER_LABEL_K.get(label, 5) for label in labels},
         )
-    return hits
+    )
+
+
+def _uncovered_physical_hits(
+    ctx: ToolContext, query: str, labels: list[str]
+) -> list[dict]:
+    """Tables and columns by meaning that no Term or ColumnAttribute stands for.
+
+    Foreign-key columns get no attribute and all-key link tables no Term, so
+    the semantic search alone could never land on them.
+    """
+    physical = [_PHYSICAL_LABELS[lb] for lb in labels if lb in _PHYSICAL_LABELS]
+    if not physical or ctx.data_retriever is None:
+        return []
+    hits = list(
+        _get_candidates_information(
+            ctx.data_retriever,
+            query,
+            list_of_semantic=physical,
+            database_name=ctx.database_name,
+            per_label_k={label: _PHYSICAL_SEARCH_K[label] for label in physical},
+        )
+    )
+    covered_columns, covered_tables = fetch_semantic_coverage(
+        [str(h["id"]) for h in hits if h.get("label") == Labels.COLUMN],
+        [str(h["id"]) for h in hits if h.get("label") == Labels.TABLE],
+    )
+    covered = {Labels.COLUMN: covered_columns, Labels.TABLE: covered_tables}
+    kept: list[dict] = []
+    counts = dict.fromkeys(physical, 0)
+    for hit in hits:
+        label = hit.get("label")
+        if label not in counts or str(hit.get("id")) in covered[label]:
+            continue
+        if counts[label] < _PHYSICAL_KEEP[label]:
+            counts[label] += 1
+            kept.append(hit)
+    return kept
 
 
 def _name_hits(query: str, labels: list[str]) -> list[dict]:
@@ -130,14 +178,19 @@ def _name_hits(query: str, labels: list[str]) -> list[dict]:
 
     The whole query has to match every token in one name or one description,
     which a sentence rarely does — so a word that looks copied from a schema is
-    also searched alone, by name only.
+    also searched alone, by name only, and against physical names too.
     """
-    object_types = set(labels)
-    searches = [(search_tokens(query), True)]
-    searches += [(search_tokens(word), False) for word in _identifier_words(query)]
+    semantic = set(labels)
+    physical = semantic | {
+        _PHYSICAL_LABELS[lb] for lb in labels if lb in _PHYSICAL_LABELS
+    }
+    searches = [(search_tokens(query), True, semantic)]
+    searches += [
+        (search_tokens(word), False, physical) for word in _identifier_words(query)
+    ]
 
     raw: list[dict] = []
-    for tokens, include_description in searches:
+    for tokens, include_description, object_types in searches:
         if not tokens:
             continue
         raw += fetch_global_search(
@@ -153,11 +206,11 @@ def _name_hits(query: str, labels: list[str]) -> list[dict]:
     return hits
 
 
-def _merge_hits(meaning: list[dict], names: list[dict]) -> list[dict]:
-    """Meaning hits first, then name hits neither search has already returned."""
+def _merge_hits(*searches: list[dict]) -> list[dict]:
+    """Hits in search order, each once."""
     merged: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    for hit in [*meaning, *names]:
+    for hit in [h for hits in searches for h in hits]:
         if hit.get("id") is None:
             continue
         key = (str(hit.get("label")), str(hit["id"]))
@@ -176,14 +229,46 @@ def _hit_table_ids(hit: dict) -> list[str]:
     ]
 
 
-def _resolve_tables(hits: list[dict]) -> tuple[list[str], dict[str, set[str]]]:
-    """Tables the hits live on, in hit order, plus which columns each matched."""
+def _resolve_tables(
+    ctx: ToolContext, hits: list[dict]
+) -> tuple[list[str], dict[str, set[str]]]:
+    """Tables the hits live on, in hit order, plus which columns each matched.
+
+    A term stands for the tables it represents, not the ones that merely
+    reference it, and an attribute for the column that owns it.
+    """
+    attr_ids = [str(h["id"]) for h in hits if h.get("label") == LABEL_COLUMN_ATTRIBUTE]
+    attr_contexts = (
+        fetch_attr_column_contexts(attr_ids, database_name=ctx.database_name)
+        if attr_ids
+        else {}
+    )
+    term_ids = [str(h["id"]) for h in hits if h.get("label") == LABEL_TERM]
+    term_tables: dict[str, list[str]] = {}
+    if term_ids:
+        for pair in fetch_term_table_pairs(
+            term_ids=term_ids, database_name=ctx.database_name
+        ):
+            if pair.get("path") != REL_REPRESENTS:
+                continue
+            tables = term_tables.setdefault(str(pair["term_id"]), [])
+            if len(tables) < _TERM_TABLE_LIMIT and str(pair["table_id"]) not in tables:
+                tables.append(str(pair["table_id"]))
+
     table_ids: list[str] = []
     matched: dict[str, set[str]] = {}
     for hit in hits:
         label = hit.get("label")
+        hit_id = str(hit["id"])
         if label == Labels.TABLE:
-            ids = [str(hit["id"])]
+            ids = [hit_id]
+        elif label == LABEL_COLUMN_ATTRIBUTE:
+            context = attr_contexts.get(hit_id) or {}
+            ids = [str(context["table_id"])] if context.get("table_id") else []
+            if ids and context.get("col_name"):
+                matched.setdefault(ids[0], set()).add(context["col_name"])
+        elif label == LABEL_TERM:
+            ids = term_tables.get(hit_id, [])
         else:
             ids = _hit_table_ids(hit)
             if label == Labels.COLUMN and ids and hit.get("name"):
@@ -216,6 +301,8 @@ def _sample_values(values: Any) -> str:
 
 def _column_line(column: dict) -> str:
     parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
+    if column.get("attribute"):
+        parts.append(f" [{column['attribute']}]")
     details = []
     if column.get("description"):
         details.append(_clip(column["description"], _MAX_DESCRIPTION_CHARS))
@@ -260,6 +347,8 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
 
 def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     header = f"TABLE {_qualified(table)}"
+    if terms := [t for t in table.get("terms") or [] if t]:
+        header += f" [{', '.join(terms)}]"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     if seen_before:
@@ -419,9 +508,13 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     if not query:
         return "Error: query is empty. Say what you are looking for."
     labels = resolve_kinds(kinds)
-    hits = _merge_hits(_meaning_hits(ctx, query, labels), _name_hits(query, labels))
+    hits = _merge_hits(
+        _meaning_hits(ctx, query, labels),
+        _uncovered_physical_hits(ctx, query, labels),
+        _name_hits(query, labels),
+    )
 
-    table_ids, matched = _resolve_tables(hits)
+    table_ids, matched = _resolve_tables(ctx, hits)
     new_ids = [tid for tid in table_ids if tid not in ctx.seen_tables]
     new_ids = new_ids[: config.max_tables_per_retrieve()]
     fetched = {str(t["id"]): t for t in fetch_tables_by_ids(new_ids)}

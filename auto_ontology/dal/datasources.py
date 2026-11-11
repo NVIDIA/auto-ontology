@@ -35,6 +35,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy import values as sa_values
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
@@ -1003,6 +1004,35 @@ def _semantic_fk_target_expr() -> ColumnElement:
     )
 
 
+def _attribute_name_expr():
+    """The name of the ColumnAttribute a column carries, if any."""
+    return (
+        select(s.column_attribute.c.name)
+        .select_from(
+            s.column__has_attribute.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+        )
+        .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
+        .correlate(s.catalog_column)
+        .order_by(s.column_attribute.c.name)
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _term_names_expr():
+    """The names of the Terms a table represents, in name order."""
+    return (
+        select(func.array_agg(aggregate_order_by(s.term.c.name, s.term.c.name)))
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
+        .where(s.table__term.c.table_id == s.catalog_table.c.id)
+        .correlate(s.catalog_table)
+        .scalar_subquery()
+    )
+
+
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     """Tables with a name/type/description/sample_values summary of each column.
 
@@ -1023,6 +1053,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` resolves the referenced attribute back to its owning column
     and returns that target as ``schema.table.column`` for SQL prompts.
+    ``attribute`` and ``terms`` are the semantic layer's names for a column and
+    a table.
     """
     if not table_ids:
         return []
@@ -1043,6 +1075,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
                 semantic_fk_target.label("semantic_fk"),
+                _attribute_name_expr().label("attribute"),
+                _term_names_expr().label("terms"),
             )
             .select_from(
                 _table_join().join(
@@ -1073,6 +1107,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 # which costs it every edge and makes it unusable in
                 # `FOR EACH`. It has to survive every path to relevant_tables.
                 "pk": row.get("pk") or [],
+                "terms": row.get("terms") or [],
                 "columns": [],
             },
         )
@@ -1088,6 +1123,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
+                    "attribute": row.get("attribute"),
                 }
             )
     return list(tables.values())
@@ -1203,80 +1239,6 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
     return {"columns": columns, "fks": fks}
 
 
-def fetch_catalog_node_ids(database_name: str) -> list[str]:
-    """Every table id in *database_name*, then every column id."""
-    rows = store().query_read(
-        select(s.catalog_table.c.id.label("table_id"), s.catalog_column.c.id)
-        .select_from(_catalog_join())
-        .where(s.catalog_database.c.name == database_name)
-    )
-    table_ids = dict.fromkeys(str(r["table_id"]) for r in rows)
-    return [*table_ids, *(str(r["id"]) for r in rows)]
-
-
-def _column_attribute_fields(column_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Per column, the attribute it has and that attribute's term.
-
-    ``{column_id: {attribute_name, description_suggestion, term_name,
-    synonyms}}``; a column with several attributes reports the lowest id's, so
-    the answer is stable between calls.
-    """
-    if not column_ids:
-        return {}
-    attribute = s.column_attribute
-    rows = store().query_read(
-        select(
-            s.column__has_attribute.c.column_id,
-            attribute.c.name.label("attribute_name"),
-            attribute.c.description_suggestion,
-            func.coalesce(_blank_to_null(attribute.c.term_name), s.term.c.name).label(
-                "term_name"
-            ),
-            s.term.c.synonyms,
-        )
-        .select_from(
-            s.column__has_attribute.join(
-                attribute, attribute.c.id == s.column__has_attribute.c.attribute_id
-            )
-            .outerjoin(
-                s.column_attribute__term,
-                s.column_attribute__term.c.attribute_id == attribute.c.id,
-            )
-            .outerjoin(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
-        )
-        .where(s.column__has_attribute.c.column_id.in_(column_ids))
-        .order_by(s.column__has_attribute.c.column_id, attribute.c.id, s.term.c.id)
-    )
-    fields: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        fields.setdefault(str(row["column_id"]), dict(row))
-    return fields
-
-
-def _table_term_fields(table_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Per table, the name and synonyms of the term it represents."""
-    if not table_ids:
-        return {}
-    rows = store().query_read(
-        select(
-            s.table__term.c.table_id,
-            s.term.c.name.label("term_name"),
-            s.term.c.synonyms,
-        )
-        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
-        .where(s.table__term.c.table_id.in_(table_ids))
-        .order_by(s.table__term.c.table_id, s.term.c.id)
-    )
-    fields: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        fields.setdefault(str(row["table_id"]), dict(row))
-    return fields
-
-
-def _blank_to_null(value: ColumnElement) -> ColumnElement:
-    return func.nullif(func.trim(func.coalesce(value, "")), "")
-
-
 def fetch_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
@@ -1306,9 +1268,6 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_column.c.data_type,
                     column_description_expr().label("description"),
                     s.catalog_column.c.sample_values,
-                    s.catalog_column.c.format,
-                    s.catalog_column.c.is_unique,
-                    _semantic_fk_target_expr().label("references"),
                     s.catalog_database.c.name.label("database_name"),
                 )
                 .select_from(_catalog_join())
@@ -1317,17 +1276,6 @@ def fetch_tables_and_columns_by_node_ids(
             )
         ]
     )
-    if not columns_df.empty:
-        semantic = _column_attribute_fields(columns_df["id"].astype(str).tolist())
-        for field in (
-            "attribute_name",
-            "description_suggestion",
-            "term_name",
-            "synonyms",
-        ):
-            columns_df[field] = [
-                (semantic.get(str(cid)) or {}).get(field) for cid in columns_df["id"]
-            ]
     tables_df = pd.DataFrame(
         [
             dict(r)
@@ -1337,8 +1285,12 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_table.c.name.label("table_name"),
                     s.catalog_schema.c.name.label("table_schema"),
                     s.catalog_table.c.table_type,
-                    table_description_expr().label("description"),
-                    s.catalog_table.c.pk,
+                    # The table's own description, not the fallback -- unlike
+                    # the columns three lines earlier. Asymmetric on purpose:
+                    # these frames feed embeddings, and widening what gets
+                    # embedded would shift retrieval results with no test
+                    # noticing.
+                    s.catalog_table.c.description,
                     s.catalog_database.c.name.label("database_name"),
                 )
                 .select_from(_table_join())
@@ -1346,12 +1298,6 @@ def fetch_tables_and_columns_by_node_ids(
             )
         ]
     )
-    if not tables_df.empty:
-        terms = _table_term_fields(tables_df["id"].astype(str).tolist())
-        for field in ("term_name", "synonyms"):
-            tables_df[field] = [
-                (terms.get(str(tid)) or {}).get(field) for tid in tables_df["id"]
-            ]
 
     database_name = ""
     for frame in (tables_df, columns_df):

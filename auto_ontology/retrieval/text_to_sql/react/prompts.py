@@ -24,10 +24,14 @@ SYSTEM_PROMPT = """\
 You answer a question about a database by writing one {dialect} SQL query.
 
 You start with no schema. Find what you need with the tools:
-- retrieve: search the ontology. Write your own search text: the question, \
-something the last result was missing ("how is revenue calculated", "which \
-column stores admission status"), or an exact table or column name. Search \
-again whenever something is missing.
+- retrieve: search the semantic layer: the business concepts the tables store, \
+what each column means, and named calculations. Write your own search text in \
+business words: the question, something the last result was missing ("how is \
+revenue calculated", "which column stores admission status"), or an exact \
+table or column name. What it finds comes back as tables and columns, with \
+the concept a table stores and what a column means in [brackets]; a column \
+that "references" another table is a foreign key to join on. Search again \
+whenever something is missing.
 - run_sql: check a query against the catalog and run it. Use it to look at \
 stored values before filtering on them, and to test a draft.
 - submit: give your final query. It is checked and run; if it fails you get \
@@ -104,11 +108,17 @@ RETRIEVE_TOOL = {
     "function": {
         "name": ToolName.RETRIEVE,
         "description": (
-            "Search tables, columns, definitions and analyses by meaning "
-            "and by name. Returns matching tables with their columns, stored "
-            "values and references, definitions with their SQL, how new "
-            "tables join to ones already found, and tables that are near "
-            "copies of them."
+            "Search the semantic layer by meaning and by name: terms (the "
+            "business concepts a table stores, such as Customer or Order), "
+            "attributes (what a column means, such as Order Date), "
+            "definitions (named calculations with their SQL) and analyses. "
+            "Tables and columns the semantic layer does not describe, such as "
+            "foreign keys and link tables, are searched directly. An exact "
+            "table or column name is matched too. Every term and "
+            "attribute found comes back as the table that stores it, with its "
+            "columns, stored values and references; definitions come with "
+            "their SQL. Also returns how new tables join to ones already "
+            "found, and tables that are near copies of them."
         ),
         "parameters": {
             "type": "object",
@@ -120,7 +130,10 @@ RETRIEVE_TOOL = {
                 "kinds": {
                     "type": "array",
                     "items": {"type": "string", "enum": _KINDS},
-                    "description": "Optional: search only these kinds.",
+                    "description": (
+                        "Optional: search only these kinds. term finds tables, "
+                        "attribute finds columns, foreign keys included."
+                    ),
                 },
             },
             "required": ["query"],

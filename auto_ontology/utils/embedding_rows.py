@@ -107,9 +107,6 @@ class CatalogEmbeddingRowsOp:
                 columns=columns,
                 schema_name=schema_name,
                 database_name=self._database_name,
-                term_name=_text(table.get("term_name")),
-                synonyms=table.get("synonyms"),
-                pk=table.get("pk"),
             )
             rows.append(
                 build_embed_row(
@@ -128,8 +125,8 @@ class CatalogEmbeddingRowsOp:
                 data_type = (
                     "" if pd.isna(v := column.get("data_type")) else str(v).strip()
                 )
-                column_description = _text(column.get("description")) or _text(
-                    column.get("description_suggestion")
+                column_description = (
+                    "" if pd.isna(v := column.get("description")) else str(v).strip()
                 )
                 sample_values = (column.get("sample_values") or [])[:5]
                 column_text = build_column_text(
@@ -140,12 +137,6 @@ class CatalogEmbeddingRowsOp:
                     schema_name=schema_name,
                     table_name=table_name,
                     database_name=self._database_name,
-                    attribute_name=_text(column.get("attribute_name")),
-                    term_name=_text(column.get("term_name")),
-                    synonyms=column.get("synonyms"),
-                    column_format=_text(column.get("format")),
-                    is_unique=column.get("is_unique"),
-                    references=_text(column.get("references")),
                 )
                 rows.append(
                     build_embed_row(
@@ -163,19 +154,6 @@ class CatalogEmbeddingRowsOp:
 # ── Text templates ───────────────────────────────────────────────────────────
 
 
-def _text(value: Any) -> str:
-    """*value* as stripped text; ``""`` for missing, NaN or blank."""
-    if value is None or (not isinstance(value, (list, tuple)) and pd.isna(value)):
-        return ""
-    return str(value).strip()
-
-
-def _synonyms(value: Any) -> str:
-    if value is None or isinstance(value, str) or not hasattr(value, "__iter__"):
-        return _text(value)
-    return ", ".join(t for v in value if (t := _text(v)))
-
-
 def build_table_text(
     *,
     table_name: str,
@@ -183,14 +161,8 @@ def build_table_text(
     columns: list[Any],
     schema_name: str,
     database_name: str,
-    term_name: str = "",
-    synonyms: Any = None,
-    pk: Any = None,
 ) -> str:
     """Build the embedding text for a table.
-
-    *term_name* and *synonyms* come from the Term the table represents, so a
-    search by business meaning finds the table itself.
 
     Returns just the text string; the caller is responsible for wrapping it
     in an embed-row dict via :func:`build_embed_row`.
@@ -200,14 +172,8 @@ def build_table_text(
         f", schema_name: {schema_name}"
         f", table_name: {table_name}"
     )
-    if term := _text(term_name):
-        text += f", term: {term}"
-    if names := _synonyms(synonyms):
-        text += f", synonyms: {names}"
     if table_description:
         text += f", table_description: {table_description}"
-    if keys := _synonyms(pk):
-        text += f", primary_key: {keys}"
 
     column_pieces: list[str] = []
     for column in columns:
@@ -236,18 +202,8 @@ def build_column_text(
     table_name: str,
     schema_name: str,
     database_name: str,
-    attribute_name: str = "",
-    term_name: str = "",
-    synonyms: Any = None,
-    column_format: str = "",
-    is_unique: Any = None,
-    references: str = "",
 ) -> str:
     """Build the embedding text for a column.
-
-    *attribute_name*, *term_name* and *synonyms* come from the ColumnAttribute
-    the column has and its Term, so a search by business meaning finds the
-    column itself.
 
     Returns just the text string; the caller is responsible for wrapping it
     in an embed-row dict via :func:`build_embed_row`.
@@ -259,20 +215,8 @@ def build_column_text(
         f", column_name: {column_name}"
         f", data_type: {data_type}"
     )
-    if attribute := _text(attribute_name):
-        text += f", attribute: {attribute}"
-    if term := _text(term_name):
-        text += f", of_term: {term}"
-    if names := _synonyms(synonyms):
-        text += f", term_synonyms: {names}"
     if column_description:
         text += f", column_description: {column_description}"
-    if fmt := _text(column_format):
-        text += f", format: {fmt}"
-    if _text(is_unique).lower() == "true":
-        text += ", unique: yes"
-    if target := _text(references):
-        text += f", references: {target}"
     if len(sample_values) > 0:
         text += f", sample_values: {', '.join(str(x) for x in sample_values)}"
     return text

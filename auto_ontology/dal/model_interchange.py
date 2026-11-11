@@ -48,7 +48,6 @@ from auto_ontology.server.model_interchange.embed import (
     build_custom_analysis_semantic_row,
     build_sql_attribute_semantic_row,
     build_table_data_row,
-    build_term_semantic_rows,
 )
 from auto_ontology.server.model_interchange.schemas import (
     AutoOntologyModelDocument,
@@ -1385,20 +1384,8 @@ def _import_terms(
             represents_rows.append({"term_id": live_term_id, "table_id": live_table_id})
     _link(s.table__term, represents_rows)
 
-    if embed_buffer is not None and newly_created:
-        db_names = _database_names_for_terms(newly_created)
-        for term in terms:
-            live_term_id, was_created = term_results[term.id]
-            if not was_created:
-                continue
-            embed_buffer.semantic_rows.extend(
-                build_term_semantic_rows(
-                    database_name=db_names.get(live_term_id, ""),
-                    live_id=live_term_id,
-                    name=term.name,
-                    description=term.description,
-                ),
-            )
+    if embed_buffer is not None:
+        embed_buffer.term_ids.extend(newly_created)
 
 
 def _import_column_attributes(
@@ -1481,6 +1468,8 @@ def _import_column_attributes(
                     is_unique=col_ctx.is_unique,
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
+                    column_description=col_ctx.description,
+                    column_data_type=col_ctx.data_type,
                 ),
             )
 
