@@ -103,9 +103,25 @@ def test_repeated_call_is_not_run_again(ctx: ToolContext) -> None:
 
     result = loop.run_episode(model, ctx, "q")
 
-    assert result.tool_calls == 2
+    assert result.tool_calls == 3
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0] == "TABLE orders (for orders)"
     assert observations[1].startswith("You already made this exact call")
+
+
+def test_a_model_that_only_repeats_itself_runs_out_of_calls(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "3")
+    model = ScriptedModel(
+        [_reply(call("retrieve", str(n), query="orders")) for n in range(50)]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "budget_exhausted"
+    assert result.tool_calls == 3
+    assert len(model.seen) == 4
 
 
 def test_budget_ends_with_a_submit_only_turn(

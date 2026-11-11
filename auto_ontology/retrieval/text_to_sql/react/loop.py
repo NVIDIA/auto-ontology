@@ -234,13 +234,16 @@ def run_episode(
             key = _call_key(name, args)
             answer: Submission | Prediction | None
             answers = prompts.is_answer(name, args)
-            if key in made and not answers:
+            if calls >= budget and not answers:
+                observation, answer = (prompts.out_of_calls_for(mode), None)
+            elif key in made and not answers:
+                # Counted though not run: otherwise a model that repeats one
+                # call never reaches the budget and the episode never ends.
+                calls += 1
                 observation, answer = (
                     "You already made this exact call; its result is above.",
                     None,
                 )
-            elif calls >= budget and not answers:
-                observation, answer = (prompts.out_of_calls_for(mode), None)
             else:
                 made.add(key)
                 calls += 1
