@@ -17,10 +17,15 @@ Set up with::
 from __future__ import annotations
 
 import os
+import secrets
+from collections.abc import Iterator
 
+import psycopg
 import pytest
+from psycopg import sql
 
 from auto_ontology.catalog.constants import TableTypes
+from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.registry import create_connector
 
 
@@ -144,3 +149,225 @@ def test_nullability_is_a_real_boolean(pagila) -> None:
     # The real assertion: a mix, not a column of all-True. The bug's signature
     # was every column agreeing.
     assert 0 < int(columns.is_nullable.sum()) < len(columns)
+
+
+def test_foreign_key_into_another_schema_is_reported(pagila: PostgresDatabase) -> None:
+    """``analytics.film_performance.film_id`` references ``public.film``.
+
+    ``constraint_column_usage.table_schema`` was the *referenced* table's
+    schema, so joining it to the constraint's own schema dropped every foreign
+    key that crosses a schema boundary, and with it the join path between the
+    schemas.
+    """
+    fks = pagila.get_fks()
+    film_performance = fks[
+        (fks.table_schema == "analytics") & (fks.table_name == "film_performance")
+    ]
+    assert film_performance[
+        ["column_name", "referenced_schema", "referenced_table", "referenced_column"]
+    ].values.tolist() == [["film_id", "public", "film", "film_id"]]
+
+
+def test_cross_and_same_schema_foreign_keys_on_one_table(
+    pagila: PostgresDatabase,
+) -> None:
+    """``analytics.category_rollup`` has one of each: ``category_id`` into
+    ``public.category`` and the ``parent_rollup_id`` self-reference."""
+    fks = pagila.get_fks()
+    rollup = fks[
+        (fks.table_schema == "analytics") & (fks.table_name == "category_rollup")
+    ]
+    assert rollup[
+        ["column_name", "referenced_schema", "referenced_table"]
+    ].values.tolist() == [
+        ["category_id", "public", "category"],
+        ["parent_rollup_id", "analytics", "category_rollup"],
+    ]
+
+
+def test_foreign_keys_on_partitions_are_not_reported(pagila: PostgresDatabase) -> None:
+    """Pagila declares ``payment``'s keys on each partition, and
+    :meth:`get_tables` hides partitions, so no row may name one."""
+    fks = pagila.get_fks()
+    on_partitions = fks[
+        fks.table_name.str.startswith("payment_p")
+        | fks.referenced_table.str.startswith("payment_p")
+    ]
+    assert on_partitions.empty, on_partitions.values.tolist()
+
+
+def _admin_connection() -> psycopg.Connection:
+    return psycopg.connect(
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=os.environ.get("POSTGRES_PORT", "5432"),
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+        dbname="pagila",
+        autocommit=True,
+    )
+
+
+@pytest.fixture
+def fk_probe(pagila: PostgresDatabase) -> Iterator[str]:
+    """A throwaway schema holding the key shapes ``information_schema`` got
+    wrong, plus the cases the ``pg_constraint`` filters exist for:
+
+    - a composite key (``child`` -> ``parent``);
+    - two tables whose constraints share a name (``to_film``, ``to_actor``);
+    - a table the read-only role is not granted (``hidden``);
+    - a partitioned table with a key out of it and a key into it, which
+      Postgres clones onto its partition (``events``, ``event_notes``).
+
+    The name is unique per test, so parallel runs against one fixture database
+    cannot drop each other's schema.
+    """
+    schema = f"ao_test_fk_probe_{secrets.token_hex(4)}"
+    ddl = sql.SQL("""
+        CREATE SCHEMA {s};
+        CREATE TABLE {s}.parent (a int, b int, PRIMARY KEY (a, b));
+        CREATE TABLE {s}.child (
+            id int PRIMARY KEY, pa int, pb int,
+            FOREIGN KEY (pa, pb) REFERENCES {s}.parent (a, b));
+        CREATE TABLE {s}.to_film (
+            id int PRIMARY KEY,
+            film_id int CONSTRAINT shared_name REFERENCES public.film (film_id));
+        CREATE TABLE {s}.to_actor (
+            id int PRIMARY KEY,
+            actor_id int CONSTRAINT shared_name REFERENCES public.actor (actor_id));
+        CREATE TABLE {s}.hidden (id int PRIMARY KEY);
+        CREATE TABLE {s}.to_hidden (
+            id int PRIMARY KEY, hidden_id int REFERENCES {s}.hidden (id));
+        CREATE TABLE {s}.events (
+            id int PRIMARY KEY, film_id int REFERENCES public.film (film_id)
+        ) PARTITION BY RANGE (id);
+        CREATE TABLE {s}.events_p1 PARTITION OF {s}.events
+            FOR VALUES FROM (0) TO (1000);
+        CREATE TABLE {s}.event_notes (
+            id int PRIMARY KEY, event_id int REFERENCES {s}.events (id));
+    """).format(s=sql.Identifier(schema))
+    try:
+        # Inside the try: the DDL autocommits statement by statement, so a
+        # failure partway leaves a half-built schema the cleanup must drop.
+        with _admin_connection() as conn:
+            conn.execute(ddl)
+        yield schema
+    finally:
+        with _admin_connection() as conn:
+            conn.execute(
+                sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                    sql.Identifier(schema)
+                )
+            )
+
+
+@pytest.fixture
+def probe_reader(fk_probe: str) -> Iterator[PostgresDatabase]:
+    """A connector for a role with ``SELECT`` on everything but ``hidden``.
+
+    The role is cluster-wide, so it is dropped whatever step fails.
+    """
+    role, password = f"ao_test_reader_{secrets.token_hex(4)}", secrets.token_hex(16)
+    ident, schema = sql.Identifier(role), sql.Identifier(fk_probe)
+    created = False
+    reader = None
+    try:
+        with _admin_connection() as conn:
+            try:
+                conn.execute(
+                    sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                        ident, sql.Literal(password)
+                    )
+                )
+            except psycopg.errors.InsufficientPrivilege:
+                pytest.skip("fixture user cannot create roles")
+            created = True
+            for statement in (
+                "GRANT USAGE ON SCHEMA public, {s} TO {r}",
+                "GRANT SELECT ON ALL TABLES IN SCHEMA public, {s} TO {r}",
+                "REVOKE SELECT ON {s}.hidden FROM {r}",
+            ):
+                conn.execute(sql.SQL(statement).format(s=schema, r=ident))
+        host = os.environ.get("POSTGRES_HOST", "localhost")
+        port = os.environ.get("POSTGRES_PORT", "5432")
+        reader = create_connector(
+            f"postgresql://{role}:{password}@{host}:{port}/pagila"
+        )
+        yield reader
+    finally:
+        if reader is not None:
+            reader.close()
+        if created:
+            with _admin_connection() as conn:
+                conn.execute(sql.SQL("DROP OWNED BY {}").format(ident))
+                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(ident))
+
+
+def _probe_fks(connector: PostgresDatabase, schema: str) -> list[list[str]]:
+    fks = connector.get_fks()
+    return fks[fks.table_schema == schema][
+        ["table_name", "column_name", "referenced_table", "referenced_column"]
+    ].values.tolist()
+
+
+def _probe_pks(connector: PostgresDatabase, schema: str) -> list[list]:
+    pks = connector.get_pks()
+    return pks[pks.table_schema == schema][
+        ["table_name", "column_name", "ordinal_position"]
+    ].values.tolist()
+
+
+# In key order within each table. ``events_p1`` never appears: the copies of
+# ``events``' keys that Postgres clones onto it, and onto ``event_notes`` for
+# the key into ``events``, are hidden with the partition.
+_PROBE_FKS = [
+    ["child", "pa", "parent", "a"],
+    ["child", "pb", "parent", "b"],
+    ["event_notes", "event_id", "events", "id"],
+    ["events", "film_id", "film", "film_id"],
+    ["to_actor", "actor_id", "actor", "actor_id"],
+    ["to_film", "film_id", "film", "film_id"],
+    ["to_hidden", "hidden_id", "hidden", "id"],
+]
+_PROBE_PKS = [
+    ["child", "id", 1],
+    ["event_notes", "id", 1],
+    ["events", "id", 1],
+    ["hidden", "id", 1],
+    ["parent", "a", 1],
+    ["parent", "b", 2],
+    ["to_actor", "id", 1],
+    ["to_film", "id", 1],
+    ["to_hidden", "id", 1],
+]
+
+
+def test_foreign_keys_are_paired_in_key_order(
+    pagila: PostgresDatabase, fk_probe: str
+) -> None:
+    """A composite key used to come back as all four column combinations, each
+    ``shared_name`` constraint was also given the other's target, and keys
+    cloned onto a partition leaked through."""
+    assert _probe_fks(pagila, fk_probe) == _PROBE_FKS
+
+
+def test_primary_keys_are_in_key_order_without_partitions(
+    pagila: PostgresDatabase, fk_probe: str
+) -> None:
+    assert _probe_pks(pagila, fk_probe) == _PROBE_PKS
+
+
+def test_read_only_role_sees_keys_it_can_query(
+    probe_reader: PostgresDatabase, fk_probe: str
+) -> None:
+    """``information_schema`` admits a table only for its owner or a privilege
+    other than ``SELECT``, so a read-only ingesting role saw no keys at all.
+
+    It must see every key except those touching ``hidden``, which it cannot
+    read: the foreign key into it and its primary key.
+    """
+    assert _probe_fks(probe_reader, fk_probe) == [
+        row for row in _PROBE_FKS if row[2] != "hidden"
+    ]
+    assert _probe_pks(probe_reader, fk_probe) == [
+        row for row in _PROBE_PKS if row[0] != "hidden"
+    ]

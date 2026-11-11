@@ -254,40 +254,90 @@ class PostgresDatabase(SQLDatabase):
         """)
 
     def get_pks(self) -> pd.DataFrame:
+        """Primary-key columns, in key order.
+
+        Driven from ``pg_constraint`` for the same reason as :meth:`get_fks`:
+        ``information_schema.table_constraints`` admits a table only for its
+        owner or a role with a privilege *other than* ``SELECT``, so a read-only
+        ingesting role saw no primary keys at all. The filters match
+        :meth:`get_tables`.
+        """
         return self.execute("""
             SELECT
-                kcu.table_schema         AS table_schema,
-                kcu.table_name           AS table_name,
-                kcu.column_name          AS column_name,
-                kcu.ordinal_position     AS ordinal_position
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-             AND tc.table_schema    = kcu.table_schema
-            WHERE tc.constraint_type = 'PRIMARY KEY'
-              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position
+                n.nspname   AS table_schema,
+                c.relname   AS table_name,
+                a.attname   AS column_name,
+                k.ord       AS ordinal_position
+            FROM pg_constraint con
+            CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+            JOIN pg_class c     ON c.oid = con.conrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+            WHERE con.contype = 'p'
+              AND c.relispartition = false
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND n.nspname NOT LIKE 'pg\\_%'
+              AND has_table_privilege(c.oid, 'SELECT')
+            ORDER BY n.nspname, c.relname, k.ord
         """)
 
     def get_fks(self) -> pd.DataFrame:
+        """One row per foreign-key column, paired with the column it references.
+
+        Driven from ``pg_constraint`` rather than ``information_schema``, which
+        got four things wrong here:
+
+        - ``table_constraints`` and ``constraint_column_usage`` admit a table
+          only for its owner (or, for the former, a privilege other than
+          ``SELECT``), so a read-only ingesting role saw no foreign keys at all.
+        - The views are matched by constraint *name*, which is unique per
+          table, not per schema: two tables with a same-named constraint were
+          each given the other's referenced table.
+        - ``constraint_column_usage`` has no column order, so a composite key
+          came back as every combination of its columns rather than the pairs.
+          ``conkey`` and ``confkey`` are parallel arrays; unnesting them
+          together keeps the pairs, and ``ord`` keeps key order.
+        - Its ``table_schema`` is the *referenced* table's schema, so joining it
+          to the constraint's own schema dropped every key that crosses a
+          schema boundary.
+
+        ``relispartition`` on both ends drops what :meth:`get_tables` hides:
+        the constraint copies Postgres clones onto each partition of a
+        partitioned table (and onto each partition of a referenced one), and
+        any key a schema declares directly on a partition. The key on the
+        partitioned parent itself is kept. ``has_table_privilege`` on both ends
+        matches :meth:`get_tables`: a key into a table the role cannot read
+        leads nowhere it can query.
+
+        Each row is one column pair; a composite key is several rows with no
+        constraint name, so it is only as composite downstream as the catalog
+        makes it.
+        """
         return self.execute("""
             SELECT
-                kcu.table_schema         AS table_schema,
-                kcu.table_name           AS table_name,
-                kcu.column_name          AS column_name,
-                ccu.table_schema         AS referenced_schema,
-                ccu.table_name           AS referenced_table,
-                ccu.column_name          AS referenced_column
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-              ON tc.constraint_name = kcu.constraint_name
-             AND tc.table_schema    = kcu.table_schema
-            JOIN information_schema.constraint_column_usage ccu
-              ON tc.constraint_name = ccu.constraint_name
-             AND tc.table_schema    = ccu.table_schema
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY kcu.table_schema, kcu.table_name, kcu.column_name
+                n.nspname   AS table_schema,
+                c.relname   AS table_name,
+                a.attname   AS column_name,
+                rn.nspname  AS referenced_schema,
+                rc.relname  AS referenced_table,
+                ra.attname  AS referenced_column
+            FROM pg_constraint con
+            CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
+                WITH ORDINALITY AS k(attnum, ref_attnum, ord)
+            JOIN pg_class c      ON c.oid  = con.conrelid
+            JOIN pg_namespace n  ON n.oid  = c.relnamespace
+            JOIN pg_attribute a  ON a.attrelid = c.oid AND a.attnum = k.attnum
+            JOIN pg_class rc     ON rc.oid = con.confrelid
+            JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+            JOIN pg_attribute ra ON ra.attrelid = rc.oid AND ra.attnum = k.ref_attnum
+            WHERE con.contype = 'f'
+              AND c.relispartition = false
+              AND rc.relispartition = false
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND n.nspname NOT LIKE 'pg\\_%'
+              AND has_table_privilege(c.oid, 'SELECT')
+              AND has_table_privilege(rc.oid, 'SELECT')
+            ORDER BY n.nspname, c.relname, con.conname, k.ord
         """)
 
     # ------------------------------------------------------------------
