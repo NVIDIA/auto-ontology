@@ -46,6 +46,7 @@ __all__ = [
     "fetch_tables_for_schema",
     "fetch_columns_for_table",
     "fetch_parent_table_id_for_column",
+    "refresh_catalog_embeddings",
     "update_node_properties",
 ]
 
@@ -88,7 +89,7 @@ def update_node_properties(
         properties=properties,
     )
     if reembed_ids:
-        _refresh_vdb_embeddings(reembed_ids)
+        refresh_catalog_embeddings(reembed_ids)
 
     if patched["label"] == Labels.COLUMN and "sample_values" in properties:
         try:
@@ -162,8 +163,12 @@ def _get_node_ids_for_embedding_update(
     return []
 
 
-def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
-    """Delete stale VDB rows, re-embed, and append Table/Column rows."""
+def refresh_catalog_embeddings(node_ids: list[str]) -> None:
+    """Re-embed these Table/Column rows from the catalog, replacing the old ones.
+
+    A table id pulls in its columns for the table text, but only the rows of
+    the ids given are written.
+    """
     from auto_ontology.utils import get_embed_params
     from auto_ontology.utils.embedding import embed_rows
     from auto_ontology.vdb import get_data_vdb

@@ -98,6 +98,40 @@ def test_column_text_drops_empty_optional_parts() -> None:
     )
 
 
+def test_a_foreign_key_names_its_target() -> None:
+    column = build_column_text(
+        column_name="customer_id",
+        column_description="The customer.",
+        data_type="int",
+        sample_values=[],
+        table_name="orders",
+        schema_name="public",
+        database_name="shop",
+        references="public.customers.id",
+    )
+    table = build_table_text(
+        table_name="orders",
+        table_description="",
+        columns=[
+            {
+                "column_name": "customer_id",
+                "data_type": "int",
+                "references": "public.customers.id",
+            }
+        ],
+        schema_name="public",
+        database_name="shop",
+    )
+    assert column == (
+        "database_name: shop, schema_name: public, table_name: orders"
+        ", column_name: customer_id, data_type: int"
+        ", column_description: The customer., references: public.customers.id"
+    )
+    assert table.endswith(
+        "columns: {name: customer_id, data_type: int, references: public.customers.id}"
+    )
+
+
 # ── Row shape ────────────────────────────────────────────────────────────────
 
 
