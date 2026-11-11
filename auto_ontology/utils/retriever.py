@@ -7,7 +7,11 @@
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import Any
+
+from openai import APIConnectionError, APIStatusError
 
 from auto_ontology.utils.embedding import EmbedParams, embed_texts, get_embed_params
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
@@ -17,10 +21,34 @@ logger = logging.getLogger(__name__)
 
 # A search embeds one short string, so it should answer in seconds; the
 # ingest-sized default would let one stalled request hold a question for ten
-# minutes before ``_query_with_retry`` ever got to see the failure. That loop
-# is the only retry on this path -- the client's own are off -- so a dead
-# endpoint costs three 60s attempts, not three times six.
+# minutes before the retry in ``Retriever.query`` ever got to see the failure.
+# That loop is the only retry on this path -- the client's own are off -- so a
+# dead endpoint costs three 60s attempts, not three times six.
 _QUERY_TIMEOUT_S = 60.0
+_QUERY_ATTEMPTS = 3
+_TRANSIENT_TOKENS = (
+    "502",
+    "Bad Gateway",
+    "503",
+    "Service Unavailable",
+    "504",
+    "Gateway Timeout",
+    "Timeout",
+    "Connection",
+)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Whether *exc* is an endpoint blip rather than a problem with the query.
+
+    The client's errors are classified by type: ``APIConnectionError`` covers
+    timeouts too, whose message ("Request timed out.") names no status.
+    """
+    if isinstance(exc, APIConnectionError):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in (408, 429) or exc.status_code >= 500
+    return any(token in str(exc) for token in _TRANSIENT_TOKENS)
 
 
 class Retriever:
@@ -50,17 +78,13 @@ class Retriever:
 
         Each hit is ``{"text", "metadata", "_distance"}``, with ``metadata``
         the row's full stored metadata. ``vdb_kwargs["where"]``, when given,
-        is the store's metadata filter. Raises when the query cannot be
-        embedded, with the endpoint's HTTP status in the message, so callers
-        can tell a transient failure from an empty result.
+        is the store's metadata filter. A timeout, a dropped connection or a
+        5xx/408/429 from the embedding endpoint is retried with backoff; when
+        the query still cannot be embedded this raises, with the endpoint's
+        HTTP status in the message, so callers can tell a failure from an
+        empty result.
         """
-        vector = embed_texts(
-            [text],
-            self.embed_params,
-            "query",
-            timeout=_QUERY_TIMEOUT_S,
-            retries=0,
-        )[0]
+        vector = self._embed_query(text)
         if vector is None:
             raise ValueError("Cannot search for a blank query.")
         where = (vdb_kwargs or {}).get("where")
@@ -73,6 +97,30 @@ class Retriever:
             }
             for hit in hits[:top_k]
         ]
+
+    def _embed_query(self, text: str) -> list[float] | None:
+        for attempt in range(1, _QUERY_ATTEMPTS + 1):
+            try:
+                return embed_texts(
+                    [text],
+                    self.embed_params,
+                    "query",
+                    timeout=_QUERY_TIMEOUT_S,
+                    retries=0,
+                )[0]
+            except Exception as exc:
+                if attempt == _QUERY_ATTEMPTS or not _is_transient(exc):
+                    raise
+                wait = 2**attempt + random.uniform(0, 1)
+                logger.warning(
+                    "Embedding the query failed on attempt %d/%d, retrying in %.1fs: %s",
+                    attempt,
+                    _QUERY_ATTEMPTS,
+                    wait,
+                    str(exc)[:200],
+                )
+                time.sleep(wait)
+        raise AssertionError("unreachable")
 
 
 _data_retriever: Retriever | None = None
