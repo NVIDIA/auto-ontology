@@ -23,9 +23,9 @@ class ToolContext:
 
     ``seen_tables`` is the memory that lets a later ``retrieve`` connect what it
     finds to what earlier calls found: a join is only worth showing between
-    tables the model already has in view. ``schemas`` is the catalog the SQL
-    checks resolve names against, loaded on first use because a question that
-    never drafts SQL should not pay for it.
+    tables the model already has in view. ``schemas`` holds the catalog the SQL
+    checks resolve names against, per database, loaded on first use because a
+    question that never drafts SQL should not pay for it.
 
     ``retriever`` searches the semantic collection (definitions, analyses);
     ``data_retriever`` the one tables and columns are embedded in.
@@ -53,7 +53,7 @@ class ToolContext:
     sibling_pairs: set[frozenset[str]] = field(default_factory=set)
     catalog_tables: list[dict[str, Any]] | None = None
     row_counts: dict[str, int | None] = field(default_factory=dict)
-    schemas: dict[str, Any] | None = None
+    schemas: dict[str | None, dict[str, Any]] = field(default_factory=dict)
     sql_runs: int = 0
     predict_calls: int = 0
     prediction_refusal: str = ""

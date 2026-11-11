@@ -28,7 +28,10 @@ import sqlglot
 from sqlglot import exp
 
 from auto_ontology.connectors.base import SQLDatabase
-from auto_ontology.dal.datasources import fetch_all_schema_ids
+from auto_ontology.dal.datasources import (
+    fetch_all_schema_ids,
+    fetch_schema_ids_for_database,
+)
 from auto_ontology.retrieval.data_access.graph_schemas import get_schemas_by_ids
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
     _deduplicate_result_columns,
@@ -170,11 +173,22 @@ def check_sql(sql: str, dialect: str | None, catalog: CatalogNames) -> CheckResu
     return CheckResult(find_unknown_names(statement, catalog), statement)
 
 
-def catalog_for(ctx: ToolContext) -> CatalogNames:
-    """The catalog the checks resolve names against, loaded once per episode."""
-    if ctx.schemas is None:
-        ctx.schemas = get_schemas_by_ids(fetch_all_schema_ids())
-    return SchemaCatalog(ctx.schemas)
+def catalog_for(ctx: ToolContext, connector: SQLDatabase) -> CatalogNames:
+    """The catalog of *connector*'s database, loaded once per episode.
+
+    Scoped to one database because the schema map is keyed by schema name
+    alone: two databases that both have ``public`` would otherwise merge into
+    one entry, and a query could pass on a table only the other one has.
+    """
+    database_name = getattr(connector, "database_name", None)
+    if database_name not in ctx.schemas:
+        schema_ids = (
+            fetch_schema_ids_for_database(database_name) if database_name else None
+        )
+        ctx.schemas[database_name] = get_schemas_by_ids(
+            schema_ids or fetch_all_schema_ids()
+        )
+    return SchemaCatalog(ctx.schemas[database_name])
 
 
 def connector_for(ctx: ToolContext) -> SQLDatabase | None:
@@ -244,7 +258,7 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first."
     dialect = getattr(connector, "dialect", None)
-    check = check_sql(sql, dialect, catalog_for(ctx))
+    check = check_sql(sql, dialect, catalog_for(ctx, connector))
     if check.problems:
         return "Not run. Fix these first:\n- " + "\n- ".join(check.problems)
 

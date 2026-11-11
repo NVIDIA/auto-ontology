@@ -93,7 +93,9 @@ def submit(
     connector = connector_for(ctx)
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first.", None
-    check = check_sql(sql, getattr(connector, "dialect", None), catalog_for(ctx))
+    check = check_sql(
+        sql, getattr(connector, "dialect", None), catalog_for(ctx, connector)
+    )
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
     db_response = _run_sql(

@@ -30,8 +30,8 @@ FINAL_SQL = (
 @pytest.fixture
 def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     catalog = FakeCatalog(SHOP_CATALOG)
-    monkeypatch.setattr(run_sql_module, "catalog_for", lambda _ctx: catalog)
-    monkeypatch.setattr(loop, "catalog_for", lambda _ctx: catalog)
+    monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
+    monkeypatch.setattr(loop, "catalog_for", lambda *_: catalog)
     monkeypatch.setattr(
         loop,
         "retrieve",

@@ -28,8 +28,8 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "true")
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_RESULT_ROWS", "2")
     catalog = FakeCatalog(SHOP_CATALOG)
-    monkeypatch.setattr(run_sql_module, "catalog_for", lambda _ctx: catalog)
-    monkeypatch.setattr(loop, "catalog_for", lambda _ctx: catalog)
+    monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
+    monkeypatch.setattr(loop, "catalog_for", lambda *_: catalog)
     return ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
 
 

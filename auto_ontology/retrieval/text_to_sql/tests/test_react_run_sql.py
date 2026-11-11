@@ -82,7 +82,7 @@ def test_render_rows_explains_an_empty_result() -> None:
 
 def _ctx(monkeypatch: pytest.MonkeyPatch) -> tuple[ToolContext, SQLiteConnector]:
     connector = SQLiteConnector(SHOP_SCRIPT)
-    monkeypatch.setattr(tool, "catalog_for", lambda _ctx: CATALOG)
+    monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
     return ToolContext(retriever=None, connectors=[connector]), connector
 
 
@@ -121,3 +121,42 @@ def test_connector_for_prefers_the_target_database() -> None:
     second.database_name = "other"
     ctx = ToolContext(None, [first, second], database_name="other")
     assert tool.connector_for(ctx) is second
+
+
+def test_catalog_for_loads_only_the_connectors_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ids_by_db = {"db_a": ["schema-a"], "db_b": ["schema-b"]}
+    loaded: list[list[str]] = []
+    monkeypatch.setattr(tool, "fetch_schema_ids_for_database", ids_by_db.__getitem__)
+    monkeypatch.setattr(tool, "fetch_all_schema_ids", lambda: ["schema-a", "schema-b"])
+    monkeypatch.setattr(
+        tool, "get_schemas_by_ids", lambda ids: loaded.append(ids) or {"public": ids}
+    )
+    db_a, db_b = SQLiteConnector(SHOP_SCRIPT), SQLiteConnector(SHOP_SCRIPT)
+    db_a.database_name, db_b.database_name = "db_a", "db_b"
+    ctx = ToolContext(None, [db_a, db_b])
+
+    tool.catalog_for(ctx, db_a)
+    tool.catalog_for(ctx, db_a)
+    tool.catalog_for(ctx, db_b)
+
+    assert loaded == [["schema-a"], ["schema-b"]]
+    assert ctx.schemas == {
+        "db_a": {"public": ["schema-a"]},
+        "db_b": {"public": ["schema-b"]},
+    }
+
+
+def test_catalog_for_falls_back_to_every_schema_without_a_database_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tool, "fetch_all_schema_ids", lambda: ["schema-a", "schema-b"])
+    monkeypatch.setattr(tool, "get_schemas_by_ids", lambda ids: {"public": ids})
+    connector = SQLiteConnector(SHOP_SCRIPT)
+    connector.database_name = None
+    ctx = ToolContext(None, [connector])
+
+    tool.catalog_for(ctx, connector)
+
+    assert ctx.schemas == {None: {"public": ["schema-a", "schema-b"]}}
