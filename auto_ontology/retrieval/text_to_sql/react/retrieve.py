@@ -52,6 +52,7 @@ from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_path
 from auto_ontology.dal.candidates import expand_info
 from auto_ontology.dal.datasources import (
+    fetch_schema_ids_for_database,
     fetch_tables_by_ids,
     find_column_id_by_table_and_name,
 )
@@ -173,12 +174,31 @@ def _uncovered_physical_hits(
     return kept
 
 
-def _name_hits(query: str, labels: list[str]) -> list[dict]:
+def _name_scopes(
+    object_types: set[str], schema_ids: list[str]
+) -> list[tuple[set[str], list[str] | None]]:
+    """*object_types* split into the physical ones, under *schema_ids*, and the rest."""
+    if not schema_ids:
+        return [(object_types, None)]
+    physical = object_types & set(_PHYSICAL_LABELS.values())
+    rest = object_types - physical
+    return [
+        (types, ids) for types, ids in ((physical, schema_ids), (rest, None)) if types
+    ]
+
+
+def _name_hits(ctx: ToolContext, query: str, labels: list[str]) -> list[dict]:
     """Substring hits on names: the whole query, then each identifier in it.
 
     The whole query has to match every token in one name or one description,
     which a sentence rarely does — so a word that looks copied from a schema is
     also searched alone, by name only, and against physical names too.
+
+    Physical names are searched in the target database only: the search keeps
+    its first rows across the whole catalog, and with many databases sharing a
+    table or column name the target's copy can fall outside them. Terms and
+    attributes do not live under a schema, which the scope would rule out
+    entirely; their tables are narrowed to the database when they are resolved.
     """
     semantic = set(labels)
     physical = semantic | {
@@ -188,17 +208,22 @@ def _name_hits(query: str, labels: list[str]) -> list[dict]:
     searches += [
         (search_tokens(word), False, physical) for word in _identifier_words(query)
     ]
+    schema_ids = (
+        fetch_schema_ids_for_database(ctx.database_name) if ctx.database_name else []
+    )
 
     raw: list[dict] = []
     for tokens, include_description, object_types in searches:
         if not tokens:
             continue
-        raw += fetch_global_search(
-            tokens,
-            object_types,
-            include_description=include_description,
-            limit=_NAME_SEARCH_LIMIT,
-        )
+        for types, data_ids in _name_scopes(object_types, schema_ids):
+            raw += fetch_global_search(
+                tokens,
+                types,
+                include_description=include_description,
+                data_ids=data_ids,
+                limit=_NAME_SEARCH_LIMIT,
+            )
     hits = [{"id": h["id"], "label": h["label"], "name": h.get("name")} for h in raw]
     extra = expand_info([{"id": h["id"], "label": h["label"]} for h in hits])
     for hit in hits:
@@ -511,18 +536,19 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     hits = _merge_hits(
         _meaning_hits(ctx, query, labels),
         _uncovered_physical_hits(ctx, query, labels),
-        _name_hits(query, labels),
+        _name_hits(ctx, query, labels),
     )
 
     table_ids, matched = _resolve_tables(ctx, hits)
     new_ids = [tid for tid in table_ids if tid not in ctx.seen_tables]
-    new_ids = new_ids[: config.max_tables_per_retrieve()]
+    # Filtered before the limit, so a table from another database never takes
+    # the place of one from this database.
     fetched = {str(t["id"]): t for t in fetch_tables_by_ids(new_ids)}
     new_tables = [
         fetched[tid]
         for tid in new_ids
         if tid in fetched and _in_database(ctx, fetched[tid])
-    ]
+    ][: config.max_tables_per_retrieve()]
     revisited = [
         ctx.seen_tables[tid]
         for tid in table_ids

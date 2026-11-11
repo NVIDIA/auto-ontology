@@ -69,7 +69,12 @@ ATTRIBUTE_COLUMNS = {
 @pytest.fixture
 def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Stub every data-access call the tool makes, recording what it asked."""
-    seen: dict[str, list[Any]] = {"meaning": [], "names": [], "join": []}
+    seen: dict[str, list[Any]] = {
+        "meaning": [],
+        "names": [],
+        "name_scopes": [],
+        "join": [],
+    }
     meaning_hits: dict[str, list[dict]] = {
         "how is revenue calculated": [REVENUE],
         "customer status": [STATUS_ATTRIBUTE],
@@ -81,8 +86,9 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         seen["meaning"].append((query, list_of_semantic, database_name))
         return [dict(h) for h in meaning_hits.get(query, [])]
 
-    def names(tokens, object_types, *, include_description, limit):
+    def names(tokens, object_types, *, include_description, data_ids, limit):
         seen["names"].append((tokens, include_description, object_types))
+        seen["name_scopes"].append((set(object_types), data_ids))
         if tokens == ["cust_ref"] and "Column" in object_types:
             return [{"id": "c-cust-ref", "label": "Column", "name": "cust_ref"}]
         return []
@@ -117,6 +123,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
 
     monkeypatch.setattr(tool, "_get_candidates_information", meaning)
     monkeypatch.setattr(tool, "fetch_global_search", names)
+    monkeypatch.setattr(tool, "fetch_schema_ids_for_database", lambda _db: [])
     monkeypatch.setattr(tool, "expand_info", expand)
     monkeypatch.setattr(
         tool, "fetch_tables_by_ids", lambda ids: [TABLES[i] for i in ids if i in TABLES]
@@ -229,6 +236,54 @@ def test_tables_in_another_database_are_left_out(
     text = tool.retrieve(_ctx(), "status")
 
     assert text.startswith("No matches for 'status'")
+
+
+def test_tables_in_another_database_do_not_use_up_the_limit(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tool.config, "max_tables_per_retrieve", lambda: 1)
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda *a, **k: [
+            {"id": "t-other", "label": "Table", "name": "customers"},
+            {"id": "t-customers", "label": "Table", "name": "customers"},
+        ],
+    )
+
+    text = tool.retrieve(_ctx(), "customers")
+
+    assert "TABLE crm.customers" in text
+
+
+def test_physical_names_are_searched_in_the_target_database_only(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        tool,
+        "fetch_schema_ids_for_database",
+        lambda db: ["s-sales", "s-crm"] if db == "shop" else [],
+    )
+
+    tool.retrieve(_ctx(), "cust_ref", kinds=["term", "definition"])
+
+    semantic = {tool.LABEL_TERM, tool.LABEL_SQL_ATTRIBUTE}
+    assert calls["name_scopes"] == [
+        (semantic, None),
+        ({tool.Labels.TABLE}, ["s-sales", "s-crm"]),
+        (semantic, None),
+    ]
+
+
+def test_names_are_searched_everywhere_without_a_target_database(
+    calls: dict,
+) -> None:
+    ctx = ToolContext(retriever=object(), connectors=[])
+
+    tool.retrieve(ctx, "customers")
+
+    assert calls["name_scopes"]
+    assert all(data_ids is None for _types, data_ids in calls["name_scopes"])
 
 
 def test_kinds_narrow_the_search(calls: dict) -> None:
