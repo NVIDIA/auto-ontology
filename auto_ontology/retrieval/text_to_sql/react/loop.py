@@ -159,13 +159,17 @@ def run_episode(
     evidence: str | None = None,
     dialect: str | None = None,
     mode: EpisodeMode = EpisodeMode.SQL,
+    custom_prompts: str | None = None,
 ) -> EpisodeResult:
     """Run the model with *mode*'s tools until it answers or the budget ends.
 
     ``sql`` answers with ``submit``, ``predict`` with ``predict``, and ``auto``
-    offers both and lets the model choose.
+    offers both and lets the model choose. *custom_prompts* is the
+    organization's sections from :func:`prompts.custom_prompts_section`.
     """
     system_prompt = prompts.system_prompt_for(mode, dialect)
+    if custom_prompts:
+        system_prompt = f"{system_prompt}\n\n{custom_prompts}"
     # Dialect rules, e.g. for MySQL: do not CAST or ROUND computed values,
     # which changes the digits an exact grader compares.
     dialect_rules = (

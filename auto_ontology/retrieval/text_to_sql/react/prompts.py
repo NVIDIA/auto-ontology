@@ -82,6 +82,31 @@ If the question asks what will happen (a future value, a likelihood, churn, \
 the next purchase), do not write SQL: retrieve the entity and the tables that \
 record its history, then call predict."""
 
+
+def custom_prompts_section(
+    custom_prompts: str | None, acronyms: list[dict[str, str]] | None
+) -> str:
+    """The organization's custom prompts and acronyms for the system prompt.
+
+    "" when neither is set, so a deployment without them sees no new section.
+    """
+    parts = []
+    if text := (custom_prompts or "").strip():
+        parts.append(f"ORGANIZATION INSTRUCTIONS\n{text}")
+    definitions = [
+        f"- {name}: {(entry.get('description') or '').strip()}"
+        for entry in acronyms or []
+        if (name := (entry.get("name") or "").strip())
+    ]
+    if definitions:
+        parts.append(
+            "GLOSSARY\nDefinitions the user's organization has registered. Use "
+            "them to resolve abbreviations, shortcuts, and internal jargon in the "
+            "question.\n" + "\n".join(definitions)
+        )
+    return "\n\n".join(parts)
+
+
 USER_TEMPLATE = """\
 QUESTION
 {question}

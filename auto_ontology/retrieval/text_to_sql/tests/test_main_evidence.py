@@ -116,3 +116,60 @@ def test_build_state_propagates_numeric_type_alignment(
     state = main_module._build_state(cast(TextToSQLPayload, payload))
 
     assert state["numeric_type_alignment"] is expected
+
+
+def _state_with(main_module: ModuleType, **extra: object) -> dict:
+    payload = {
+        "question": "How many accounts?",
+        "data_retriever": object(),
+        "connectors": [SimpleNamespace(dialect="sqlite", database_name="db_test")],
+        **extra,
+    }
+    return main_module._build_state(cast(TextToSQLPayload, payload))
+
+
+def test_build_state_joins_custom_prompts_and_acronyms(
+    main_module: ModuleType,
+) -> None:
+    state = _state_with(
+        main_module,
+        custom_prompts="Amounts are in USD.",
+        acronyms=[{"name": "ARR", "description": "Annual recurring revenue"}],
+    )
+
+    assert state["custom_prompts"] == (
+        "ORGANIZATION INSTRUCTIONS\n"
+        "Amounts are in USD.\n\n"
+        "GLOSSARY\n"
+        "Definitions the user's organization has registered. Use them to resolve "
+        "abbreviations, shortcuts, and internal jargon in the question.\n"
+        "- ARR: Annual recurring revenue"
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"custom_prompts": "Amounts are in USD."},
+        {"acronyms": [{"name": "ARR", "description": "Annual recurring revenue"}]},
+    ],
+)
+def test_build_state_keeps_either_one_alone(
+    main_module: ModuleType, extra: dict
+) -> None:
+    section = _state_with(main_module, **extra)["custom_prompts"]
+
+    assert ("ORGANIZATION INSTRUCTIONS" in section) == ("custom_prompts" in extra)
+    assert ("GLOSSARY" in section) == ("acronyms" in extra)
+    assert ("USD" in section) == ("custom_prompts" in extra)
+    assert ("ARR" in section) == ("acronyms" in extra)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"custom_prompts": "  ", "acronyms": [{"name": "", "description": "x"}]}],
+)
+def test_build_state_has_no_section_without_either(
+    main_module: ModuleType, extra: dict
+) -> None:
+    assert _state_with(main_module, **extra)["custom_prompts"] == ""

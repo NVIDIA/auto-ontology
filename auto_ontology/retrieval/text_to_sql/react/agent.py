@@ -79,6 +79,7 @@ class ReactSQLAgent(BaseAgent):
             evidence=state.get("evidence"),
             dialect=getattr(connector, "dialect", None),
             mode=episode_mode(state.get("prediction_override")),
+            custom_prompts=state.get("custom_prompts"),
         )
 
         for step in result.trajectory:

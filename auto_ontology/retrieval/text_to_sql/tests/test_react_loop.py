@@ -193,6 +193,16 @@ def test_evidence_reaches_the_model(ctx: ToolContext) -> None:
     assert "EVIDENCE\nactive means status = 'ACTIVE'" in model.seen[0][1].content
 
 
+def test_custom_prompts_reach_the_system_prompt(ctx: ToolContext) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(
+        model, ctx, "q", custom_prompts="ORGANIZATION INSTRUCTIONS\nUse USD."
+    )
+
+    assert model.seen[0][0].content.endswith("\n\nORGANIZATION INSTRUCTIONS\nUse USD.")
+
+
 @pytest.mark.parametrize("dialect", ["mysql", "sqlite", "oracle"])
 def test_dialect_rules_reach_the_model(ctx: ToolContext, dialect: str) -> None:
     model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])

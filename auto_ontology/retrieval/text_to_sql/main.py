@@ -15,6 +15,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 from auto_ontology.retrieval.text_to_sql.node_labels import NODE_LABELS
 from auto_ontology.retrieval.text_to_sql.react.agent import STEP_NAME as REACT_STEP
 from auto_ontology.retrieval.text_to_sql.react.config import prediction_enabled
+from auto_ontology.retrieval.text_to_sql.react.prompts import custom_prompts_section
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     TextToSQLPayload,
@@ -117,6 +118,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "prediction_override": prediction_override,
+        "custom_prompts": custom_prompts_section(
+            payload.get("custom_prompts"), payload.get("acronyms")
+        ),
     }
     return state
 
