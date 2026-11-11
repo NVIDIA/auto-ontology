@@ -422,6 +422,20 @@ that support structured output, and keep the embedding model the same for
 ingestion and queries. [`.env.example`](./.env.example) documents every
 variable.
 
+The default `NON_REASONING` model is a hybrid reasoning model: it thinks before
+every answer. Set `NON_REASONING_THINKING=off` (Helm: `nonReasoningThinking`)
+to turn that off for the non-reasoning steps. When
+`langchain-nvidia-ai-endpoints` records a request switch for the model, it
+sends that; for any other model, including Nemotron 3.5 (not in the library's
+table), it sends Nemotron's `chat_template_kwargs: {enable_thinking: false}`.
+Known models switched by a system-prompt tag (`detailed thinking off`,
+`/no_think`) are left as they are, with a warning. It applies to every
+`ChatNVIDIA` client, hosted or self-hosted NIM; `openai/`, `azure/` and `aws/`
+models ignore it. Set it only for hybrid models: one whose template lacks the
+switch ignores the field, and an endpoint that rejects it fails the call, which
+then falls back to the reasoning model. With `bundledSecret.enabled=false`, set
+`NON_REASONING_THINKING` in your own Secret.
+
 ### Predictions
 
 Set `KUMO_RFM_API_KEY` and the agent routes predictive questions to KumoRFM.
