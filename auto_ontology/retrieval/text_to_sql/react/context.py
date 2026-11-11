@@ -35,6 +35,9 @@ class ToolContext:
     ``prediction_llm`` are what ``predict`` hands KumoRFM: the question as the
     user asked it, not as the model rephrased it.
 
+    ``row_counts`` caches the SIMILAR-line counts for the episode;
+    ``counts_left`` is how many more the current ``retrieve`` call may run.
+
     ``pages`` holds the ``run_sql`` results too long to show, for ``grep`` to
     search; page *n* is ``pages[n - 1]``.
 
@@ -59,6 +62,7 @@ class ToolContext:
     sibling_pairs: set[frozenset[str]] = field(default_factory=set)
     catalog_tables: list[dict[str, Any]] | None = None
     row_counts: dict[str, int | None] = field(default_factory=dict)
+    counts_left: int = 0
     schemas: dict[str | None, dict[str, Any]] = field(default_factory=dict)
     sql_runs: int = 0
     predict_calls: int = 0

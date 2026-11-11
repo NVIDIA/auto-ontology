@@ -82,6 +82,20 @@ def siblings_enabled() -> bool:
     return value in _TRUTHY or not value
 
 
+def max_sibling_counts() -> int:
+    """Row counts one ``retrieve`` call may run for its SIMILAR lines.
+
+    An exact count is a full scan on most engines and the number is only a
+    hint, so a table past the limit is named without one.
+    """
+    return _int_env("TEXT_TO_SQL_REACT_MAX_SIBLING_COUNTS", 4)
+
+
+def sibling_count_timeout_s() -> int:
+    """Seconds one SIMILAR-line row count may run before it is dropped."""
+    return _int_env("TEXT_TO_SQL_REACT_SIBLING_COUNT_TIMEOUT_S", 5)
+
+
 def submit_tool_enabled() -> bool:
     """Whether the model answers SQL with a separate ``submit`` tool.
 

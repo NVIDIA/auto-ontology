@@ -342,13 +342,19 @@ ORDERS_ARCHIVE = {
 class CountingConnector:
     database_name = "shop"
     dialect = "mysql"
+    supports_statement_timeout = True
 
     def __init__(self, counts: dict[str, int]):
         self.counts = counts
         self.sql: list[str] = []
+        self.timeouts: list[float | None] = []
 
-    def execute(self, sql: str) -> pd.DataFrame:
+    def qualify(self, schema: str | None, table: str) -> str:
+        return f"cat.`{schema}`.`{table}`"
+
+    def execute(self, sql: str, timeout_s: float | None = None) -> pd.DataFrame:
         self.sql.append(sql)
+        self.timeouts.append(timeout_s)
         table = sql.rsplit(".", 1)[-1].strip("`")
         return pd.DataFrame([[self.counts[table]]])
 
@@ -395,6 +401,52 @@ def test_a_near_copy_is_named_once_per_episode(
 
     assert "SIMILAR" not in again
     assert len(with_siblings.sql) == 2
+
+
+def test_a_count_is_qualified_by_the_connector_and_capped_in_time(
+    with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_SIBLING_COUNT_TIMEOUT_S", "3")
+    ctx = ToolContext(
+        retriever=object(), connectors=[with_siblings], database_name="shop"
+    )
+    tool.retrieve(ctx, "how is revenue calculated")
+
+    assert with_siblings.sql == [
+        "SELECT COUNT(*) FROM cat.`sales`.`orders`",
+        "SELECT COUNT(*) FROM cat.`sales`.`orders_archive`",
+    ]
+    assert with_siblings.timeouts == [3, 3]
+
+
+def test_a_table_the_connector_cannot_qualify_is_named_without_a_count(
+    with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(schema: str | None, table: str) -> str:
+        raise ValueError(f"Trino requires a schema to qualify {table!r}")
+
+    monkeypatch.setattr(with_siblings, "qualify", refuse)
+    ctx = ToolContext(
+        retriever=object(), connectors=[with_siblings], database_name="shop"
+    )
+    text = tool.retrieve(ctx, "how is revenue calculated")
+
+    assert "SIMILAR sales.orders ~ sales.orders_archive: 4 shared columns" in text
+    assert with_siblings.sql == []
+
+
+def test_counts_past_the_limit_are_left_off_and_not_cached(
+    with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_SIBLING_COUNTS", "1")
+    ctx = ToolContext(
+        retriever=object(), connectors=[with_siblings], database_name="shop"
+    )
+    text = tool.retrieve(ctx, "how is revenue calculated")
+
+    assert "SIMILAR sales.orders (120 rows) ~ sales.orders_archive: " in text
+    assert len(with_siblings.sql) == 1
+    assert "t-orders-archive" not in ctx.row_counts
 
 
 def test_without_a_database_the_line_has_no_counts(with_siblings: None) -> None:

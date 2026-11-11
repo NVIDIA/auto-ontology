@@ -19,9 +19,9 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from sqlglot import exp
-
 from auto_ontology.dal.datasources import fetch_table_column_names
+from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
+from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
 
@@ -108,21 +108,36 @@ def _catalog(ctx: ToolContext) -> list[dict[str, Any]]:
 
 
 def _row_count(ctx: ToolContext, table: dict) -> int | None:
-    """Exact rows in *table*, counted once per episode; ``None`` if it fails."""
+    """Exact rows in *table*, counted once per episode; ``None`` if it fails.
+
+    Counted under a short cap and at most ``max_sibling_counts`` times per
+    ``retrieve``: an exact count is a full scan on most engines, and the number
+    is only a hint. A table skipped for the limit is not cached, so a later
+    call can still count it.
+    """
     key = str(table.get("id"))
-    if key not in ctx.row_counts:
-        ctx.row_counts[key] = None
-        connector = connector_for(ctx)
-        if connector is not None:
-            sql = (
-                exp.select(exp.Count(this=exp.Star()))
-                .from_(exp.table_(table["name"], db=table.get("schema_name") or None))
-                .sql(dialect=getattr(connector, "dialect", None) or None)
-            )
-            try:
-                ctx.row_counts[key] = int(connector.execute(sql).iat[0, 0])
-            except Exception:  # noqa: BLE001 — a missing count only drops a detail
-                logger.info("ReAct sibling row count failed: %s", sql, exc_info=True)
+    if key in ctx.row_counts:
+        return ctx.row_counts[key]
+    connector = connector_for(ctx)
+    if connector is None or ctx.counts_left <= 0:
+        return None
+    ctx.counts_left -= 1
+    ctx.row_counts[key] = None
+    try:
+        # Inside the try: three-level engines refuse to qualify a table
+        # without a schema.
+        name = connector.qualify(table.get("schema_name") or None, table["name"])
+        frame = execute_chat_sql(
+            connector,
+            f"SELECT COUNT(*) FROM {name}",
+            kind="ReAct sibling row count",
+            timeout_s=config.sibling_count_timeout_s(),
+        )
+        ctx.row_counts[key] = int(frame.iat[0, 0])
+    except Exception:  # noqa: BLE001 — a missing count only drops a detail
+        logger.info(
+            "ReAct sibling row count failed for %s", _qualified(table), exc_info=True
+        )
     return ctx.row_counts[key]
 
 
@@ -148,6 +163,7 @@ def sibling_lines(
     Each line comes with the two tables it names.
     """
     lines: list[tuple[str, list[dict]]] = []
+    ctx.counts_left = config.max_sibling_counts()
     catalog = _catalog(ctx) if new_tables else []
     for table in new_tables:
         for sibling in find_siblings(table, catalog):
