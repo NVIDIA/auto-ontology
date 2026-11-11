@@ -124,6 +124,18 @@ def _apply_debug_seed(
         logger.info("Debug seed: wrong results — injecting targeted hints")
 
 
+def _previous_attempt_note(session: InteractiveSessionState) -> str:
+    """The rejected SQL and the feedback `_apply_debug_seed` recorded, or ""."""
+    feedback = session.path_state.get("error")
+    sql = (session.path_state.get("sql_code") or "").strip()
+    if not isinstance(feedback, str) or not feedback.strip() or not sql:
+        return ""
+    return (
+        "## Previous Attempt (rejected; fix it rather than repeat it)\n"
+        f"{sql}\n\n## Feedback\n{feedback.strip()}"
+    )
+
+
 def _apply_follow_up_seed(
     session: InteractiveSessionState,
     *,
@@ -332,6 +344,11 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             logger.info(
                 "[%s] SQL gen — injected conditional output hint", session.task_id
             )
+    if previous_attempt_note := _previous_attempt_note(session):
+        # The SQL generator starts each run afresh, so a debug turn's rejected
+        # SQL and its feedback reach it only through evidence.
+        evidence = "\n".join(filter(None, [evidence, previous_attempt_note]))
+        logger.info("[%s] SQL gen — injected previous attempt", session.task_id)
     if expanded_question_note or user_clarifications_note or phase1_sql_reference_note:
         evidence = (
             expanded_question_note
