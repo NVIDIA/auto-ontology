@@ -1006,35 +1006,6 @@ def _semantic_fk_target_expr() -> ColumnElement:
     )
 
 
-def _attribute_name_expr():
-    """The name of the ColumnAttribute a column carries, if any."""
-    return (
-        select(s.column_attribute.c.name)
-        .select_from(
-            s.column__has_attribute.join(
-                s.column_attribute,
-                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
-            )
-        )
-        .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
-        .correlate(s.catalog_column)
-        .order_by(s.column_attribute.c.name)
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
-def _term_names_expr():
-    """The names of the Terms a table represents, in name order."""
-    return (
-        select(func.array_agg(aggregate_order_by(s.term.c.name, s.term.c.name)))
-        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
-        .where(s.table__term.c.table_id == s.catalog_table.c.id)
-        .correlate(s.catalog_table)
-        .scalar_subquery()
-    )
-
-
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     """Tables with a name/type/description/sample_values summary of each column.
 
@@ -1055,8 +1026,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` resolves the referenced attribute back to its owning column
     and returns that target as ``schema.table.column`` for SQL prompts.
-    ``attribute`` and ``terms`` are the semantic layer's names for a column and
-    a table.
     """
     if not table_ids:
         return []
@@ -1077,8 +1046,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
                 semantic_fk_target.label("semantic_fk"),
-                _attribute_name_expr().label("attribute"),
-                _term_names_expr().label("terms"),
             )
             .select_from(
                 _table_join().join(
@@ -1109,7 +1076,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 # which costs it every edge and makes it unusable in
                 # `FOR EACH`. It has to survive every path to relevant_tables.
                 "pk": row.get("pk") or [],
-                "terms": row.get("terms") or [],
                 "columns": [],
             },
         )
@@ -1125,7 +1091,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
-                    "attribute": row.get("attribute"),
                 }
             )
     return list(tables.values())

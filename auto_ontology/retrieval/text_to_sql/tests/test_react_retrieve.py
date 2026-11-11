@@ -380,23 +380,12 @@ def test_a_kind_searches_its_physical_counterpart(physical: dict) -> None:
     assert physical["labels"] == ["Column"]
 
 
-def test_terms_and_attributes_are_shown_in_brackets(
-    calls: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    named = {
-        **ORDERS,
-        "terms": ["Purchase Order"],
-        "columns": [
-            {"name": "amount", "data_type": "REAL", "attribute": "Order Amount"},
-            *ORDERS["columns"][1:2],
-        ],
-    }
-    monkeypatch.setattr(tool, "fetch_tables_by_ids", lambda ids: [named])
+def test_tables_and_columns_show_only_their_own_names(calls: dict) -> None:
     text = tool.retrieve(_ctx(), "order amount")
 
-    assert "TABLE sales.orders [Purchase Order] — One row per order" in text
-    assert "  amount REAL [Order Amount]" in text
+    assert "TABLE sales.orders — One row per order" in text
     assert "  cust_ref INT — Who placed the order; references" in text
+    assert "[" not in text.split("\n\n")[0]
 
 
 def test_an_attributes_column_survives_the_wide_table_cut(

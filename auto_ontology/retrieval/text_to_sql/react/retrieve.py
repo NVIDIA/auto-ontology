@@ -32,8 +32,7 @@ One call does three things, all through existing data-access functions:
    (:func:`find_join_path`), and the near-copies of every new table
    (:mod:`.siblings`).
 
-The model still sees tables and columns, with the Term or attribute each
-stands for in brackets.
+The model sees only tables and columns, with their descriptions.
 
 The result is rendered as text and capped in size. The same query against the
 same catalog returns the same text.
@@ -326,8 +325,6 @@ def _sample_values(values: Any) -> str:
 
 def _column_line(column: dict) -> str:
     parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
-    if column.get("attribute"):
-        parts.append(f" [{column['attribute']}]")
     details = []
     if column.get("description"):
         details.append(_clip(column["description"], _MAX_DESCRIPTION_CHARS))
@@ -372,8 +369,6 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
 
 def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     header = f"TABLE {_qualified(table)}"
-    if terms := [t for t in table.get("terms") or [] if t]:
-        header += f" [{', '.join(terms)}]"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     if seen_before:

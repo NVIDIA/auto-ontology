@@ -28,9 +28,9 @@ You start with no schema. Find what you need with the tools:
 what each column means, and named calculations. Write your own search text in \
 business words: the question, something the last result was missing ("how is \
 revenue calculated", "which column stores admission status"), or an exact \
-table or column name. What it finds comes back as tables and columns, with \
-the concept a table stores and what a column means in [brackets]; a column \
-that "references" another table is a foreign key to join on. Search again \
+table or column name. What it finds comes back as tables and columns with \
+their descriptions; a column that "references" another table is a foreign \
+key to join on. Search again \
 whenever something is missing.
 - run_sql: check a query against the catalog and run it. Use it to look at \
 stored values before filtering on them, and to test a draft.
