@@ -4258,6 +4258,129 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/graph/status": {
+      "get": {
+        "description": "graphApi.status — whether the optional Apache AGE projection is on and built.",
+        "operationId": "get_api_graph_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "summary": "Graph Status",
+        "tags": ["graph"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/graph/status/route.ts",
+        "x-auto-ontology-permissions": {
+          "catalog": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
+    "/api/graph/terms/{term_id}/neighborhood": {
+      "get": {
+        "description": "graphApi.termNeighborhood — vertices and edges around one Term in the AGE\nprojection. Read-only; the traversal is fixed server-side.",
+        "operationId": "get_api_graph_terms_term_id_neighborhood",
+        "parameters": [
+          {
+            "description": "Term id.",
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "description": "Term id.",
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Hops to expand from the Term.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Hops to expand from the Term.",
+              "maximum": 3,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Stop expanding once this many vertices are collected.",
+            "in": "query",
+            "name": "max_nodes",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "Stop expanding once this many vertices are collected.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Max Nodes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermNeighborhoodResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Term Neighborhood",
+        "tags": ["graph"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/graph/terms/[term_id]/neighborhood/route.ts",
+        "x-auto-ontology-permissions": {
+          "catalog": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/groups": {
       "get": {
         "description": "groupsApi.getAll — list groups. Admin only: each group names its members.",
@@ -10418,6 +10541,32 @@
         "title": "GlobalSearchRequest",
         "type": "object"
       },
+      "GraphEdge": {
+        "additionalProperties": true,
+        "properties": {
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "type": {
+            "description": "REPRESENTS, CONTAINS, PROPERTY_OF, ...",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["type", "source", "target"],
+        "title": "GraphEdge",
+        "type": "object"
+      },
       "GraphLink": {
         "additionalProperties": true,
         "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.\n``SAME_CONCEPT`` links two terms that are members of one Concept, whether\nor not they share a table.",
@@ -10440,6 +10589,88 @@
         },
         "required": ["source", "target"],
         "title": "GraphLink",
+        "type": "object"
+      },
+      "GraphNode": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "description": "The object's Auto Ontology id.",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Term, Table, Column, ColumnAttribute, ...",
+            "title": "Label",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          }
+        },
+        "required": ["id", "label"],
+        "title": "GraphNode",
+        "type": "object"
+      },
+      "GraphStatusResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "built": {
+            "default": false,
+            "description": "Whether the graph exists.",
+            "title": "Built",
+            "type": "boolean"
+          },
+          "edges": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Edge count per type.",
+            "title": "Edges",
+            "type": "object"
+          },
+          "enabled": {
+            "description": "Whether AGE_GRAPH_ENABLED is set.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "graph": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AGE graph name.",
+            "title": "Graph"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO timestamp of the last completed sync.",
+            "title": "Synced At"
+          },
+          "vertices": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Vertex count per label.",
+            "title": "Vertices",
+            "type": "object"
+          }
+        },
+        "required": ["enabled"],
+        "title": "GraphStatusResponse",
         "type": "object"
       },
       "Group": {
@@ -13626,6 +13857,41 @@
         },
         "required": ["id"],
         "title": "TermListItem",
+        "type": "object"
+      },
+      "TermNeighborhoodResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "term_id": {
+            "title": "Term Id",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when max_nodes stopped the walk early.",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": ["term_id", "depth", "truncated", "nodes", "edges"],
+        "title": "TermNeighborhoodResponse",
         "type": "object"
       },
       "TermsPageResponse": {
