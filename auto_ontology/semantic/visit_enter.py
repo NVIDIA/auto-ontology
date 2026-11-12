@@ -637,7 +637,7 @@ def calculate_columns_profiling(
             # appending as much annotation as fits, falling back a step at a
             # time rather than an all-or-nothing choice, so a key's own name
             # is never lost just because a longer example/format string
-            # didn't fit next to it. The SQL-gen prompt (sql_from_semantic.py)
+            # didn't fit next to it. The SQL-gen prompt
             # applies no such filter — it always sees the full, un-capped
             # entry — so this only trims what retrieval-time embedding sees.
             # Note this budgets the *formatted* entry (brackets/quotes

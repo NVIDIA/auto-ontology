@@ -18,7 +18,7 @@ Four properties of the engine shape this connector:
   :attr:`~ClickHouseDatabase.database_name` and the ``table_schema`` every
   introspection method reports, and only its tables are ingested. Reporting
   another database's tables under this connection would make
-  ``auto_ontology.retrieval.text_to_sql.formatters_util.qualify_table`` emit a
+  schema-qualified SQL emit a
   three-part ``bound.other.table``, which ClickHouse cannot parse -- so a
   second database is a second connection.
 * **``system`` tables, not ``information_schema``.** ClickHouse ships an

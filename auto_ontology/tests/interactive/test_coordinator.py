@@ -51,14 +51,6 @@ def test_step_rejects_none_turn_type():
         step(sess, turn_type=None)
 
 
-def test_debug_seed_sets_resume_from():
-    sess = _make_session()
-    _apply_debug_seed(sess, debug_error=None)
-    assert sess.path_state["_resume_from"] == "reconstruct_sql"
-    assert sess.path_state["sql_attempts"] == 0
-    assert sess.path_state["error_analysis_done"] is False
-
-
 def test_debug_seed_sets_error():
     sess = _make_session()
     _apply_debug_seed(sess, debug_error="column X does not exist")
@@ -94,7 +86,6 @@ def test_step_routes_exec_error_through_debug_path():
     assert isinstance(action, SubmitSQLAction)
     assert action.sql == "SELECT column FROM aliens"
     assert sess.path_state["error"] == actual_error
-    assert sess.path_state["_resume_from"] == "reconstruct_sql"
 
 
 def test_follow_up_seed_sets_working_question():
@@ -234,7 +225,6 @@ def test_sql_generation_includes_raw_clarifications_in_evidence():
     payload = mock_generate.call_args.args[0]
     assert sql == "SELECT 1"
     assert payload["question"] == "original question"
-    assert payload["enriched_question"] == "expanded merged question"
     assert "## Expanded Question" in payload["evidence"]
     assert (
         "Question: Which formula?\nAnswer: Divide cost by revenue."

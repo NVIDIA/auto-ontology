@@ -137,6 +137,7 @@ class CatalogEmbeddingRowsOp:
                     schema_name=schema_name,
                     table_name=table_name,
                     database_name=self._database_name,
+                    references=_text(column.get("references")),
                 )
                 rows.append(
                     build_embed_row(
@@ -152,6 +153,10 @@ class CatalogEmbeddingRowsOp:
 
 
 # ── Text templates ───────────────────────────────────────────────────────────
+
+
+def _text(value: Any) -> str:
+    return "" if value is None or pd.isna(value) else str(value).strip()
 
 
 def build_table_text(
@@ -186,6 +191,8 @@ def build_table_text(
         )
         if column_description:
             piece += f", description: {column_description}"
+        if references := _text(column.get("references")):
+            piece += f", references: {references}"
         piece += "}"
         column_pieces.append(piece)
 
@@ -202,9 +209,11 @@ def build_column_text(
     table_name: str,
     schema_name: str,
     database_name: str,
+    references: str = "",
 ) -> str:
     """Build the embedding text for a column.
 
+    *references* is the ``schema.table.column`` a foreign key lands on.
     Returns just the text string; the caller is responsible for wrapping it
     in an embed-row dict via :func:`build_embed_row`.
     """
@@ -217,6 +226,8 @@ def build_column_text(
     )
     if column_description:
         text += f", column_description: {column_description}"
+    if references:
+        text += f", references: {references}"
     if len(sample_values) > 0:
         text += f", sample_values: {', '.join(str(x) for x in sample_values)}"
     return text

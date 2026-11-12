@@ -6,7 +6,7 @@
 
 Split out of clarify.py: this module owns "what entities does the question
 mention, and which schema column/attribute does each one resolve to" —
-running the entity-coverage LangGraph, checking VDB-hit ambiguity, and
+running the entity-coverage pipeline, checking VDB-hit ambiguity, and
 resolving collisions where two entities land on the same column. External
 knowledge (KB) coverage lives in kb_coverage.py; clarification-turn
 orchestration lives in clarify.py.
@@ -20,8 +20,9 @@ import re
 
 from langchain_core.messages import HumanMessage
 
-from auto_ontology.retrieval.entity_coverage.graph import (
-    create_graph as _create_entity_coverage_graph,
+from auto_ontology.retrieval.entity_coverage.pipeline import (
+    create_steps as _create_entity_coverage_steps,
+    run as _run_entity_coverage,
 )
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
@@ -63,8 +64,8 @@ CLARIFY_MAX_DISTANCE: float = _resolve_clarify_max_distance()
 # keeps ambiguity flagging scoped to real near-ties.
 _AMBIGUITY_MAX_GAP: float = 0.25
 
-# Compiled entity-coverage LangGraph — shared across calls, compiled once at import.
-_ec_app = _create_entity_coverage_graph().compile()
+# Entity-coverage steps — shared across calls, built once at import.
+_ec_steps = _create_entity_coverage_steps()
 
 _FILLER = frozenset(
     [
@@ -156,7 +157,7 @@ def _run_entity_coverage_pipeline(
     semantic_retriever: object,
     db_name: str | None,
 ) -> dict:
-    """Invoke the entity-coverage LangGraph and return its final path_state.
+    """Run the entity-coverage pipeline and return its final path_state.
 
     Uses the reasoning LLM (state["llm"]) for extraction per main's decision.
     Returns an empty dict on any failure so callers degrade gracefully.
@@ -184,12 +185,12 @@ def _run_entity_coverage_pipeline(
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": [],
-        # data_retriever and connectors are not used by the 3-node entity-coverage
-        # graph (question_extraction → retrieve_candidates → coverage_grade) but are
+        # data_retriever and connectors are not used by the 3-step entity-coverage
+        # pipeline (question_extraction → retrieve_candidates → coverage_grade) but are
         # present in AgentState; we omit them and bypass _build_state intentionally.
     }
     try:
-        final_state = _ec_app.invoke(state, config={"recursion_limit": 10})
+        final_state = _run_entity_coverage(state, _ec_steps)
         return final_state.get("path_state", {})
     except Exception as exc:
         logger.error("Clarify — entity-coverage pipeline failed: %s", exc)

@@ -106,3 +106,56 @@ def table_description_expr(table=s.catalog_table) -> ColumnElement:
         .scalar_subquery()
     )
     return func.coalesce(_non_blank(table.c.description), from_term)
+
+
+def _qualified_column(target) -> ColumnElement:
+    return func.concat_ws(
+        ".", s.catalog_schema.c.name, s.catalog_table.c.name, target.c.name
+    )
+
+
+def column_reference_expr(column=s.catalog_column) -> ColumnElement:
+    """``schema.table.column`` a column's foreign key lands on, or ``NULL``.
+
+    A declared foreign key first, then a ``SEMANTIC_FK``, whose target is the
+    column that *owns* the referenced attribute. Takes the table or alias, for
+    the same reason as :func:`column_description_expr`.
+    """
+    target = s.catalog_column.alias("reference_target")
+
+    def _onto(link) -> ColumnElement:
+        return (
+            select(_qualified_column(target))
+            .select_from(
+                link.join(target, target.c.id == link.c.target_id)
+                .join(s.catalog_table, s.catalog_table.c.id == target.c.table_id)
+                .join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+            )
+            .where(link.c.source_id == column.c.id)
+            .order_by(target.c.id)
+            .limit(1)
+            .scalar_subquery()
+        )
+
+    declared = select(
+        s.column__foreign_key.c.source_column_id.label("source_id"),
+        s.column__foreign_key.c.target_column_id.label("target_id"),
+    ).subquery("declared_reference")
+    semantic = (
+        select(
+            s.column__semantic_fk.c.column_id.label("source_id"),
+            s.column__has_attribute.c.column_id.label("target_id"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+        )
+        .subquery("semantic_reference")
+    )
+    return func.coalesce(_onto(declared), _onto(semantic))

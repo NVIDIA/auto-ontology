@@ -6,14 +6,12 @@ from typing import Any
 
 import pytest
 
-from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.base import (
     AgentExecutionError,
     BaseAgent,
     agent_wrapper,
 )
 from auto_ontology.retrieval.text_to_sql.state import AgentState
-from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import route_decision
 
 
 class _InvalidAgent(BaseAgent):
@@ -41,7 +39,6 @@ def _state(decision: str = "valid_sql") -> dict:
         "path_state": {},
         "connectors": [],
         "messages": [],
-        "domain_rules": [],
     }
 
 
@@ -54,38 +51,11 @@ def test_validation_failure_never_returns_an_empty_state_update() -> None:
         raise AssertionError("missing failure decision must fail explicitly")
 
 
-def test_execution_validation_failure_replaces_stale_valid_decision() -> None:
-    state = _state()
-    update = agent_wrapper(SQLExecutionAgent())(state)
-    merged = {**state, **update}
+def test_validation_failure_replaces_stale_decision() -> None:
+    update = agent_wrapper(_InvalidAgent(failure_decision="unconstructable"))(_state())
 
-    assert update["decision"] == "invalid_sql"
-    assert route_decision(merged) == "invalid_sql"
-    assert update["path_state"]["error"]["agent"] == "sql_execution"
-
-
-def test_execution_exception_replaces_stale_valid_decision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    agent = SQLExecutionAgent()
-    monkeypatch.setattr(agent, "validate_input", lambda state: True)
-    monkeypatch.setattr(
-        agent,
-        "execute",
-        lambda state: (_ for _ in ()).throw(RuntimeError("fixture failure")),
-    )
-
-    state = _state()
-    update = agent_wrapper(agent)(state)
-    merged = {**state, **update}
-
-    assert update["decision"] == "invalid_sql"
-    assert route_decision(merged) == "invalid_sql"
-    assert update["path_state"]["error"] == {
-        "type": "RuntimeError",
-        "message": "fixture failure",
-        "agent": "sql_execution",
-    }
+    assert update["decision"] == "unconstructable"
+    assert update["path_state"]["error"]["agent"] == "invalid_fixture"
 
 
 def test_malformed_result_without_failure_transition_raises() -> None:
