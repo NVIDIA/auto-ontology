@@ -315,8 +315,55 @@ def test_output_is_capped(calls: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "200")
     text = tool.retrieve(_ctx(), "how is revenue calculated")
 
-    assert len(text) < 300
-    assert "more results not shown" in text
+    assert len(text) < 400
+    assert "ALSO FOUND, not shown for space" in text
+
+
+def test_what_does_not_fit_is_still_named(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "60")
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.endswith(
+        "ALSO FOUND, not shown for space — retrieve one by name to see it: "
+        "sales.orders, ATTRIBUTE Revenue (of Order)"
+    )
+
+
+def test_the_also_found_line_fits_inside_the_limit(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "200")
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert len(text) <= 200
+    assert "ALSO FOUND" in text
+
+
+def test_a_table_shown_earlier_is_not_named_again(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx()
+    tool.retrieve(ctx, "order amount")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "10")
+    text = tool.retrieve(ctx, "order amount")
+
+    assert "sales.orders" not in text
+
+
+def test_tables_past_the_table_limit_are_named(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TABLES_PER_RETRIEVE", "1")
+    monkeypatch.setattr(
+        tool, "_resolve_tables", lambda ctx, hits: (["t-orders", "t-customers"], {})
+    )
+    text = tool.retrieve(_ctx(), "customers")
+
+    assert "TABLE sales.orders" in text
+    assert "TABLE crm.customers" not in text
+    assert text.endswith("retrieve one by name to see it: crm.customers")
 
 
 def test_empty_query_is_refused(calls: dict) -> None:
@@ -421,6 +468,28 @@ def test_a_table_the_limit_cut_comes_back_in_full(
     assert "TABLE crm.customers" not in cut
     assert "shown earlier" not in again
     assert "status TEXT — values: 'ACTIVE', 'CHURNED', 'PENDING'" in again
+
+
+def test_a_table_too_long_for_the_limit_is_shown_short(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    notes = [
+        {"name": f"note_{i}", "data_type": "TEXT", "description": "A free note " * 6}
+        for i in range(10)
+    ]
+    wide = {**ORDERS, "columns": [*ORDERS["columns"], *notes]}
+    monkeypatch.setattr(tool, "fetch_tables_by_ids", lambda ids: [wide])
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "400")
+    ctx = _ctx()
+    text = tool.retrieve(ctx, "order amount")
+
+    assert "TABLE sales.orders — One row per order (shortened to fit)" in text
+    assert "  order_id INT\n  cust_ref INT — references crm.customers" in text
+    assert "  amount REAL" in text
+    assert "note_0" not in text
+    assert "… 11 more columns not shown; retrieve sales.orders" in text
+    assert ctx.was_shown("sales", "orders")
+    assert "t-orders" not in ctx.seen_tables
 
 
 def test_a_table_the_limit_cut_is_not_in_view(

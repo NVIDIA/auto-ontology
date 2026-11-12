@@ -390,6 +390,40 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     return "\n".join(lines)
 
 
+def _short_table_block(table: dict, matched: set[str]) -> str:
+    """*table* in a few lines, for when its full block does not fit.
+
+    Keeps the description and the columns a query most likely needs -- the
+    matched ones, the key and the foreign keys -- without their descriptions,
+    and says how to see the rest.
+    """
+    header = f"TABLE {_qualified(table)}"
+    if table.get("description"):
+        header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
+    keys = {str(k) for k in table.get("pk") or []}
+    lowered = {m.lower() for m in matched}
+    columns = list(table.get("columns") or [])
+    kept = [
+        c
+        for c in columns
+        if str(c.get("name") or "").lower() in lowered
+        or str(c.get("name")) in keys
+        or c.get("semantic_fk")
+    ]
+    lines = [header + " (shortened to fit)"]
+    for column in kept:
+        line = f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()
+        if column.get("semantic_fk"):
+            line += f" — references {column['semantic_fk']}"
+        lines.append(line)
+    if hidden := len(columns) - len(kept):
+        lines.append(
+            f"  … {hidden} more columns not shown; retrieve {_qualified(table)} "
+            "to see all of them"
+        )
+    return "\n".join(lines)
+
+
 def _definition_block(hit: dict) -> str | None:
     """A line for a hit that carries meaning beyond a table: a definition."""
     label = hit.get("label")
@@ -494,32 +528,75 @@ def _join_lines(
     return lines
 
 
-def _cap(blocks: list[str]) -> str:
+def _cap(
+    blocks: list[str],
+    shorter: dict[str, str] | None = None,
+    names: dict[str, str] | None = None,
+    also_found: list[str] | None = None,
+    quiet: set[str] | None = None,
+) -> str:
     """Join *blocks* in order within the observation limit, dropping repeats.
 
-    A block that does not fit is skipped rather than ending the result, so the
-    short lines after a large table still use the room that is left.
+    A block that does not fit is replaced by its entry in *shorter* when that
+    fits, and skipped otherwise rather than ending the result, so the short
+    lines after a large table still use the room that is left. Every skipped
+    block with an entry in *names*, and every name in *also_found*, is listed
+    on a last line, so nothing the search found goes unmentioned; a skipped
+    block in *quiet* is left out without a mention. The last line counts
+    against the limit: blocks are dropped from the end to make room for it.
     """
     limit = config.max_observation_chars()
-    out: list[str] = []
+    shorter = shorter or {}
+    names = names or {}
+    quiet = quiet or set()
+    out: list[tuple[str, str]] = []
     seen: set[str] = set()
     used = 0
-    skipped = 0
+    missed = list(also_found or [])
+    unnamed = 0
+
+    def miss(block: str) -> None:
+        nonlocal unnamed
+        if block in quiet:
+            return
+        if names.get(block):
+            missed.append(names[block])
+        else:
+            unnamed += 1
+
     for block in blocks:
         if block in seen:
             continue
         seen.add(block)
+        shown = block
         if used + len(block) + 2 > limit:
-            skipped += 1
-            continue
-        out.append(block)
-        used += len(block) + 2
-    if skipped:
-        out.append(
-            f"… {skipped} more results not shown; narrow the query or pass kinds "
-            "to see them"
+            shown = shorter.get(block, "")
+            if not shown or used + len(shown) + 2 > limit:
+                miss(block)
+                continue
+        out.append((shown, block))
+        used += len(shown) + 2
+    while out and used + len(_missed_line(missed, unnamed)) > limit:
+        shown, block = out.pop()
+        used -= len(shown) + 2
+        miss(block)
+    note = _missed_line(missed, unnamed)
+    return "\n\n".join([shown for shown, _ in out] + ([note] if note else []))
+
+
+def _missed_line(missed: list[str], unnamed: int) -> str:
+    """The last line of a result, naming what did not fit; empty if all did."""
+    if missed:
+        line = (
+            "ALSO FOUND, not shown for space — retrieve one by name to see it: "
+            + ", ".join(dict.fromkeys(missed))
         )
-    return "\n\n".join(out)
+        return line + (f"; and {unnamed} join or similar lines" if unnamed else "")
+    if unnamed:
+        return (
+            f"… {unnamed} join or similar lines not shown; narrow the query to see them"
+        )
+    return ""
 
 
 def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> str:
@@ -539,11 +616,13 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # Filtered before the limit, so a table from another database never takes
     # the place of one from this database.
     fetched = {str(t["id"]): t for t in fetch_tables_by_ids(new_ids)}
-    new_tables = [
+    found = [
         fetched[tid]
         for tid in new_ids
         if tid in fetched and _in_database(ctx, fetched[tid])
-    ][: config.max_tables_per_retrieve()]
+    ]
+    new_tables = found[: config.max_tables_per_retrieve()]
+    past_limit = [_qualified(t) for t in found[config.max_tables_per_retrieve() :]]
     revisited = [
         ctx.seen_tables[tid]
         for tid in table_ids
@@ -553,9 +632,9 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     def own(table: dict) -> set[tuple[str | None, str | None]]:
         return {(table.get("schema_name"), table.get("name"))}
 
-    # Most useful first, since the limit cuts from the end: new tables, how they
-    # join, definitions that carry SQL, then tables seen before. Each block
-    # carries the tables it names.
+    # Most useful first, since the limit shortens or only names what comes
+    # last: new tables, how they join, definitions that carry SQL, then tables
+    # seen before. Each block carries the tables it names.
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
@@ -569,25 +648,43 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             (line, set().union(*(own(t) for t in tables)))
             for line, tables in sibling_lines(ctx, new_tables)
         ]
-    named += [
+    definitions = [
         (block, _sql_tables(hit.get("sql")))
         for hit in hits
         if (block := _definition_block(hit)) is not None
     ]
-    named += [(_table_block(t, matched[str(t["id"])], True), own(t)) for t in revisited]
+    named += definitions
+    earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
+    named += [(block, own(t)) for block, t in earlier]
+    block_names = {
+        **{new_blocks[str(t["id"])]: _qualified(t) for t in new_tables},
+        **{block: block.split("\n")[0].split(" — ")[0] for block, _ in definitions},
+    }
     if not named:
         return (
             f"No matches for {query!r}. Try other words, an exact column or table "
             "name, or a broader query."
         )
-    result = _cap([block for block, _ in named])
-    # Only a table the model was actually shown counts as seen; one the limit
-    # cut must come back in full when a later search finds it again.
+    short_blocks = {
+        new_blocks[str(t["id"])]: _short_table_block(
+            t, matched.get(str(t["id"]), set())
+        )
+        for t in new_tables
+    }
+    result = _cap(
+        [block for block, _ in named],
+        short_blocks,
+        block_names,
+        past_limit,
+        quiet={block for block, _ in earlier},
+    )
+    # Only a table shown in full counts as seen; one the limit cut or shortened
+    # must come back in full when a later search finds it again.
     ctx.seen_tables.update(
         {str(t["id"]): t for t in new_tables if new_blocks[str(t["id"])] in result}
     )
     for block, tables in named:
-        if block in result:
+        if block in result or short_blocks.get(block, "\0") in result:
             for schema, name in tables:
                 ctx.show_table(schema, name)
     return result
