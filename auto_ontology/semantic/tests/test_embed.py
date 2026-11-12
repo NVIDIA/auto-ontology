@@ -59,6 +59,15 @@ def test_term_text_is_shaped_like_its_tables() -> None:
     )
 
 
+def test_a_table_description_copied_from_its_term_is_not_repeated() -> None:
+    attrs = [{**STATUS, "table_description": "An order placed."}]
+
+    text = _texts(TERM, attrs)[0]
+
+    assert "term_description: An order placed" in text
+    assert "table_description" not in text
+
+
 def test_a_term_over_several_tables_names_them_all() -> None:
     archived = {**STATUS, "id": "a-2", "table_name": "orders_archive"}
     text = _texts(TERM, [STATUS, archived])[0]

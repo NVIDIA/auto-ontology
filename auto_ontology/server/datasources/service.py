@@ -32,6 +32,8 @@ from auto_ontology.dal.datasources import (
 )
 from auto_ontology.dal.terms import (
     fetch_column_attribute_embedding_contexts_by_column_id,
+    fetch_term_and_column_attributes_for_embedding,
+    fetch_term_ids_for_table,
 )
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.utils.column_types import sample_values_edit_error
@@ -91,12 +93,25 @@ def update_node_properties(
     if reembed_ids:
         refresh_catalog_embeddings(reembed_ids)
 
-    if patched["label"] == Labels.COLUMN and "sample_values" in properties:
+    if patched["label"] == Labels.COLUMN and (
+        "sample_values" in properties or "description" in properties
+    ):
         try:
-            _refresh_semantic_column_attribute_embeddings(node_id)
+            _refresh_semantic_column_attribute_embeddings(
+                node_id, with_terms="description" in properties
+            )
         except Exception:
             logger.warning(
                 "Failed to refresh semantic ColumnAttribute embeddings for column %r",
+                node_id,
+                exc_info=True,
+            )
+    if patched["label"] == Labels.TABLE and "description" in properties:
+        try:
+            _refresh_semantic_term_rows(fetch_term_ids_for_table(node_id))
+        except Exception:
+            logger.warning(
+                "Failed to refresh semantic Term embeddings for table %r",
                 node_id,
                 exc_info=True,
             )
@@ -211,8 +226,15 @@ def refresh_catalog_embeddings(node_ids: list[str]) -> None:
     write_embedded_rows(vdb, rows)
 
 
-def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:
-    """Refresh semantic VDB rows whose text includes this Column's sample values."""
+def _refresh_semantic_column_attribute_embeddings(
+    column_id: str, *, with_terms: bool = False
+) -> None:
+    """Refresh semantic VDB rows whose text includes this Column's details.
+
+    An attribute's text carries the column's sample values and description; a
+    Term's carries the description too, for an attribute with none of its own,
+    so *with_terms* refreshes the Terms behind the attributes as well.
+    """
     contexts = fetch_column_attribute_embedding_contexts_by_column_id(column_id)
     for term, attrs in contexts:
         if not attrs:
@@ -225,3 +247,18 @@ def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:
             if attr_id:
                 embedder.vdb.delete_by_id(attr_id)
         embedder.embed_column_attributes(attrs)
+    if with_terms:
+        _refresh_semantic_term_rows([str(term["id"]) for term, _ in contexts])
+
+
+def _refresh_semantic_term_rows(term_ids: list[str]) -> None:
+    """Re-embed only the Term rows of *term_ids*, whose text lists their tables."""
+    for term_id in dict.fromkeys(term_ids):
+        term, attrs = fetch_term_and_column_attributes_for_embedding(term_id)
+        if term is None:
+            continue
+        embedder = build_semantic_embedder(term.get("database_name") or "", reset=False)
+        if embedder is None:
+            return
+        embedder.vdb.delete_by_id(term_id)
+        embedder.embed_term(term, attrs, embed_attrs=False)

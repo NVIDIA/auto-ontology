@@ -292,6 +292,20 @@ def semantic_layer_calculated() -> bool:
     )
 
 
+def fetch_term_ids_for_table(table_id: str) -> list[str]:
+    """Ids of every semantic Term the table represents."""
+    rows = store().query_read(
+        select(s.term.c.id)
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
+        .where(
+            s.table__term.c.table_id == table_id,
+            s.term.c.source == SEMANTIC_SOURCE,
+        )
+        .order_by(s.term.c.id)
+    )
+    return [str(r["id"]) for r in rows]
+
+
 def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
     """``{id, name, description}`` for the Term a table represents.
 
@@ -1110,10 +1124,11 @@ def fetch_term_and_column_attributes_for_embedding(
 def fetch_column_attribute_embedding_contexts_by_column_id(
     column_id: str,
 ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-    """The Term contexts a column's sample-value update invalidates.
+    """The Term contexts a column's sample-value or description update invalidates.
 
-    Sample values are part of a ColumnAttribute's embedding text, so profiling a
-    column stales every attribute on it and every term behind those.
+    Sample values and the column's description are part of a ColumnAttribute's
+    embedding text, so either edit stales every attribute on the column and
+    every term behind those.
     """
     rows = store().query_read(
         _attribute_embedding_select()

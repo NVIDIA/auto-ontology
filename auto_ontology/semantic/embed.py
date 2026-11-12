@@ -274,10 +274,12 @@ def _term_text(
             f"schema_name: {table.get('schema_name') or ''}",
             f"table_name: {table['table_name']}",
         ]
-        parts += [f"{k}: {v}" for k, v in _table_facts(table).items()]
+        parts += [
+            f"{k}: {v}" for k, v in _table_facts(table, term.get("description")).items()
+        ]
     elif tables:
         pieces = [
-            _braces({"table": name, **_table_facts(table)})
+            _braces({"table": name, **_table_facts(table, term.get("description"))})
             for name, table in tables.items()
         ]
         parts.append(f"tables: {','.join(pieces)}")
@@ -308,9 +310,12 @@ def _qualified_table(a: dict[str, Any]) -> str:
     return ".".join(p for p in (a.get("schema_name"), a.get("table_name")) if p)
 
 
-def _table_facts(a: dict[str, Any]) -> dict[str, str]:
+def _table_facts(a: dict[str, Any], term_description: str | None) -> dict[str, str]:
+    """The table's description, unless it only repeats the Term's."""
     description = (a.get("table_description") or "").strip()
-    return {"table_description": description} if description else {}
+    if not description or _same_text(description, term_description or ""):
+        return {}
+    return {"table_description": description}
 
 
 def _braces(fields: dict[str, Any]) -> str:

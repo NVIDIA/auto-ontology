@@ -254,6 +254,7 @@
     "fetch_semantic_coverage": "(column_ids: 'list[str]', table_ids: 'list[str]') -> 'tuple[set[str], set[str]]'",
     "fetch_table_schema_map": "(database_name: 'str') -> 'dict[str, str]'",
     "fetch_term_and_column_attributes_for_embedding": "(term_id: 'str') -> 'tuple[dict[str, Any] | None, list[dict[str, Any]]]'",
+    "fetch_term_ids_for_table": "(table_id: 'str') -> 'list[str]'",
     "fetch_term_synonyms": "(attr_ids: 'list[str]') -> 'dict[str, list[str]]'",
     "fetch_term_table_pairs": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, database_name: 'str | None' = None, *, term_ids: 'list[str] | None' = None, table_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
     "fetch_term_zones_map": "(zone_ids: 'list[str] | None' = None, term_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'",
