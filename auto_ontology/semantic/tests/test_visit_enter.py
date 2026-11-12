@@ -31,6 +31,14 @@ from auto_ontology.semantic.visit_enter import (
 from auto_ontology.utils.sql_identifiers import qualified_name
 
 
+@pytest.fixture(autouse=True)
+def store_distinct_ratios():
+    with patch(
+        "auto_ontology.semantic.visit_enter.store_column_distinct_ratios"
+    ) as store:
+        yield store
+
+
 def _mock_connector(dialect: str = "postgres") -> MagicMock:
     """A mock connector that qualifies names the way a real one would.
 
@@ -88,6 +96,55 @@ def test_keep_persisted_sample_caps_text_only() -> None:
     # Non-scalars are judged by how long they render.
     assert _keep_persisted_sample(["a", "b"]) is True
     assert _keep_persisted_sample(["x" * 40]) is False
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_a_column_is_unique_when_95_percent_of_its_values_are_distinct(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+    store_distinct_ratios: MagicMock,
+) -> None:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame(
+        {
+            "mostly_distinct": [*range(19), 0],
+            "repeated": [*range(18), 0, 0],
+            "small_enum": [*"ABCDE", *[None] * 15],
+            "small_repeat": [*"ABCDA", *[None] * 15],
+            "empty": [None] * 20,
+        }
+    )
+    columns = [
+        {"name": "mostly_distinct", "data_type": "integer"},
+        {"name": "repeated", "data_type": "integer"},
+        {"name": "small_enum", "data_type": "integer"},
+        {"name": "small_repeat", "data_type": "integer"},
+        {"name": "empty", "data_type": "integer"},
+    ]
+
+    result = calculate_columns_profiling(
+        {"id": "t1", "name": "t", "schema_name": "public"}, columns, connector
+    )
+
+    assert {name: profile["is_unique"] for name, profile in result.items()} == {
+        "mostly_distinct": True,
+        "repeated": False,
+        "small_enum": True,
+        "small_repeat": False,
+        "empty": False,
+    }
+    store_distinct_ratios.assert_called_once_with(
+        "t1",
+        {
+            "mostly_distinct": 0.95,
+            "repeated": 0.9,
+            "small_enum": 1.0,
+            "small_repeat": 0.8,
+        },
+    )
 
 
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")

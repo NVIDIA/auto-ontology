@@ -31,6 +31,7 @@ from sqlalchemy import (
     distinct,
     func,
     literal,
+    or_,
     select,
     update,
 )
@@ -518,6 +519,15 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
         table_id,
         {name: bool(flag) for name, flag in uniqueness.items()},
         "is_unique",
+    )
+
+
+def store_column_distinct_ratios(table_id: str, ratios: dict[str, float]) -> None:
+    """Write the measured share of distinct sampled values onto columns."""
+    _set_column_property(
+        table_id,
+        {name: float(ratio) for name, ratio in ratios.items()},
+        "distinct_ratio",
     )
 
 
@@ -1492,7 +1502,9 @@ def find_table_key_columns(
     from ``catalog_table.pk`` (set at ingestion from the DDL); ``unique`` comes
     from ``catalog_column.is_unique`` (set from observed-data profiling — see
     :func:`store_column_uniqueness`), so it also catches a unique-in-practice
-    column with no declared constraint. Returns ``{"pk": [], "unique": []}``
+    column with no declared constraint. Only columns whose sample was fully
+    distinct count: a column flagged unique at a ``distinct_ratio`` below 1.0
+    is mostly distinct, which proves neither claim. Returns ``{"pk": [], "unique": []}``
     (not ``None``) when no match is found.
     """
     empty: dict[str, list[str]] = {"pk": [], "unique": []}
@@ -1522,6 +1534,12 @@ def find_table_key_columns(
         select(s.catalog_column.c.name).where(
             s.catalog_column.c.table_id == table_id,
             s.catalog_column.c.is_unique.is_(True),
+            # Callers prove a GROUP BY vacuous or a join 1:1 from this, which
+            # mostly-distinct is not.
+            or_(
+                s.catalog_column.c.distinct_ratio.is_(None),
+                s.catalog_column.c.distinct_ratio >= 1.0,
+            ),
         )
     )
     unique_cols = list(

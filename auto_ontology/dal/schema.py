@@ -47,6 +47,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -277,7 +278,14 @@ catalog_column = Table(
     # `950324` and `1995-03-24` are the same day and share no predicate, and a
     # wrong guess yields SQL that runs, returns nothing, and looks right.
     Column("format", Text, nullable=True),
+    # Profiling sets `is_unique` when at least 95% of the sampled non-null
+    # values are distinct, so a key with a few dirty duplicates still reads as
+    # a key. `distinct_ratio` is that measured share. Readers that need exact
+    # uniqueness -- the text-to-SQL validators, through `find_table_key_columns`
+    # -- require 1.0. NULL means no ratio was measured (a model import, or a
+    # column profiled before the ratio existed), and the flag is then exact.
     Column("is_unique", Boolean, nullable=True),
+    Column("distinct_ratio", Float, nullable=True),
     # A real Boolean. It used to hold the *strings* `information_schema`
     # reports, 'YES' and 'NO', which read back as truthy either way -- so
     # `bool(stored)` was True for every column and every export claimed the

@@ -25,6 +25,7 @@ from auto_ontology.dal.attributes import merge_column_attribute
 from auto_ontology.dal.datasources import (
     mark_table_as_junction,
     store_column_date_formats,
+    store_column_distinct_ratios,
     store_column_sample_values,
     store_column_uniqueness,
 )
@@ -60,6 +61,10 @@ _PROFILING_QUERY_TIMEOUT_SECONDS = 120
 _MAX_CONSECUTIVE_SAMPLE_FAILURES = 3
 # Most-common values kept per column.
 _PROFILING_TOP_N = 5
+# Share of sampled non-null values that must be distinct for a column to count
+# as unique. Below 1 so a stray duplicate or a dirty row does not hide a key;
+# under 20 values it still means every value distinct.
+_UNIQUE_RATIO = 0.95
 # String sample values longer than this are not persisted.
 _MAX_SAMPLE_VALUE_LEN = 30
 # Declared data-type substrings whose sample values are not persisted.
@@ -413,7 +418,8 @@ def calculate_columns_profiling(
     """Profile a table's columns from a live sample of up to 1000 rows.
 
     Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
-    ``is_unique`` flag (all non-null values distinct) and the 5 most-common
+    ``is_unique`` flag (at least 95% of non-null values distinct, the measured
+    share persisted as ``distinct_ratio``) and the 5 most-common
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
@@ -432,6 +438,7 @@ def calculate_columns_profiling(
     text coerce through ``stringify_sample_values``.
 
     Persists to catalog columns: ``is_unique`` for every column,
+    ``distinct_ratio`` for every column with a non-null sampled value,
     ``format`` for date/time-typed or text columns whose sampled values share
     one storage notation — resolved by validating every value against
     strptime candidates (see ``auto_ontology.semantic.date_format``), so it can settle
@@ -480,6 +487,7 @@ def calculate_columns_profiling(
     profiling: dict[str, dict[str, Any]] = {}
     sample_values: dict[str, list] = {}
     uniqueness: dict[str, bool] = {}
+    distinct_ratios: dict[str, float] = {}
     date_formats: dict[str, str] = {}
 
     for column in df.columns:
@@ -492,7 +500,8 @@ def calculate_columns_profiling(
             # as dict/list, neither of which can go in a set or a Counter.
             keys = [_sample_key(value) for value in values]
 
-            is_unique = bool(keys and len(set(keys)) == len(keys))
+            distinct_ratio = len(set(keys)) / len(keys) if keys else None
+            is_unique = distinct_ratio is not None and distinct_ratio >= _UNIQUE_RATIO
 
             first_by_key: dict[str, Any] = {}
             for key, value in zip(keys, values):
@@ -555,6 +564,8 @@ def calculate_columns_profiling(
             date_formats[col_name] = date_format
 
         uniqueness[col_name] = is_unique
+        if distinct_ratio is not None:
+            distinct_ratios[col_name] = distinct_ratio
         profiling[col_name] = {
             "sample_values": col_values,
             "is_unique": is_unique,
@@ -745,6 +756,7 @@ def calculate_columns_profiling(
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)
     store_column_uniqueness(table_id, uniqueness)
+    store_column_distinct_ratios(table_id, distinct_ratios)
     store_column_date_formats(table_id, date_formats)
 
     return profiling
