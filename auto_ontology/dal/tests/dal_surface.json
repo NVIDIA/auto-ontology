@@ -233,6 +233,11 @@
     "remove_labels_no_longer_matched": "(*, rule_id: 'str', targets: 'dict[str, Select]') -> 'int'",
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
+  "term_families": {
+    "fetch_family_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_family_edges": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "replace_term_families": "(database_name: 'str', families: 'Iterable[tuple[str, str, Mapping[str, str]]]') -> 'int'"
+  },
   "terms": {
     "build_term_table_maps": "(pairs: 'list[dict[str, Any]]') -> 'tuple[dict[str, set[str]], dict[str, set[str]]]'",
     "count_column_attributes_by_term_id": "(term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'int'",

@@ -15,6 +15,7 @@ from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
+from auto_ontology.semantic.term_families import resolve_term_families
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
@@ -77,13 +78,20 @@ def _run_semantic_compilation(
     # rather than spending minutes on work nobody is waiting for.
     if is_cancelled():
         logger.info(
-            "Semantic compilation cancelled (database=%r) — skipping the FK, "
-            "SqlAttribute and bridge-table stages; %d table(s) compiled in %.1fs",
+            "Semantic compilation cancelled (database=%r) — skipping the term "
+            "family, FK, SqlAttribute and bridge-table stages; %d table(s) "
+            "compiled in %.1fs",
             database_name,
             count,
             time.monotonic() - started,
         )
         return count
+
+    logger.info("=" * 60)
+    logger.info("Resolving term families…")
+    logger.info("=" * 60)
+    family_count = resolve_term_families(database_name)
+    logger.info("Term families found: %d", family_count)
 
     logger.info("=" * 60)
     logger.info("Resolving semantic FK edges…")
@@ -109,14 +117,15 @@ def _run_semantic_compilation(
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all four stages completed.
+    # exceptions, so reaching this means all five stages completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
-        "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s) in %.1fs",
+        "%d table(s), %d term family(ies), %d semantic FK edge(s), "
+        "%d SqlAttribute(s), %d bridge table(s) in %.1fs",
         database_name,
         count,
+        family_count,
         fk_count,
         attr_count,
         bridge_table_count,

@@ -484,6 +484,47 @@ table__term = Table(
     ),
 )
 
+# A TermFamily is one version of a schema that a database keeps several copies
+# of, told apart by a table-name prefix: `OLD_ROOMS` and `NEW_ROOMS` are twins,
+# `OLD` and `NEW` are two families (`auto_ontology.semantic.term_families`).
+#
+# Derived, never edited: every compile replaces a database's families outright,
+# so nothing here may carry a user's change. Scoped by schema because twins are
+# only ever looked for within one, and so a data reset removes the family by
+# cascade along with the tables it was computed from.
+term_family = Table(
+    "term_family",
+    METADATA,
+    _id(),
+    Column(
+        "schema_id",
+        Text,
+        ForeignKey(catalog_schema.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("prefix", Text, nullable=False),
+    UniqueConstraint("schema_id", "prefix", name="uq_term_family_schema_prefix"),
+)
+
+# MEMBER_OF: Term -> TermFamily. `base_name` is the table name without the
+# family's prefix; two members of sibling families with the same `base_name`
+# are twins. `UNIQUE(term_id)`: a Term belongs to at most one family.
+term__term_family = Table(
+    "term__term_family",
+    METADATA,
+    Column(
+        "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
+    ),
+    Column(
+        "family_id",
+        Text,
+        ForeignKey(term_family.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("base_name", Text, nullable=False),
+    UniqueConstraint("term_id"),
+)
+
 column_attribute = Table(
     "column_attribute",
     METADATA,
@@ -1420,6 +1461,8 @@ __all__ = [
     "table__join",
     "table__term",
     "term",
+    "term__term_family",
+    "term_family",
     "text_attribute",
     "user_group",
     "user_group__member",
