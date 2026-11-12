@@ -50,7 +50,7 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     )
     monkeypatch.setattr(visit_enter, "apply_display_names_to_specs", lambda *_a: None)
     monkeypatch.setattr(
-        visit_enter, "_terms_with_assignments", lambda *_a: [(term, [assignment])]
+        visit_enter, "terms_with_assignments", lambda *_a: [(term, [assignment])]
     )
     monkeypatch.setattr(
         visit_enter,

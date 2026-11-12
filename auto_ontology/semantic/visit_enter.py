@@ -115,7 +115,7 @@ _DATE_SHAPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but the
 # commit phase is serialized so collision-qualified Term names are allocated in
 # a stable order and each table's store writes and embedding stay together.
-_term_commit_lock = threading.Lock()
+term_commit_lock = threading.Lock()
 
 
 @contextmanager
@@ -137,7 +137,7 @@ def _step(table_name: str, description: str) -> Iterator[None]:
         )
 
 
-def _terms_with_assignments(
+def terms_with_assignments(
     term_result: Any,
     spec_by_column: dict[str, ColumnAttributeSpec],
 ) -> list[tuple[Any, list[Any]]]:
@@ -948,7 +948,7 @@ def process_table(
         term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
     spec_by_column = {spec.source_column: spec for spec in specs}
-    persisted_terms = _terms_with_assignments(term_result, spec_by_column)
+    persisted_terms = terms_with_assignments(term_result, spec_by_column)
 
     if not persisted_terms:
         logger.warning(
@@ -964,10 +964,10 @@ def process_table(
     terms: list = []
     attrs_by_term: dict[str, list[dict]] = defaultdict(list)
 
-    commit_context = commit_slot if commit_slot is not None else _term_commit_lock
+    commit_context = commit_slot if commit_slot is not None else term_commit_lock
     with commit_context:
         with _step(table_name, f"Writing {len(persisted_terms)} term(s) to the graph"):
-            _commit_terms(
+            commit_terms(
                 persisted_terms,
                 spec_by_column,
                 table_id,
@@ -1006,7 +1006,7 @@ def process_table(
     )
 
 
-def _commit_terms(
+def commit_terms(
     persisted_terms: list,
     spec_by_column: dict[str, ColumnAttributeSpec],
     table_id: str,
