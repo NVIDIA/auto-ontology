@@ -122,6 +122,29 @@ def fetch_family_edges(database_name: str) -> list[dict[str, Any]]:
     return [dict(row) for row in store().query_read(statement)]
 
 
+def fetch_table_families(database_name: str) -> list[dict[str, Any]]:
+    """One row per family membership of a table of *database_name*.
+
+    Rows carry ``table_id``, ``family_id`` and ``base_name``, reached through
+    the table's Terms. A table none of whose Terms is in a family is absent.
+    """
+    statement = (
+        select(
+            s.table__term.c.table_id,
+            s.term__term_family.c.family_id,
+            s.term__term_family.c.base_name,
+        )
+        .join(
+            s.term__term_family,
+            s.term__term_family.c.term_id == s.table__term.c.term_id,
+        )
+        .join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
+        .where(s.catalog_table.c.schema_id.in_(_database_schema_ids(database_name)))
+        .order_by(s.table__term.c.table_id, s.term__term_family.c.family_id)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
 def replace_term_families(
     database_name: str,
     families: Iterable[tuple[str, str, Mapping[str, str]]],

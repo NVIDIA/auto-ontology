@@ -66,2182 +66,2776 @@
     "attributes.find_join_path__unknown": [],
     "attributes.find_unlinked_fk_columns": [
       {
+        "data_type": "DATETIME",
         "description": null,
-        "fk_target_col_id": "<col:chinook.main.Album.AlbumId>",
-        "fk_target_table_id": "<table:chinook.main.Album>",
-        "id": "<col:chinook.main.Track.AlbumId>",
-        "is_unique": null,
-        "name": "AlbumId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Track>",
-        "table_name": "Track"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Artist.ArtistId>",
-        "fk_target_table_id": "<table:chinook.main.Artist>",
-        "id": "<col:chinook.main.Album.ArtistId>",
-        "is_unique": null,
-        "name": "ArtistId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Album>",
-        "table_name": "Album"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Customer.CustomerId>",
-        "fk_target_table_id": "<table:chinook.main.Customer>",
-        "id": "<col:chinook.main.Invoice.CustomerId>",
-        "is_unique": null,
-        "name": "CustomerId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Employee.EmployeeId>",
-        "fk_target_table_id": "<table:chinook.main.Employee>",
-        "id": "<col:chinook.main.Customer.SupportRepId>",
-        "is_unique": null,
-        "name": "SupportRepId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Employee.EmployeeId>",
-        "fk_target_table_id": "<table:chinook.main.Employee>",
-        "id": "<col:chinook.main.Employee.ReportsTo>",
-        "is_unique": null,
-        "name": "ReportsTo",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Genre.GenreId>",
-        "fk_target_table_id": "<table:chinook.main.Genre>",
-        "id": "<col:chinook.main.Track.GenreId>",
-        "is_unique": null,
-        "name": "GenreId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Track>",
-        "table_name": "Track"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Invoice.InvoiceId>",
-        "fk_target_table_id": "<table:chinook.main.Invoice>",
-        "id": "<col:chinook.main.InvoiceLine.InvoiceId>",
-        "is_unique": null,
-        "name": "InvoiceId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.InvoiceLine>",
-        "table_name": "InvoiceLine"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.MediaType.MediaTypeId>",
-        "fk_target_table_id": "<table:chinook.main.MediaType>",
-        "id": "<col:chinook.main.Track.MediaTypeId>",
-        "is_unique": null,
-        "name": "MediaTypeId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Track>",
-        "table_name": "Track"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Playlist.PlaylistId>",
-        "fk_target_table_id": "<table:chinook.main.Playlist>",
-        "id": "<col:chinook.main.PlaylistTrack.PlaylistId>",
-        "is_unique": null,
-        "name": "PlaylistId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.PlaylistTrack>",
-        "table_name": "PlaylistTrack"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Track.TrackId>",
-        "fk_target_table_id": "<table:chinook.main.Track>",
-        "id": "<col:chinook.main.InvoiceLine.TrackId>",
-        "is_unique": null,
-        "name": "TrackId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.InvoiceLine>",
-        "table_name": "InvoiceLine"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:chinook.main.Track.TrackId>",
-        "fk_target_table_id": "<table:chinook.main.Track>",
-        "id": "<col:chinook.main.PlaylistTrack.TrackId>",
-        "is_unique": null,
-        "name": "TrackId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.PlaylistTrack>",
-        "table_name": "PlaylistTrack"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.analytics.category_rollup.category_rollup_id>",
-        "fk_target_table_id": "<table:pagila.analytics.category_rollup>",
-        "id": "<col:pagila.analytics.category_rollup.parent_rollup_id>",
-        "is_unique": null,
-        "name": "parent_rollup_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.analytics.category_rollup>",
-        "table_name": "category_rollup"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.actor.actor_id>",
-        "fk_target_table_id": "<table:pagila.public.actor>",
-        "id": "<col:pagila.public.film_actor.actor_id>",
-        "is_unique": null,
-        "name": "actor_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_actor>",
-        "table_name": "film_actor"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.address.address_id>",
-        "fk_target_table_id": "<table:pagila.public.address>",
-        "id": "<col:pagila.public.customer.address_id>",
-        "is_unique": null,
-        "name": "address_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.address.address_id>",
-        "fk_target_table_id": "<table:pagila.public.address>",
-        "id": "<col:pagila.public.staff.address_id>",
-        "is_unique": null,
-        "name": "address_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.address.address_id>",
-        "fk_target_table_id": "<table:pagila.public.address>",
-        "id": "<col:pagila.public.store.address_id>",
-        "is_unique": null,
-        "name": "address_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.store>",
-        "table_name": "store"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.category.category_id>",
-        "fk_target_table_id": "<table:pagila.public.category>",
-        "id": "<col:pagila.public.film_category.category_id>",
-        "is_unique": null,
-        "name": "category_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_category>",
-        "table_name": "film_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.city.city_id>",
-        "fk_target_table_id": "<table:pagila.public.city>",
-        "id": "<col:pagila.public.address.city_id>",
-        "is_unique": null,
-        "name": "city_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.country.country_id>",
-        "fk_target_table_id": "<table:pagila.public.country>",
-        "id": "<col:pagila.public.city.country_id>",
-        "is_unique": null,
-        "name": "country_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.city>",
-        "table_name": "city"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.film.film_id>",
-        "fk_target_table_id": "<table:pagila.public.film>",
-        "id": "<col:pagila.public.film_actor.film_id>",
-        "is_unique": null,
-        "name": "film_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_actor>",
-        "table_name": "film_actor"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.film.film_id>",
-        "fk_target_table_id": "<table:pagila.public.film>",
-        "id": "<col:pagila.public.film_category.film_id>",
-        "is_unique": null,
-        "name": "film_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_category>",
-        "table_name": "film_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.inventory.inventory_id>",
-        "fk_target_table_id": "<table:pagila.public.inventory>",
-        "id": "<col:pagila.public.rental.inventory_id>",
-        "is_unique": null,
-        "name": "inventory_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental>",
-        "table_name": "rental"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.language.language_id>",
-        "fk_target_table_id": "<table:pagila.public.language>",
-        "id": "<col:pagila.public.film.language_id>",
-        "is_unique": null,
-        "name": "language_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.language.language_id>",
-        "fk_target_table_id": "<table:pagila.public.language>",
-        "id": "<col:pagila.public.film.original_language_id>",
-        "is_unique": null,
-        "name": "original_language_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.staff.staff_id>",
-        "fk_target_table_id": "<table:pagila.public.staff>",
-        "id": "<col:pagila.public.rental.staff_id>",
-        "is_unique": null,
-        "name": "staff_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental>",
-        "table_name": "rental"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.store.store_id>",
-        "fk_target_table_id": "<table:pagila.public.store>",
-        "id": "<col:pagila.public.customer.store_id>",
-        "is_unique": null,
-        "name": "store_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.store.store_id>",
-        "fk_target_table_id": "<table:pagila.public.store>",
-        "id": "<col:pagila.public.inventory.store_id>",
-        "is_unique": null,
-        "name": "store_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.inventory>",
-        "table_name": "inventory"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": "<col:pagila.public.store.store_id>",
-        "fk_target_table_id": "<table:pagila.public.store>",
-        "id": "<col:pagila.public.staff.store_id>",
-        "is_unique": null,
-        "name": "store_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Album.AlbumId>",
-        "is_unique": null,
-        "name": "AlbumId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Album>",
-        "table_name": "Album"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Album.Title>",
-        "is_unique": null,
-        "name": "Title",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Album>",
-        "table_name": "Album"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Artist.ArtistId>",
-        "is_unique": null,
-        "name": "ArtistId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Artist>",
-        "table_name": "Artist"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Artist.Name>",
-        "is_unique": null,
-        "name": "Name",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Artist>",
-        "table_name": "Artist"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.Address>",
-        "is_unique": null,
-        "name": "Address",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.City>",
-        "is_unique": null,
-        "name": "City",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.Company>",
-        "is_unique": null,
-        "name": "Company",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.Country>",
-        "is_unique": null,
-        "name": "Country",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.CustomerId>",
-        "is_unique": null,
-        "name": "CustomerId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.Email>",
-        "is_unique": null,
-        "name": "Email",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.Fax>",
-        "is_unique": null,
-        "name": "Fax",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.FirstName>",
-        "is_unique": null,
-        "name": "FirstName",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.LastName>",
-        "is_unique": null,
-        "name": "LastName",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.Phone>",
-        "is_unique": null,
-        "name": "Phone",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.PostalCode>",
-        "is_unique": null,
-        "name": "PostalCode",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Customer.State>",
-        "is_unique": null,
-        "name": "State",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Customer>",
-        "table_name": "Customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.Address>",
-        "is_unique": null,
-        "name": "Address",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Employee.BirthDate>",
         "is_unique": null,
         "name": "BirthDate",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Employee>",
         "table_name": "Employee"
       },
       {
+        "data_type": "DATETIME",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.City>",
-        "is_unique": null,
-        "name": "City",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.Country>",
-        "is_unique": null,
-        "name": "Country",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.Email>",
-        "is_unique": null,
-        "name": "Email",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.EmployeeId>",
-        "is_unique": null,
-        "name": "EmployeeId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.Fax>",
-        "is_unique": null,
-        "name": "Fax",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.FirstName>",
-        "is_unique": null,
-        "name": "FirstName",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Employee.HireDate>",
         "is_unique": null,
         "name": "HireDate",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Employee>",
         "table_name": "Employee"
       },
       {
+        "data_type": "DATETIME",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.LastName>",
-        "is_unique": null,
-        "name": "LastName",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.Phone>",
-        "is_unique": null,
-        "name": "Phone",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.PostalCode>",
-        "is_unique": null,
-        "name": "PostalCode",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.State>",
-        "is_unique": null,
-        "name": "State",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Employee.Title>",
-        "is_unique": null,
-        "name": "Title",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Employee>",
-        "table_name": "Employee"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Genre.GenreId>",
-        "is_unique": null,
-        "name": "GenreId",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Genre>",
-        "table_name": "Genre"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Genre.Name>",
-        "is_unique": null,
-        "name": "Name",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Genre>",
-        "table_name": "Genre"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Invoice.BillingAddress>",
-        "is_unique": null,
-        "name": "BillingAddress",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Invoice.BillingCity>",
-        "is_unique": null,
-        "name": "BillingCity",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Invoice.BillingCountry>",
-        "is_unique": null,
-        "name": "BillingCountry",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Invoice.BillingPostalCode>",
-        "is_unique": null,
-        "name": "BillingPostalCode",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Invoice.BillingState>",
-        "is_unique": null,
-        "name": "BillingState",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Invoice.InvoiceDate>",
         "is_unique": null,
         "name": "InvoiceDate",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Invoice>",
         "table_name": "Invoice"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Album.AlbumId>",
+        "fk_target_table_id": "<table:chinook.main.Album>",
+        "id": "<col:chinook.main.Track.AlbumId>",
+        "is_unique": null,
+        "name": "AlbumId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Track>",
+        "table_name": "Track"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Artist.ArtistId>",
+        "fk_target_table_id": "<table:chinook.main.Artist>",
+        "id": "<col:chinook.main.Album.ArtistId>",
+        "is_unique": null,
+        "name": "ArtistId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Album>",
+        "table_name": "Album"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Customer.CustomerId>",
+        "fk_target_table_id": "<table:chinook.main.Customer>",
+        "id": "<col:chinook.main.Invoice.CustomerId>",
+        "is_unique": null,
+        "name": "CustomerId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Employee.EmployeeId>",
+        "fk_target_table_id": "<table:chinook.main.Employee>",
+        "id": "<col:chinook.main.Customer.SupportRepId>",
+        "is_unique": null,
+        "name": "SupportRepId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Employee.EmployeeId>",
+        "fk_target_table_id": "<table:chinook.main.Employee>",
+        "id": "<col:chinook.main.Employee.ReportsTo>",
+        "is_unique": null,
+        "name": "ReportsTo",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Genre.GenreId>",
+        "fk_target_table_id": "<table:chinook.main.Genre>",
+        "id": "<col:chinook.main.Track.GenreId>",
+        "is_unique": null,
+        "name": "GenreId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Track>",
+        "table_name": "Track"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Invoice.InvoiceId>",
+        "fk_target_table_id": "<table:chinook.main.Invoice>",
+        "id": "<col:chinook.main.InvoiceLine.InvoiceId>",
+        "is_unique": null,
+        "name": "InvoiceId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.InvoiceLine>",
+        "table_name": "InvoiceLine"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.MediaType.MediaTypeId>",
+        "fk_target_table_id": "<table:chinook.main.MediaType>",
+        "id": "<col:chinook.main.Track.MediaTypeId>",
+        "is_unique": null,
+        "name": "MediaTypeId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Track>",
+        "table_name": "Track"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Playlist.PlaylistId>",
+        "fk_target_table_id": "<table:chinook.main.Playlist>",
+        "id": "<col:chinook.main.PlaylistTrack.PlaylistId>",
+        "is_unique": null,
+        "name": "PlaylistId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.PlaylistTrack>",
+        "table_name": "PlaylistTrack"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Track.TrackId>",
+        "fk_target_table_id": "<table:chinook.main.Track>",
+        "id": "<col:chinook.main.InvoiceLine.TrackId>",
+        "is_unique": null,
+        "name": "TrackId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.InvoiceLine>",
+        "table_name": "InvoiceLine"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:chinook.main.Track.TrackId>",
+        "fk_target_table_id": "<table:chinook.main.Track>",
+        "id": "<col:chinook.main.PlaylistTrack.TrackId>",
+        "is_unique": null,
+        "name": "TrackId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.PlaylistTrack>",
+        "table_name": "PlaylistTrack"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.Album.AlbumId>",
+        "is_unique": null,
+        "name": "AlbumId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Album>",
+        "table_name": "Album"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.Artist.ArtistId>",
+        "is_unique": null,
+        "name": "ArtistId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Artist>",
+        "table_name": "Artist"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.Customer.CustomerId>",
+        "is_unique": null,
+        "name": "CustomerId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.Employee.EmployeeId>",
+        "is_unique": null,
+        "name": "EmployeeId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.Genre.GenreId>",
+        "is_unique": null,
+        "name": "GenreId",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Genre>",
+        "table_name": "Genre"
+      },
+      {
+        "data_type": "INTEGER",
+        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Invoice.InvoiceId>",
         "is_unique": null,
         "name": "InvoiceId",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Invoice>",
         "table_name": "Invoice"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Invoice.Total>",
-        "is_unique": null,
-        "name": "Total",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Invoice>",
-        "table_name": "Invoice"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.InvoiceLine.InvoiceLineId>",
         "is_unique": null,
         "name": "InvoiceLineId",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.InvoiceLine>",
         "table_name": "InvoiceLine"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.InvoiceLine.Quantity>",
         "is_unique": null,
         "name": "Quantity",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.InvoiceLine>",
         "table_name": "InvoiceLine"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.InvoiceLine.UnitPrice>",
-        "is_unique": null,
-        "name": "UnitPrice",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.InvoiceLine>",
-        "table_name": "InvoiceLine"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.MediaType.MediaTypeId>",
         "is_unique": null,
         "name": "MediaTypeId",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.MediaType>",
         "table_name": "MediaType"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.MediaType.Name>",
-        "is_unique": null,
-        "name": "Name",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.MediaType>",
-        "table_name": "MediaType"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Playlist.Name>",
-        "is_unique": null,
-        "name": "Name",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Playlist>",
-        "table_name": "Playlist"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Playlist.PlaylistId>",
         "is_unique": null,
         "name": "PlaylistId",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Playlist>",
         "table_name": "Playlist"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Track.Bytes>",
         "is_unique": null,
         "name": "Bytes",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Track>",
         "table_name": "Track"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:chinook.main.Track.Composer>",
-        "is_unique": null,
-        "name": "Composer",
-        "sample_values": null,
-        "table_id": "<table:chinook.main.Track>",
-        "table_name": "Track"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Track.Milliseconds>",
         "is_unique": null,
         "name": "Milliseconds",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Track>",
         "table_name": "Track"
       },
       {
+        "data_type": "INTEGER",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Track.TrackId>",
         "is_unique": null,
         "name": "TrackId",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Track>",
         "table_name": "Track"
       },
       {
+        "data_type": "NUMERIC(10,2)",
         "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.Invoice.Total>",
+        "is_unique": null,
+        "name": "Total",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
+      },
+      {
+        "data_type": "NUMERIC(10,2)",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:chinook.main.InvoiceLine.UnitPrice>",
+        "is_unique": null,
+        "name": "UnitPrice",
+        "sample_values": null,
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.InvoiceLine>",
+        "table_name": "InvoiceLine"
+      },
+      {
+        "data_type": "NUMERIC(10,2)",
+        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:chinook.main.Track.UnitPrice>",
         "is_unique": null,
         "name": "UnitPrice",
         "sample_values": null,
+        "schema_name": "main",
         "table_id": "<table:chinook.main.Track>",
         "table_name": "Track"
       },
       {
+        "data_type": "NVARCHAR(10)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.category_rollup.category_id>",
+        "id": "<col:chinook.main.Customer.PostalCode>",
         "is_unique": null,
-        "name": "category_id",
+        "name": "PostalCode",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.category_rollup>",
-        "table_name": "category_rollup"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(10)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.category_rollup.category_rollup_id>",
+        "id": "<col:chinook.main.Employee.PostalCode>",
         "is_unique": null,
-        "name": "category_rollup_id",
+        "name": "PostalCode",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.category_rollup>",
-        "table_name": "category_rollup"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(10)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.category_rollup.label>",
+        "id": "<col:chinook.main.Invoice.BillingPostalCode>",
         "is_unique": null,
-        "name": "label",
+        "name": "BillingPostalCode",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.category_rollup>",
-        "table_name": "category_rollup"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
       },
       {
+        "data_type": "NVARCHAR(120)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.category_rollup.total_rentals>",
+        "id": "<col:chinook.main.Artist.Name>",
         "is_unique": null,
-        "name": "total_rentals",
+        "name": "Name",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.category_rollup>",
-        "table_name": "category_rollup"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Artist>",
+        "table_name": "Artist"
       },
       {
+        "data_type": "NVARCHAR(120)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.film_performance.film_id>",
+        "id": "<col:chinook.main.Genre.Name>",
         "is_unique": null,
-        "name": "film_id",
+        "name": "Name",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.film_performance>",
-        "table_name": "film_performance"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Genre>",
+        "table_name": "Genre"
       },
       {
+        "data_type": "NVARCHAR(120)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.film_performance.film_performance_id>",
+        "id": "<col:chinook.main.MediaType.Name>",
         "is_unique": null,
-        "name": "film_performance_id",
+        "name": "Name",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.film_performance>",
-        "table_name": "film_performance"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.MediaType>",
+        "table_name": "MediaType"
       },
       {
+        "data_type": "NVARCHAR(120)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.film_performance.last_rented_at>",
+        "id": "<col:chinook.main.Playlist.Name>",
         "is_unique": null,
-        "name": "last_rented_at",
+        "name": "Name",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.film_performance>",
-        "table_name": "film_performance"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Playlist>",
+        "table_name": "Playlist"
       },
       {
+        "data_type": "NVARCHAR(160)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.film_performance.rental_count>",
+        "id": "<col:chinook.main.Album.Title>",
         "is_unique": null,
-        "name": "rental_count",
+        "name": "Title",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.film_performance>",
-        "table_name": "film_performance"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Album>",
+        "table_name": "Album"
       },
       {
+        "data_type": "NVARCHAR(20)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.film_performance.revenue>",
+        "id": "<col:chinook.main.Customer.LastName>",
         "is_unique": null,
-        "name": "revenue",
+        "name": "LastName",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.film_performance>",
-        "table_name": "film_performance"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(20)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.top_films.film_id>",
+        "id": "<col:chinook.main.Employee.FirstName>",
         "is_unique": null,
-        "name": "film_id",
+        "name": "FirstName",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.top_films>",
-        "table_name": "top_films"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(20)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.top_films.rental_count>",
+        "id": "<col:chinook.main.Employee.LastName>",
         "is_unique": null,
-        "name": "rental_count",
+        "name": "LastName",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.top_films>",
-        "table_name": "top_films"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(220)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.top_films.revenue>",
+        "id": "<col:chinook.main.Track.Composer>",
         "is_unique": null,
-        "name": "revenue",
+        "name": "Composer",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.top_films>",
-        "table_name": "top_films"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Track>",
+        "table_name": "Track"
       },
       {
+        "data_type": "NVARCHAR(24)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.analytics.top_films.title>",
+        "id": "<col:chinook.main.Customer.Fax>",
         "is_unique": null,
-        "name": "title",
+        "name": "Fax",
         "sample_values": null,
-        "table_id": "<table:pagila.analytics.top_films>",
-        "table_name": "top_films"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(24)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor.actor_id>",
+        "id": "<col:chinook.main.Customer.Phone>",
         "is_unique": null,
-        "name": "actor_id",
+        "name": "Phone",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor>",
-        "table_name": "actor"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(24)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor.first_name>",
+        "id": "<col:chinook.main.Employee.Fax>",
         "is_unique": null,
-        "name": "first_name",
+        "name": "Fax",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor>",
-        "table_name": "actor"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(24)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor.last_name>",
+        "id": "<col:chinook.main.Employee.Phone>",
         "is_unique": null,
-        "name": "last_name",
+        "name": "Phone",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor>",
-        "table_name": "actor"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(30)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor.last_update>",
+        "id": "<col:chinook.main.Employee.Title>",
         "is_unique": null,
-        "name": "last_update",
+        "name": "Title",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor>",
-        "table_name": "actor"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor_info.actor_id>",
+        "id": "<col:chinook.main.Customer.City>",
         "is_unique": null,
-        "name": "actor_id",
+        "name": "City",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor_info>",
-        "table_name": "actor_info"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor_info.film_info>",
+        "id": "<col:chinook.main.Customer.Country>",
         "is_unique": null,
-        "name": "film_info",
+        "name": "Country",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor_info>",
-        "table_name": "actor_info"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor_info.first_name>",
+        "id": "<col:chinook.main.Customer.FirstName>",
         "is_unique": null,
-        "name": "first_name",
+        "name": "FirstName",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor_info>",
-        "table_name": "actor_info"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.actor_info.last_name>",
+        "id": "<col:chinook.main.Customer.State>",
         "is_unique": null,
-        "name": "last_name",
+        "name": "State",
         "sample_values": null,
-        "table_id": "<table:pagila.public.actor_info>",
-        "table_name": "actor_info"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.address2>",
+        "id": "<col:chinook.main.Employee.City>",
         "is_unique": null,
-        "name": "address2",
+        "name": "City",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.address>",
+        "id": "<col:chinook.main.Employee.Country>",
         "is_unique": null,
-        "name": "address",
+        "name": "Country",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.address_id>",
+        "id": "<col:chinook.main.Employee.State>",
         "is_unique": null,
-        "name": "address_id",
+        "name": "State",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.district>",
+        "id": "<col:chinook.main.Invoice.BillingCity>",
         "is_unique": null,
-        "name": "district",
+        "name": "BillingCity",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.last_update>",
+        "id": "<col:chinook.main.Invoice.BillingCountry>",
         "is_unique": null,
-        "name": "last_update",
+        "name": "BillingCountry",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
       },
       {
+        "data_type": "NVARCHAR(40)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.phone>",
+        "id": "<col:chinook.main.Invoice.BillingState>",
         "is_unique": null,
-        "name": "phone",
+        "name": "BillingState",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
       },
       {
+        "data_type": "NVARCHAR(60)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.address.postal_code>",
+        "id": "<col:chinook.main.Customer.Email>",
         "is_unique": null,
-        "name": "postal_code",
+        "name": "Email",
         "sample_values": null,
-        "table_id": "<table:pagila.public.address>",
-        "table_name": "address"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(60)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.category.category_id>",
+        "id": "<col:chinook.main.Employee.Email>",
         "is_unique": null,
-        "name": "category_id",
+        "name": "Email",
         "sample_values": null,
-        "table_id": "<table:pagila.public.category>",
-        "table_name": "category"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(70)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.category.last_update>",
+        "id": "<col:chinook.main.Customer.Address>",
         "is_unique": null,
-        "name": "last_update",
+        "name": "Address",
         "sample_values": null,
-        "table_id": "<table:pagila.public.category>",
-        "table_name": "category"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "NVARCHAR(70)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.category.name>",
+        "id": "<col:chinook.main.Employee.Address>",
         "is_unique": null,
-        "name": "name",
+        "name": "Address",
         "sample_values": null,
-        "table_id": "<table:pagila.public.category>",
-        "table_name": "category"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Employee>",
+        "table_name": "Employee"
       },
       {
+        "data_type": "NVARCHAR(70)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.city.city>",
+        "id": "<col:chinook.main.Invoice.BillingAddress>",
         "is_unique": null,
-        "name": "city",
+        "name": "BillingAddress",
         "sample_values": null,
-        "table_id": "<table:pagila.public.city>",
-        "table_name": "city"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Invoice>",
+        "table_name": "Invoice"
       },
       {
+        "data_type": "NVARCHAR(80)",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
-        "id": "<col:pagila.public.city.city_id>",
+        "id": "<col:chinook.main.Customer.Company>",
         "is_unique": null,
-        "name": "city_id",
+        "name": "Company",
         "sample_values": null,
-        "table_id": "<table:pagila.public.city>",
-        "table_name": "city"
+        "schema_name": "main",
+        "table_id": "<table:chinook.main.Customer>",
+        "table_name": "Customer"
       },
       {
+        "data_type": "boolean",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.city.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.city>",
-        "table_name": "city"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.country.country>",
-        "is_unique": null,
-        "name": "country",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.country>",
-        "table_name": "country"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.country.country_id>",
-        "is_unique": null,
-        "name": "country_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.country>",
-        "table_name": "country"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.country.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.country>",
-        "table_name": "country"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer.active>",
-        "is_unique": null,
-        "name": "active",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.customer.activebool>",
         "is_unique": null,
         "name": "activebool",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.customer>",
         "table_name": "customer"
       },
       {
+        "data_type": "boolean",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer.create_date>",
-        "is_unique": null,
-        "name": "create_date",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer.first_name>",
-        "is_unique": null,
-        "name": "first_name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer.last_name>",
-        "is_unique": null,
-        "name": "last_name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer>",
-        "table_name": "customer"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.address>",
-        "is_unique": null,
-        "name": "address",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.city>",
-        "is_unique": null,
-        "name": "city",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.country>",
-        "is_unique": null,
-        "name": "country",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.id>",
-        "is_unique": null,
-        "name": "id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.name>",
-        "is_unique": null,
-        "name": "name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.notes>",
-        "is_unique": null,
-        "name": "notes",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.phone>",
-        "is_unique": null,
-        "name": "phone",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.sid>",
-        "is_unique": null,
-        "name": "sid",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.customer_list.zip code>",
-        "is_unique": null,
-        "name": "zip code",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.customer_list>",
-        "table_name": "customer_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.description>",
-        "is_unique": null,
-        "name": "description",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.fulltext>",
-        "is_unique": null,
-        "name": "fulltext",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.length>",
-        "is_unique": null,
-        "name": "length",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.release_year>",
-        "is_unique": null,
-        "name": "release_year",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.rental_duration>",
-        "is_unique": null,
-        "name": "rental_duration",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.rental_rate>",
-        "is_unique": null,
-        "name": "rental_rate",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.replacement_cost>",
-        "is_unique": null,
-        "name": "replacement_cost",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film.special_features>",
-        "is_unique": null,
-        "name": "special_features",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film>",
-        "table_name": "film"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_actor.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_actor>",
-        "table_name": "film_actor"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_category.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_category>",
-        "table_name": "film_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.actors>",
-        "is_unique": null,
-        "name": "actors",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.category>",
-        "is_unique": null,
-        "name": "category",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.description>",
-        "is_unique": null,
-        "name": "description",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.fid>",
-        "is_unique": null,
-        "name": "fid",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.length>",
-        "is_unique": null,
-        "name": "length",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.price>",
-        "is_unique": null,
-        "name": "price",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.rating>",
-        "is_unique": null,
-        "name": "rating",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.film_list.title>",
-        "is_unique": null,
-        "name": "title",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.film_list>",
-        "table_name": "film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.inventory.inventory_id>",
-        "is_unique": null,
-        "name": "inventory_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.inventory>",
-        "table_name": "inventory"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.inventory.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.inventory>",
-        "table_name": "inventory"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.language.language_id>",
-        "is_unique": null,
-        "name": "language_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.language>",
-        "table_name": "language"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.language.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.language>",
-        "table_name": "language"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.language.name>",
-        "is_unique": null,
-        "name": "name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.language>",
-        "table_name": "language"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.actors>",
-        "is_unique": null,
-        "name": "actors",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.category>",
-        "is_unique": null,
-        "name": "category",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.description>",
-        "is_unique": null,
-        "name": "description",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.fid>",
-        "is_unique": null,
-        "name": "fid",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.length>",
-        "is_unique": null,
-        "name": "length",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.price>",
-        "is_unique": null,
-        "name": "price",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.rating>",
-        "is_unique": null,
-        "name": "rating",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.nicer_but_slower_film_list.title>",
-        "is_unique": null,
-        "name": "title",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
-        "table_name": "nicer_but_slower_film_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.payment.payment_date>",
-        "is_unique": null,
-        "name": "payment_date",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.payment>",
-        "table_name": "payment"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.payment.payment_id>",
-        "is_unique": null,
-        "name": "payment_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.payment>",
-        "table_name": "payment"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.payment.rental_id>",
-        "is_unique": null,
-        "name": "rental_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.payment>",
-        "table_name": "payment"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.payment.staff_id>",
-        "is_unique": null,
-        "name": "staff_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.payment>",
-        "table_name": "payment"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.rental.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental>",
-        "table_name": "rental"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.rental.rental_id>",
-        "is_unique": null,
-        "name": "rental_id",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental>",
-        "table_name": "rental"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.rental.return_date>",
-        "is_unique": null,
-        "name": "return_date",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental>",
-        "table_name": "rental"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.rental_by_category.category>",
-        "is_unique": null,
-        "name": "category",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental_by_category>",
-        "table_name": "rental_by_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.rental_by_category.total_sales>",
-        "is_unique": null,
-        "name": "total_sales",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.rental_by_category>",
-        "table_name": "rental_by_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.sales_by_film_category.category>",
-        "is_unique": null,
-        "name": "category",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.sales_by_film_category>",
-        "table_name": "sales_by_film_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.sales_by_film_category.total_sales>",
-        "is_unique": null,
-        "name": "total_sales",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.sales_by_film_category>",
-        "table_name": "sales_by_film_category"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.sales_by_store.manager>",
-        "is_unique": null,
-        "name": "manager",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.sales_by_store>",
-        "table_name": "sales_by_store"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.sales_by_store.store>",
-        "is_unique": null,
-        "name": "store",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.sales_by_store>",
-        "table_name": "sales_by_store"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.sales_by_store.total_sales>",
-        "is_unique": null,
-        "name": "total_sales",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.sales_by_store>",
-        "table_name": "sales_by_store"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.staff.active>",
         "is_unique": null,
         "name": "active",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.staff>",
         "table_name": "staff"
       },
       {
+        "data_type": "bytea",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff.email>",
-        "is_unique": null,
-        "name": "email",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff.first_name>",
-        "is_unique": null,
-        "name": "first_name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff.last_name>",
-        "is_unique": null,
-        "name": "last_name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff.password>",
-        "is_unique": null,
-        "name": "password",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.staff.picture>",
         "is_unique": null,
         "name": "picture",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.staff>",
         "table_name": "staff"
       },
       {
+        "data_type": "character",
         "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.language.name>",
+        "is_unique": null,
+        "name": "name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.language>",
+        "table_name": "language"
+      },
+      {
+        "data_type": "date",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer.create_date>",
+        "is_unique": null,
+        "name": "create_date",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.analytics.category_rollup.category_rollup_id>",
+        "fk_target_table_id": "<table:pagila.analytics.category_rollup>",
+        "id": "<col:pagila.analytics.category_rollup.parent_rollup_id>",
+        "is_unique": null,
+        "name": "parent_rollup_id",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.category_rollup>",
+        "table_name": "category_rollup"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.actor.actor_id>",
+        "fk_target_table_id": "<table:pagila.public.actor>",
+        "id": "<col:pagila.public.film_actor.actor_id>",
+        "is_unique": null,
+        "name": "actor_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_actor>",
+        "table_name": "film_actor"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.address.address_id>",
+        "fk_target_table_id": "<table:pagila.public.address>",
+        "id": "<col:pagila.public.customer.address_id>",
+        "is_unique": null,
+        "name": "address_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.address.address_id>",
+        "fk_target_table_id": "<table:pagila.public.address>",
+        "id": "<col:pagila.public.staff.address_id>",
+        "is_unique": null,
+        "name": "address_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.address.address_id>",
+        "fk_target_table_id": "<table:pagila.public.address>",
+        "id": "<col:pagila.public.store.address_id>",
+        "is_unique": null,
+        "name": "address_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.store>",
+        "table_name": "store"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.category.category_id>",
+        "fk_target_table_id": "<table:pagila.public.category>",
+        "id": "<col:pagila.public.film_category.category_id>",
+        "is_unique": null,
+        "name": "category_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_category>",
+        "table_name": "film_category"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.city.city_id>",
+        "fk_target_table_id": "<table:pagila.public.city>",
+        "id": "<col:pagila.public.address.city_id>",
+        "is_unique": null,
+        "name": "city_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.country.country_id>",
+        "fk_target_table_id": "<table:pagila.public.country>",
+        "id": "<col:pagila.public.city.country_id>",
+        "is_unique": null,
+        "name": "country_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.city>",
+        "table_name": "city"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.film.film_id>",
+        "fk_target_table_id": "<table:pagila.public.film>",
+        "id": "<col:pagila.public.film_actor.film_id>",
+        "is_unique": null,
+        "name": "film_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_actor>",
+        "table_name": "film_actor"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.film.film_id>",
+        "fk_target_table_id": "<table:pagila.public.film>",
+        "id": "<col:pagila.public.film_category.film_id>",
+        "is_unique": null,
+        "name": "film_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_category>",
+        "table_name": "film_category"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.inventory.inventory_id>",
+        "fk_target_table_id": "<table:pagila.public.inventory>",
+        "id": "<col:pagila.public.rental.inventory_id>",
+        "is_unique": null,
+        "name": "inventory_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental>",
+        "table_name": "rental"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.language.language_id>",
+        "fk_target_table_id": "<table:pagila.public.language>",
+        "id": "<col:pagila.public.film.language_id>",
+        "is_unique": null,
+        "name": "language_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.language.language_id>",
+        "fk_target_table_id": "<table:pagila.public.language>",
+        "id": "<col:pagila.public.film.original_language_id>",
+        "is_unique": null,
+        "name": "original_language_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.staff.staff_id>",
+        "fk_target_table_id": "<table:pagila.public.staff>",
+        "id": "<col:pagila.public.rental.staff_id>",
+        "is_unique": null,
+        "name": "staff_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental>",
+        "table_name": "rental"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.store.store_id>",
+        "fk_target_table_id": "<table:pagila.public.store>",
+        "id": "<col:pagila.public.customer.store_id>",
+        "is_unique": null,
+        "name": "store_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.store.store_id>",
+        "fk_target_table_id": "<table:pagila.public.store>",
+        "id": "<col:pagila.public.inventory.store_id>",
+        "is_unique": null,
+        "name": "store_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.inventory>",
+        "table_name": "inventory"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": "<col:pagila.public.store.store_id>",
+        "fk_target_table_id": "<table:pagila.public.store>",
+        "id": "<col:pagila.public.staff.store_id>",
+        "is_unique": null,
+        "name": "store_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.category_rollup.category_id>",
+        "is_unique": null,
+        "name": "category_id",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.category_rollup>",
+        "table_name": "category_rollup"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.category_rollup.category_rollup_id>",
+        "is_unique": null,
+        "name": "category_rollup_id",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.category_rollup>",
+        "table_name": "category_rollup"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.category_rollup.total_rentals>",
+        "is_unique": null,
+        "name": "total_rentals",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.category_rollup>",
+        "table_name": "category_rollup"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.film_performance.film_id>",
+        "is_unique": null,
+        "name": "film_id",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.film_performance>",
+        "table_name": "film_performance"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.film_performance.film_performance_id>",
+        "is_unique": null,
+        "name": "film_performance_id",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.film_performance>",
+        "table_name": "film_performance"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.film_performance.rental_count>",
+        "is_unique": null,
+        "name": "rental_count",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.film_performance>",
+        "table_name": "film_performance"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.top_films.film_id>",
+        "is_unique": null,
+        "name": "film_id",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.top_films>",
+        "table_name": "top_films"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.top_films.rental_count>",
+        "is_unique": null,
+        "name": "rental_count",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.top_films>",
+        "table_name": "top_films"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor.actor_id>",
+        "is_unique": null,
+        "name": "actor_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor>",
+        "table_name": "actor"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor_info.actor_id>",
+        "is_unique": null,
+        "name": "actor_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor_info>",
+        "table_name": "actor_info"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.address_id>",
+        "is_unique": null,
+        "name": "address_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.category.category_id>",
+        "is_unique": null,
+        "name": "category_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.category>",
+        "table_name": "category"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.city.city_id>",
+        "is_unique": null,
+        "name": "city_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.city>",
+        "table_name": "city"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.country.country_id>",
+        "is_unique": null,
+        "name": "country_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.country>",
+        "table_name": "country"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer.active>",
+        "is_unique": null,
+        "name": "active",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.id>",
+        "is_unique": null,
+        "name": "id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.sid>",
+        "is_unique": null,
+        "name": "sid",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.fid>",
+        "is_unique": null,
+        "name": "fid",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.inventory.inventory_id>",
+        "is_unique": null,
+        "name": "inventory_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.inventory>",
+        "table_name": "inventory"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.language.language_id>",
+        "is_unique": null,
+        "name": "language_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.language>",
+        "table_name": "language"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.fid>",
+        "is_unique": null,
+        "name": "fid",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.payment.payment_id>",
+        "is_unique": null,
+        "name": "payment_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.payment>",
+        "table_name": "payment"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.payment.rental_id>",
+        "is_unique": null,
+        "name": "rental_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.payment>",
+        "table_name": "payment"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.payment.staff_id>",
+        "is_unique": null,
+        "name": "staff_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.payment>",
+        "table_name": "payment"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.rental.rental_id>",
+        "is_unique": null,
+        "name": "rental_id",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental>",
+        "table_name": "rental"
+      },
+      {
+        "data_type": "integer",
+        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.staff.staff_id>",
         "is_unique": null,
         "name": "staff_id",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.staff>",
         "table_name": "staff"
       },
       {
+        "data_type": "integer",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff.username>",
-        "is_unique": null,
-        "name": "username",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff>",
-        "table_name": "staff"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff_list.address>",
-        "is_unique": null,
-        "name": "address",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff_list>",
-        "table_name": "staff_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff_list.city>",
-        "is_unique": null,
-        "name": "city",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff_list>",
-        "table_name": "staff_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff_list.country>",
-        "is_unique": null,
-        "name": "country",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff_list>",
-        "table_name": "staff_list"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.staff_list.id>",
         "is_unique": null,
         "name": "id",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.staff_list>",
         "table_name": "staff_list"
       },
       {
+        "data_type": "integer",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff_list.name>",
-        "is_unique": null,
-        "name": "name",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff_list>",
-        "table_name": "staff_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff_list.phone>",
-        "is_unique": null,
-        "name": "phone",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff_list>",
-        "table_name": "staff_list"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.staff_list.sid>",
         "is_unique": null,
         "name": "sid",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.staff_list>",
         "table_name": "staff_list"
       },
       {
+        "data_type": "integer",
         "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.staff_list.zip code>",
-        "is_unique": null,
-        "name": "zip code",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.staff_list>",
-        "table_name": "staff_list"
-      },
-      {
-        "description": null,
-        "fk_target_col_id": null,
-        "fk_target_table_id": null,
-        "id": "<col:pagila.public.store.last_update>",
-        "is_unique": null,
-        "name": "last_update",
-        "sample_values": null,
-        "table_id": "<table:pagila.public.store>",
-        "table_name": "store"
-      },
-      {
-        "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.store.manager_staff_id>",
         "is_unique": null,
         "name": "manager_staff_id",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.store>",
         "table_name": "store"
       },
       {
+        "data_type": "integer",
         "description": null,
+        "distinct_values": null,
         "fk_target_col_id": null,
         "fk_target_table_id": null,
         "id": "<col:pagila.public.store.store_id>",
         "is_unique": null,
         "name": "store_id",
         "sample_values": null,
+        "schema_name": "public",
         "table_id": "<table:pagila.public.store>",
         "table_name": "store"
+      },
+      {
+        "data_type": "mpaa_rating",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.rating>",
+        "is_unique": null,
+        "name": "rating",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "mpaa_rating",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.rating>",
+        "is_unique": null,
+        "name": "rating",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.film_performance.revenue>",
+        "is_unique": null,
+        "name": "revenue",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.film_performance>",
+        "table_name": "film_performance"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.top_films.revenue>",
+        "is_unique": null,
+        "name": "revenue",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.top_films>",
+        "table_name": "top_films"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.rental_rate>",
+        "is_unique": null,
+        "name": "rental_rate",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.replacement_cost>",
+        "is_unique": null,
+        "name": "replacement_cost",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.price>",
+        "is_unique": null,
+        "name": "price",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.price>",
+        "is_unique": null,
+        "name": "price",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.rental_by_category.total_sales>",
+        "is_unique": null,
+        "name": "total_sales",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental_by_category>",
+        "table_name": "rental_by_category"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.sales_by_film_category.total_sales>",
+        "is_unique": null,
+        "name": "total_sales",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.sales_by_film_category>",
+        "table_name": "sales_by_film_category"
+      },
+      {
+        "data_type": "numeric",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.sales_by_store.total_sales>",
+        "is_unique": null,
+        "name": "total_sales",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.sales_by_store>",
+        "table_name": "sales_by_store"
+      },
+      {
+        "data_type": "smallint",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.length>",
+        "is_unique": null,
+        "name": "length",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "smallint",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.rental_duration>",
+        "is_unique": null,
+        "name": "rental_duration",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "smallint",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.length>",
+        "is_unique": null,
+        "name": "length",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "smallint",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.length>",
+        "is_unique": null,
+        "name": "length",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.category_rollup.label>",
+        "is_unique": null,
+        "name": "label",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.category_rollup>",
+        "table_name": "category_rollup"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.top_films.title>",
+        "is_unique": null,
+        "name": "title",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.top_films>",
+        "table_name": "top_films"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor.first_name>",
+        "is_unique": null,
+        "name": "first_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor>",
+        "table_name": "actor"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor.last_name>",
+        "is_unique": null,
+        "name": "last_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor>",
+        "table_name": "actor"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor_info.film_info>",
+        "is_unique": null,
+        "name": "film_info",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor_info>",
+        "table_name": "actor_info"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor_info.first_name>",
+        "is_unique": null,
+        "name": "first_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor_info>",
+        "table_name": "actor_info"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor_info.last_name>",
+        "is_unique": null,
+        "name": "last_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor_info>",
+        "table_name": "actor_info"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.address2>",
+        "is_unique": null,
+        "name": "address2",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.address>",
+        "is_unique": null,
+        "name": "address",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.district>",
+        "is_unique": null,
+        "name": "district",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.phone>",
+        "is_unique": null,
+        "name": "phone",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.postal_code>",
+        "is_unique": null,
+        "name": "postal_code",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.category.name>",
+        "is_unique": null,
+        "name": "name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.category>",
+        "table_name": "category"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.city.city>",
+        "is_unique": null,
+        "name": "city",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.city>",
+        "table_name": "city"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.country.country>",
+        "is_unique": null,
+        "name": "country",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.country>",
+        "table_name": "country"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer.first_name>",
+        "is_unique": null,
+        "name": "first_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer.last_name>",
+        "is_unique": null,
+        "name": "last_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.address>",
+        "is_unique": null,
+        "name": "address",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.city>",
+        "is_unique": null,
+        "name": "city",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.country>",
+        "is_unique": null,
+        "name": "country",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.name>",
+        "is_unique": null,
+        "name": "name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.notes>",
+        "is_unique": null,
+        "name": "notes",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.phone>",
+        "is_unique": null,
+        "name": "phone",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer_list.zip code>",
+        "is_unique": null,
+        "name": "zip code",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer_list>",
+        "table_name": "customer_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.description>",
+        "is_unique": null,
+        "name": "description",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.actors>",
+        "is_unique": null,
+        "name": "actors",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.category>",
+        "is_unique": null,
+        "name": "category",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.description>",
+        "is_unique": null,
+        "name": "description",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_list.title>",
+        "is_unique": null,
+        "name": "title",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_list>",
+        "table_name": "film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.actors>",
+        "is_unique": null,
+        "name": "actors",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.category>",
+        "is_unique": null,
+        "name": "category",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.description>",
+        "is_unique": null,
+        "name": "description",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.nicer_but_slower_film_list.title>",
+        "is_unique": null,
+        "name": "title",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.nicer_but_slower_film_list>",
+        "table_name": "nicer_but_slower_film_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.rental_by_category.category>",
+        "is_unique": null,
+        "name": "category",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental_by_category>",
+        "table_name": "rental_by_category"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.sales_by_film_category.category>",
+        "is_unique": null,
+        "name": "category",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.sales_by_film_category>",
+        "table_name": "sales_by_film_category"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.sales_by_store.manager>",
+        "is_unique": null,
+        "name": "manager",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.sales_by_store>",
+        "table_name": "sales_by_store"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.sales_by_store.store>",
+        "is_unique": null,
+        "name": "store",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.sales_by_store>",
+        "table_name": "sales_by_store"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff.email>",
+        "is_unique": null,
+        "name": "email",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff.first_name>",
+        "is_unique": null,
+        "name": "first_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff.last_name>",
+        "is_unique": null,
+        "name": "last_name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff.password>",
+        "is_unique": null,
+        "name": "password",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff.username>",
+        "is_unique": null,
+        "name": "username",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff_list.address>",
+        "is_unique": null,
+        "name": "address",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff_list>",
+        "table_name": "staff_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff_list.city>",
+        "is_unique": null,
+        "name": "city",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff_list>",
+        "table_name": "staff_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff_list.country>",
+        "is_unique": null,
+        "name": "country",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff_list>",
+        "table_name": "staff_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff_list.name>",
+        "is_unique": null,
+        "name": "name",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff_list>",
+        "table_name": "staff_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff_list.phone>",
+        "is_unique": null,
+        "name": "phone",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff_list>",
+        "table_name": "staff_list"
+      },
+      {
+        "data_type": "text",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff_list.zip code>",
+        "is_unique": null,
+        "name": "zip code",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff_list>",
+        "table_name": "staff_list"
+      },
+      {
+        "data_type": "text[]",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.special_features>",
+        "is_unique": null,
+        "name": "special_features",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.analytics.film_performance.last_rented_at>",
+        "is_unique": null,
+        "name": "last_rented_at",
+        "sample_values": null,
+        "schema_name": "analytics",
+        "table_id": "<table:pagila.analytics.film_performance>",
+        "table_name": "film_performance"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.actor.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.actor>",
+        "table_name": "actor"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.address.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.address>",
+        "table_name": "address"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.category.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.category>",
+        "table_name": "category"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.city.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.city>",
+        "table_name": "city"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.country.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.country>",
+        "table_name": "country"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.customer.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.customer>",
+        "table_name": "customer"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_actor.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_actor>",
+        "table_name": "film_actor"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film_category.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film_category>",
+        "table_name": "film_category"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.inventory.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.inventory>",
+        "table_name": "inventory"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.language.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.language>",
+        "table_name": "language"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.payment.payment_date>",
+        "is_unique": null,
+        "name": "payment_date",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.payment>",
+        "table_name": "payment"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.rental.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental>",
+        "table_name": "rental"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.rental.return_date>",
+        "is_unique": null,
+        "name": "return_date",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.rental>",
+        "table_name": "rental"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.staff.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.staff>",
+        "table_name": "staff"
+      },
+      {
+        "data_type": "timestamp with time zone",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.store.last_update>",
+        "is_unique": null,
+        "name": "last_update",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.store>",
+        "table_name": "store"
+      },
+      {
+        "data_type": "tsvector",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.fulltext>",
+        "is_unique": null,
+        "name": "fulltext",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
+      },
+      {
+        "data_type": "year",
+        "description": null,
+        "distinct_values": null,
+        "fk_target_col_id": null,
+        "fk_target_table_id": null,
+        "id": "<col:pagila.public.film.release_year>",
+        "is_unique": null,
+        "name": "release_year",
+        "sample_values": null,
+        "schema_name": "public",
+        "table_id": "<table:pagila.public.film>",
+        "table_name": "film"
       }
     ],
     "connections.list_connections": [],
@@ -2461,192 +3055,273 @@
         "description": null,
         "id": "<table:chinook.main.Album>",
         "name": "Album",
+        "pk": [
+          "AlbumId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.Artist>",
         "name": "Artist",
+        "pk": [
+          "ArtistId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.Customer>",
         "name": "Customer",
+        "pk": [
+          "CustomerId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.Employee>",
         "name": "Employee",
+        "pk": [
+          "EmployeeId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.Genre>",
         "name": "Genre",
+        "pk": [
+          "GenreId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.Invoice>",
         "name": "Invoice",
+        "pk": [
+          "InvoiceId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.InvoiceLine>",
         "name": "InvoiceLine",
+        "pk": [
+          "InvoiceLineId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.MediaType>",
         "name": "MediaType",
+        "pk": [
+          "MediaTypeId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.Playlist>",
         "name": "Playlist",
+        "pk": [
+          "PlaylistId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:chinook.main.PlaylistTrack>",
         "name": "PlaylistTrack",
+        "pk": [
+          "PlaylistId",
+          "TrackId"
+        ],
         "schema_name": "main"
       },
       {
         "description": null,
         "id": "<table:pagila.analytics.category_rollup>",
         "name": "category_rollup",
+        "pk": [
+          "category_rollup_id"
+        ],
         "schema_name": "analytics"
       },
       {
         "description": null,
         "id": "<table:pagila.analytics.film_performance>",
         "name": "film_performance",
+        "pk": [
+          "film_performance_id"
+        ],
         "schema_name": "analytics"
       },
       {
         "description": null,
         "id": "<table:pagila.analytics.top_films>",
         "name": "top_films",
+        "pk": null,
         "schema_name": "analytics"
       },
       {
         "description": null,
         "id": "<table:pagila.public.actor>",
         "name": "actor",
+        "pk": [
+          "actor_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.actor_info>",
         "name": "actor_info",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.address>",
         "name": "address",
+        "pk": [
+          "address_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.category>",
         "name": "category",
+        "pk": [
+          "category_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.city>",
         "name": "city",
+        "pk": [
+          "city_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.country>",
         "name": "country",
+        "pk": [
+          "country_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.customer_list>",
         "name": "customer_list",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.film_actor>",
         "name": "film_actor",
+        "pk": [
+          "actor_id",
+          "film_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.film_category>",
         "name": "film_category",
+        "pk": [
+          "category_id",
+          "film_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.film_list>",
         "name": "film_list",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.inventory>",
         "name": "inventory",
+        "pk": [
+          "inventory_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.language>",
         "name": "language",
+        "pk": [
+          "language_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.nicer_but_slower_film_list>",
         "name": "nicer_but_slower_film_list",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.rental_by_category>",
         "name": "rental_by_category",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.sales_by_film_category>",
         "name": "sales_by_film_category",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.sales_by_store>",
         "name": "sales_by_store",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.staff>",
         "name": "staff",
+        "pk": [
+          "staff_id"
+        ],
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.staff_list>",
         "name": "staff_list",
+        "pk": null,
         "schema_name": "public"
       },
       {
         "description": null,
         "id": "<table:pagila.public.store>",
         "name": "store",
+        "pk": [
+          "store_id"
+        ],
         "schema_name": "public"
       }
     ],
@@ -2824,16 +3499,16 @@
         "id": "<db:chinook>",
         "name": "chinook",
         "num_of_schemas": 1,
-        "schemas": [],
-        "owner_id": null
+        "owner_id": null,
+        "schemas": []
       },
       {
         "description": null,
         "id": "<db:pagila>",
         "name": "pagila",
         "num_of_schemas": 2,
-        "schemas": [],
-        "owner_id": null
+        "owner_id": null,
+        "schemas": []
       }
     ],
     "datasources.fetch_databases[none]": [],
@@ -2843,8 +3518,8 @@
         "id": "<db:pagila>",
         "name": "pagila",
         "num_of_schemas": 1,
-        "schemas": [],
-        "owner_id": null
+        "owner_id": null,
+        "schemas": []
       }
     ],
     "datasources.fetch_item_by_id": {
@@ -2855,6 +3530,7 @@
       "is_junction_table": false,
       "label": "Table",
       "name": "film",
+      "owner_id": null,
       "pk": [
         "film_id"
       ],
@@ -2871,6 +3547,7 @@
       "is_junction_table": false,
       "label": "Table",
       "name": "film",
+      "owner_id": null,
       "pk": [
         "film_id"
       ],
@@ -2887,16 +3564,16 @@
         {
           "description": null,
           "id": "<schema:pagila.analytics>",
+          "owner_id": null,
           "schema_name": "analytics",
-          "tables_count": 3,
-          "owner_id": null
+          "tables_count": 3
         },
         {
           "description": null,
           "id": "<schema:pagila.public>",
+          "owner_id": null,
           "schema_name": "public",
-          "tables_count": 23,
-          "owner_id": null
+          "tables_count": 23
         }
       ],
       "schemas_count": 2
@@ -3599,63 +4276,63 @@
             "description": "Primary key of customer.",
             "format": null,
             "is_nullable": false,
-            "semantic_fk": "public.customer.customer_id",
             "name": "customer_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": "public.customer.customer_id"
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "inventory_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "rental_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "staff_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": "When the rental started.",
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "rental_date",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "last_update",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "return_date",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           }
         ],
         "database_name": "pagila",
@@ -3675,126 +4352,126 @@
             "description": "Primary key of film.",
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "film_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "language_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "original_language_id",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "mpaa_rating",
             "description": "MPAA rating; an enum.",
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "rating",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "numeric",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "rental_rate",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "numeric",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "replacement_cost",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "smallint",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "rental_duration",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "smallint",
             "description": null,
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "length",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "text",
             "description": "The film's title.",
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "title",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "text",
             "description": null,
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "description",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "text[]",
             "description": null,
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "special_features",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "last_update",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "tsvector",
             "description": null,
             "format": null,
             "is_nullable": false,
-            "semantic_fk": null,
             "name": "fulltext",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           },
           {
             "data_type": "year",
             "description": null,
             "format": null,
             "is_nullable": true,
-            "semantic_fk": null,
             "name": "release_year",
-            "sample_values": null
+            "sample_values": null,
+            "semantic_fk": null
           }
         ],
         "database_name": "pagila",
@@ -3816,12 +4493,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.customer>",
         "name": "customer",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 1,
-        "owner_id": null
+        "terms_count": 1
       },
       {
         "columns_count": 11,
@@ -3830,12 +4507,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.staff>",
         "name": "staff",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 14,
@@ -3844,12 +4521,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.film>",
         "name": "film",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 2,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 1,
-        "owner_id": null
+        "terms_count": 1
       },
       {
         "columns_count": 2,
@@ -3858,12 +4535,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.rental_by_category>",
         "name": "rental_by_category",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "materialized view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 2,
@@ -3872,12 +4549,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.sales_by_film_category>",
         "name": "sales_by_film_category",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 3,
@@ -3886,12 +4563,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.category>",
         "name": "category",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 3,
@@ -3900,12 +4577,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.country>",
         "name": "country",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 3,
@@ -3914,12 +4591,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.film_actor>",
         "name": "film_actor",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 3,
@@ -3928,12 +4605,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.film_category>",
         "name": "film_category",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 3,
@@ -3942,12 +4619,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.language>",
         "name": "language",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 3,
@@ -3956,12 +4633,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.sales_by_store>",
         "name": "sales_by_store",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 4,
@@ -3970,12 +4647,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.actor>",
         "name": "actor",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 4,
@@ -3984,12 +4661,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.actor_info>",
         "name": "actor_info",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 4,
@@ -3998,12 +4675,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.city>",
         "name": "city",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 4,
@@ -4012,12 +4689,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.inventory>",
         "name": "inventory",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 1,
-        "owner_id": null
+        "terms_count": 1
       },
       {
         "columns_count": 4,
@@ -4026,12 +4703,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.store>",
         "name": "store",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 6,
@@ -4040,12 +4717,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.payment>",
         "name": "payment",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 3,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 2,
-        "owner_id": null
+        "terms_count": 2
       },
       {
         "columns_count": 7,
@@ -4054,12 +4731,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.rental>",
         "name": "rental",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 2,
-        "owner_id": null
+        "terms_count": 2
       },
       {
         "columns_count": 8,
@@ -4068,12 +4745,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.address>",
         "name": "address",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 8,
@@ -4082,12 +4759,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.film_list>",
         "name": "film_list",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 8,
@@ -4096,12 +4773,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.nicer_but_slower_film_list>",
         "name": "nicer_but_slower_film_list",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 8,
@@ -4110,12 +4787,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.staff_list>",
         "name": "staff_list",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       },
       {
         "columns_count": 9,
@@ -4124,12 +4801,12 @@
         "description_certified": false,
         "id": "<table:pagila.public.customer_list>",
         "name": "customer_list",
+        "owner_id": null,
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0,
-        "owner_id": null
+        "terms_count": 0
       }
     ],
     "exploration.fetch_data_exploration_edges[admin]": [
@@ -6195,39 +6872,39 @@
     "sql_attributes.fetch_sql_attributes_by_term_id": [
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "description": "Film count grouped by category, via the bridge table.",
         "description_suggestion": null,
         "expression": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "id": "<sqlattr:films per category>",
+        "modified": null,
+        "modified_by": null,
         "name": "films per category",
+        "owner_id": null,
         "source": "bridgeTable",
         "sql": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "tags": [],
         "term_id": "<term:Film>",
-        "term_name": "Film",
-        "owner_id": null,
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        "term_name": "Film"
       },
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "description": "Number of films in the catalog.",
         "description_suggestion": null,
         "expression": "SELECT count(film_id) FROM film",
         "id": "<sqlattr:film count>",
+        "modified": null,
+        "modified_by": null,
         "name": "film count",
+        "owner_id": null,
         "source": "sql",
         "sql": "SELECT count(film_id) FROM film",
         "tags": [],
         "term_id": "<term:Film>",
-        "term_name": "Film",
-        "owner_id": null,
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        "term_name": "Film"
       }
     ],
     "sql_attributes.fetch_sql_attributes_with_sql": [
@@ -6293,92 +6970,92 @@
     "sql_attributes.find_attr_by_name__absent": null,
     "sql_attributes.get_full_sql_attribute_by_id": {
       "certified": false,
+      "created": "<redacted>",
+      "created_by": null,
       "description": "Sum of all payment amounts.",
       "description_suggestion": null,
       "expression": "SELECT sum(amount) FROM payment",
       "id": "<sqlattr:total revenue>",
+      "modified": null,
+      "modified_by": null,
       "name": "total revenue",
+      "owner_id": null,
       "source": "manual",
       "sql": "SELECT sum(amount) FROM payment",
       "tags": [],
       "term_id": "<term:Payment>",
       "term_name": "Payment",
-      "zones": [],
-      "owner_id": null,
-      "created": "<redacted>",
-      "modified": null,
-      "created_by": null,
-      "modified_by": null
+      "zones": []
     },
     "sql_attributes.get_sql_attribute_by_id": "<sqlattr:total revenue>",
     "sql_attributes.list_sql_attributes": [
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "description": "Film count grouped by category, via the bridge table.",
         "description_suggestion": null,
         "expression": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "id": "<sqlattr:films per category>",
+        "modified": null,
+        "modified_by": null,
         "name": "films per category",
+        "owner_id": null,
         "source": "bridgeTable",
         "sql": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "term_id": "<term:Film>",
-        "term_name": "Film",
-        "owner_id": null,
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        "term_name": "Film"
       },
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "description": "Number of films in the catalog.",
         "description_suggestion": null,
         "expression": "SELECT count(film_id) FROM film",
         "id": "<sqlattr:film count>",
+        "modified": null,
+        "modified_by": null,
         "name": "film count",
+        "owner_id": null,
         "source": "sql",
         "sql": "SELECT count(film_id) FROM film",
         "term_id": "<term:Film>",
-        "term_name": "Film",
-        "owner_id": null,
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        "term_name": "Film"
       },
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "description": "Sum of all payment amounts.",
         "description_suggestion": null,
         "expression": "SELECT sum(amount) FROM payment",
         "id": "<sqlattr:total revenue>",
+        "modified": null,
+        "modified_by": null,
         "name": "total revenue",
+        "owner_id": null,
         "source": "manual",
         "sql": "SELECT sum(amount) FROM payment",
         "term_id": "<term:Payment>",
-        "term_name": "Payment",
-        "owner_id": null,
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        "term_name": "Payment"
       },
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "description": "Total paid by each customer.",
         "description_suggestion": null,
         "expression": "SELECT customer_id, sum(amount) FROM payment GROUP BY customer_id",
         "id": "<sqlattr:customer lifetime value>",
+        "modified": null,
+        "modified_by": null,
         "name": "customer lifetime value",
+        "owner_id": null,
         "source": "table",
         "sql": "SELECT customer_id, sum(amount) FROM payment GROUP BY customer_id",
         "term_id": "<term:Customer>",
-        "term_name": "Customer",
-        "owner_id": null,
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        "term_name": "Customer"
       }
     ],
     "terms.count_column_attributes_by_term_id": 3,
@@ -6393,6 +7070,7 @@
         "id": "<term:Film>",
         "name": "Film",
         "name_certified": true,
+        "owner_id": null,
         "schema_names": [
           "public"
         ],
@@ -6401,6 +7079,7 @@
           "picture",
           "title"
         ],
+        "tags": [],
         "zones": [
           {
             "color": "#4f46e5",
@@ -6408,9 +7087,7 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ],
-        "owner_id": null,
-        "tags": []
+        ]
       },
       {
         "certification": "partial",
@@ -6419,6 +7096,7 @@
         "id": "<term:Customer>",
         "name": "Customer",
         "name_certified": true,
+        "owner_id": null,
         "schema_names": [
           "public"
         ],
@@ -6426,9 +7104,8 @@
           "patron",
           "renter"
         ],
-        "zones": [],
-        "owner_id": null,
-        "tags": []
+        "tags": [],
+        "zones": []
       },
       {
         "certification": "partial",
@@ -6437,6 +7114,7 @@
         "id": "<term:Rental>",
         "name": "Rental",
         "name_certified": false,
+        "owner_id": null,
         "schema_names": [
           "public"
         ],
@@ -6444,9 +7122,8 @@
           "hire",
           "loan"
         ],
-        "zones": [],
-        "owner_id": null,
-        "tags": []
+        "tags": [],
+        "zones": []
       },
       {
         "certification": "pending",
@@ -6455,12 +7132,14 @@
         "id": "<term:Track>",
         "name": "Track",
         "name_certified": false,
+        "owner_id": null,
         "schema_names": [
           "main"
         ],
         "synonyms": [
           "song"
         ],
+        "tags": [],
         "zones": [
           {
             "color": "#059669",
@@ -6468,9 +7147,7 @@
             "id": "<zone:Cross database>",
             "name": "Cross database"
           }
-        ],
-        "owner_id": null,
-        "tags": []
+        ]
       },
       {
         "certification": "pending",
@@ -6479,15 +7156,15 @@
         "id": "<term:Payment>",
         "name": "Payment",
         "name_certified": false,
+        "owner_id": null,
         "schema_names": [
           "public"
         ],
         "synonyms": [
           "transaction"
         ],
-        "zones": [],
-        "owner_id": null,
-        "tags": []
+        "tags": [],
+        "zones": []
       }
     ],
     "terms.fetch_all_terms[none]": [],
@@ -6499,6 +7176,7 @@
         "id": "<term:Film>",
         "name": "Film",
         "name_certified": true,
+        "owner_id": null,
         "schema_names": [
           "public"
         ],
@@ -6507,6 +7185,7 @@
           "picture",
           "title"
         ],
+        "tags": [],
         "zones": [
           {
             "color": "#4f46e5",
@@ -6514,9 +7193,7 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ],
-        "owner_id": null,
-        "tags": []
+        ]
       }
     ],
     "terms.fetch_all_terms_and_attributes[admin]": [
@@ -6528,6 +7205,7 @@
           "id": "<term:Film>",
           "name": "Film",
           "name_certified": true,
+          "owner_id": null,
           "schema_names": [
             "public"
           ],
@@ -6536,6 +7214,7 @@
             "picture",
             "title"
           ],
+          "tags": [],
           "zones": [
             {
               "color": "#4f46e5",
@@ -6543,9 +7222,7 @@
               "id": "<zone:Film domain>",
               "name": "Film domain"
             }
-          ],
-          "owner_id": null,
-          "tags": []
+          ]
         },
         {
           "certification": "partial",
@@ -6554,6 +7231,7 @@
           "id": "<term:Customer>",
           "name": "Customer",
           "name_certified": true,
+          "owner_id": null,
           "schema_names": [
             "public"
           ],
@@ -6561,9 +7239,8 @@
             "patron",
             "renter"
           ],
-          "zones": [],
-          "owner_id": null,
-          "tags": []
+          "tags": [],
+          "zones": []
         },
         {
           "certification": "partial",
@@ -6572,6 +7249,7 @@
           "id": "<term:Rental>",
           "name": "Rental",
           "name_certified": false,
+          "owner_id": null,
           "schema_names": [
             "public"
           ],
@@ -6579,9 +7257,8 @@
             "hire",
             "loan"
           ],
-          "zones": [],
-          "owner_id": null,
-          "tags": []
+          "tags": [],
+          "zones": []
         },
         {
           "certification": "pending",
@@ -6590,12 +7267,14 @@
           "id": "<term:Track>",
           "name": "Track",
           "name_certified": false,
+          "owner_id": null,
           "schema_names": [
             "main"
           ],
           "synonyms": [
             "song"
           ],
+          "tags": [],
           "zones": [
             {
               "color": "#059669",
@@ -6603,9 +7282,7 @@
               "id": "<zone:Cross database>",
               "name": "Cross database"
             }
-          ],
-          "owner_id": null,
-          "tags": []
+          ]
         },
         {
           "certification": "pending",
@@ -6614,15 +7291,15 @@
           "id": "<term:Payment>",
           "name": "Payment",
           "name_certified": false,
+          "owner_id": null,
           "schema_names": [
             "public"
           ],
           "synonyms": [
             "transaction"
           ],
-          "zones": [],
-          "owner_id": null,
-          "tags": []
+          "tags": [],
+          "zones": []
         }
       ],
       [
@@ -6753,6 +7430,7 @@
           "id": "<term:Film>",
           "name": "Film",
           "name_certified": true,
+          "owner_id": null,
           "schema_names": [
             "public"
           ],
@@ -6761,6 +7439,7 @@
             "picture",
             "title"
           ],
+          "tags": [],
           "zones": [
             {
               "color": "#4f46e5",
@@ -6768,9 +7447,7 @@
               "id": "<zone:Film domain>",
               "name": "Film domain"
             }
-          ],
-          "owner_id": null,
-          "tags": []
+          ]
         }
       ],
       [
@@ -6875,9 +7552,13 @@
     "terms.fetch_column_attributes_by_term_id": [
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "datatype": "integer",
         "description": "Primary key of film.",
         "id": "<attr:Film/film id/film_id>",
+        "modified": null,
+        "modified_by": null,
         "name": "film id",
         "primary_column": {
           "column_name": "film_id",
@@ -6909,17 +7590,17 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ],
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        ]
       },
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "datatype": "mpaa_rating",
         "description": "MPAA rating; an enum.",
         "id": "<attr:Film/film rating/rating>",
+        "modified": null,
+        "modified_by": null,
         "name": "film rating",
         "primary_column": {
           "column_name": "rating",
@@ -6942,17 +7623,17 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ],
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        ]
       },
       {
         "certified": false,
+        "created": "<redacted>",
+        "created_by": null,
         "datatype": "text",
         "description": "The film's title.",
         "id": "<attr:Film/film title/title>",
+        "modified": null,
+        "modified_by": null,
         "name": "film title",
         "primary_column": {
           "column_name": "title",
@@ -6975,11 +7656,7 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ],
-        "created": "<redacted>",
-        "modified": null,
-        "created_by": null,
-        "modified_by": null
+        ]
       }
     ],
     "terms.fetch_related_term_ids": [],
@@ -7281,11 +7958,16 @@
     "terms.find_column_attribute_by_column_id": "<attr:Film/film id/film_id>",
     "terms.get_full_term_by_id": {
       "certification": "partial",
+      "created": "<redacted>",
+      "created_by": null,
       "description": "A motion picture available for rental.",
       "description_certified": true,
       "id": "<term:Film>",
+      "modified": null,
+      "modified_by": null,
       "name": "Film",
       "name_certified": true,
+      "owner_id": null,
       "synonyms": [
         "movie",
         "picture",
@@ -7308,12 +7990,7 @@
           "id": "<zone:Film domain>",
           "name": "Film domain"
         }
-      ],
-      "owner_id": null,
-      "created": "<redacted>",
-      "modified": null,
-      "created_by": null,
-      "modified_by": null
+      ]
     },
     "terms.get_full_term_by_id__unknown": null,
     "terms.get_slim_term_by_id": {

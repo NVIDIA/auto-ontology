@@ -149,6 +149,23 @@ def test_store_column_distinct_ratios_writes_the_measured_share(world) -> None:
     assert _row(world.columns["orders.email"])["distinct_ratio"] == 0.97
 
 
+def test_store_column_distinct_values_keeps_them_apart_from_samples(world) -> None:
+    world.table("orders")
+    world.column("orders", "id")
+    orders = world.tables["orders"]
+    d.store_column_sample_values(orders, {"id": [7, 3]})
+
+    d.store_column_distinct_values(orders, {"id": [1, 2, 3]})
+
+    row = store().query_read(
+        select(
+            s.catalog_column.c.sample_values, s.catalog_column.c.distinct_values
+        ).where(s.catalog_column.c.id == world.columns["orders.id"])
+    )[0]
+    assert json.loads(row["distinct_values"]) == [1, 2, 3]
+    assert json.loads(row["sample_values"]) == [7, 3]
+
+
 def test_key_columns_count_only_fully_distinct_unique_columns(world) -> None:
     """A mostly-distinct column is unique for the semantic layer, but cannot
     prove a GROUP BY vacuous or a join 1:1 for the text-to-SQL validators."""

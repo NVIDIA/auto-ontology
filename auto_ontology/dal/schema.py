@@ -268,6 +268,13 @@ catalog_column = Table(
     # A JSON string, read back as a string by callers. Promoting it to jsonb is
     # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
+    # The lowest distinct non-null values in the warehouse's own order, JSON
+    # like `sample_values` but never mixed with it: those are the most common
+    # values, these are a contiguous bottom of the value range. Written only
+    # for suspected key columns (`auto_ontology.semantic.visit_enter`), so semantic
+    # FK resolution can test whether one column's values sit inside another's
+    # (`auto_ontology.semantic.fk_values`).
+    Column("distinct_values", Text, nullable=True),
     # How the values are *written*, not what they are: 'YYMMDD', 'YYYY-MM-DD'.
     # Generic storage notation despite only date inference filling it today
     # (`auto_ontology.semantic.date_format`) -- an address or id profiler would write the

@@ -42,7 +42,7 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         visit_enter,
         "suggest_potential_foreign_keys",
-        lambda *_a, **_k: SimpleNamespace(suggestions=[]),
+        lambda *_a, **_k: SimpleNamespace(suggestions=[], pk_column_names=[]),
     )
     monkeypatch.setattr(visit_enter, "column_attribute_specs", lambda *_a, **_k: [spec])
     monkeypatch.setattr(

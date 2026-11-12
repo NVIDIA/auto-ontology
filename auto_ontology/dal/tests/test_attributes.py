@@ -884,6 +884,69 @@ def test_unlinked_scopes_to_one_database(world) -> None:
     assert "y" in {r["name"] for r in a.find_unlinked_fk_columns()}
 
 
+def test_unlinked_carries_the_columns_stored_distinct_values(world) -> None:
+    world.table("orders")
+    world.column("orders", "customer_ref")
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.customer_ref"])
+        .values(distinct_values="[1001, 1002]", data_type="integer")
+    )
+
+    (row,) = a.find_unlinked_fk_columns(f"{world.prefix}-shopdb")
+    assert row["distinct_values"] == "[1001, 1002]"
+    assert row["data_type"] == "integer"
+    assert row["schema_name"] == "public"
+
+
+# --------------------------------------------------------------------------
+# fetch_value_key_candidates
+# --------------------------------------------------------------------------
+
+
+def _mark_unique(column: str, world: World, distinct_values: str | None) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns[column])
+        .values(is_unique=True, distinct_values=distinct_values)
+    )
+
+
+def test_value_key_candidates_are_unique_attribute_owners(world) -> None:
+    world.table("customers")
+    world.column("customers", "id", 1)
+    world.column("customers", "email", 2)
+    world.column("customers", "status", 3)
+    world.attribute("customer-id", owner="customers.id")
+    world.attribute("customer-email", owner="customers.email")
+    _mark_unique("customers.id", world, "[1, 2]")
+    _mark_unique("customers.status", world, '["a"]')
+
+    (row,) = a.fetch_value_key_candidates(f"{world.prefix}-shopdb")
+
+    assert row == {
+        "attribute_id": world.attributes["customer-id"],
+        "column_id": world.columns["customers.id"],
+        "column_name": "id",
+        "data_type": None,
+        "distinct_values": "[1, 2]",
+        "table_id": world.tables["customers"],
+        "table_name": "customers",
+        "schema_name": "public",
+    }
+
+
+def test_value_key_candidates_scope_to_one_database(world) -> None:
+    world.database("otherdb")
+    world.table("there", database="otherdb")
+    world.column("there", "id")
+    world.attribute("there-id", owner="there.id")
+    _mark_unique("there.id", world, None)
+
+    assert a.fetch_value_key_candidates(f"{world.prefix}-shopdb") == []
+    assert len(a.fetch_value_key_candidates(f"{world.prefix}-otherdb")) == 1
+
+
 # --------------------------------------------------------------------------
 # fetch_column_attribute_columns_map
 # --------------------------------------------------------------------------

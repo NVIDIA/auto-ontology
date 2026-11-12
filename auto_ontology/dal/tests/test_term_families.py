@@ -213,3 +213,29 @@ def test_replace_swaps_out_the_previous_families(world) -> None:
     assert linked == 1
     assert _families(shop.id) == {"NEW": {(new, "ROOMS")}}
     assert _families(warehouse.id) == {"V1": {(theirs, "STOCK")}}
+
+
+def test_table_families_map_tables_through_their_terms(world) -> None:
+    shop, warehouse = world("shop"), world("warehouse")
+    old_rooms = shop.table("OLD_ROOMS", ["ID"])
+    new_rooms = shop.table("NEW_ROOMS", ["ID"])
+    shop.table("HOTELS", ["ID"])
+    stock = warehouse.table("V1_STOCK", ["ID"])
+    tf.replace_term_families(
+        shop.name,
+        [
+            (shop.schema, "OLD", {shop.term_of(old_rooms): "ROOMS"}),
+            (shop.schema, "NEW", {shop.term_of(new_rooms): "ROOMS"}),
+        ],
+    )
+    tf.replace_term_families(
+        warehouse.name, [(warehouse.schema, "V1", {warehouse.term_of(stock): "STOCK"})]
+    )
+
+    rows = tf.fetch_table_families(shop.name)
+
+    assert {(r["table_id"], r["base_name"]) for r in rows} == {
+        (old_rooms, "ROOMS"),
+        (new_rooms, "ROOMS"),
+    }
+    assert len({r["family_id"] for r in rows}) == 2

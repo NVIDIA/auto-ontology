@@ -522,6 +522,20 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
     )
 
 
+def store_column_distinct_values(table_id: str, values: dict[str, list]) -> None:
+    """Write each column's lowest distinct values, JSON-encoded.
+
+    Encoded like ``sample_values`` (types kept, nulls dropped), and a column
+    whose list holds nothing is left alone.
+    """
+    encoded = {
+        name: dumped
+        for name, column_values in values.items()
+        if (dumped := dump_sample_values(column_values)) is not None
+    }
+    _set_column_property(table_id, encoded, "distinct_values")
+
+
 def store_column_distinct_ratios(table_id: str, ratios: dict[str, float]) -> None:
     """Write the measured share of distinct sampled values onto columns."""
     _set_column_property(
@@ -876,6 +890,7 @@ def fetch_all_tables_without_term(
             s.catalog_table.c.id,
             s.catalog_table.c.name,
             s.catalog_table.c.description,
+            s.catalog_table.c.pk,
             s.catalog_schema.c.name.label("schema_name"),
         )
         .select_from(_table_join())

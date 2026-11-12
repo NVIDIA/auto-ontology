@@ -163,6 +163,10 @@ class PotentialFkResult(BaseModel):
         default_factory=list,
         description="Suspected FK columns; empty when none apply.",
     )
+    pk_column_names: list[str] = Field(
+        default_factory=list,
+        description="Columns inferred to be the table's own primary key.",
+    )
     is_junction_table: bool = Field(
         default=False,
         description="Whether each row represents an association between entity roles.",

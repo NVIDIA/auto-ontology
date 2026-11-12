@@ -26,6 +26,7 @@ from auto_ontology.dal.datasources import (
     mark_table_as_junction,
     store_column_date_formats,
     store_column_distinct_ratios,
+    store_column_distinct_values,
     store_column_sample_values,
     store_column_uniqueness,
 )
@@ -37,7 +38,10 @@ from auto_ontology.dal.terms import (
 from auto_ontology.semantic.deterministic import column_attribute_specs
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
-from auto_ontology.semantic.fk_suggester import suggest_potential_foreign_keys
+from auto_ontology.semantic.fk_suggester import (
+    declared_pk_column_names,
+    suggest_potential_foreign_keys,
+)
 from auto_ontology.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from auto_ontology.semantic.term_extractor import (
     apply_display_names_to_specs,
@@ -61,6 +65,8 @@ _PROFILING_QUERY_TIMEOUT_SECONDS = 120
 _MAX_CONSECUTIVE_SAMPLE_FAILURES = 3
 # Most-common values kept per column.
 _PROFILING_TOP_N = 5
+# Lowest distinct values kept per suspected FK/PK column (`distinct_values`).
+KEY_DISTINCT_VALUES_LIMIT = 20
 # Share of sampled non-null values that must be distinct for a column to count
 # as unique. Below 1 so a stray duplicate or a dirty row does not hide a key;
 # under 20 values it still means every value distinct.
@@ -156,7 +162,7 @@ def _resolve_connector(database_name: str | None) -> "SQLDatabase | None":
     return None
 
 
-def _execute_capped(connector: "SQLDatabase", sql: str) -> pd.DataFrame:
+def execute_capped(connector: "SQLDatabase", sql: str) -> pd.DataFrame:
     """Run a profiling query, capped on connectors that advertise a free cap.
 
     ``is True`` rather than a plain truthiness check: a test double answers
@@ -381,7 +387,7 @@ def _distinct_values_if_low_cardinality(
     """
     quoted = quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
-        df = _execute_capped(
+        df = execute_capped(
             connector,
             f"SELECT DISTINCT {quoted} FROM {qualified} "
             f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}",
@@ -406,6 +412,63 @@ def _distinct_values_if_low_cardinality(
     if len(values) > cap:
         return None
     return values
+
+
+def probe_ascending_distinct_values(
+    connector: "SQLDatabase",
+    schema_name: str | None,
+    table_name: str,
+    column_name: str,
+) -> list[Any] | None:
+    """The column's lowest :data:`KEY_DISTINCT_VALUES_LIMIT` distinct values.
+
+    In the warehouse's own ascending order, which is what makes two columns'
+    lists comparable although each is cut short (``semantic.fk_values``).
+    ``None`` when the probe fails or the sampling breaker is open; a timeout
+    or lost connection counts against the breaker like any other profiling
+    query.
+    """
+    if _sampling_breaker.is_open(connector):
+        return None
+    quoted = quoted_identifier(column_name, getattr(connector, "dialect", None))
+    qualified = connector.qualify(schema_name, table_name)
+    try:
+        df = execute_capped(
+            connector,
+            f"SELECT DISTINCT {quoted} FROM {qualified} WHERE {quoted} IS NOT NULL "
+            f"ORDER BY {quoted} LIMIT {KEY_DISTINCT_VALUES_LIMIT}",
+        )
+    except Exception as exc:
+        _sampling_breaker.record_failure(connector, exc)
+        logger.warning(
+            "Ascending distinct-value probe on %s.%s failed (%s)",
+            qualified,
+            column_name,
+            type(exc).__name__,
+        )
+        return None
+    _sampling_breaker.record_success(connector)
+    if df is None:
+        return None
+    return [_json_ready_sample(v) for v in df.iloc[:, 0].tolist()]
+
+
+def _store_key_distinct_values(
+    table: dict[str, Any],
+    connector: "SQLDatabase",
+    column_names: set[str],
+) -> None:
+    """Probe and persist the ascending distinct values of suspected key columns."""
+    values: dict[str, list[Any]] = {}
+    for column_name in sorted(column_names):
+        if _sampling_breaker.is_open(connector):
+            break
+        probed = probe_ascending_distinct_values(
+            connector, table.get("schema_name"), table["name"], column_name
+        )
+        if probed:
+            values[column_name] = probed
+    store_column_distinct_values(table["id"], values)
 
 
 def calculate_columns_profiling(
@@ -466,7 +529,7 @@ def calculate_columns_profiling(
     qualified = connector.qualify(schema_name, table_name)
 
     try:
-        df = _execute_capped(
+        df = execute_capped(
             connector, f"SELECT * FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}"
         )
     except Exception as exc:
@@ -770,6 +833,7 @@ def process_table(
     embedder: SemanticEmbedder | None = None,
     database_name: str | None = None,
     probe_distinct_values: bool = True,
+    probe_key_values: bool = True,
     commit_slot: AbstractContextManager[None] | None = None,
 ) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes.
@@ -778,6 +842,10 @@ def process_table(
     read once per run by the caller. It gates only the per-column ``SELECT
     DISTINCT`` probes; the bounded row sample always runs. Defaults to True so
     a direct caller keeps the historical behaviour.
+
+    ``probe_key_values`` is the inverse of ``PREVENT_SEMANTIC_FK_DB_QUERIES``:
+    whether the suspected FK and PK columns get their ascending distinct values
+    probed for semantic FK resolution.
 
     ``commit_slot`` lets the parallel pipeline impose canonical table ordering
     only on persistence. Direct callers fall back to the process-local lock.
@@ -833,6 +901,21 @@ def process_table(
         fk["source_column"] for fk in declared_fks if fk.get("source_column")
     }
     all_fk_names = declared_fk_names | suggested_fk_names
+
+    column_names = {col.get("name") for col in ctx.get("columns", [])}
+    key_names = (
+        all_fk_names
+        | declared_pk_column_names(table)
+        | set(fk_suggestions.pk_column_names)
+    ) & column_names
+    if (
+        probe_key_values
+        and key_names
+        and connector is not None
+        and not _sampling_breaker.is_open(connector)
+    ):
+        with _step(table_name, f"Probing key values ({len(key_names)} columns)"):
+            _store_key_distinct_values(table, connector, key_names)
 
     # Payload-bearing junctions are wider than the pure two-key shape handled
     # by the later bridge pass. Require both the conservative LLM decision and
