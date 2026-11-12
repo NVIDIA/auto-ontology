@@ -17,6 +17,7 @@ def _col(cid: str, name: str, description: str = "", **extra: Any) -> dict:
         "data_type": "varchar",
         "sample_values": [],
         "description": description,
+        "own_description": description,
         "references": None,
         **extra,
     }
@@ -27,6 +28,7 @@ _DESCRIBED = {
     "name": "departments",
     "schema_name": "hr",
     "description": "A department.",
+    "own_description": "A department.",
     "bridge_description": None,
     "columns": [_col("c-dept-key", "dept_key", "Department key.")],
 }
@@ -35,12 +37,14 @@ _ROLES = {
     "name": "roles",
     "schema_name": "hr",
     "description": None,
+    "own_description": None,
     "bridge_description": None,
     "columns": [
         _col(
             "c-roles-dept",
             "dept_key",
             "Department key.",
+            own_description=None,
             references="hr.departments.dept_key",
         ),
         _col("c-roles-user", "username", sample_values=["jdoe", "asmith"]),
@@ -81,12 +85,23 @@ def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return seen
 
 
-def test_only_what_has_no_description_is_written(world: dict[str, Any]) -> None:
-    assert cd.describe_catalog("hr") == 2
+def test_only_what_has_no_description_of_its_own_is_written(
+    world: dict[str, Any],
+) -> None:
+    assert cd.describe_catalog("hr") == 3
 
     tables, columns = world["filled"]
     assert tables == {"t-roles": "Which user holds a role in which department."}
-    assert columns == {"c-roles-user": "User login."}
+    assert columns == {"c-roles-dept": "Department key.", "c-roles-user": "User login."}
+
+
+def test_a_borrowed_description_is_copied_not_rewritten(
+    world: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cd, "invoke_with_structured_output", lambda *a: None)
+
+    assert cd.describe_catalog("hr") == 1
+    assert world["filled"] == ({}, {"c-roles-dept": "Department key."})
 
 
 def test_one_call_per_table_that_needs_one(world: dict[str, Any]) -> None:
@@ -116,6 +131,7 @@ def test_a_failed_call_leaves_the_table_undescribed(
 ) -> None:
     monkeypatch.setattr(cd, "invoke_with_structured_output", lambda *a: None)
 
-    assert cd.describe_catalog("hr") == 0
-    assert world["filled"] == ({}, {})
+    cd.describe_catalog("hr")
+    tables, columns = world["filled"]
+    assert "t-roles" not in tables and "c-roles-user" not in columns
     assert world["refreshed"] == ["t-dept", "t-roles"]

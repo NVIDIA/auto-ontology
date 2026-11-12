@@ -5,15 +5,16 @@
 """Give every table and column a description, then re-embed the catalog.
 
 Runs last in a compilation, once Terms, attributes, foreign keys and bridges
-exist. Most descriptions already resolve through the semantic layer: a table
-reads its Term's, a column its attribute's or the one its foreign key points
-at. What is left has no source -- a table no Term represents, such as a bridge,
-and a column with neither an attribute nor a resolved foreign key. Those are
-written by the LLM, one call per table, onto the catalog where it has no
-description of its own.
+exist. A table or column with no description of its own gets one copied from
+the semantic layer: a table its Term's, a column its attribute's or the one
+its foreign key points at. The copy is the node's own from then on, so a later
+change to the Term or attribute does not change it. What has no source -- a
+table no Term represents, such as a bridge, and a column with neither an
+attribute nor a resolved foreign key -- is written by the LLM, one call per
+table. A description the node already has is never replaced.
 
 The Table and Column rows were embedded at ingest, before any of this existed,
-so they are re-embedded with the descriptions as they now resolve.
+so they are re-embedded with their new descriptions.
 """
 
 from __future__ import annotations
@@ -68,15 +69,17 @@ def describe_catalog(database_name: str) -> int:
     Returns the number of tables and columns given a description.
     """
     tables = fetch_description_context(database_name)
+    table_descriptions = _copied(tables)
+    column_descriptions = _copied([col for table in tables for col in table["columns"]])
     gaps = [table for table in tables if _needs_description(table)]
     logger.info(
-        "Describing %d of %d table(s) with no description source",
+        "Copying %d semantic-layer description(s); describing %d of %d table(s) "
+        "with no description source",
+        len(table_descriptions) + len(column_descriptions),
         len(gaps),
         len(tables),
     )
 
-    table_descriptions: dict[str, str] = {}
-    column_descriptions: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
         for table, result in zip(gaps, pool.map(_describe_table, gaps)):
             if result is None:
@@ -102,6 +105,15 @@ def describe_catalog(database_name: str) -> int:
         refresh_catalog_embeddings(node_ids)
         logger.info("Re-embedded %d Table/Column row(s)", len(node_ids))
     return len(written)
+
+
+def _copied(nodes: list[dict[str, Any]]) -> dict[str, str]:
+    """``{id: description}`` for each node whose description is borrowed."""
+    return {
+        str(node["id"]): _text(node.get("description"))
+        for node in nodes
+        if _text(node.get("description")) and not _text(node.get("own_description"))
+    }
 
 
 def _needs_description(table: dict[str, Any]) -> bool:

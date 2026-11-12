@@ -1291,9 +1291,10 @@ def fetch_description_context(database_name: str) -> list[dict[str, Any]]:
     """Every table in *database_name* with its columns, as descriptions resolve.
 
     ``description`` is what a reader sees: the node's own, else the Term or
-    attribute behind it (see :mod:`auto_ontology.dal.sql_fragments`). A table
-    also carries the descriptions of the bridge SqlAttributes written over it,
-    and a column the ``schema.table.column`` its foreign key lands on.
+    attribute behind it (see :mod:`auto_ontology.dal.sql_fragments`), and
+    ``own_description`` the node's own alone. A table also carries the
+    descriptions of the bridge SqlAttributes written over it, and a column the
+    ``schema.table.column`` its foreign key lands on.
     """
     bridge_descriptions = (
         select(
@@ -1324,6 +1325,7 @@ def fetch_description_context(database_name: str) -> list[dict[str, Any]]:
             s.catalog_table.c.name,
             s.catalog_schema.c.name.label("schema_name"),
             table_description_expr().label("description"),
+            s.catalog_table.c.description.label("own_description"),
             bridge_descriptions.label("bridge_description"),
         )
         .select_from(_table_join())
@@ -1338,6 +1340,7 @@ def fetch_description_context(database_name: str) -> list[dict[str, Any]]:
             s.catalog_column.c.data_type,
             s.catalog_column.c.sample_values,
             column_description_expr().label("description"),
+            s.catalog_column.c.description.label("own_description"),
             column_reference_expr().label("references"),
         )
         .select_from(_catalog_join())
