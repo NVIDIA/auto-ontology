@@ -539,7 +539,7 @@ def test_column_descriptions_fill_only_missing_or_name_only_ones(world) -> None:
     }
 
 
-def test_column_descriptions_never_replace_a_certified_one(world) -> None:
+def test_column_descriptions_never_replace_a_certified_one(world: World) -> None:
     world.table("ledger")
     world.column("ledger", "blank", 1)
     world.column("ledger", "echo", 2, description="ECHO")

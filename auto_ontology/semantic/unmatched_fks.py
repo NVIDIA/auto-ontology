@@ -193,6 +193,15 @@ def _embed_table_terms(table: dict[str, Any], embedder: SemanticEmbedder) -> Non
         # The VDB appends and has no transaction, so replacements are embedded
         # first and only a node that has one loses its old row.
         replaced = {row["metadata"]["id"] for row in rows if row["metadata"].get("id")}
+        missing = sorted(
+            node["id"] for node in (*terms, *attrs) if node["id"] not in replaced
+        )
+        if missing:
+            logger.warning(
+                "[%s] no new embedding for %s; keeping their old vectors",
+                table["name"],
+                missing,
+            )
         for node in (*terms, *attrs):
             if node["id"] in replaced:
                 embedder.vdb.delete_by_id(node["id"])

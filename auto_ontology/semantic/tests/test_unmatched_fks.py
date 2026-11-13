@@ -155,15 +155,17 @@ def test_a_failed_reembed_keeps_the_old_vectors(failure: list | Exception) -> No
     write.assert_not_called()
 
 
-def test_only_nodes_with_a_replacement_lose_their_old_vector() -> None:
+def test_only_nodes_with_a_replacement_lose_their_old_vector(caplog) -> None:
     rows = [{"metadata": {"id": "t1"}}, {"metadata": {"id": "a1"}}]
-    embedder, write = _embed_with(rows)
+    with caplog.at_level("WARNING", logger=_MODULE):
+        embedder, write = _embed_with(rows)
 
     assert [c.args[0] for c in embedder.vdb.delete_by_id.call_args_list] == [
         "t1",
         "a1",
     ]
     write.assert_called_once_with(embedder.vdb, rows)
+    assert "['a2']" in caplog.text
 
 
 def test_table_without_a_term_gets_one(store) -> None:
