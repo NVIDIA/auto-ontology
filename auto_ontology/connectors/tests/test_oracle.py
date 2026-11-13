@@ -14,6 +14,7 @@ from auto_ontology.connectors.connection_string_factory import build_connection_
 from auto_ontology.connectors.oracle import (
     OracleDatabase,
     _parse_connection_string,
+    drop_database_qualifier,
     to_oracle_sql,
 )
 from auto_ontology.connectors.registry import create_connector
@@ -220,6 +221,53 @@ def test_execute_returns_dataframe_and_closes_connection(
     assert connection.executed == [("SELECT :1 AS VALUE FROM DUAL", [1])]
     assert connection.call_timeout is None
     assert connection.closed
+
+
+def test_execute_drops_the_database_qualifier(driver: SimpleNamespace) -> None:
+    # The catalog knows a table as database.schema.table, and generated SQL can
+    # carry all three; Oracle rejects that spelling (ORA-03048 on 23ai).
+    database = OracleDatabase(_CONNECTION_STRING)
+
+    database.execute(
+        'SELECT e."NAME" FROM FREEPDB1.HR."EMPLOYEES" e '
+        'ORDER BY e."SALARY" DESC FETCH FIRST 2 ROWS ONLY'
+    )
+
+    assert driver.connections[-1].executed == [
+        (
+            'SELECT e."NAME" FROM HR."EMPLOYEES" e '
+            'ORDER BY e."SALARY" DESC FETCH FIRST 2 ROWS ONLY',
+            [],
+        )
+    ]
+
+
+def test_database_qualifier_is_dropped_from_tables_and_columns() -> None:
+    rewritten = drop_database_qualifier(
+        'SELECT "FREEPDB1"."HR"."EMPLOYEES"."NAME" FROM "FREEPDB1"."HR"."EMPLOYEES" '
+        "JOIN freepdb1.hr.departments d ON d.id = 1",
+        "FREEPDB1",
+    )
+
+    assert "FREEPDB1" not in rewritten.upper()
+    assert 'FROM "HR"."EMPLOYEES"' in rewritten
+    assert "JOIN hr.departments d" in rewritten
+
+
+def test_only_this_connections_database_is_dropped() -> None:
+    sql = "SELECT * FROM OTHERDB.HR.EMPLOYEES"
+
+    assert drop_database_qualifier(sql, "FREEPDB1") == sql
+
+
+def test_a_schema_named_like_the_database_is_left_alone(
+    driver: SimpleNamespace,
+) -> None:
+    database = OracleDatabase("oracle://hr:pw@localhost:1521/HR")
+
+    database.execute("SELECT * FROM HR.EMPLOYEES")
+
+    assert driver.connections[-1].executed == [("SELECT * FROM HR.EMPLOYEES", [])]
 
 
 def test_execute_rewrites_limit_before_sending(driver: SimpleNamespace) -> None:

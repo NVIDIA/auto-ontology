@@ -21,6 +21,7 @@ from urllib.parse import unquote, urlparse
 import oracledb
 import pandas as pd
 import sqlglot
+from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from auto_ontology.catalog.constants import TableTypes
@@ -119,6 +120,33 @@ def to_oracle_sql(sql: str) -> str:
     return statements[0]
 
 
+def drop_database_qualifier(sql: str, database_name: str) -> str:
+    """Rewrite ``database.schema.table`` references to ``schema.table``.
+
+    Everywhere else a table is known by three names, and SQL written against
+    the catalog carries all three. Oracle has no such level: a session is
+    already inside one database, and ``FREEPDB1.HR.EMPLOYEES`` is read as a
+    column reference and rejected. Only a qualifier equal to *database_name*
+    is removed, so anything else still fails loudly.
+
+    SQL that sqlglot cannot parse is returned unchanged.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, read="oracle")
+    except SqlglotError:
+        return sql
+    target = database_name.casefold()
+    changed = False
+    for node in tree.find_all(exp.Table, exp.Column):
+        catalog = node.args.get("catalog")
+        if catalog is not None and catalog.name.casefold() == target:
+            node.set("catalog", None)
+            changed = True
+    if not changed:
+        return sql
+    return tree.sql(dialect="oracle")
+
+
 def _output_type_handler(cursor: Any, metadata: Any) -> Any:
     """Fetch LOB columns as plain ``str``/``bytes`` instead of LOB locators.
 
@@ -157,6 +185,12 @@ class OracleDatabase(SQLDatabase):
     ) -> None:
         self._connect_kwargs = _parse_connection_string(connection_string)
         self._database_name = str(self._connect_kwargs["service_name"])
+        # Cheap test for whether a statement names the database at all, so the
+        # common case skips parsing. See ``drop_database_qualifier``.
+        self._database_qualifier_re = re.compile(
+            rf'(?<![\w$#"]){re.escape(self._database_name)}"?\s*\.',
+            re.IGNORECASE,
+        )
         # Compared upper-cased: Oracle folds unquoted identifiers to upper case,
         # so a user typing "hr" must still match the schema named "HR".
         self._schema_names: list[str] = sorted(
@@ -215,7 +249,9 @@ class OracleDatabase(SQLDatabase):
     ) -> pd.DataFrame:
         """Run *sql*; with *timeout_s*, the driver abandons it after that long.
 
-        A statement containing ``LIMIT`` is rewritten up front (see
+        A ``database.schema.table`` reference loses its database part (see
+        :func:`drop_database_qualifier`), and a statement containing ``LIMIT``
+        is rewritten up front (see
         :func:`to_oracle_sql`). Any other statement is sent as written, and
         rewritten only if Oracle rejects its syntax (see
         ``_REWRITABLE_SYNTAX_CODES``) -- valid Oracle SQL is therefore never put
@@ -228,6 +264,8 @@ class OracleDatabase(SQLDatabase):
         """
         # Oracle rejects a trailing semicolon on a single statement.
         statement = sql.strip().rstrip(";").strip()
+        if self._database_qualifier_re.search(statement):
+            statement = drop_database_qualifier(statement, self._database_name)
         if _LIMIT_RE.search(statement):
             statement = to_oracle_sql(statement)
 
