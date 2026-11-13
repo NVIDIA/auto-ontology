@@ -25,10 +25,27 @@ from auto_ontology.semantic.visit_enter import (
     _sample_key,
     _sampling_breaker,
     calculate_columns_profiling,
+    probe_ascending_distinct_values,
     process_table,
     reset_sampling_breaker,
 )
 from auto_ontology.utils.sql_identifiers import qualified_name
+
+
+@pytest.fixture(autouse=True)
+def store_distinct_ratios():
+    with patch(
+        "auto_ontology.semantic.visit_enter.store_column_distinct_ratios"
+    ) as store:
+        yield store
+
+
+@pytest.fixture(autouse=True)
+def store_key_values():
+    with patch(
+        "auto_ontology.semantic.visit_enter.store_column_distinct_values"
+    ) as store:
+        yield store
 
 
 def _mock_connector(dialect: str = "postgres") -> MagicMock:
@@ -88,6 +105,55 @@ def test_keep_persisted_sample_caps_text_only() -> None:
     # Non-scalars are judged by how long they render.
     assert _keep_persisted_sample(["a", "b"]) is True
     assert _keep_persisted_sample(["x" * 40]) is False
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_a_column_is_unique_when_95_percent_of_its_values_are_distinct(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+    store_distinct_ratios: MagicMock,
+) -> None:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame(
+        {
+            "mostly_distinct": [*range(19), 0],
+            "repeated": [*range(18), 0, 0],
+            "small_enum": [*"ABCDE", *[None] * 15],
+            "small_repeat": [*"ABCDA", *[None] * 15],
+            "empty": [None] * 20,
+        }
+    )
+    columns = [
+        {"name": "mostly_distinct", "data_type": "integer"},
+        {"name": "repeated", "data_type": "integer"},
+        {"name": "small_enum", "data_type": "integer"},
+        {"name": "small_repeat", "data_type": "integer"},
+        {"name": "empty", "data_type": "integer"},
+    ]
+
+    result = calculate_columns_profiling(
+        {"id": "t1", "name": "t", "schema_name": "public"}, columns, connector
+    )
+
+    assert {name: profile["is_unique"] for name, profile in result.items()} == {
+        "mostly_distinct": True,
+        "repeated": False,
+        "small_enum": True,
+        "small_repeat": False,
+        "empty": False,
+    }
+    store_distinct_ratios.assert_called_once_with(
+        "t1",
+        {
+            "mostly_distinct": 0.95,
+            "repeated": 0.9,
+            "small_enum": 1.0,
+            "small_repeat": 0.8,
+        },
+    )
 
 
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
@@ -1019,3 +1085,122 @@ def test_the_breaker_key_matches_however_the_database_is_spelled() -> None:
     reset_sampling_breaker("nvdp")
 
     assert not _sampling_breaker.is_open(dead)
+
+
+def test_key_value_probe_reads_the_lowest_distinct_values() -> None:
+    connector = _mock_connector()
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = pd.DataFrame({"id": [np.int64(3), np.int64(7)]})
+
+    values = probe_ascending_distinct_values(connector, "raw", "orders", "Order Id")
+
+    assert values == [3, 7]
+    assert connector.execute.call_args.args[0] == (
+        'SELECT DISTINCT "Order Id" FROM "raw"."orders" WHERE "Order Id" IS NOT NULL '
+        'ORDER BY "Order Id" LIMIT 20'
+    )
+
+
+def test_key_value_probe_failure_counts_toward_the_breaker() -> None:
+    connector = _CappedConnector(TimeoutError("cancelled"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        assert probe_ascending_distinct_values(connector, "raw", "t", "id") is None
+
+    assert _sampling_breaker.is_open(connector)
+    calls = len(connector.calls)
+    assert probe_ascending_distinct_values(connector, "raw", "t", "id") is None
+    assert len(connector.calls) == calls
+
+
+def _process_keys_table(
+    *, probe_key_values: bool = True
+) -> tuple[MagicMock, MagicMock]:
+    from auto_ontology.semantic.models import (
+        PotentialFkResult,
+        PotentialFkSuggestion,
+        TableTermsResult,
+    )
+
+    table = {
+        "id": "t1",
+        "name": "orders",
+        "description": "",
+        "schema_name": "public",
+        "pk": ["order_no"],
+    }
+    ctx = {
+        "columns": [
+            {"name": name, "data_type": "integer"}
+            for name in ("order_no", "alt_id", "customer_id", "store_ref", "amount")
+        ],
+        "fks": [{"source_column": "customer_id", "target_table": "customers"}],
+    }
+    suggestions = PotentialFkResult(
+        suggestions=[
+            PotentialFkSuggestion(column_name="store_ref", rationale="store key")
+        ],
+        pk_column_names=["alt_id"],
+    )
+    with (
+        patch(
+            "auto_ontology.semantic.visit_enter._resolve_connector",
+            return_value=_mock_connector(),
+        ),
+        patch(
+            "auto_ontology.semantic.visit_enter.calculate_columns_profiling",
+            return_value={},
+        ),
+        patch(
+            "auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys",
+            return_value=suggestions,
+        ),
+        patch(
+            "auto_ontology.semantic.visit_enter.extract_term",
+            return_value=TableTermsResult(terms=[]),
+        ),
+        patch("auto_ontology.semantic.visit_enter.upsert_table_term"),
+        patch("auto_ontology.semantic.visit_enter.merge_column_attribute"),
+        patch(
+            "auto_ontology.semantic.visit_enter.probe_ascending_distinct_values",
+            side_effect=lambda _c, _s, _t, column: [f"{column}-1"],
+        ) as probe,
+        patch(
+            "auto_ontology.semantic.visit_enter.store_column_distinct_values"
+        ) as store,
+    ):
+        process_table(
+            table,
+            ctx,
+            domain_summary=None,
+            database_name="db",
+            probe_key_values=probe_key_values,
+        )
+    return probe, store
+
+
+def test_process_table_probes_suspected_key_columns() -> None:
+    probe, store = _process_keys_table()
+
+    assert [c.args[3] for c in probe.call_args_list] == [
+        "alt_id",
+        "customer_id",
+        "order_no",
+        "store_ref",
+    ]
+    store.assert_called_once_with(
+        "t1",
+        {
+            "alt_id": ["alt_id-1"],
+            "customer_id": ["customer_id-1"],
+            "order_no": ["order_no-1"],
+            "store_ref": ["store_ref-1"],
+        },
+    )
+
+
+def test_process_table_skips_key_probes_when_prevented() -> None:
+    probe, store = _process_keys_table(probe_key_values=False)
+
+    probe.assert_not_called()
+    store.assert_not_called()

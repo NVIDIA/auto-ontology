@@ -1,11 +1,13 @@
 {
   "attributes": {
     "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
-    "delete_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'None'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
+    "fetch_attributes_to_describe": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
+    "fetch_semantic_fk_ends": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_value_key_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
@@ -14,9 +16,10 @@
     "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",
     "find_table_bridge": "(table_a_id: 'str', table_b_id: 'str', allowed_table_ids: 'set[str] | None' = None) -> 'tuple[list[dict], list[dict]]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
-    "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
+    "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None' = None) -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
     "set_semantic_fk_join_default": "(source_table_id: 'str', target_attribute_id: 'str', selected_column_id: 'str') -> 'None'",
+    "store_attribute_descriptions": "(descriptions: 'dict[str, str]') -> 'int'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
   },
   "candidates": {
@@ -76,6 +79,9 @@
     "mark_table_as_junction": "(table_id: 'str') -> 'None'",
     "patch_catalog_node": "(node_id: 'str', properties: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "store_column_date_formats": "(table_id: 'str', date_formats: 'dict[str, str]') -> 'None'",
+    "store_column_descriptions": "(table_id: 'str', descriptions: 'dict[str, str]') -> 'list[str]'",
+    "store_column_distinct_ratios": "(table_id: 'str', ratios: 'dict[str, float]') -> 'None'",
+    "store_column_distinct_values": "(table_id: 'str', values: 'dict[str, list]') -> 'None'",
     "store_column_sample_values": "(table_id: 'str', samples: 'dict[str, list]') -> 'None'",
     "store_column_uniqueness": "(table_id: 'str', uniqueness: 'dict[str, bool]') -> 'None'"
   },
@@ -209,7 +215,7 @@
     "update_sql_attribute": "(attr_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, expression: 'str | None' = None, source: 'str | None' = None, certified: 'bool | None' = None, owner_id: 'str | None' = None, set_owner: 'bool' = False, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'None'"
   },
   "sql_fragments": {
-    "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('pii_processed', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
+    "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('distinct_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('distinct_ratio', Float(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('pii_processed', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
     "name_contains": "(column: 'ColumnElement', search: 'str') -> 'ColumnElement'",
     "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('owner_id', Text(), table=<catalog_table>), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
@@ -232,6 +238,13 @@
     "list_tags": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "remove_labels_no_longer_matched": "(*, rule_id: 'str', targets: 'dict[str, Select]') -> 'int'",
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
+  },
+  "term_families": {
+    "attribute_family_prefix": "(attribute_id: 'ColumnElement') -> 'ColumnElement'",
+    "fetch_family_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_family_edges": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_table_families": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "replace_term_families": "(database_name: 'str', families: 'Iterable[tuple[str, str, Mapping[str, str]]]') -> 'int'"
   },
   "terms": {
     "build_term_table_maps": "(pairs: 'list[dict[str, Any]]') -> 'tuple[dict[str, set[str]], dict[str, set[str]]]'",

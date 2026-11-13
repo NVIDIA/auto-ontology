@@ -1474,6 +1474,7 @@ def _import_column_attributes(
                     live_id=live_attr_id,
                     name=attr.name,
                     description=attr.description,
+                    column_description=col_ctx.description,
                     term_name=term.name,
                     source_column=col_ctx.name,
                     table_id=ctx["live_table_id"],

@@ -86,7 +86,7 @@ def _normalize_label(name: str, *, fallback: str) -> str:
 
 
 def _format_spec_line(spec: ColumnAttributeSpec) -> str:
-    desc = f" — {spec.description}" if spec.description else ""
+    desc = f" — {spec.column_description}" if spec.column_description else ""
     return f"  - source_column={spec.source_column} ({spec.datatype}){desc}"
 
 

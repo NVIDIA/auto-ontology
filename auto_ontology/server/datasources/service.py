@@ -6,7 +6,7 @@
 
 All direct store access lives in auto_ontology/dal/datasources.py.
 This module only keeps the VDB orchestration: update_node_properties
-and its helpers that mix catalog reads with vector-store upserts.
+and its helpers that mix catalog reads with pgvector upserts.
 """
 
 from __future__ import annotations
@@ -15,14 +15,9 @@ import logging
 from typing import Any
 
 from auto_ontology.catalog.constants import Labels
-from auto_ontology.utils.embedding_rows import (
-    CatalogEmbeddingRowsOp,
-)
-
 from auto_ontology.dal.datasources import (
     count_columns_for_table,
     fetch_parent_table_id_for_column,
-    fetch_tables_and_columns_by_node_ids,
     fetch_columns_for_table,
     fetch_databases,
     fetch_node_properties_by_id,
@@ -34,6 +29,9 @@ from auto_ontology.dal.terms import (
     fetch_column_attribute_embedding_contexts_by_column_id,
 )
 from auto_ontology.semantic.embed import build_semantic_embedder
+from auto_ontology.utils.catalog_reembed import (
+    refresh_catalog_embeddings as _refresh_vdb_embeddings,
+)
 from auto_ontology.utils.column_types import sample_values_edit_error
 from auto_ontology.utils.sample_values import stringify_sample_values
 
@@ -58,7 +56,7 @@ def update_node_properties(
 
     Returns ``{id, ...updated_fields}``. When the patch touches fields that
     feed retrieval text (``Table``/``Column`` description or column
-    ``sample_values``), stale vector-store rows are replaced.
+    ``sample_values``), stale pgvector rows are deleted and re-appended.
 
     Raises ``ValueError`` when the patch would put sample values on a column
     whose declared SQL type cannot hold hand-written text; both routes that
@@ -90,7 +88,9 @@ def update_node_properties(
     if reembed_ids:
         _refresh_vdb_embeddings(reembed_ids)
 
-    if patched["label"] == Labels.COLUMN and "sample_values" in properties:
+    if patched["label"] == Labels.COLUMN and (
+        "sample_values" in properties or "description" in properties
+    ):
         try:
             _refresh_semantic_column_attribute_embeddings(node_id)
         except Exception:
@@ -128,7 +128,7 @@ def _get_node_ids_for_embedding_update(
     label: str,
     properties: dict[str, Any],
 ) -> list[str]:
-    """Return the ids whose vector-store rows must be refreshed for *properties*.
+    """Return the ids whose pgvector rows must be refreshed for *properties*.
 
     * ``Column`` + ``description`` → column and parent ``Table`` (table text
       lists column descriptions).
@@ -162,51 +162,8 @@ def _get_node_ids_for_embedding_update(
     return []
 
 
-def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
-    """Re-embed these Table/Column rows, replacing their previous VDB rows."""
-    from auto_ontology.utils import get_embed_params
-    from auto_ontology.utils.embedding import embed_rows
-    from auto_ontology.vdb import get_data_vdb
-    from auto_ontology.vdb.records import replace_embedded_rows
-
-    unique_ids = set(dict.fromkeys(node_ids))
-
-    tables_df, columns_df, database_name = fetch_tables_and_columns_by_node_ids(
-        node_ids
-    )
-    if tables_df.empty and columns_df.empty:
-        logger.info(
-            "No Table/Column rows found for node_ids=%r; skipping VDB upsert.",
-            node_ids,
-        )
-        return
-
-    embed_df = CatalogEmbeddingRowsOp(database_name=database_name).process(
-        (tables_df, columns_df),
-    )
-    if embed_df.empty:
-        return
-
-    def _row_id(row: dict[str, Any]) -> str | None:
-        meta = row.get("metadata") or {}
-        node_id = meta.get("id")
-        return str(node_id) if node_id is not None else None
-
-    records = embed_df.to_dict(orient="records")
-    records = [r for r in records if _row_id(r) in unique_ids]
-    if not records:
-        return
-
-    # A failed embed must leave the old rows. On pgvector that is embedding
-    # here, before replace_embedded_rows deletes anything; on Elasticsearch
-    # embed_rows passes the text through and the store writes before it
-    # deletes.
-    rows = embed_rows(records, get_embed_params(), what="tabular")
-    replace_embedded_rows(get_data_vdb(), unique_ids, rows)
-
-
 def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:
-    """Refresh semantic VDB rows whose text includes this Column's sample values."""
+    """Refresh semantic VDB rows whose text includes this Column's description or samples."""
     contexts = fetch_column_attribute_embedding_contexts_by_column_id(column_id)
     for term, attrs in contexts:
         if not attrs:
