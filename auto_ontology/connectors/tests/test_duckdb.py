@@ -13,8 +13,10 @@ in-process.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import duckdb
+import pandas as pd
 import pytest
 
 from auto_ontology.connectors.duckdb import DuckDBDatabase
@@ -31,7 +33,7 @@ _FK_COLUMNS = [
 
 
 @pytest.fixture
-def keyed_db(tmp_path) -> Iterator[DuckDBDatabase]:
+def keyed_db(tmp_path: Path) -> Iterator[DuckDBDatabase]:
     path = tmp_path / "keyed.duckdb"
     conn = duckdb.connect(str(path))
     conn.execute(
@@ -69,11 +71,13 @@ def unkeyed_db() -> Iterator[DuckDBDatabase]:
     db.close()
 
 
-def _rows(frame) -> list[tuple]:
+def _rows(frame: pd.DataFrame) -> list[tuple]:
     return [tuple(row) for row in frame.itertuples(index=False)]
 
 
-def test_composite_primary_key_keeps_declared_order(keyed_db) -> None:
+def test_composite_primary_key_keeps_declared_order(
+    keyed_db: DuckDBDatabase,
+) -> None:
     pks = keyed_db.get_pks()
     assert list(pks.columns) == _PK_COLUMNS
     assert _rows(pks) == [
@@ -84,7 +88,9 @@ def test_composite_primary_key_keeps_declared_order(keyed_db) -> None:
     ]
 
 
-def test_composite_foreign_key_pairs_columns_by_position(keyed_db) -> None:
+def test_composite_foreign_key_pairs_columns_by_position(
+    keyed_db: DuckDBDatabase,
+) -> None:
     """``(l_no, o_id)`` references ``(line_no, order_id)``, not their cross product.
 
     The single-column key names no target column, so DuckDB resolves it to the
@@ -99,7 +105,9 @@ def test_composite_foreign_key_pairs_columns_by_position(keyed_db) -> None:
     ]
 
 
-def test_attached_catalog_keys_are_not_reported(keyed_db, tmp_path) -> None:
+def test_attached_catalog_keys_are_not_reported(
+    keyed_db: DuckDBDatabase, tmp_path: Path
+) -> None:
     """Same-named tables in another catalog must not contribute their keys.
 
     Every column the attached keys name also exists here, so a leaked row
@@ -128,7 +136,9 @@ def test_attached_catalog_keys_are_not_reported(keyed_db, tmp_path) -> None:
     ]
 
 
-def test_database_without_keys_returns_shaped_empty_frames(unkeyed_db) -> None:
+def test_database_without_keys_returns_shaped_empty_frames(
+    unkeyed_db: DuckDBDatabase,
+) -> None:
     """Empty, but with the columns ``add_pks``/``add_fks`` read."""
     pks = unkeyed_db.get_pks()
     fks = unkeyed_db.get_fks()
