@@ -44,6 +44,7 @@ from auto_ontology.semantic.visit_enter import (
     terms_with_assignments,
 )
 from auto_ontology.utils.sample_values import parse_sample_values
+from auto_ontology.vdb.records import write_embedded_rows
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +183,20 @@ def _embed_table_terms(table: dict[str, Any], embedder: SemanticEmbedder) -> Non
         for attr in attrs:
             if attr.get("term_name"):
                 attrs_by_term[attr["term_name"]].append(attr)
-        # The VDB appends, so rows embedded by the table pass are replaced.
+        rows = [
+            row
+            for term in terms
+            for row in embedder.embed_term_rows(
+                term, attrs_by_term.get(term["name"], [])
+            )
+        ]
+        # The VDB appends and has no transaction, so replacements are embedded
+        # first and only a node that has one loses its old row.
+        replaced = {row["metadata"]["id"] for row in rows if row["metadata"].get("id")}
         for node in (*terms, *attrs):
-            embedder.vdb.delete_by_id(node["id"])
-        for term in terms:
-            embedder.embed_term(term, attrs_by_term.get(term["name"], []))
+            if node["id"] in replaced:
+                embedder.vdb.delete_by_id(node["id"])
+        if rows:
+            write_embedded_rows(embedder.vdb, rows)
     except Exception:
         logger.warning("[%s] re-embedding after attaching failed", table["name"])

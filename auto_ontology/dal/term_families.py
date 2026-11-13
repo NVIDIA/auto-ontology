@@ -13,14 +13,24 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from sqlalchemy import ColumnElement, delete, func, insert, literal, select, union
+from sqlalchemy import (
+    ColumnElement,
+    Select,
+    Table,
+    delete,
+    func,
+    insert,
+    literal,
+    select,
+    union,
+)
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 
 
-def _database_schema_ids(database_name: str):
+def _database_schema_ids(database_name: str) -> Select:
     """The schemas of one database, as a subquery."""
     return (
         select(s.catalog_schema.c.id)
@@ -108,7 +118,7 @@ def fetch_family_edges(database_name: str) -> list[dict[str, Any]]:
         select(literal(1)).where(func.split_part(ref, "|", 1).notin_(owned)).exists()
     )
 
-    def edges(link, origin: str, *where):
+    def edges(link: Table, origin: str, *where: ColumnElement) -> Select:
         source_table = s.catalog_table.alias(f"{origin}_source_table")
         target_table = s.catalog_table.alias(f"{origin}_target_table")
         return (

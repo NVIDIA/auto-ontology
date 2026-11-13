@@ -1160,6 +1160,7 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
             s.column_attribute.c.id,
         )
         .select_from(
@@ -1216,6 +1217,10 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
                 "column_description": row["column_description"],
                 "family_prefix": row["family_prefix"],
                 "sample_values": row["sample_values"],
+                "is_unique": row["is_unique"],
+                "table_id": row["table_id"],
+                "table_name": row["table_name"],
+                "schema_name": row["schema_name"],
                 "id": row["id"],
             }
         )

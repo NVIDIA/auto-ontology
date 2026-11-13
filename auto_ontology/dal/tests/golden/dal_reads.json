@@ -7568,9 +7568,13 @@
             "description": "Primary key of film.",
             "family_prefix": null,
             "id": "<attr:Film/film id/film_id>",
+            "is_unique": null,
             "name": "film id",
             "sample_values": null,
+            "schema_name": "public",
             "source_column": "film_id",
+            "table_id": "<table:pagila.public.film>",
+            "table_name": "film",
             "term_name": "Film"
           }
         ],

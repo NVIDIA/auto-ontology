@@ -57,16 +57,27 @@ class SemanticEmbedder:
         in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
         """
+        with_embeddings = self.embed_term_rows(term, attrs)
+        if with_embeddings:
+            write_embedded_rows(self.vdb, with_embeddings)
+        return len(with_embeddings)
+
+    def embed_term_rows(
+        self,
+        term: dict[str, Any],
+        attrs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """The rows :meth:`embed_term` would write, embedded but not written."""
         rows = _build_rows(self.database_name, term, attrs)
         if not rows:
-            return 0
+            return []
 
         embedded_df = batch_embed(rows, self.embed_params)
         if embedded_df is None or embedded_df.empty:
             logger.warning(
                 "Inline embed produced no rows for Term %s", term.get("name")
             )
-            return 0
+            return []
 
         with_embeddings = [
             row
@@ -79,10 +90,7 @@ class SemanticEmbedder:
                 len(rows),
                 term.get("name"),
             )
-            return 0
-
-        write_embedded_rows(self.vdb, with_embeddings)
-        return len(with_embeddings)
+        return with_embeddings
 
     def embed_column_attributes(self, attrs: list[dict[str, Any]]) -> int:
         """Embed only ColumnAttribute rows, without rewriting the parent Term row."""

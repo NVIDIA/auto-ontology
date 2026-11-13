@@ -24,7 +24,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select, update  # noqa: E402
 
 from auto_ontology.dal import datasources as d  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
@@ -537,6 +537,33 @@ def test_column_descriptions_fill_only_missing_or_name_only_ones(world) -> None:
         "echo": "Replaced",
         "real": "Curated",
     }
+
+
+def test_column_descriptions_never_replace_a_certified_one(world) -> None:
+    world.table("ledger")
+    world.column("ledger", "blank", 1)
+    world.column("ledger", "echo", 2, description="ECHO")
+    store().query_write(
+        update(s.catalog_column)
+        .where(s.catalog_column.c.table_id == world.tables["ledger"])
+        .values(description_certified=True)
+    )
+
+    written = d.store_column_descriptions(
+        world.tables["ledger"], {"blank": "Filled", "echo": "Replaced"}
+    )
+
+    assert written == []
+    rows = store().query_read(
+        select(
+            s.catalog_column.c.name,
+            s.catalog_column.c.description,
+            s.catalog_column.c.description_certified,
+        ).where(s.catalog_column.c.table_id == world.tables["ledger"])
+    )
+    assert {
+        r["name"]: (r["description"], r["description_certified"]) for r in rows
+    } == {"blank": (None, True), "echo": ("ECHO", True)}
 
 
 # --------------------------------------------------------------------------

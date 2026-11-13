@@ -561,12 +561,14 @@ def store_column_descriptions(table_id: str, descriptions: dict[str, str]) -> li
         .where(
             s.catalog_column.c.table_id == table_id,
             s.catalog_column.c.name.in_(list(descriptions)),
+            s.catalog_column.c.description_certified.is_(False),
             or_(
                 current == "",
                 func.lower(current) == func.lower(s.catalog_column.c.name),
             ),
         )
         .values(
+            description_certified=False,
             description=case(
                 {
                     name: literal(text, s.catalog_column.c.description.type)
@@ -574,7 +576,7 @@ def store_column_descriptions(table_id: str, descriptions: dict[str, str]) -> li
                 },
                 value=s.catalog_column.c.name,
                 else_=s.catalog_column.c.description,
-            )
+            ),
         )
         .returning(s.catalog_column.c.id)
     )

@@ -105,8 +105,10 @@ def test_self_reference_joins_the_tables_term(store) -> None:
         _unlinked("employees", "manager_id"),
     ]
     embedder = MagicMock()
+    embedder.embed_term_rows.return_value = [{"metadata": {"id": "t1"}}]
 
-    assert unmatched_fks.attach_unmatched_fk_columns("hr", embedder) == 1
+    with patch(f"{_MODULE}.write_embedded_rows") as write:
+        assert unmatched_fks.attach_unmatched_fk_columns("hr", embedder) == 1
 
     store["merge"].assert_called_once_with(
         term_name="Employee",
@@ -116,8 +118,52 @@ def test_self_reference_joins_the_tables_term(store) -> None:
         datatype="integer",
     )
     store["extract"].assert_not_called()
+    embedder.embed_term_rows.assert_called_once_with(
+        {"id": "t1", "name": "Employee"}, []
+    )
     embedder.vdb.delete_by_id.assert_called_once_with("t1")
-    embedder.embed_term.assert_called_once_with({"id": "t1", "name": "Employee"}, [])
+    write.assert_called_once_with(embedder.vdb, [{"metadata": {"id": "t1"}}])
+
+
+def _embed_with(rows_or_error: list | Exception) -> tuple[MagicMock, MagicMock]:
+    terms = [{"id": "t1", "name": "Employee"}]
+    attrs = [
+        {"id": "a1", "term_name": "Employee"},
+        {"id": "a2", "term_name": "Employee"},
+    ]
+    embedder = MagicMock()
+    if isinstance(rows_or_error, Exception):
+        embedder.embed_term_rows.side_effect = rows_or_error
+    else:
+        embedder.embed_term_rows.return_value = rows_or_error
+    with (
+        patch(
+            f"{_MODULE}.fetch_terms_and_attributes_for_table",
+            return_value=(terms, attrs),
+        ),
+        patch(f"{_MODULE}.write_embedded_rows") as write,
+    ):
+        unmatched_fks._embed_table_terms(_TABLES["employees"], embedder)
+    return embedder, write
+
+
+@pytest.mark.parametrize("failure", [[], RuntimeError("embed endpoint down")])
+def test_a_failed_reembed_keeps_the_old_vectors(failure: list | Exception) -> None:
+    embedder, write = _embed_with(failure)
+
+    embedder.vdb.delete_by_id.assert_not_called()
+    write.assert_not_called()
+
+
+def test_only_nodes_with_a_replacement_lose_their_old_vector() -> None:
+    rows = [{"metadata": {"id": "t1"}}, {"metadata": {"id": "a1"}}]
+    embedder, write = _embed_with(rows)
+
+    assert [c.args[0] for c in embedder.vdb.delete_by_id.call_args_list] == [
+        "t1",
+        "a1",
+    ]
+    write.assert_called_once_with(embedder.vdb, rows)
 
 
 def test_table_without_a_term_gets_one(store) -> None:
