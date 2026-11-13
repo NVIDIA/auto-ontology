@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
@@ -27,6 +28,7 @@ def _isolate_fallback_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_invoke, "_NON_REASONING_IDS", set())
     monkeypatch.setattr(llm_invoke, "_NON_REASONING_STRONG_REFS", {})
     monkeypatch.setattr(llm_invoke, "_REASONING_FALLBACK_CLIENT", None)
+    monkeypatch.setattr(llm_invoke, "_DEFAULT_NON_REASONING", threading.local())
 
 
 class _Model:
@@ -497,3 +499,266 @@ def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -
     monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
 
     assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
+
+
+# ---------------------------------------------------------------------------
+# Connection reuse
+# ---------------------------------------------------------------------------
+
+
+class _Endpoint:
+    """A local HTTP/1.1 endpoint that records which connection served each request."""
+
+    def __init__(self) -> None:
+        import http.server
+
+        endpoint = self
+        self.connections: list[tuple[str, int]] = []
+        self.cookies: list[str | None] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self) -> None:  # noqa: N802 — http.server's name
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                endpoint.connections.append(self.client_address)
+                endpoint.cookies.append(self.headers.get("Cookie"))
+                body = b"{}"
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Set-Cookie", "backend=node-7; Path=/")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}/v1/chat"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+@pytest.fixture
+def endpoint() -> Any:
+    server = _Endpoint()
+    yield server
+    server.close()
+
+
+def test_consecutive_calls_share_one_connection(endpoint: _Endpoint) -> None:
+    session = llm_invoke._TimeoutSession(5)
+
+    for _ in range(3):
+        assert session.post(endpoint.url, json={"q": 1}).status_code == 200
+
+    assert len(set(endpoint.connections)) == 1
+
+
+def test_a_connection_left_idle_is_replaced_not_reused(endpoint: _Endpoint) -> None:
+    session = llm_invoke._TimeoutSession(5, max_idle=0.0)
+
+    session.post(endpoint.url, json={})
+    session.post(endpoint.url, json={})
+
+    assert len(set(endpoint.connections)) == 2
+
+
+def test_reused_session_sends_no_cookie(endpoint: _Endpoint) -> None:
+    """A one-shot session never carried one; a kept one must not start to."""
+    session = llm_invoke._TimeoutSession(5)
+
+    session.post(endpoint.url, json={})
+    session.post(endpoint.url, json={})
+
+    assert endpoint.cookies == [None, None]
+    assert len(session.cookies) == 0
+
+
+class _FlakySession(llm_invoke._TimeoutSession):
+    """Raises the queued errors, one per send, before letting requests through."""
+
+    def __init__(self, errors: list[Exception], **kwargs: Any) -> None:
+        super().__init__(5, **kwargs)
+        self.errors = errors
+        self.sends = 0
+
+    def send(self, request: Any, **kwargs: Any) -> Any:
+        self.sends += 1
+        if self.errors:
+            error = self.errors.pop(0)
+            # A callable is called at failure time, so it can move the clock.
+            raise error() if callable(error) else error
+        return super().send(request, **kwargs)
+
+
+def test_stale_connection_is_retried_once_on_a_new_one(endpoint: _Endpoint) -> None:
+    session = _FlakySession([])
+    session.post(endpoint.url, json={})
+    session.errors.append(requests.exceptions.ConnectionError("Connection aborted."))
+
+    response = session.post(endpoint.url, json={})
+
+    assert response.status_code == 200
+    assert session.sends == 3
+    assert len(set(endpoint.connections)) == 2
+
+
+def test_a_failure_while_the_endpoint_was_answering_is_not_resent(
+    endpoint: _Endpoint,
+) -> None:
+    """Seconds in, the request was delivered: resending would deliver it twice.
+
+    This is the failure a fresh session has too, so it goes to the caller's
+    retry policy as it always did. requests reports a stalled response body as
+    a plain ConnectionError as well, which is why elapsed time decides this
+    and not the exception type.
+    """
+    session = _FlakySession([])
+    session.post(endpoint.url, json={})
+    now = [session._clock()]
+    session._clock = lambda: now[0]
+
+    def dropped_after_thirty_seconds() -> Exception:
+        now[0] += 30.0
+        return requests.exceptions.ConnectionError("Read timed out.")
+
+    session.errors.append(dropped_after_thirty_seconds)
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        session.post(endpoint.url, json={})
+
+    assert session.sends == 2
+
+
+def test_first_request_connection_failure_is_not_retried(endpoint: _Endpoint) -> None:
+    """Nothing was pooled yet, so the failure is the endpoint's, not staleness."""
+    session = _FlakySession([requests.exceptions.ConnectionError("refused")])
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        session.post(endpoint.url, json={})
+
+    assert session.sends == 1
+
+
+def test_timeout_on_a_reused_session_is_not_retried(endpoint: _Endpoint) -> None:
+    session = _FlakySession([])
+    session.post(endpoint.url, json={})
+    session.errors.append(requests.exceptions.ConnectTimeout("timed out"))
+
+    with pytest.raises(requests.exceptions.ConnectTimeout):
+        session.post(endpoint.url, json={})
+
+    assert session.sends == 2
+
+
+def test_a_second_connection_failure_is_raised(endpoint: _Endpoint) -> None:
+    session = _FlakySession([])
+    session.post(endpoint.url, json={})
+    session.errors.extend(
+        [
+            requests.exceptions.ConnectionError("aborted"),
+            requests.exceptions.ConnectionError("refused"),
+        ]
+    )
+
+    with pytest.raises(requests.exceptions.ConnectionError, match="refused"):
+        session.post(endpoint.url, json={})
+
+    # The failed retry left nothing pooled, so the next call starts clean.
+    assert session.post(endpoint.url, json={}).status_code == 200
+
+
+def test_each_thread_gets_its_own_session() -> None:
+    sessions = llm_invoke._ThreadSessions(5)
+    seen: list[object] = []
+
+    worker = threading.Thread(target=lambda: seen.append(sessions()))
+    worker.start()
+    worker.join()
+
+    assert sessions() is sessions()
+    assert seen[0] is not sessions()
+
+
+def test_nvidia_client_reuses_sessions_and_honours_the_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client's own 60s default used to override the configured timeout."""
+    monkeypatch.setattr(llm_invoke, "LLM_INVOKE_TIMEOUT_S", 137)
+
+    client = llm_invoke._build_client(
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",
+        api_key="nvapi-test",
+        base_url="http://127.0.0.1:9/v1",
+        temperature=0.0,
+        max_tokens=16,
+    )
+
+    assert client._client.timeout == 137
+    assert client._client.get_session_fn() is client._client.get_session_fn()
+
+
+def test_default_non_reasoning_client_is_built_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[object] = []
+
+    def factory(**_kwargs: object) -> object:
+        built.append(object())
+        return built[-1]
+
+    monkeypatch.setattr(llm_invoke, "get_non_reasoning_llm_client", factory)
+    monkeypatch.setattr(
+        llm_invoke,
+        "invoke_with_structured_output",
+        lambda llm, _messages, _schema: llm,
+    )
+    monkeypatch.setattr(llm_invoke, "safe_invoke_text", lambda llm, _prompt: llm)
+
+    first = llm_invoke.safe_invoke_structured_nr([], _Schema)
+    second = llm_invoke.safe_invoke_structured_nr([], _Schema)
+    third = llm_invoke.safe_invoke_text_nr("question")
+
+    assert first is second is third
+    assert len(built) == 1
+
+
+def test_default_non_reasoning_client_is_not_shared_between_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """These calls built a client each before; they must still not share one.
+
+    ChatNVIDIA keeps the outgoing request on the client object between
+    building it and sending it, so a client used from two threads can send one
+    thread's prompt on behalf of the other.
+    """
+    monkeypatch.setattr(llm_invoke, "get_non_reasoning_llm_client", lambda: object())
+    monkeypatch.setattr(llm_invoke, "safe_invoke_text", lambda llm, _prompt: llm)
+    other: list[object] = []
+
+    worker = threading.Thread(
+        target=lambda: other.append(llm_invoke.safe_invoke_text_nr("question"))
+    )
+    worker.start()
+    worker.join()
+
+    mine = llm_invoke.safe_invoke_text_nr("question")
+    assert mine is llm_invoke.safe_invoke_text_nr("question")
+    assert other[0] is not mine
+
+
+def test_default_non_reasoning_client_follows_a_replaced_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_invoke, "safe_invoke_text", lambda llm, _prompt: llm)
+    monkeypatch.setattr(llm_invoke, "get_non_reasoning_llm_client", lambda: "first")
+    assert llm_invoke.safe_invoke_text_nr("question") == "first"
+
+    monkeypatch.setattr(llm_invoke, "get_non_reasoning_llm_client", lambda: "second")
+    assert llm_invoke.safe_invoke_text_nr("question") == "second"
