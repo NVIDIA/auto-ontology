@@ -21,16 +21,18 @@ function escapeField(value: ChartCell): string {
 }
 
 /**
- * Slugify a chart title into a safe `.csv` filename. Letters and digits are kept
- * in every script -- `\p{L}` and `\p{N}` rather than `\w`, which is ASCII-only
- * and reduced a Korean or Japanese title to `chart` -- while everything that
- * cannot appear in a filename is dropped.
+ * Slugify a chart title into a safe `.csv` filename. Letters, digits and the
+ * combining marks that belong to them are kept in every script -- `\p{L}` and
+ * `\p{N}` rather than `\w`, which is ASCII-only and reduced a Korean or Japanese
+ * title to `chart` -- while everything that cannot appear in a filename is
+ * dropped. `\p{M}` matters as much as the letters: Devanagari vowel signs and
+ * viramas are marks, so without it `हिन्दी` collapses to `हनद`.
  */
 function toFilename(title: string): string {
 	const slug = title
 		.toLowerCase()
 		.trim()
-		.replace(/[^\p{L}\p{N}\s_-]/gu, '')
+		.replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, '')
 		.replace(/[\s_]+/g, '-')
 		.replace(/^-+|-+$/g, '');
 	return `${slug || 'chart'}.csv`;
