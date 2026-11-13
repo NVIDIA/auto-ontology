@@ -182,6 +182,9 @@ def _embed_table_terms(table: dict[str, Any], embedder: SemanticEmbedder) -> Non
         for attr in attrs:
             if attr.get("term_name"):
                 attrs_by_term[attr["term_name"]].append(attr)
+        # The VDB appends, so rows embedded by the table pass are replaced.
+        for node in (*terms, *attrs):
+            embedder.vdb.delete_by_id(node["id"])
         for term in terms:
             embedder.embed_term(term, attrs_by_term.get(term["name"], []))
     except Exception:

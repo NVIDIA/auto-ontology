@@ -116,6 +116,7 @@ def test_self_reference_joins_the_tables_term(store) -> None:
         datatype="integer",
     )
     store["extract"].assert_not_called()
+    embedder.vdb.delete_by_id.assert_called_once_with("t1")
     embedder.embed_term.assert_called_once_with({"id": "t1", "name": "Employee"}, [])
 
 
