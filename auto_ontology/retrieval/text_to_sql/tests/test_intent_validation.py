@@ -296,15 +296,10 @@ def test_non_short_answer_validation_omits_strict_projection_check(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
 )
 @patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_schemas_by_ids",
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_catalog_schemas",
     return_value={},
 )
-@patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
-    return_value=[],
-)
 def test_parse_failure_does_not_call_intent_llm(
-    _mock_schema_ids: MagicMock,
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
@@ -372,15 +367,10 @@ def test_parse_result_without_catalog_table_is_invalid(_mock_parse: MagicMock) -
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
 )
 @patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_schemas_by_ids",
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_catalog_schemas",
     return_value={},
 )
-@patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
-    return_value=[],
-)
 def test_retry_threshold_still_runs_intent_llm(
-    _mock_schema_ids: MagicMock,
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
@@ -420,15 +410,10 @@ def test_retry_threshold_still_runs_intent_llm(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
 )
 @patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_schemas_by_ids",
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_catalog_schemas",
     return_value={},
 )
-@patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
-    return_value=[],
-)
 def test_final_full_pipeline_attempt_still_runs_intent_llm(
-    _mock_schema_ids: MagicMock,
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:

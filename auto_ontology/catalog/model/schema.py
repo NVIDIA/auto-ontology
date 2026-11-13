@@ -92,12 +92,15 @@ class Schema:
                 self.columns_df.set_index("id")["full_name"].to_dict()
             )
 
-            # This is for improving is_column_in_table
+            # This is for improving is_column_in_table. Read column-wise: one
+            # `iterrows()` pass builds a Series per row, which at catalog
+            # scale was half the cost of constructing a Schema.
             self.columns_map = {}
-            for _, row in self.columns_df.iterrows():
-                if row["table_name_lower"] not in self.columns_map:
-                    self.columns_map[row["table_name_lower"]] = {}
-                self.columns_map[row["table_name_lower"]][row["column_name_lower"]] = (
+            for table_name_lower, column_name_lower in zip(
+                self.columns_df["table_name_lower"],
+                self.columns_df["column_name_lower"],
+            ):
+                self.columns_map.setdefault(table_name_lower, {})[column_name_lower] = (
                     True
                 )
 
@@ -150,6 +153,52 @@ class Schema:
             lambda x: {"id": x.id},
             axis=1,
         )
+
+    def column_names_by_table(self) -> dict[str, tuple[str, ...]]:
+        """Lower-cased column names per lower-cased table name, in row order.
+
+        This is what SQL extraction needs from the catalog on every parse: the
+        column set of each table, to hand to sqlglot's ``qualify`` and to
+        attribute bare column references. Reading it off ``columns_df`` row by
+        row costs a pandas Series per column of the *whole* schema, per parse,
+        which made a parse scale with the catalog instead of with the query.
+        It is derived once and kept for as long as ``columns_df`` is the same
+        frame with the same number of rows.
+
+        Names are lower-cased with ``str(...).lower()`` and nothing else, on
+        purpose: unlike ``columns_map`` they keep any surrounding quotes, which
+        is the spelling the extractor has always matched against.
+        """
+        df = self.columns_df
+        if df is None or df.empty:
+            return {}
+        # The frame itself is held, not its id(): an id can be handed to a new
+        # object once the old one is collected, and would then vouch for an
+        # index read from a frame that no longer exists.
+        cached = getattr(self, "_column_names_by_table", None)
+        if cached is not None and cached[0] is df and cached[1] == len(df):
+            return cached[2]
+        grouped: dict[str, list[str]] = {}
+        for table_name, column_name in zip(df["table_name"], df["column_name"]):
+            grouped.setdefault(str(table_name).lower(), []).append(
+                str(column_name).lower()
+            )
+        index = {table: tuple(columns) for table, columns in grouped.items()}
+        self._column_names_by_table = (df, len(df), index)
+        return index
+
+    def forget_nodes(self) -> None:
+        """Drop the table and column nodes built by earlier lookups.
+
+        ``get_table_node`` and ``get_column_node`` build a node on first use and
+        keep it. A schema that is parsed against repeatedly calls this between
+        parses so that each one resolves names as the first did; the frames,
+        ``columns_map`` and ``id_to_node`` it resolves them from are untouched.
+        """
+        self.table_nodes = {}
+        self.column_nodes = {}
+        self.tables_to_columns = {}
+        self.tables_columns_pos = {}
 
     def get_schema_name(self):
         return self.schema_name

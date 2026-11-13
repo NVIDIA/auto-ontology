@@ -27,11 +27,13 @@ and rely solely on ``qualify()``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.schema import MappingSchema
 
 
 class SQLSyntaxError(ValueError):
@@ -151,6 +153,54 @@ def _alias_to_table_map(
     return mapping
 
 
+class SchemaCatalog(dict):
+    """A ``{schema_name: Schema}`` map that is parsed against more than once.
+
+    Extraction derives two things from the catalog that depend on the catalog
+    alone, not on the SQL: the flat ``{table: {column: type}}`` mapping
+    ``qualify`` reads, and the ``MappingSchema`` sqlglot normalises that
+    mapping into for one dialect. Both are linear in the number of columns in
+    the *whole* catalog, so rebuilding them per statement makes every parse
+    pay for every table nobody asked about.
+
+    A plain ``dict`` has nowhere to keep them. Wrapping the map in this class
+    is how a caller says the same catalog will be reused, and that it will not
+    add, drop or swap a schema in place afterwards -- build a new
+    ``SchemaCatalog`` for a changed catalog instead. A plain ``dict`` still
+    works everywhere and is simply derived from each time.
+
+    Not safe for concurrent parses on its own: these caches, like the lazily
+    built nodes on each ``Schema``, are filled on first use. Callers sharing
+    one across threads serialise the parse.
+    """
+
+    __slots__ = ("_qualify_columns", "_qualify_schemas")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._qualify_columns: dict[str, dict[str, str]] | None = None
+        self._qualify_schemas: dict[str, MappingSchema] = {}
+
+
+def _schema_column_index(schema: Any) -> dict[str, tuple[str, ...]]:
+    """``{table: (column, ...)}`` for one catalog schema, names lower-cased.
+
+    A :class:`~auto_ontology.catalog.model.Schema` keeps this itself; anything
+    else that merely looks like one (a ``columns_df`` and nothing more) has it
+    derived here, the same way.
+    """
+    accessor = getattr(schema, "column_names_by_table", None)
+    if callable(accessor):
+        return accessor()
+    df = getattr(schema, "columns_df", None)
+    if df is None or df.empty:
+        return {}
+    grouped: dict[str, list[str]] = {}
+    for table_name, column_name in zip(df["table_name"], df["column_name"]):
+        grouped.setdefault(str(table_name).lower(), []).append(str(column_name).lower())
+    return {table: tuple(columns) for table, columns in grouped.items()}
+
+
 def _build_schema_dict(all_schemas: dict) -> dict[str, dict[str, str]]:
     """Build a flat ``{table: {col: "TEXT"}}`` dict for sqlglot's qualify pass.
 
@@ -161,16 +211,41 @@ def _build_schema_dict(all_schemas: dict) -> dict[str, dict[str, str]]:
     Multi-schema disambiguation is handled separately via ``alias_map`` and
     ``source_table_names`` (which use fully-qualified keys).
     """
+    if isinstance(all_schemas, SchemaCatalog) and (
+        all_schemas._qualify_columns is not None
+    ):
+        return all_schemas._qualify_columns
+
     schema: dict[str, dict[str, str]] = {}
     for s in all_schemas.values():
-        df = s.columns_df
-        if df is None or df.empty:
-            continue
-        for _, row in df.iterrows():
-            tbl = str(row["table_name"]).lower()
-            col = str(row["column_name"]).lower()
-            schema.setdefault(tbl, {})[col] = "TEXT"
+        for tbl, columns in _schema_column_index(s).items():
+            table_columns = schema.setdefault(tbl, {})
+            for col in columns:
+                table_columns[col] = "TEXT"
+
+    if isinstance(all_schemas, SchemaCatalog):
+        all_schemas._qualify_columns = schema
     return schema
+
+
+def _qualify_schema(
+    all_schemas: dict, schema_dict: dict[str, dict[str, str]], dialect: str
+) -> "MappingSchema | dict[str, dict[str, str]]":
+    """What to hand ``qualify`` as its schema for *dialect*.
+
+    ``qualify`` turns a mapping into ``MappingSchema(mapping, dialect=dialect)``
+    before it does anything else, and passes an existing schema object through
+    untouched. For a :class:`SchemaCatalog` that object is built once per
+    dialect here, by that exact call, and reused; sqlglot only reads from it.
+    Everything else gets the mapping, as before.
+    """
+    if not isinstance(all_schemas, SchemaCatalog) or not schema_dict:
+        return schema_dict
+    cached = all_schemas._qualify_schemas.get(dialect)
+    if cached is None:
+        cached = MappingSchema(schema_dict, dialect=dialect)
+        all_schemas._qualify_schemas[dialect] = cached
+    return cached
 
 
 _BINARY_CMP = (exp.EQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.NEQ)
@@ -692,7 +767,7 @@ def extract_tables_and_columns(
         qualified = qualify(
             statement,
             dialect=dialect,
-            schema=schema_dict,
+            schema=_qualify_schema(all_schemas, schema_dict, dialect),
             qualify_columns=True,
             validate_qualify_columns=False,
             expand_stars=bool(schema_dict),
@@ -718,13 +793,11 @@ def extract_tables_and_columns(
     if unresolved and all_schemas:
         col_to_tables: dict[str, list[str]] = {}
         for schema_name, s in all_schemas.items():
-            df = s.columns_df
-            if df is None or df.empty:
-                continue
             skey = schema_name.lower()
-            for _, row in df.iterrows():
-                col_n = str(row["column_name"]).lower()
-                tbl_n = str(row["table_name"]).lower()
+            # Per table, not per column: which source table a catalog table
+            # stands for is decided by its name alone, so only the columns of
+            # tables this query actually reads are ever walked.
+            for tbl_n, columns in _schema_column_index(s).items():
                 # Try the qualified name first (schema.table); fall back to bare
                 # table name for SQL that doesn't prefix tables with a schema.
                 qualified_name = f"{skey}.{tbl_n}"
@@ -733,8 +806,11 @@ def extract_tables_and_columns(
                     if qualified_name in source_table_names
                     else (tbl_n if tbl_n in source_table_names else None)
                 )
-                if matched and matched not in col_to_tables.get(col_n, []):
-                    col_to_tables.setdefault(col_n, []).append(matched)
+                if not matched:
+                    continue
+                for col_n in columns:
+                    if matched not in col_to_tables.get(col_n, []):
+                        col_to_tables.setdefault(col_n, []).append(matched)
 
         for col_name in unresolved:
             candidates = col_to_tables.get(col_name, [])
