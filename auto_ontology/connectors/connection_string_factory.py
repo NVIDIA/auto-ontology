@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_MYSQL_PORT = "3306"
+DEFAULT_ORACLE_PORT = "1521"
 DEFAULT_HEAVYDB_PORT = "6274"
 DEFAULT_KYUUBI_PORT = "10000"
 DEFAULT_TRINO_PORT = "8080"
@@ -71,6 +72,18 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         database = _require(connection, "database")
         port = str(connection.get("port") or "").strip() or DEFAULT_MYSQL_PORT
         return f"mysql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
+
+    if conn_type == "oracle":
+        host = _require(connection, "host").rstrip("/")
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        # ``database`` holds the service name: it is what identifies the
+        # connection, and what a pluggable database is addressed by.
+        service_name = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_ORACLE_PORT
+        return (
+            f"oracle://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(service_name)}"
+        )
 
     if conn_type == "snowflake":
         account = _require(connection, "account")

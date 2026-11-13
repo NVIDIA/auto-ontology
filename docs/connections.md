@@ -45,6 +45,7 @@ The URL scheme selects the connector:
 | ------------- | --------------------------- | :-----------: |
 | PostgreSQL    | `postgresql://`, `postgres://` | yes        |
 | MySQL         | `mysql://`                  | yes           |
+| Oracle        | `oracle://`                 | yes           |
 | Databricks    | `databricks://`             | yes           |
 | Snowflake     | `snowflake://`              | yes           |
 | ClickHouse    | `clickhouse://`             | yes           |
@@ -56,6 +57,18 @@ The URL scheme selects the connector:
 
 The registry lives in
 [`auto_ontology/connectors/registry.py`](../auto_ontology/connectors/registry.py).
+
+### Oracle
+
+`oracle://user:password@host:1521/service_name`. The path is the **service
+name** (not a SID), and it is the connection's database name. The connector
+uses `python-oracledb` in thin mode, so no Oracle Instant Client is needed;
+Oracle Database 12.1 or later is required.
+
+Without a schema allowlist only the connecting user's own schema is ingested.
+Pick other schemas in the UI to ingest them instead; the account needs `SELECT`
+on their tables, and reads metadata from the `ALL_*` dictionary views, so no
+DBA privileges are needed. Query history is not collected.
 
 ## Vault
 

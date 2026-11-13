@@ -43,6 +43,18 @@ export type MySqlConnectionParams = {
 	database: string;
 };
 
+export type OracleConnectionParams = {
+	type: ConnectionType.ORACLE;
+	host: string;
+	port: string;
+	user: string;
+	password: string;
+	/** The service name; it is also the connection's identity. */
+	database: string;
+	/** Optional ingestion allowlist. Empty/absent = only the connecting user's schema. */
+	schemas?: string[];
+};
+
 export type SnowflakeConnectionParams = {
 	type: ConnectionType.SNOWFLAKE;
 	account: string;
@@ -92,6 +104,7 @@ export type ConnectionParams = (
 	| DatabricksConnectionParams
 	| PostgresConnectionParams
 	| MySqlConnectionParams
+	| OracleConnectionParams
 	| SnowflakeConnectionParams
 	| HeavyDBConnectionParams
 ) &
