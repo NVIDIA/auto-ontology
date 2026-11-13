@@ -20,12 +20,17 @@ function escapeField(value: ChartCell): string {
 	return text;
 }
 
-/** Slugify a chart title into a safe `.csv` filename. */
+/**
+ * Slugify a chart title into a safe `.csv` filename. Letters and digits are kept
+ * in every script -- `\p{L}` and `\p{N}` rather than `\w`, which is ASCII-only
+ * and reduced a Korean or Japanese title to `chart` -- while everything that
+ * cannot appear in a filename is dropped.
+ */
 function toFilename(title: string): string {
 	const slug = title
 		.toLowerCase()
 		.trim()
-		.replace(/[^\w\s-]/g, '')
+		.replace(/[^\p{L}\p{N}\s_-]/gu, '')
 		.replace(/[\s_]+/g, '-')
 		.replace(/^-+|-+$/g, '');
 	return `${slug || 'chart'}.csv`;
@@ -54,7 +59,11 @@ export function specToCsv(spec: ChartSpec): { filename: string; csv: string } {
  */
 export function downloadCsv(spec: ChartSpec): void {
 	const { filename, csv } = specToCsv(spec);
-	const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+	// Excel opens a BOM-less UTF-8 CSV in the legacy code page, which garbles
+	// every non-ASCII header and value. The byte-order mark is a property of the
+	// downloaded file, not of the RFC 4180 serialization, so it belongs here and
+	// not in `specToCsv`.
+	const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
 	const url = URL.createObjectURL(blob);
 	const anchor = document.createElement('a');
 	anchor.href = url;
