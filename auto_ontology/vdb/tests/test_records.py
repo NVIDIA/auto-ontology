@@ -171,3 +171,17 @@ def test_written_rows_come_back_from_a_search(
     assert (
         retriever.query("who buys", vdb_kwargs={"where": {"database_name": "x"}}) == []
     )
+
+
+def test_warming_never_creates_a_collection(vdb: Any) -> None:
+    """Warming runs at worker start, before anything may have been ingested."""
+    assert vdb.warm() is False
+    assert vdb._table_exists() is False
+
+    write_embedded_rows(vdb, [_row("orders", _unit(0))])
+    vdb.close()
+
+    assert vdb.warm() is True
+    assert vdb.warm() is True
+    [hits] = vdb.retrieval([_unit(0)], top_k=1)
+    assert hits[0]["metadata"]["id"] == "orders"

@@ -339,6 +339,22 @@ class PostgresVDB:
         self._get_store()
         return self.collection_name
 
+    def warm(self) -> bool:
+        """Open the connection pool and bind the store ahead of the first search.
+
+        Otherwise the first search a process runs pays for the engine, a pooled
+        connection and the store's table inspection before it can query.
+
+        Read-only, unlike :meth:`create_index`: a collection that does not
+        exist yet is left that way, and the first write creates it as before.
+        Returns whether the store is now ready.
+        """
+        if self._store is not None:
+            return True
+        if not self._table_exists():
+            return False
+        return self._get_store() is not None
+
     # ------------------------------------------------------------------
     # Read / write
     # ------------------------------------------------------------------

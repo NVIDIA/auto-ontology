@@ -56,6 +56,49 @@ _QUEUE_POLL_S = 0.25
 _TERMINATE_GRACE_S = 1.0
 
 
+def _prewarm(*retrievers: Any) -> None:
+    """Pay the first question's one-time costs before there is a question.
+
+    Importing the agent and building the singletons leaves several things
+    unopened: the catalog store's connection pool, each vector store's engine
+    and table binding, and the catalog schema map SQL validation parses
+    against. Each is created on first use, so without this the first question
+    a worker serves is slower than every later one -- and a worker is replaced
+    on every cancel, so "first" recurs.
+
+    Best-effort and read-only. A step that fails is skipped and happens lazily
+    at its usual place instead. An empty catalog, for one, has no schema map
+    to build yet.
+
+    The catalog store goes first and decides whether anything else is tried.
+    It is the one connection here with a connect timeout, and the vector
+    stores live in the same database: if it cannot be reached there is nothing
+    to warm, and trying would only wait on a connection that is not coming.
+    """
+    from auto_ontology.dal.session import store
+    from auto_ontology.retrieval.data_access.graph_schemas import get_catalog_schemas
+
+    try:
+        store().query_read("SELECT 1")
+    except Exception as exc:  # noqa: BLE001 — warming is optional
+        logger.info(
+            "Prewarm skipped: the catalog store is not reachable (%s: %s)",
+            type(exc).__name__,
+            exc,
+        )
+        return
+
+    steps: list[tuple[str, Any]] = [("catalog schema map", get_catalog_schemas)]
+    for retriever in retrievers:
+        steps.append(("vector store", lambda r=retriever: r.vdb.warm()))
+
+    for name, step in steps:
+        try:
+            step()
+        except Exception as exc:  # noqa: BLE001 — warming is optional
+            logger.info("Prewarm skipped the %s: %s: %s", name, type(exc).__name__, exc)
+
+
 def _worker_loop(
     in_q: "mp.Queue[tuple[str, Any]]",
     out_q: "mp.Queue[tuple[str, Any]]",
@@ -122,6 +165,13 @@ def _worker_loop(
         out_q.put((_TAG_READY, None))
     except Exception:  # noqa: BLE001
         return
+
+    # After READY, not before. The pool waits for READY with no timeout and no
+    # liveness check, so a worker that died while warming -- building the
+    # schema map for a very large catalog is the heaviest thing it does at
+    # start -- would leave that wait blocked for good. Once READY is out, a
+    # death here is seen the way a death mid-question is: by events().
+    _prewarm(data_retriever, semantic_retriever)
 
     while True:
         try:

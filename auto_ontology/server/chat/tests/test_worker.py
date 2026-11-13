@@ -33,6 +33,8 @@ def _run_loop(
     connector_batches: list[list[str]],
     *,
     evidence: str | None = None,
+    out_q: _FakeQueue | None = None,
+    prewarm: Any = lambda *retrievers: None,
 ) -> dict:
     """Drive one ASK through ``_worker_loop`` and return the agent payload it built.
 
@@ -79,9 +81,11 @@ def _run_loop(
     monkeypatch.setattr(
         "auto_ontology.retrieval.text_to_sql.main.stream_agent_response", fake_stream
     )
+    # Warming opens real connections; these tests are about the request loop.
+    monkeypatch.setattr(worker_module, "_prewarm", prewarm)
 
     in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None, [], evidence))])
-    worker_module._worker_loop(in_q, _FakeQueue())
+    worker_module._worker_loop(in_q, out_q or _FakeQueue())
     return captured
 
 
@@ -122,3 +126,91 @@ def test_worker_forwards_evidence_without_changing_question(
     assert payload["question"] == "q"
     assert payload["processing_question"] == "q"
     assert payload["evidence"] == "status means accounts.status"
+
+
+class _Vdb:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.warmed = 0
+
+    def warm(self) -> bool:
+        self.warmed += 1
+        if self.error is not None:
+            raise self.error
+        return True
+
+
+class _Retriever:
+    def __init__(self, vdb: _Vdb) -> None:
+        self.vdb = vdb
+
+
+def _stub_prewarm_targets(
+    monkeypatch: MonkeyPatch, *, store_error: Exception | None = None
+) -> list[str]:
+    calls: list[str] = []
+
+    class _Store:
+        def query_read(self, statement: str) -> list:
+            calls.append(statement)
+            if store_error is not None:
+                raise store_error
+            return []
+
+    def empty_catalog() -> dict:
+        calls.append("schema map")
+        raise KeyError("database_name")
+
+    monkeypatch.setattr("auto_ontology.dal.session.store", lambda: _Store())
+    monkeypatch.setattr(
+        "auto_ontology.retrieval.data_access.graph_schemas.get_catalog_schemas",
+        empty_catalog,
+    )
+    return calls
+
+
+def test_prewarm_opens_every_store_and_survives_a_failing_one(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """One store being down must not leave the others cold, or stop the worker."""
+    calls = _stub_prewarm_targets(monkeypatch)
+    broken = _Vdb(RuntimeError("connection refused"))
+    healthy = _Vdb()
+
+    worker_module._prewarm(_Retriever(broken), _Retriever(healthy))
+
+    assert calls == ["SELECT 1", "schema map"]
+    assert (broken.warmed, healthy.warmed) == (1, 1)
+
+
+def test_prewarm_stops_when_the_database_is_unreachable(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The vector stores share that database and connect with no timeout."""
+    calls = _stub_prewarm_targets(
+        monkeypatch, store_error=RuntimeError("connection timeout expired")
+    )
+    vdb = _Vdb()
+
+    worker_module._prewarm(_Retriever(vdb))
+
+    assert calls == ["SELECT 1"]
+    assert vdb.warmed == 0
+
+
+def test_worker_reports_ready_before_it_warms(monkeypatch: MonkeyPatch) -> None:
+    """The pool waits on READY with no liveness check; warming must not precede it."""
+    out_q = _FakeQueue()
+    ready_when_warming: list[bool] = []
+
+    def record(*_retrievers: object) -> None:
+        ready_when_warming.append((worker_module._TAG_READY, None) in out_q.puts)
+
+    _run_loop(
+        monkeypatch,
+        connector_batches=[["boot-connector"]],
+        out_q=out_q,
+        prewarm=record,
+    )
+
+    assert ready_when_warming == [True]
