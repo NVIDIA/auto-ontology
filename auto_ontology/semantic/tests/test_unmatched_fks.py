@@ -114,7 +114,6 @@ def test_self_reference_joins_the_tables_term(store) -> None:
         source_column="manager_id",
         attr_name="managerId",
         datatype="integer",
-        description="Reports to — samples: 7, 9",
     )
     store["extract"].assert_not_called()
     embedder.embed_term.assert_called_once_with({"id": "t1", "name": "Employee"}, [])

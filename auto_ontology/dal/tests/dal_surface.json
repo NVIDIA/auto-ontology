@@ -2,8 +2,10 @@
   "attributes": {
     "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
+    "fetch_attributes_to_describe": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
+    "fetch_semantic_fk_ends": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_value_key_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
@@ -14,9 +16,10 @@
     "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",
     "find_table_bridge": "(table_a_id: 'str', table_b_id: 'str', allowed_table_ids: 'set[str] | None' = None) -> 'tuple[list[dict], list[dict]]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
-    "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
+    "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None' = None) -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
     "set_semantic_fk_join_default": "(source_table_id: 'str', target_attribute_id: 'str', selected_column_id: 'str') -> 'None'",
+    "store_attribute_descriptions": "(descriptions: 'dict[str, str]') -> 'int'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
   },
   "candidates": {
@@ -76,6 +79,7 @@
     "mark_table_as_junction": "(table_id: 'str') -> 'None'",
     "patch_catalog_node": "(node_id: 'str', properties: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "store_column_date_formats": "(table_id: 'str', date_formats: 'dict[str, str]') -> 'None'",
+    "store_column_descriptions": "(table_id: 'str', descriptions: 'dict[str, str]') -> 'list[str]'",
     "store_column_distinct_ratios": "(table_id: 'str', ratios: 'dict[str, float]') -> 'None'",
     "store_column_distinct_values": "(table_id: 'str', values: 'dict[str, list]') -> 'None'",
     "store_column_sample_values": "(table_id: 'str', samples: 'dict[str, list]') -> 'None'",
@@ -236,6 +240,7 @@
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "term_families": {
+    "attribute_family_prefix": "(attribute_id: 'ColumnElement') -> 'ColumnElement'",
     "fetch_family_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_family_edges": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_table_families": "(database_name: 'str') -> 'list[dict[str, Any]]'",

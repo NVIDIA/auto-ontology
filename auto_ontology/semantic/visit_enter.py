@@ -35,7 +35,11 @@ from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
     upsert_table_term,
 )
-from auto_ontology.semantic.deterministic import column_attribute_specs
+from auto_ontology.semantic.deterministic import (
+    column_attribute_specs,
+    fill_missing_column_descriptions,
+    lacks_description,
+)
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from auto_ontology.semantic.fk_suggester import (
@@ -932,19 +936,28 @@ def process_table(
             fk_suggestions.junction_table_rationale or "LLM table-grain decision",
         )
 
+    non_fk_columns = [
+        col for col in ctx.get("columns", []) if col.get("name") not in all_fk_names
+    ]
+    undocumented = sum(1 for col in non_fk_columns if lacks_description(col))
+    if undocumented:
+        with _step(table_name, f"Describing {undocumented} undocumented column(s)"):
+            fill_missing_column_descriptions(
+                table_id, non_fk_columns, columns_profiling_samples
+            )
+
     # --- Build attribute specs for non-FK columns ---
     specs = column_attribute_specs(
         ctx.get("columns", []),
         declared_fks,
         suggested_fk_columns=all_fk_names,
-        columns_profiling_samples=columns_profiling_samples,
     )
     if not specs:
         logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
         return ProcessTableResult()
 
     # --- LLM: propose Term(s) and display names ---
-    with _step(table_name, f"Generating terms and descriptions ({len(specs)} columns)"):
+    with _step(table_name, f"Generating terms ({len(specs)} columns)"):
         term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
     spec_by_column = {spec.source_column: spec for spec in specs}
@@ -1041,6 +1054,5 @@ def commit_terms(
                 source_column=spec.source_column,
                 attr_name=spec.display_name,
                 datatype=spec.datatype,
-                description=spec.description,
             )
             result_attr_names.append(spec.display_name)

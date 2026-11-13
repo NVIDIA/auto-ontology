@@ -27,7 +27,10 @@ from auto_ontology.dal.attributes import (
 from auto_ontology.dal.datasources import fetch_table_by_id, fetch_table_context
 from auto_ontology.dal.terms import fetch_terms_and_attributes_for_table
 from auto_ontology.semantic.cancellation import is_cancelled
-from auto_ontology.semantic.deterministic import column_attribute_specs
+from auto_ontology.semantic.deterministic import (
+    column_attribute_specs,
+    fill_missing_column_descriptions,
+)
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import SemanticEmbedder
 from auto_ontology.semantic.models import ColumnAttributeSpec
@@ -97,7 +100,8 @@ def _attach_table(
         col["name"]: {"sample_values": parse_sample_values(col.get("sample_values"))}
         for col in columns
     }
-    specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
+    fill_missing_column_descriptions(table_id, columns, profiling)
+    specs = column_attribute_specs(columns, [])
     if not specs:
         return 0
 
@@ -133,7 +137,6 @@ def _attach_to_term(
             source_column=spec.source_column,
             attr_name=spec.display_name or spec.name,
             datatype=spec.datatype,
-            description=spec.description,
         ):
             written += 1
     logger.info(

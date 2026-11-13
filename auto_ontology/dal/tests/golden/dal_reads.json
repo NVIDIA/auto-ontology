@@ -3965,6 +3965,7 @@
           "is_foreign_key_target": true,
           "name": "film_id",
           "ordinal_position": 1,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -3975,6 +3976,7 @@
           "is_foreign_key_target": false,
           "name": "language_id",
           "ordinal_position": 5,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -3985,6 +3987,7 @@
           "is_foreign_key_target": false,
           "name": "original_language_id",
           "ordinal_position": 6,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -3995,6 +3998,7 @@
           "is_foreign_key_target": false,
           "name": "rating",
           "ordinal_position": 11,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4005,6 +4009,7 @@
           "is_foreign_key_target": false,
           "name": "rental_rate",
           "ordinal_position": 8,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4015,6 +4020,7 @@
           "is_foreign_key_target": false,
           "name": "replacement_cost",
           "ordinal_position": 10,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4025,6 +4031,7 @@
           "is_foreign_key_target": false,
           "name": "length",
           "ordinal_position": 9,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4035,6 +4042,7 @@
           "is_foreign_key_target": false,
           "name": "rental_duration",
           "ordinal_position": 7,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4045,6 +4053,7 @@
           "is_foreign_key_target": false,
           "name": "title",
           "ordinal_position": 2,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4055,6 +4064,7 @@
           "is_foreign_key_target": false,
           "name": "description",
           "ordinal_position": 3,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4065,6 +4075,7 @@
           "is_foreign_key_target": false,
           "name": "special_features",
           "ordinal_position": 13,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4075,6 +4086,7 @@
           "is_foreign_key_target": false,
           "name": "last_update",
           "ordinal_position": 12,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4085,6 +4097,7 @@
           "is_foreign_key_target": false,
           "name": "fulltext",
           "ordinal_position": 14,
+          "own_description": null,
           "sample_values": null
         },
         {
@@ -4095,6 +4108,7 @@
           "is_foreign_key_target": false,
           "name": "release_year",
           "ordinal_position": 4,
+          "own_description": null,
           "sample_values": null
         }
       ],
@@ -7304,9 +7318,11 @@
       ],
       [
         {
+          "column_description": null,
           "column_name": "Name",
           "datatype": "NVARCHAR(200)",
           "description": "The track's title.",
+          "family_prefix": null,
           "id": "<attr:Track/track name/Name>",
           "is_unique": null,
           "name": "track name",
@@ -7318,9 +7334,11 @@
           "term_name": "Track"
         },
         {
+          "column_description": null,
           "column_name": "amount",
           "datatype": "numeric",
           "description": "Amount paid.",
+          "family_prefix": null,
           "id": "<attr:Payment/payment amount/amount>",
           "is_unique": null,
           "name": "payment amount",
@@ -7332,9 +7350,11 @@
           "term_name": "Payment"
         },
         {
+          "column_description": null,
           "column_name": "customer_id",
           "datatype": "integer",
           "description": "Primary key of customer.",
+          "family_prefix": null,
           "id": "<attr:Customer/customer id/customer_id>",
           "is_unique": null,
           "name": "customer id",
@@ -7346,9 +7366,11 @@
           "term_name": "Customer"
         },
         {
+          "column_description": null,
           "column_name": "email",
           "datatype": "character varying",
           "description": "Contact address.",
+          "family_prefix": null,
           "id": "<attr:Customer/customer email/email>",
           "is_unique": null,
           "name": "customer email",
@@ -7360,9 +7382,11 @@
           "term_name": "Customer"
         },
         {
+          "column_description": null,
           "column_name": "film_id",
           "datatype": "integer",
           "description": "Primary key of film.",
+          "family_prefix": null,
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
           "name": "film id",
@@ -7374,9 +7398,11 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "column_name": "rating",
           "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
+          "family_prefix": null,
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
           "name": "film rating",
@@ -7388,9 +7414,11 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "column_name": "rental_date",
           "datatype": "timestamp with time zone",
           "description": "When the rental started.",
+          "family_prefix": null,
           "id": "<attr:Rental/rental date/rental_date>",
           "is_unique": null,
           "name": "rental date",
@@ -7402,9 +7430,11 @@
           "term_name": "Rental"
         },
         {
+          "column_description": null,
           "column_name": "title",
           "datatype": "text",
           "description": "The film's title.",
+          "family_prefix": null,
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
           "name": "film title",
@@ -7452,9 +7482,11 @@
       ],
       [
         {
+          "column_description": null,
           "column_name": "film_id",
           "datatype": "integer",
           "description": "Primary key of film.",
+          "family_prefix": null,
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
           "name": "film id",
@@ -7466,9 +7498,11 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "column_name": "rating",
           "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
+          "family_prefix": null,
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
           "name": "film rating",
@@ -7480,9 +7514,11 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "column_name": "title",
           "datatype": "text",
           "description": "The film's title.",
+          "family_prefix": null,
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
           "name": "film title",
@@ -7528,7 +7564,9 @@
       [
         [
           {
+            "column_description": null,
             "description": "Primary key of film.",
+            "family_prefix": null,
             "id": "<attr:Film/film id/film_id>",
             "name": "film id",
             "sample_values": null,
@@ -7721,7 +7759,9 @@
     "terms.fetch_term_and_column_attributes_for_embedding": [
       [
         {
+          "column_description": null,
           "description": "MPAA rating; an enum.",
+          "family_prefix": null,
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
           "name": "film rating",
@@ -7732,7 +7772,9 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "description": "Primary key of film.",
+          "family_prefix": null,
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
           "name": "film id",
@@ -7743,7 +7785,9 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "description": "The film's title.",
+          "family_prefix": null,
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
           "name": "film title",
@@ -7890,22 +7934,9 @@
     "terms.fetch_terms_and_attributes_for_table": [
       [
         {
-          "description": "A motion picture available for rental.",
-          "id": "<term:Film>",
-          "name": "Film",
-          "schema_names": [
-            "public"
-          ],
-          "synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
-        }
-      ],
-      [
-        {
+          "column_description": null,
           "description": "MPAA rating; an enum.",
+          "family_prefix": null,
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
           "name": "film rating",
@@ -7917,7 +7948,9 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "description": "Primary key of film.",
+          "family_prefix": null,
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
           "name": "film id",
@@ -7929,7 +7962,9 @@
           "term_name": "Film"
         },
         {
+          "column_description": null,
           "description": "The film's title.",
+          "family_prefix": null,
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
           "name": "film title",
@@ -7939,6 +7974,21 @@
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
           "term_name": "Film"
+        }
+      ],
+      [
+        {
+          "description": "A motion picture available for rental.",
+          "id": "<term:Film>",
+          "name": "Film",
+          "schema_names": [
+            "public"
+          ],
+          "synonyms": [
+            "movie",
+            "picture",
+            "title"
+          ]
         }
       ]
     ],

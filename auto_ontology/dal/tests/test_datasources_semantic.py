@@ -492,6 +492,53 @@ def test_table_context_of_a_missing_table_is_empty_not_an_error() -> None:
     assert d.fetch_table_context("no-such-table") == {"columns": [], "fks": []}
 
 
+def test_table_context_keeps_the_columns_own_description_apart(world) -> None:
+    world.table("notes")
+    world.column("notes", "body")
+    attr = world.attribute("body", description="Borrowed")
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["notes.body"],
+        attribute_id=attr,
+    )
+
+    (column,) = d.fetch_table_context(world.tables["notes"])["columns"]
+
+    assert column["description"] == "Borrowed"
+    assert column["own_description"] is None
+
+
+# --------------------------------------------------------------------------
+# store_column_descriptions
+# --------------------------------------------------------------------------
+
+
+def test_column_descriptions_fill_only_missing_or_name_only_ones(world) -> None:
+    world.table("ledger")
+    world.column("ledger", "blank", 1)
+    world.column("ledger", "echo", 2, description="ECHO")
+    world.column("ledger", "real", 3, description="Curated")
+
+    written = d.store_column_descriptions(
+        world.tables["ledger"],
+        {"blank": "Filled", "echo": "Replaced", "real": "Overwritten"},
+    )
+
+    assert sorted(written) == sorted(
+        [world.columns["ledger.blank"], world.columns["ledger.echo"]]
+    )
+    rows = store().query_read(
+        select(s.catalog_column.c.name, s.catalog_column.c.description).where(
+            s.catalog_column.c.table_id == world.tables["ledger"]
+        )
+    )
+    assert {r["name"]: r["description"] for r in rows} == {
+        "blank": "Filled",
+        "echo": "Replaced",
+        "real": "Curated",
+    }
+
+
 # --------------------------------------------------------------------------
 # fetch_tables_and_columns_by_node_ids
 # --------------------------------------------------------------------------

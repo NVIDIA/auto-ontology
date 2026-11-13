@@ -51,7 +51,8 @@ class SemanticEmbedder:
 
         ``term`` entries: ``{"name", "description", "id"}``.
         ``attrs`` entries include ``name``, ``term_name``, ``source_column``,
-        ``description``, ``id``, and the owning table metadata.
+        ``column_description``, ``family_prefix``, ``id``, and the owning table
+        metadata.
         ``id`` is the catalog ``id`` (UUID) and, when present, lands
         in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
@@ -242,10 +243,16 @@ def _build_rows(
         if not attr_name:
             continue
         owner = a.get("term_name") or term_name or ""
+        family = a.get("family_prefix")
+        family_suffix = f", family {family}" if family else ""
         sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
+        # The column's description, never the attribute's: the attribute's is
+        # written after FK resolution from its links, and editing it must not
+        # move the vector.
         text = (
-            f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
-            f"{a.get('description') or ''}"
+            f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}"
+            f"{family_suffix}. "
+            f"{a.get('column_description') or ''}"
             f"{sample_block}"
         ).strip()
         path = (

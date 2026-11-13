@@ -10,6 +10,7 @@ import logging
 import os
 import time
 
+from auto_ontology.semantic.attribute_descriptions import describe_column_attributes
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
@@ -80,7 +81,8 @@ def _run_semantic_compilation(
     if is_cancelled():
         logger.info(
             "Semantic compilation cancelled (database=%r) — skipping the term "
-            "family, FK, unmatched-FK, SqlAttribute and bridge-table stages; "
+            "family, FK, unmatched-FK, SqlAttribute, bridge-table and "
+            "attribute-description stages; "
             "%d table(s) "
             "compiled in %.1fs",
             database_name,
@@ -92,7 +94,7 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     logger.info("Resolving term families…")
     logger.info("=" * 60)
-    family_count = resolve_term_families(database_name)
+    family_count = resolve_term_families(database_name, embedder)
     logger.info("Term families found: %d", family_count)
 
     logger.info("=" * 60)
@@ -123,6 +125,12 @@ def _run_semantic_compilation(
     bridge_table_count = build_bridge_tables_sql_attributes(database_name)
     logger.info("Bridge tables built: %d", bridge_table_count)
 
+    logger.info("=" * 60)
+    logger.info("Describing ColumnAttributes…")
+    logger.info("=" * 60)
+    described_count = describe_column_attributes(database_name)
+    logger.info("ColumnAttributes described: %d", described_count)
+
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
@@ -133,7 +141,8 @@ def _run_semantic_compilation(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d term family(ies), %d semantic FK edge(s), "
         "%d unmatched FK column(s) attached, "
-        "%d SqlAttribute(s), %d bridge table(s) in %.1fs",
+        "%d SqlAttribute(s), %d bridge table(s), "
+        "%d ColumnAttribute(s) described in %.1fs",
         database_name,
         count,
         family_count,
@@ -141,6 +150,7 @@ def _run_semantic_compilation(
         unmatched_count,
         attr_count,
         bridge_table_count,
+        described_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)

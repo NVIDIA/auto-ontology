@@ -545,6 +545,42 @@ def store_column_distinct_ratios(table_id: str, ratios: dict[str, float]) -> Non
     )
 
 
+def store_column_descriptions(table_id: str, descriptions: dict[str, str]) -> list[str]:
+    """Write generated descriptions onto columns that lack a real one.
+
+    A column counts as lacking one when its description is blank or merely
+    repeats its name (case-insensitively). The check runs in the ``UPDATE``
+    itself, so a description someone saved in the meantime is never replaced.
+    Returns the ids of the columns written.
+    """
+    if not descriptions:
+        return []
+    current = func.trim(func.coalesce(s.catalog_column.c.description, ""))
+    rows = store().query_write(
+        update(s.catalog_column)
+        .where(
+            s.catalog_column.c.table_id == table_id,
+            s.catalog_column.c.name.in_(list(descriptions)),
+            or_(
+                current == "",
+                func.lower(current) == func.lower(s.catalog_column.c.name),
+            ),
+        )
+        .values(
+            description=case(
+                {
+                    name: literal(text, s.catalog_column.c.description.type)
+                    for name, text in descriptions.items()
+                },
+                value=s.catalog_column.c.name,
+                else_=s.catalog_column.c.description,
+            )
+        )
+        .returning(s.catalog_column.c.id)
+    )
+    return [row["id"] for row in rows]
+
+
 def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
     """Write inferred value notations onto Column ``format``.
 
@@ -1114,6 +1150,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 def fetch_table_context(table_id: str) -> dict[str, Any]:
     """``{columns, fks}`` for one table — what the SQL generator is handed.
 
+    ``description`` falls back through the column's attributes;
+    ``own_description`` is the column's alone.
+
     ``is_foreign_key_target`` marks a column some *other* column already points
     at; ``auto_ontology.semantic.fk_suggester`` drops those from the columns it offers the
     LLM, so it cannot propose an FK that inverts one the catalog already knows.
@@ -1130,6 +1169,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "name": r["name"],
             "data_type": r["data_type"],
             "description": r["description"],
+            "own_description": r["own_description"],
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
             "format": r["format"],
@@ -1141,6 +1181,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 s.catalog_column.c.name,
                 s.catalog_column.c.data_type,
                 column_description_expr().label("description"),
+                s.catalog_column.c.description.label("own_description"),
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,

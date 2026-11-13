@@ -43,8 +43,11 @@ from typing import Any
 from auto_ontology.dal.term_families import (
     fetch_family_candidates,
     fetch_family_edges,
+    fetch_table_families,
     replace_term_families,
 )
+from auto_ontology.dal.terms import fetch_terms_and_attributes_for_table
+from auto_ontology.semantic.embed import SemanticEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -262,8 +265,15 @@ def _expand(seeds: set[str], neighbours: dict[str, set[str]]) -> set[str]:
     return found
 
 
-def resolve_term_families(database_name: str) -> int:
-    """Recompute the term families of *database_name*; return how many exist."""
+def resolve_term_families(
+    database_name: str, embedder: SemanticEmbedder | None = None
+) -> int:
+    """Recompute the term families of *database_name*; return how many exist.
+
+    A ColumnAttribute's embedding names its family, so with an *embedder* the
+    attributes of every table whose family changed are re-embedded.
+    """
+    before = _table_prefixes(database_name) if embedder is not None else {}
     families = detect_term_families(
         fetch_family_candidates(database_name),
         fetch_family_edges(database_name),
@@ -288,4 +298,42 @@ def resolve_term_families(database_name: str) -> int:
         linked,
         database_name,
     )
+    if embedder is not None:
+        _reembed_moved_tables(database_name, before, embedder)
     return len(families)
+
+
+def _table_prefixes(database_name: str) -> dict[str, str]:
+    prefixes: dict[str, str] = {}
+    for row in fetch_table_families(database_name):
+        current = prefixes.get(row["table_id"])
+        if current is None or row["prefix"] < current:
+            prefixes[row["table_id"]] = row["prefix"]
+    return prefixes
+
+
+def _reembed_moved_tables(
+    database_name: str, before: dict[str, str], embedder: SemanticEmbedder
+) -> None:
+    after = _table_prefixes(database_name)
+    moved = sorted(
+        t for t in before.keys() | after.keys() if before.get(t) != after.get(t)
+    )
+    for table_id in moved:
+        try:
+            _, attrs = fetch_terms_and_attributes_for_table(table_id)
+            for attr in attrs:
+                embedder.vdb.delete_by_id(attr["id"])
+            embedder.embed_column_attributes(attrs)
+        except Exception:
+            logger.warning(
+                "re-embedding table %s after its family changed failed",
+                table_id,
+                exc_info=True,
+            )
+    if moved:
+        logger.info(
+            "resolve_term_families: re-embedded the attributes of %d table(s) "
+            "whose family changed",
+            len(moved),
+        )

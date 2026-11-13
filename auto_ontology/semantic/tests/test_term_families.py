@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from auto_ontology.semantic.term_families import (
     detect_term_families,
@@ -241,3 +241,37 @@ def test_resolve_writes_the_detected_families() -> None:
         ("dw", "NEW", 3),
         ("dw", "OLD", 3),
     ]
+
+
+def test_resolve_re_embeds_only_tables_whose_family_changed() -> None:
+    module = "auto_ontology.semantic.term_families"
+    before = [
+        {"table_id": "kept", "prefix": "NEW"},
+        {"table_id": "moved", "prefix": "OLD"},
+        {"table_id": "dropped", "prefix": "OLD"},
+    ]
+    after = [
+        {"table_id": "kept", "prefix": "NEW"},
+        {"table_id": "moved", "prefix": "NEW"},
+        {"table_id": "joined", "prefix": "NEW"},
+    ]
+    embedder = MagicMock()
+    with (
+        patch(f"{module}.fetch_family_candidates", return_value=[]),
+        patch(f"{module}.fetch_family_edges", return_value=[]),
+        patch(f"{module}.replace_term_families", return_value=0),
+        patch(f"{module}.fetch_table_families", side_effect=[before, after]),
+        patch(
+            f"{module}.fetch_terms_and_attributes_for_table",
+            side_effect=lambda table_id: ([], [{"id": f"attr:{table_id}"}]),
+        ) as fetch,
+    ):
+        resolve_term_families("warehouse", embedder)
+
+    assert [c.args[0] for c in fetch.call_args_list] == ["dropped", "joined", "moved"]
+    assert [c.args[0] for c in embedder.vdb.delete_by_id.call_args_list] == [
+        "attr:dropped",
+        "attr:joined",
+        "attr:moved",
+    ]
+    assert embedder.embed_column_attributes.call_count == 3

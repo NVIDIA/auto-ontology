@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from sqlalchemy import delete, func, insert, literal, select, union
+from sqlalchemy import ColumnElement, delete, func, insert, literal, select, union
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from auto_ontology.dal import schema as s
@@ -29,6 +29,23 @@ def _database_schema_ids(database_name: str):
             s.catalog_database.c.id == s.catalog_schema.c.database_id,
         )
         .where(s.catalog_database.c.name == database_name)
+    )
+
+
+def attribute_family_prefix(attribute_id: ColumnElement) -> ColumnElement:
+    """The prefix of the family the attribute's Term belongs to, or ``NULL``."""
+    return (
+        select(s.term_family.c.prefix)
+        .select_from(
+            s.column_attribute__term.join(
+                s.term__term_family,
+                s.term__term_family.c.term_id == s.column_attribute__term.c.term_id,
+            ).join(s.term_family, s.term_family.c.id == s.term__term_family.c.family_id)
+        )
+        .where(s.column_attribute__term.c.attribute_id == attribute_id)
+        .order_by(s.term_family.c.prefix)
+        .limit(1)
+        .scalar_subquery()
     )
 
 
@@ -125,19 +142,22 @@ def fetch_family_edges(database_name: str) -> list[dict[str, Any]]:
 def fetch_table_families(database_name: str) -> list[dict[str, Any]]:
     """One row per family membership of a table of *database_name*.
 
-    Rows carry ``table_id``, ``family_id`` and ``base_name``, reached through
-    the table's Terms. A table none of whose Terms is in a family is absent.
+    Rows carry ``table_id``, ``family_id``, ``prefix`` and ``base_name``,
+    reached through the table's Terms. A table none of whose Terms is in a
+    family is absent.
     """
     statement = (
         select(
             s.table__term.c.table_id,
             s.term__term_family.c.family_id,
+            s.term_family.c.prefix,
             s.term__term_family.c.base_name,
         )
         .join(
             s.term__term_family,
             s.term__term_family.c.term_id == s.table__term.c.term_id,
         )
+        .join(s.term_family, s.term_family.c.id == s.term__term_family.c.family_id)
         .join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
         .where(s.catalog_table.c.schema_id.in_(_database_schema_ids(database_name)))
         .order_by(s.table__term.c.table_id, s.term__term_family.c.family_id)
