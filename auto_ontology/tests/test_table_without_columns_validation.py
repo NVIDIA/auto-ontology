@@ -28,7 +28,7 @@ def _mock_schema(table_name: str, table_id: str = "tbl-1") -> MagicMock:
     schema.table_exists.side_effect = lambda t: t.lower() == table_name.lower()
     schema.get_columns_names.return_value = ["id"]
 
-    def _get_table_node(tbl: str):
+    def _get_table_node(tbl: str) -> MagicMock:
         if tbl.lower() != table_name.lower():
             raise ValueError(f"Table {tbl} is not in schema")
         return MagicMock(id=table_id)
