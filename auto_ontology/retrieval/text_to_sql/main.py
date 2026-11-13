@@ -135,6 +135,47 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
 )
 
 
+class _NodeTimings:
+    """Where one run's wall time went, node by node.
+
+    Nodes run strictly one after another, so the time between two consecutive
+    node completions belongs to the later node. That needs nothing from the
+    nodes themselves and holds for both ways the graph is streamed.
+
+    The answer to "why was that question slow" is otherwise only recoverable
+    by lining up log timestamps by hand, and it differs per question: one
+    spends its time generating SQL, another in four rounds of reconstruction,
+    another waiting on the database.
+    """
+
+    def __init__(self) -> None:
+        self._started = time.perf_counter()
+        self._last = self._started
+        self._seconds: dict[str, float] = {}
+        self._visits: dict[str, int] = {}
+
+    def node_finished(self, node_name: str) -> None:
+        now = time.perf_counter()
+        if node_name not in _TRANSPARENT_NODES:
+            self._seconds[node_name] = (
+                self._seconds.get(node_name, 0.0) + now - self._last
+            )
+            self._visits[node_name] = self._visits.get(node_name, 0) + 1
+        self._last = now
+
+    def summary(self) -> str:
+        """Slowest node first, e.g. ``total 41.3s | reconstruct_sql 19.8s (x3) | ...``."""
+        parts = [f"total {time.perf_counter() - self._started:.1f}s"]
+        for node_name, seconds in sorted(
+            self._seconds.items(), key=lambda item: item[1], reverse=True
+        ):
+            visits = self._visits[node_name]
+            parts.append(
+                f"{node_name} {seconds:.1f}s" + (f" (x{visits})" if visits > 1 else "")
+            )
+        return " | ".join(parts)
+
+
 def _build_state(payload: TextToSQLPayload) -> AgentState:
     custom_prompts = payload.get("custom_prompts", "")
     acronyms = payload.get("acronyms", [])
@@ -441,6 +482,7 @@ def stream_agent_response(
     streamed_sql: str | None = None
 
     last_node: str | None = None
+    timings = _NodeTimings()
     try:
         while True:
             final_state = dict(state)
@@ -471,6 +513,7 @@ def stream_agent_response(
 
                 logger.info("--- AGENT STEP ---")
                 for node_name, node_output in chunk.items():
+                    timings.node_finished(node_name)
                     if node_name in _TRANSPARENT_NODES:
                         _merge_node_output(final_state, node_output)
                         continue
@@ -532,10 +575,12 @@ def stream_agent_response(
             answer["thoughts"] = thoughts_summary
         elapsed = time.perf_counter() - t0
         logger.debug("Final answer (%.2fs):\n%s", elapsed, answer)
+        logger.info("Text-to-SQL timing: %s", timings.summary())
         yield {"type": "result", "answer": answer}
 
     except Exception as exc:
         logger.exception("Error during agent stream")
+        logger.info("Text-to-SQL timing (failed run): %s", timings.summary())
         yield {
             "type": "error",
             "message": f"Agent failed after {last_node or 'graph_start'}: {exc}",
@@ -564,6 +609,7 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
     # Required by auto_ontology/retrieval/interactive/coordinator.py to persist path_state across turns/phases.
     state = _build_state(payload)
     final_state = dict(state)
+    timings = _NodeTimings()
 
     try:
         while True:
@@ -571,6 +617,7 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
             terminal_node: str | None = None
             for step in app.stream(state, config={"recursion_limit": 45}):
                 for node_name, node_output in step.items():
+                    timings.node_finished(node_name)
                     if node_name not in _TRANSPARENT_NODES:
                         terminal_node = node_name
                     _merge_node_output(final_state, node_output)
@@ -583,8 +630,10 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
             )
             state = _restore_for_full_pipeline_retry(final_state)
         _apply_last_deterministic_sql_fallback(final_state, terminal_node)
+        logger.info("Text-to-SQL timing: %s", timings.summary())
     except Exception as exc:
         logger.exception("Error during agent stream in get_agent_response_with_state")
+        logger.info("Text-to-SQL timing (failed run): %s", timings.summary())
         # The stream may have already produced a valid, executed SQL query
         # (e.g. several reconstruction rounds succeeded) before a later node
         # raised — most commonly GraphRecursionError from an intent-validation
