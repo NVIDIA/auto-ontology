@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -79,6 +80,27 @@ def _is_statement_timeout(error: BaseException) -> bool:
         "QUERY_EXECUTION_TIMEOUT_EXCEEDED" in text
         or _TIMEOUT_SQLSTATE_RE.search(text) is not None
     )
+
+
+# ``DESCRIBE TABLE EXTENDED ... AS JSON`` needs Databricks Runtime 16.2. Older
+# runtimes reject the trailing clause before reading the table, with a parse
+# error, so the connector can fall back to the text form for the rest of the
+# run. Individual foreign tables report UNSUPPORTED_FEATURE instead, which only
+# means that table cannot use the JSON form.
+_AS_JSON_UNSUPPORTED_RE = re.compile(
+    r"(?:PARSE_SYNTAX_ERROR|UNSUPPORTED_FEATURE)", re.IGNORECASE
+)
+_AS_JSON_SYNTAX_ERROR_RE = re.compile(r"PARSE_SYNTAX_ERROR", re.IGNORECASE)
+
+
+def _is_as_json_unsupported(error: BaseException) -> bool:
+    """Whether a DESCRIBE failure means this statement cannot return JSON."""
+    return _AS_JSON_UNSUPPORTED_RE.search(str(error)) is not None
+
+
+def _is_as_json_syntax_error(error: BaseException) -> bool:
+    """Whether the runtime itself rejects the ``AS JSON`` clause."""
+    return _AS_JSON_SYNTAX_ERROR_RE.search(str(error)) is not None
 
 
 def _identifier_list(raw: str) -> list[str]:
@@ -191,6 +213,9 @@ class DatabricksDatabase(SQLDatabase):
         )
         # Columns/PKs/FKs from one DESCRIBE EXTENDED pass; see :meth:`_describe_pass`.
         self._describe_cache: tuple[pd.DataFrame, ...] | None = None
+        # Whether this warehouse accepts ``DESCRIBE ... AS JSON``. ``None`` means
+        # untried; ``False`` falls back to the text form for the rest of the run.
+        self._describe_json_supported: bool | None = None
         # Raw SHOW TABLES result from get_tables(); reused by _describe_pass to avoid
         # a second round-trip to the warehouse for the same metadata.
         self._show_tables_cache: pd.DataFrame | None = None
@@ -585,11 +610,160 @@ class DatabricksDatabase(SQLDatabase):
             pairs.append((name, definition.strip()))
         return pairs
 
+    @staticmethod
+    def _describe_json_metadata(described: pd.DataFrame) -> dict[str, Any] | None:
+        """The parsed ``json_metadata`` payload of ``DESCRIBE ... AS JSON``."""
+        if described.empty or "json_metadata" not in described.columns:
+            return None
+        raw = described.iloc[0]["json_metadata"]
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+            return None
+        try:
+            metadata = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        return metadata if isinstance(metadata, dict) else None
+
+    @staticmethod
+    def _render_type(type_info: Any) -> str:
+        """Render one JSON type object as the SQL type text DESCRIBE reports.
+
+        The JSON form spells parameterised and nested types as objects:
+        ``{"name": "decimal", "precision": 28, "scale": 2}``,
+        ``{"name": "array", "element_type": {...}}``, and so on. The catalog
+        stores a SQL type string, so those objects have to be written back out.
+        """
+        if not isinstance(type_info, dict):
+            return "" if type_info is None else str(type_info)
+
+        name = str(type_info.get("name") or "").lower()
+        if name == "struct":
+            fields = [
+                field
+                for field in type_info.get("fields") or []
+                if isinstance(field, dict)
+            ]
+            rendered = ",".join(
+                f"{field.get('name') or ''}:"
+                f"{DatabricksDatabase._render_type(field.get('type'))}"
+                for field in fields
+            )
+            return f"struct<{rendered}>"
+        if name == "array":
+            element = DatabricksDatabase._render_type(type_info.get("element_type"))
+            return f"array<{element}>"
+        if name == "map":
+            key = DatabricksDatabase._render_type(type_info.get("key_type"))
+            value = DatabricksDatabase._render_type(type_info.get("value_type"))
+            return f"map<{key},{value}>"
+        if name == "decimal":
+            precision = type_info.get("precision")
+            scale = type_info.get("scale")
+            if precision is not None and scale is not None:
+                return f"decimal({precision},{scale})"
+            if precision is not None:
+                return f"decimal({precision})"
+            return "decimal"
+        if name in ("varchar", "char"):
+            length = type_info.get("length")
+            return f"{name}({length})" if length is not None else name
+        if name == "string":
+            collation = type_info.get("collation")
+            # UTF8_BINARY is the default collation, so the text form omits it.
+            if collation and str(collation).upper() != "UTF8_BINARY":
+                return f"string COLLATE {collation}"
+            return "string"
+        if name == "timestamp_ltz":
+            # The SQL type Databricks reports in the text form is timestamp.
+            return "timestamp"
+        if name == "interval":
+            start = type_info.get("start_unit")
+            end = type_info.get("end_unit")
+            if start and end:
+                return f"interval {str(start).lower()} to {str(end).lower()}"
+            if start:
+                return f"interval {str(start).lower()}"
+            return "interval"
+        return name
+
+    @classmethod
+    def _json_columns_frame(
+        cls, metadata: dict[str, Any], schema: str, table: str
+    ) -> tuple[pd.DataFrame, str | None]:
+        """Columns and constraint text from one AS JSON payload."""
+        raw_columns = metadata.get("columns") or []
+        if not isinstance(raw_columns, list):
+            return pd.DataFrame(), None
+        columns = [column for column in raw_columns if isinstance(column, dict)]
+        if not columns:
+            return pd.DataFrame(), None
+        frame = pd.DataFrame(
+            {
+                "table_schema": schema,
+                "table_name": table,
+                "column_name": [str(column.get("name") or "") for column in columns],
+                "data_type": [
+                    cls._render_type(column.get("type")) for column in columns
+                ],
+                # Declared nullability, not a sample: null means the source
+                # metadata carried no value, which the catalog stores as unknown.
+                "is_nullable": [column.get("nullable", pd.NA) for column in columns],
+                "ordinal_position": range(1, len(columns) + 1),
+                "description": [column.get("comment") for column in columns],
+            }
+        )
+        constraints = metadata.get("table_constraints")
+        return frame, constraints if isinstance(constraints, str) else None
+
+    @classmethod
+    def _text_columns_frame(
+        cls, described: pd.DataFrame, schema: str, table: str
+    ) -> pd.DataFrame:
+        """Columns from the text DESCRIBE form, with nullability left unknown."""
+        columns = cls._describe_columns_only(described)
+        if columns.empty:
+            return pd.DataFrame()
+        frame = pd.DataFrame(
+            {
+                "table_schema": schema,
+                "table_name": table,
+                "column_name": columns["col_name"].astype(str),
+                "data_type": columns.get("data_type", pd.NA),
+                "is_nullable": pd.NA,
+                "ordinal_position": range(1, len(columns) + 1),
+            }
+        )
+        if "comment" in columns.columns:
+            # DESCRIBE reports the column comment, which normalize_columns
+            # already types as the column description.
+            frame["description"] = columns["comment"]
+        return frame
+
+    @staticmethod
+    def _log_describe_failure(error: Error, schema: str, table: str) -> None:
+        """Log a failed DESCRIBE at the severity its cause deserves."""
+        if _is_scope_permission_error(error):
+            logger.error(
+                "databricks: schema-scoped DESCRIBE denied for %s.%s "
+                "(%s); aborting extraction",
+                schema,
+                table,
+                type(error).__name__,
+            )
+            return
+        logger.warning(
+            "databricks: DESCRIBE failed for %s.%s (%s); dropping it from the catalog",
+            schema,
+            table,
+            type(error).__name__,
+        )
+
     _COLUMN_FIELDS = [
         "table_schema",
         "table_name",
         "column_name",
         "data_type",
+        "is_nullable",
         "ordinal_position",
     ]
     _PK_FIELDS = ["table_schema", "table_name", "column_name", "ordinal_position"]
@@ -609,6 +783,12 @@ class DatabricksDatabase(SQLDatabase):
         a single pass replaces three separate sources: two ``information_schema`` joins
         (``key_column_usage`` x ``table_constraints`` x ``referential_constraints``) that
         are the slowest statements in introspection, plus the column scan.
+
+        ``AS JSON`` is the preferred form because it also reports each column's declared
+        ``nullable`` flag. Runtimes before 16.2 reject that clause, so those fall back to
+        the text form for the rest of the run; a foreign table that rejects it falls back
+        for that table only. The text form has no nullability, which stays NULL in the
+        catalog as unknown.
 
         Every statement shares ONE connection — opening one costs ~0.9s and has been
         measured stalling for minutes, so a connect per table would dominate the run.
@@ -663,37 +843,80 @@ class DatabricksDatabase(SQLDatabase):
                     f"{catalog}.{_quoted_identifier(row_schema)}"
                     f".{_quoted_identifier(table_name)}"
                 )
+                metadata: dict[str, Any] | None = None
+                if self._describe_json_supported is not False:
+                    try:
+                        described = self._run(
+                            connection,
+                            f"DESCRIBE TABLE EXTENDED {qualified} AS JSON",
+                        )
+                    except Error as error:
+                        if _is_as_json_unsupported(error):
+                            if _is_as_json_syntax_error(error):
+                                self._describe_json_supported = False
+                                logger.info(
+                                    "databricks: DESCRIBE ... AS JSON is "
+                                    "unavailable on this runtime; falling back "
+                                    "to text DESCRIBE, which cannot report "
+                                    "declared nullability"
+                                )
+                            else:
+                                logger.info(
+                                    "databricks: DESCRIBE ... AS JSON is "
+                                    "unsupported for %s.%s; using text DESCRIBE "
+                                    "for this table",
+                                    row_schema,
+                                    table_name,
+                                )
+                        else:
+                            self._log_describe_failure(error, row_schema, table_name)
+                            # A missing USE CATALOG/SCHEMA grant invalidates every
+                            # remaining relation. Stop after the first denial instead
+                            # of issuing and swallowing one doomed DESCRIBE per table.
+                            if _is_scope_permission_error(error):
+                                raise
+                            # One table can still disappear mid-run or carry a
+                            # narrower grant. It is dropped from the tables frame too
+                            # (see the docstring), so the rest of the schema still
+                            # ingests as a consistent catalog.
+                            continue
+                    else:
+                        metadata = self._describe_json_metadata(described)
+                        if metadata is not None:
+                            self._describe_json_supported = True
+
+                if metadata is not None:
+                    frame, constraints = self._json_columns_frame(
+                        metadata, row_schema, table_name
+                    )
+                    if frame.empty:
+                        logger.warning(
+                            "databricks: DESCRIBE ... AS JSON returned no columns "
+                            "for %s.%s; dropping it from the catalog",
+                            row_schema,
+                            table_name,
+                        )
+                        continue
+                    column_frames.append(frame)
+                    described_relations.add((row_schema, table_name))
+                    if constraints:
+                        self._collect_constraint(
+                            constraints, row_schema, table_name, pk_rows, fk_rows
+                        )
+                    continue
+
                 try:
                     described = self._run(
                         connection, f"DESCRIBE TABLE EXTENDED {qualified}"
                     )
                 except Error as error:
-                    # A missing USE CATALOG/SCHEMA grant invalidates every remaining
-                    # relation. Stop after the first denial instead of issuing and
-                    # swallowing one doomed DESCRIBE per table.
+                    self._log_describe_failure(error, row_schema, table_name)
                     if _is_scope_permission_error(error):
-                        logger.error(
-                            "databricks: schema-scoped DESCRIBE denied for %s.%s "
-                            "(%s); aborting extraction",
-                            row_schema,
-                            table_name,
-                            type(error).__name__,
-                        )
                         raise
-                    # One table can still disappear mid-run or carry a narrower grant.
-                    # It is dropped from the tables frame too (see the docstring), so
-                    # the rest of the schema still ingests as a consistent catalog.
-                    logger.warning(
-                        "databricks: DESCRIBE failed for %s.%s (%s); "
-                        "dropping it from the catalog",
-                        row_schema,
-                        table_name,
-                        type(error).__name__,
-                    )
                     continue
 
-                columns = self._describe_columns_only(described)
-                if columns.empty:
+                frame = self._text_columns_frame(described, row_schema, table_name)
+                if frame.empty:
                     # DESCRIBE answered but named no columns. Reporting the relation
                     # anyway is the "non-empty table map, zero columns" catalog the
                     # coverage gate exists to reject.
@@ -705,18 +928,7 @@ class DatabricksDatabase(SQLDatabase):
                     )
                     continue
 
-                frame = {
-                    "table_schema": row_schema,
-                    "table_name": table_name,
-                    "column_name": columns["col_name"].astype(str),
-                    "data_type": columns.get("data_type", pd.NA),
-                    "ordinal_position": range(1, len(columns) + 1),
-                }
-                if "comment" in columns.columns:
-                    # DESCRIBE reports the column comment, which normalize_columns
-                    # already types as the column description.
-                    frame["description"] = columns["comment"]
-                column_frames.append(pd.DataFrame(frame))
+                column_frames.append(frame)
                 described_relations.add((row_schema, table_name))
 
                 for _name, definition in self._describe_constraints(described):
@@ -749,9 +961,13 @@ class DatabricksDatabase(SQLDatabase):
         pk_rows: list[dict[str, Any]],
         fk_rows: list[dict[str, Any]],
     ) -> None:
-        """Append the rows one constraint definition contributes."""
-        primary = _PRIMARY_KEY_RE.search(definition)
-        if primary:
+        """Append the rows every constraint definition in *definition* contributes.
+
+        The text form has one definition per row. The JSON form packs all of a
+        table's constraints into one string, so both PK and FK definitions have
+        to be found wherever they appear rather than stopping at the first one.
+        """
+        for primary in _PRIMARY_KEY_RE.finditer(definition):
             for position, column in enumerate(_identifier_list(primary.group(1)), 1):
                 pk_rows.append(
                     {
@@ -761,31 +977,28 @@ class DatabricksDatabase(SQLDatabase):
                         "ordinal_position": position,
                     }
                 )
-            return
 
-        foreign = _FOREIGN_KEY_RE.search(definition)
-        if not foreign:
-            return
-        local_columns = _identifier_list(foreign.group(1))
-        referenced_schema, referenced_table = _split_qualified(foreign.group(2))
-        referenced_columns = _identifier_list(foreign.group(3))
-        for position, column in enumerate(local_columns):
-            # Composite keys pair positionally with the referenced columns.
-            referenced = (
-                referenced_columns[position]
-                if position < len(referenced_columns)
-                else ""
-            )
-            fk_rows.append(
-                {
-                    "table_schema": schema,
-                    "table_name": table_name,
-                    "column_name": column,
-                    "referenced_schema": referenced_schema or schema,
-                    "referenced_table": referenced_table,
-                    "referenced_column": referenced,
-                }
-            )
+        for foreign in _FOREIGN_KEY_RE.finditer(definition):
+            local_columns = _identifier_list(foreign.group(1))
+            referenced_schema, referenced_table = _split_qualified(foreign.group(2))
+            referenced_columns = _identifier_list(foreign.group(3))
+            for position, column in enumerate(local_columns):
+                # Composite keys pair positionally with the referenced columns.
+                referenced = (
+                    referenced_columns[position]
+                    if position < len(referenced_columns)
+                    else ""
+                )
+                fk_rows.append(
+                    {
+                        "table_schema": schema,
+                        "table_name": table_name,
+                        "column_name": column,
+                        "referenced_schema": referenced_schema or schema,
+                        "referenced_table": referenced_table,
+                        "referenced_column": referenced,
+                    }
+                )
 
     def _with_columns(self, listed: pd.DataFrame) -> pd.DataFrame:
         """*listed* minus the relations :meth:`_describe_pass` found no columns for."""

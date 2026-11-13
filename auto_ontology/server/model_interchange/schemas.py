@@ -54,7 +54,10 @@ class ModelColumn(BaseModel):
     # numbers, so a re-import can still tell 1 from '1' (see
     # ``auto_ontology.utils.sample_values.dump_sample_values``).
     sample_values: list[Any] = Field(default_factory=list)
-    is_nullable: bool = True
+    # Tri-state: True/False when the connector declared it, None when the
+    # source metadata carried no value. An omitted field still defaults to
+    # nullable, so existing documents keep their meaning.
+    is_nullable: bool | None = True
     is_unique: bool = False
 
 
