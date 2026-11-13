@@ -215,11 +215,21 @@ class PostgresVDB:
         return self._engine
 
     def _table_exists(self) -> bool:
-        # Bounded like every other direct Postgres connection in the repo: a
-        # blackholed database drops packets rather than refusing them, and an
-        # unbounded connect would hang the caller instead of failing. The
-        # chat worker reaches this from its warm-up, before reading questions.
-        with psycopg.connect(self.connection_string, connect_timeout=3) as conn:
+        # Bounded at every stage, since the chat worker reaches this from its
+        # warm-up before it reads questions: the connect (a blackholed database
+        # drops packets rather than refusing them), the query (a server that
+        # stops answering after connect), and a peer that silently disappears
+        # (TCP keepalives notice in about five seconds). A one-row catalog
+        # lookup has no business taking longer than three seconds anywhere.
+        with psycopg.connect(
+            self.connection_string,
+            connect_timeout=3,
+            keepalives=1,
+            keepalives_idle=3,
+            keepalives_interval=1,
+            keepalives_count=2,
+            options="-c statement_timeout=3000",
+        ) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -249,17 +259,20 @@ class PostgresVDB:
                 )
             conn.commit()
 
-    def _get_store(self) -> Optional[PGVectorStore]:
+    def _get_store(self, *, create_missing: bool = True) -> Optional[PGVectorStore]:
         """Return the vector store, creating the table on first write.
 
-        If the table doesn't exist and ``vector_size`` is not provided (e.g.
-        on read paths), returns ``None`` so callers can short-circuit.
+        With ``create_missing=False`` a collection that does not exist is left
+        alone and ``None`` is returned, for callers that must never write.
         """
         if self._store is not None:
             return self._store
 
+        exists = self._table_exists()
+        if not exists and not create_missing:
+            return None
         engine = self._get_engine()
-        if not self._table_exists():
+        if not exists:
             self._ensure_schema()
             engine.init_vectorstore_table(
                 table_name=self.collection_name,
@@ -351,13 +364,11 @@ class PostgresVDB:
 
         Read-only, unlike :meth:`create_index`: a collection that does not
         exist yet is left that way, and the first write creates it as before.
-        Returns whether the store is now ready.
+        Existence is checked once, by the bind itself, so a collection dropped
+        a moment earlier cannot slip past a separate check and be recreated;
+        at worst binding fails and raises. Returns whether the store is ready.
         """
-        if self._store is not None:
-            return True
-        if not self._table_exists():
-            return False
-        return self._get_store() is not None
+        return self._get_store(create_missing=False) is not None
 
     # ------------------------------------------------------------------
     # Read / write

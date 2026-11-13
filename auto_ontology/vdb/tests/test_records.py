@@ -185,3 +185,16 @@ def test_warming_never_creates_a_collection(vdb: Any) -> None:
     assert vdb.warm() is True
     [hits] = vdb.retrieval([_unit(0)], top_k=1)
     assert hits[0]["metadata"]["id"] == "orders"
+
+
+def test_warming_a_collection_dropped_after_its_check_does_not_recreate_it(
+    vdb: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The existence check says yes, then the table is gone by the time of binding."""
+    monkeypatch.setattr(vdb, "_table_exists", lambda: True)
+
+    with pytest.raises(Exception):
+        vdb.warm()
+
+    monkeypatch.undo()
+    assert vdb._table_exists() is False
