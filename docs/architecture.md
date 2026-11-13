@@ -179,13 +179,14 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 
 ### Next: Generate (ReAct, in development)
 
-The ReAct work in development adds two cross-table steps after the semantic
-foreign key steps. Both run by default on that branch.
+The ReAct work in development adds two cross-table steps: one right after the
+semantic foreign key steps, and one at the end of the compilation. Both run by
+default on that branch.
 
 | Step | Kind | Code |
 | --- | --- | --- |
 | Keep links inside a table family: when two copies of a schema differ only by a name prefix (`OLD_ROOMS`, `NEW_ROOMS`), move a link that crosses families onto the twin in its own family, or drop it | Rules + SQL | `semantic/table_families.py` (`resolve_table_families`) |
-| Re-embed tables and columns with their terms and attributes, so a table's search text carries its term | `EMBED` | `server/datasources/service.py` (`refresh_catalog_embeddings`) |
+| Last, after bridge tables: give every table and column without a description one, copied from its term, its attribute, or the column its foreign key references; the `REASONING` LLM writes the rest, one call per table. Existing descriptions are never replaced. Then re-embed the tables and columns | LLM + `EMBED` | `semantic/catalog_descriptions.py` (`describe_catalog`) |
 
 ```mermaid
 flowchart TD
@@ -204,7 +205,7 @@ flowchart TD
   end
   subgraph cross["Semantic compilation: cross-table pass"]
     direction LR
-    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL + rules: drop keys with no shared values; keep keys inside a table family"] --> x5["EMBED: re-index tables and columns with their terms"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"]
+    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL + rules: drop keys with no shared values; keep keys inside a table family"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"] --> x6["LLM: describe tables and columns that have no description; EMBED: re-index them"]
   end
   subgraph output["Output"]
     direction LR
@@ -216,7 +217,7 @@ flowchart TD
   classDef model fill:#eaf5d6,stroke:#76b900,color:#111
   classDef det fill:#f2f2f2,stroke:#777,color:#111
   classDef optional stroke-dasharray:5 5
-  class c2,c3,p2,p3,x1,x5,x3,x4 model
+  class c2,c3,p2,p3,x1,x3,x4,x6 model
   class c1,p1,x2 det
   class c2 optional
 ```
@@ -377,9 +378,10 @@ added to the agent's prompts.
 
 **Next: ReAct, model-chosen tools (in development).** The ReAct agent replaces
 the fixed chain with one loop: the `REASONING` model
-starts with no schema and decides which tool to call next. It is being built
-on the `feat/react-ontology-agent_clean` branch and isn't in a release yet, so
-the details below can change.
+starts with no schema and decides which tool to call next. Its system prompt
+carries the glossary definitions and custom prompts from **Settings → Semantic
+Input**. It is being built on the `feat/react-ontology-agent_clean` branch and
+isn't in a release yet, so the details below can change.
 
 ```mermaid
 flowchart TD
@@ -387,11 +389,11 @@ flowchart TD
   agent{"Reasoning model: choose the next tool"}
   subgraph tools["Tools"]
     direction LR
-    retrieve["retrieve: search the ontology by meaning and name; show tables, values, definitions, join paths"]
-    runsql["run_sql: check names against the catalog, run read-only, return rows"]
+    retrieve["retrieve: search the semantic layer by meaning and name; show tables, columns, values, definitions, join paths"]
+    runsql["run_sql: check names against the catalog and what retrieve showed, run read-only, return rows"]
     grep["grep: search a saved result too long to show"]
   end
-  submit{"submit: check names, run the final query"}
+  submit{"submit: same checks, run the final query"}
   ans["Answer + SQL + chart"]
   ref["Refusal: no accepted query"]
   predict["predict: LLM writes PQL; KumoRFM forecast or score"]
@@ -419,9 +421,9 @@ Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool
 
 | Tool | What it does | Kind | Offered |
 | --- | --- | --- | --- |
-| `retrieve` | Searches the ontology by meaning (pgvector) and by name (substring search). Returns matching tables with their terms, columns, stored values, and references; SQL attribute definitions; join paths from new tables to tables already shown (`find_join_path`); and near-copies of each table. Optional `kinds` narrows to tables, columns, definitions, or analyses. | `EMBED` + SQL, no LLM | Always |
-| `run_sql` | Checks the query's table and column names against the catalog, suggests the closest real names for unknown ones, then runs it read-only and returns up to 100 rows | SQL, no model | Always |
-| `submit` | Checks and runs the final query. A clean run is the answer; an error or a rewrite goes back to the model | SQL, no model | Always (with `TEXT_TO_SQL_REACT_SUBMIT_TOOL=false`, `run_sql(final=true)` answers instead) |
+| `retrieve` | Searches the semantic layer by meaning (pgvector) and by name (substring search): terms stand for tables, attributes for columns, plus definitions (SQL attributes) and analyses. Tables and columns the semantic layer doesn't describe, such as foreign keys and link tables, are searched in the catalog directly. Every hit comes back as tables and columns with their descriptions, stored values, and references; definitions with their SQL; join paths from new tables to tables already shown (`find_join_path`); and near-copies of each table. Optional `kinds` narrows to terms, attributes, definitions, or analyses. | `EMBED` + SQL, no LLM | Always |
+| `run_sql` | Checks the query's table and column names against the catalog of the database it runs on, suggesting the closest real names for unknown ones, and rejects tables no `retrieve` result named. Then runs it read-only and returns up to 100 rows | SQL, no model | Always |
+| `submit` | Applies the same checks and runs the final query. A clean run is the answer; an error or a rewrite goes back to the model | SQL, no model | Always (with `TEXT_TO_SQL_REACT_SUBMIT_TOOL=false`, `run_sql(final=true)` answers instead) |
 | `grep` | Searches all rows of a `run_sql` result too long to show | Deterministic | Off; `TEXT_TO_SQL_REACT_GREP=true` |
 | `predict` | Builds a KumoRFM graph over the tables `retrieve` showed, writes PQL with the `NON_REASONING` model, and predicts. Ends the episode | `NON_REASONING` LLM + KumoRFM | Only when `KUMO_RFM_API_URL` is set |
 
@@ -454,9 +456,11 @@ The ReAct agent doesn't ask clarifying questions.
 | `TEXT_TO_SQL_REACT_MAX_RESULT_ROWS` | 100 | Rows `run_sql` shows |
 | `TEXT_TO_SQL_REACT_MAX_TABLES_PER_RETRIEVE` | 6 | Tables one `retrieve` introduces |
 | `TEXT_TO_SQL_REACT_MAX_COLUMNS_PER_TABLE` | 25 | Columns shown for a wide table |
+| `TEXT_TO_SQL_REACT_MAX_SIBLING_COUNTS` | 4 | Row counts one `retrieve` runs for near-copy tables |
+| `TEXT_TO_SQL_REACT_SIBLING_COUNT_TIMEOUT_S` | 5 | Seconds one of those row counts may run |
 
 A repeated identical tool call isn't run again; the model is pointed to the
-earlier result.
+earlier result, and the repeat still counts against the tool budget.
 
 ### Relation to the MCP tools
 
