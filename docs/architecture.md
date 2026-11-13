@@ -17,8 +17,8 @@ two a step uses.
 
 - [Services](#services)
 - [Generate an ontology](#generate-an-ontology)
-- [Answer a question, now: fixed chain](#answer-a-question-now-fixed-chain)
-- [Answer a question, next: ReAct (in development)](#answer-a-question-next-react-in-development)
+- [Answer a question, now: ReAct](#answer-a-question-now-react)
+- [Previous: fixed chain (LangGraph)](#previous-fixed-chain-langgraph)
 - [Check answerability](#check-answerability)
 - [Settings](#settings)
 
@@ -101,7 +101,7 @@ flowchart TD
   end
   subgraph cross["Semantic compilation: cross-table pass"]
     direction LR
-    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL: drop foreign keys with no shared values"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"]
+    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL + rules: drop keys with no shared values; keep keys inside a table family"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"] --> x6["LLM: describe tables and columns that have no description; EMBED: re-index them"]
   end
   subgraph output["Output"]
     direction LR
@@ -113,7 +113,7 @@ flowchart TD
   classDef model fill:#eaf5d6,stroke:#76b900,color:#111
   classDef det fill:#f2f2f2,stroke:#777,color:#111
   classDef optional stroke-dasharray:5 5
-  class c2,c3,p2,p3,x1,x3,x4 model
+  class c2,c3,p2,p3,x1,x3,x4,x6 model
   class c1,p1,x2 det
   class c2 optional
 ```
@@ -170,59 +170,14 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 | --- | --- | --- | --- |
 | Link each foreign key column to the term attribute it references: declared key first; otherwise embedding search for the top 5 candidates and an LLM pick, falling back to a sample-value match | `EMBED` + LLM + SQL | On | `semantic/semantic_fk.py` (`resolve_semantic_fks`) |
 | Drop links whose columns share no values | SQL | On | `prune_disjoint_semantic_fks` |
+| Keep links inside a table family: when two copies of a schema differ only by a name prefix (`OLD_ROOMS`, `NEW_ROOMS`), move a link that crosses families onto the twin in its own family, or drop it | Rules + SQL | On | `semantic/table_families.py` (`resolve_table_families`) |
 | Choose one default join per group of alternative links | LLM, deterministic fallback | On | `select_semantic_fk_join_defaults` |
 | Suggest SQL attributes from the 10 most-used expressions per term in query history | Parse (rules) + LLM | On | `semantic/sql_attribute_suggester.py` |
 | Write SQL attributes for bridge tables; the reranker picks the term that owns each | LLM + `RERANK` | On | `semantic/bridge_tables.py` |
+| Give every table and column without a description one, copied from its term, its attribute, or the column its foreign key references; the LLM writes the rest, one call per table, and never replaces an existing description. Then re-embed the tables and columns | LLM + `EMBED` | On | `semantic/catalog_descriptions.py` (`describe_catalog`) |
 | Replay tagging rules over the catalog and ontology | Rules | On when rules exist | `ingestion_service/semantic_scheduler.py` |
 
 `RERANK` is used only in the bridge-table step. Answering doesn't call it.
-
-### Next: Generate (ReAct, in development)
-
-The ReAct work in development adds two cross-table steps: one right after the
-semantic foreign key steps, and one at the end of the compilation. Both run by
-default on that branch.
-
-| Step | Kind | Code |
-| --- | --- | --- |
-| Keep links inside a table family: when two copies of a schema differ only by a name prefix (`OLD_ROOMS`, `NEW_ROOMS`), move a link that crosses families onto the twin in its own family, or drop it | Rules + SQL | `semantic/table_families.py` (`resolve_table_families`) |
-| Last, after bridge tables: give every table and column without a description one, copied from its term, its attribute, or the column its foreign key references; the `REASONING` LLM writes the rest, one call per table. Existing descriptions are never replaced. Then re-embed the tables and columns | LLM + `EMBED` | `semantic/catalog_descriptions.py` (`describe_catalog`) |
-
-```mermaid
-flowchart TD
-  subgraph inputs["Inputs"]
-    direction LR
-    i1[("Schema, keys, declared foreign keys")]
-    i2[("Query history")]
-  end
-  subgraph ingest["Catalog ingest"]
-    direction LR
-    c1["SQL: extract tables, columns, keys, views, queries"] --> c2["Rules + LLM: detect PII"] --> c3["EMBED: index tables and columns"]
-  end
-  subgraph pertable["Semantic compilation: per-table pass"]
-    direction LR
-    p1["SQL: sample values, distinct values, date formats"] --> p2["LLM: foreign key candidates, junction tables"] --> p3["LLM: column descriptions, terms, synonyms"]
-  end
-  subgraph cross["Semantic compilation: cross-table pass"]
-    direction LR
-    x1["EMBED + LLM: semantic foreign keys"] --> x2["SQL + rules: drop keys with no shared values; keep keys inside a table family"] --> x3["LLM: SQL attributes from query history"] --> x4["LLM + RERANK: SQL attributes for bridge tables"] --> x6["LLM: describe tables and columns that have no description; EMBED: re-index them"]
-  end
-  subgraph output["Output"]
-    direction LR
-    o1[("Ontology and embeddings: Postgres + pgvector")] --> o2["Certify: test with questions, refine, mark certified (UI or REST)"]
-    o1 <--> o3["Import or export: Ossie YAML"]
-  end
-  inputs --> ingest --> pertable --> cross --> output
-  output -. "edits are kept; the next run compiles only tables without a term" .-> pertable
-  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
-  classDef det fill:#f2f2f2,stroke:#777,color:#111
-  classDef optional stroke-dasharray:5 5
-  class c2,c3,p2,p3,x1,x3,x4,x6 model
-  class c1,p1,x2 det
-  class c2 optional
-```
-
-Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
 ### Output and certification
 
@@ -239,149 +194,15 @@ Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool
 - Import and export model definitions as Ossie YAML with **Settings → Import /
   Export**, `POST /api/model/import`, or `POST /api/model/export`.
 
-## Answer a question, now: fixed chain
+## Answer a question, now: ReAct
 
-This is the current agent, a LangGraph graph built in
-`auto_ontology/retrieval/text_to_sql/text_to_sql_graph.py` (`create_graph`).
-Every question runs the same steps in the same order; the routing between them
-is fixed in code.
-
-**Now: fixed chain (LangGraph), overview.**
-
-```mermaid
-flowchart TD
-  q["Question: chat, REST, MCP ask_question, or eval"]
-  intent["LLM: classify intent, separate evidence"]
-  ret["EMBED + LLM: extract entities, search the ontology, keep relevant candidates"]
-  meta["LLM: answer from metadata"]
-  join["Find join paths: shortest route over semantic foreign keys"]
-  gen["Reasoning LLM: write SQL and its explanation"]
-  judge{"SQL checks + LLM: judge the query against the question"}
-  fix["LLM: repair SQL"]
-  run["Execute SQL"]
-  check["LLM + SQL: if the result is empty, probe filter values"]
-  ans["Answer + SQL + chart"]
-  ref["Refusal: no valid query from this data"]
-  kumo["LLM: write PQL; KumoRFM: forecast or score"]
-  q --> intent --> ret
-  ret -- "metadata question" --> meta
-  ret --> join --> gen --> judge
-  judge -- "accept" --> run --> check --> ans
-  judge -- "reject" --> fix --> judge
-  run -- "error" --> fix
-  check -- "near-miss value" --> fix
-  gen -- "cannot be built" --> ref
-  judge -- "still failing after 7 repairs" --> ref
-  join -. "predictive question, KUMO_RFM_API_URL set" .-> kumo
-  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
-  classDef det fill:#f2f2f2,stroke:#777,color:#111
-  classDef optional stroke-dasharray:5 5
-  class intent,ret,meta,gen,judge,fix,check,kumo model
-  class join,run det
-  class kumo optional
-```
-
-Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
-
-**Now: fixed chain (LangGraph), full detail.**
-
-```mermaid
-flowchart TD
-  q["Question"]
-  fu["LLM: rewrite a follow-up as a standalone question"]
-  intent["question_intent. LLM: classify intent, separate evidence"]
-  ext["question_extraction. LLM: extract entities and subject"]
-  ret["retrieve_candidates. EMBED: search pgvector; LLM: keep relevant hits"]
-  meta["information_agent. LLM: answer from metadata with catalog tools"]
-  prep["prepare_candidates. LLM: anchor column and relevant tables; SQL: find join paths"]
-  pred["prepare_prediction_graph, kumo_predict. LLM: write PQL; KumoRFM: predict"]
-  ev["refine_evidence. LLM: map evidence onto the schema"]
-  gen["construct_sql_from_candidates. Reasoning LLM: SQL and explanation"]
-  vals["validate_sql_values. LLM + SQL: check filter literals"]
-  judge{"validate_sql_query. Parse and static checks; LLM: judge intent"}
-  fix["reconstruct_sql. LLM: repair SQL"]
-  pre["precheck_combined. SQL: probe literals, joins, JSONB paths"]
-  run["execute_sql_query. SQL: run read-only"]
-  like["check_empty_like_result. LLM: loosen LIKE filters on an empty result"]
-  repair["check_value_repair. SQL: probe filter values on an empty result"]
-  fmt["format_and_respond: answer, SQL, rows"]
-  chart["LLM: chart (Chat)"]
-  ref["unconstructable_sql_response: refusal"]
-  q -. "chat history" .-> fu
-  q --> intent
-  fu -.-> intent
-  intent --> ext --> ret
-  ret -- "metadata question" --> meta
-  ret --> prep
-  prep -. "prediction, KUMO_RFM_API_URL set" .-> pred
-  prep -. "evidence supplied" .-> ev
-  prep --> gen
-  ev -.-> gen
-  gen -. "validate_sql_values" .-> vals
-  gen --> judge
-  vals -.-> judge
-  gen -- "cannot be built" --> ref
-  judge -- "reject" --> fix
-  fix --> judge
-  judge -- "7 repairs failed" --> ref
-  judge -. "DB_PROBE flags" .-> pre
-  pre -.-> run
-  judge -- "accept" --> run
-  run -- "error" --> fix
-  run --> like --> repair --> fmt
-  like -- "fix" --> fix
-  repair -- "near-miss or empty" --> fix
-  fmt -.-> chart
-  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
-  classDef det fill:#f2f2f2,stroke:#777,color:#111
-  classDef optional stroke-dasharray:5 5
-  class fu,intent,ext,ret,meta,prep,pred,ev,gen,vals,judge,fix,like,chart model
-  class pre,run,repair,fmt det
-  class fu,pred,ev,vals,pre optional
-```
-
-Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
-
-| Step (graph node) | What it does | Kind | Default | Controlled by |
-| --- | --- | --- | --- | --- |
-| Follow-up resolution (Chat worker, before the graph) | Rewrites a follow-up as a standalone question from the conversation | `NON_REASONING` LLM | When the conversation has history | `conversation_id` |
-| `question_intent` | Classifies the question as calculation, information, or prediction, and separates inline evidence | `NON_REASONING` LLM | On | `calculation_only` (library payload) forces calculation |
-| `question_extraction` | Extracts the entities and subject the question names | `NON_REASONING` LLM | On | — |
-| `retrieve_candidates` | Searches pgvector for column attributes, SQL attributes, custom analyses, and the subject term, then keeps the hits a model judges relevant | `EMBED` + `NON_REASONING` LLM | On | — |
-| `information_agent` | Answers questions about the metadata itself with read-only catalog tools (up to 6 tool calls) | `NON_REASONING` LLM | Information questions only | — |
-| `prepare_candidates` | Picks an anchor column, finds join paths from it (shortest route over semantic foreign keys, `dal/attributes.py` `find_join_path`), adds tables by embedding search, and filters tables by relevance | `NON_REASONING` LLM + `EMBED` + SQL | On | — |
-| `prepare_prediction_graph`, `kumo_predict` | Builds a KumoRFM graph over the candidate tables, writes PQL, and predicts | `NON_REASONING` LLM + KumoRFM | Off | `KUMO_RFM_API_URL` (and `KUMO_RFM_API_KEY` if needed); `prediction` request field |
-| `refine_evidence` | Maps user-supplied evidence onto the schema | `NON_REASONING` LLM | Only when evidence is supplied | `evidence` request field |
-| `construct_sql_from_candidates` | Writes the SQL and its plain-language explanation, or declares the question unanswerable | `REASONING` LLM | On | — |
-| `validate_sql_values` | Checks filter literals against the database before running | `NON_REASONING` LLM + SQL | Off in Chat and REST | `validate_sql_values` (library payload; the eval turns it on) |
-| `validate_sql_query` | Parses the SQL, runs static checks, and judges whether it answers the question | Rules + `NON_REASONING` LLM | On | — |
-| `reconstruct_sql` | Repairs the SQL from the error or rejection | `NON_REASONING` LLM | On a failed check | Up to 7 repairs per attempt |
-| `precheck_combined` | Probes literals, join paths, and JSONB key paths before running | SQL | Off | `DB_PROBE_PROACTIVE`, `DB_PROBE_JOIN_PATH_CHECK`, `DB_PROBE_JSONB_PATH_CHECK` |
-| `execute_sql_query` | Runs the query read-only | SQL | On | **Settings → Agent Settings → SQL Query Timeout** (30 s) |
-| `check_empty_like_result` | On an empty result, asks a model which `LIKE` filters to loosen; also catches all-NULL JSONB columns | `NON_REASONING` LLM | On an empty result | Skipped when `shorten_answer` is set |
-| `check_value_repair` | On an empty result, compares filter literals with the column's real values; a near-miss, or an undiagnosed empty result, goes back to repair once | SQL | On an empty result | — |
-| `format_and_respond` | Assembles the answer, SQL, and rows | Deterministic | On | — |
-| `unconstructable_sql_response` | Returns the refusal | Deterministic | When no valid query | — |
-| Chart (Chat router, after the graph) | Decides whether and how to chart the rows | `NON_REASONING` LLM | On, in conversations | **Settings → Agent Settings → Visualize SQL Results** |
-
-After 5 repairs, the post-execution checks stop blocking and let the SQL
-through; the intent judge keeps running. If the graph ends in a refusal, the
-whole chain reruns once from `question_intent`. If the second run also
-refuses, the response carries the refusal text together with the last query
-that passed the static checks but not the intent judge, unexecuted
-(`main.py`, `_apply_last_deterministic_sql_fallback`).
-
-Glossary definitions and custom prompts from **Settings → Semantic Input** are
-added to the agent's prompts.
-
-## Answer a question, next: ReAct (in development)
-
-**Next: ReAct, model-chosen tools (in development).** The ReAct agent replaces
-the fixed chain with one loop: the `REASONING` model
-starts with no schema and decides which tool to call next. Its system prompt
-carries the glossary definitions and custom prompts from **Settings → Semantic
-Input**. It is being built on the `feat/react-ontology-agent_clean` branch and
-isn't in a release yet, so the details below can change.
+**Now: ReAct, model-chosen tools.** The answering agent is a loop: the
+`REASONING` model starts with no schema and decides which tool to call next
+(`auto_ontology/retrieval/text_to_sql/react/`). Its system prompt carries the
+glossary definitions and custom prompts from **Settings → Semantic Input**.
+Before the loop, Chat rewrites a follow-up as a standalone question with the
+`NON_REASONING` model; after it, `format_and_respond` assembles the answer and
+Chat draws a chart.
 
 ```mermaid
 flowchart TD
@@ -473,6 +294,141 @@ directly. `retrieve` covers what the term and table tools expose, and an MCP
 client reaches the ReAct agent through `ask_question`, which calls
 `POST /api/chat/completions`.
 
+## Previous: fixed chain (LangGraph)
+
+Before the ReAct agent, questions ran through a fixed LangGraph graph
+(`text_to_sql_graph.py`, `create_graph`, removed with the ReAct change). Every
+question ran the same steps in the same order. It's kept here for comparison
+with earlier benchmark runs.
+
+**Previous: fixed chain (LangGraph), overview.**
+
+```mermaid
+flowchart TD
+  q["Question: chat, REST, MCP ask_question, or eval"]
+  intent["LLM: classify intent, separate evidence"]
+  ret["EMBED + LLM: extract entities, search the ontology, keep relevant candidates"]
+  meta["LLM: answer from metadata"]
+  join["Find join paths: shortest route over semantic foreign keys"]
+  gen["Reasoning LLM: write SQL and its explanation"]
+  judge{"SQL checks + LLM: judge the query against the question"}
+  fix["LLM: repair SQL"]
+  run["Execute SQL"]
+  check["LLM + SQL: if the result is empty, probe filter values"]
+  ans["Answer + SQL + chart"]
+  ref["Refusal: no valid query from this data"]
+  kumo["LLM: write PQL; KumoRFM: forecast or score"]
+  q --> intent --> ret
+  ret -- "metadata question" --> meta
+  ret --> join --> gen --> judge
+  judge -- "accept" --> run --> check --> ans
+  judge -- "reject" --> fix --> judge
+  run -- "error" --> fix
+  check -- "near-miss value" --> fix
+  gen -- "cannot be built" --> ref
+  judge -- "still failing after 7 repairs" --> ref
+  join -. "predictive question, KUMO_RFM_API_URL set" .-> kumo
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef optional stroke-dasharray:5 5
+  class intent,ret,meta,gen,judge,fix,check,kumo model
+  class join,run det
+  class kumo optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
+
+**Previous: fixed chain (LangGraph), full detail.**
+
+```mermaid
+flowchart TD
+  q["Question"]
+  fu["LLM: rewrite a follow-up as a standalone question"]
+  intent["question_intent. LLM: classify intent, separate evidence"]
+  ext["question_extraction. LLM: extract entities and subject"]
+  ret["retrieve_candidates. EMBED: search pgvector; LLM: keep relevant hits"]
+  meta["information_agent. LLM: answer from metadata with catalog tools"]
+  prep["prepare_candidates. LLM: anchor column and relevant tables; SQL: find join paths"]
+  pred["prepare_prediction_graph, kumo_predict. LLM: write PQL; KumoRFM: predict"]
+  ev["refine_evidence. LLM: map evidence onto the schema"]
+  gen["construct_sql_from_candidates. Reasoning LLM: SQL and explanation"]
+  vals["validate_sql_values. LLM + SQL: check filter literals"]
+  judge{"validate_sql_query. Parse and static checks; LLM: judge intent"}
+  fix["reconstruct_sql. LLM: repair SQL"]
+  pre["precheck_combined. SQL: probe literals, joins, JSONB paths"]
+  run["execute_sql_query. SQL: run read-only"]
+  like["check_empty_like_result. LLM: loosen LIKE filters on an empty result"]
+  repair["check_value_repair. SQL: probe filter values on an empty result"]
+  fmt["format_and_respond: answer, SQL, rows"]
+  chart["LLM: chart (Chat)"]
+  ref["unconstructable_sql_response: refusal"]
+  q -. "chat history" .-> fu
+  q --> intent
+  fu -.-> intent
+  intent --> ext --> ret
+  ret -- "metadata question" --> meta
+  ret --> prep
+  prep -. "prediction, KUMO_RFM_API_URL set" .-> pred
+  prep -. "evidence supplied" .-> ev
+  prep --> gen
+  ev -.-> gen
+  gen -. "validate_sql_values" .-> vals
+  gen --> judge
+  vals -.-> judge
+  gen -- "cannot be built" --> ref
+  judge -- "reject" --> fix
+  fix --> judge
+  judge -- "7 repairs failed" --> ref
+  judge -. "DB_PROBE flags" .-> pre
+  pre -.-> run
+  judge -- "accept" --> run
+  run -- "error" --> fix
+  run --> like --> repair --> fmt
+  like -- "fix" --> fix
+  repair -- "near-miss or empty" --> fix
+  fmt -.-> chart
+  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
+  classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef optional stroke-dasharray:5 5
+  class fu,intent,ext,ret,meta,prep,pred,ev,gen,vals,judge,fix,like,chart model
+  class pre,run,repair,fmt det
+  class fu,pred,ev,vals,pre optional
+```
+
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
+
+| Step (graph node) | What it does | Kind | Default | Controlled by |
+| --- | --- | --- | --- | --- |
+| Follow-up resolution (Chat worker, before the graph) | Rewrites a follow-up as a standalone question from the conversation | `NON_REASONING` LLM | When the conversation has history | `conversation_id` |
+| `question_intent` | Classifies the question as calculation, information, or prediction, and separates inline evidence | `NON_REASONING` LLM | On | `calculation_only` (library payload) forces calculation |
+| `question_extraction` | Extracts the entities and subject the question names | `NON_REASONING` LLM | On | — |
+| `retrieve_candidates` | Searches pgvector for column attributes, SQL attributes, custom analyses, and the subject term, then keeps the hits a model judges relevant | `EMBED` + `NON_REASONING` LLM | On | — |
+| `information_agent` | Answers questions about the metadata itself with read-only catalog tools (up to 6 tool calls) | `NON_REASONING` LLM | Information questions only | — |
+| `prepare_candidates` | Picks an anchor column, finds join paths from it (shortest route over semantic foreign keys, `dal/attributes.py` `find_join_path`), adds tables by embedding search, and filters tables by relevance | `NON_REASONING` LLM + `EMBED` + SQL | On | — |
+| `prepare_prediction_graph`, `kumo_predict` | Builds a KumoRFM graph over the candidate tables, writes PQL, and predicts | `NON_REASONING` LLM + KumoRFM | Off | `KUMO_RFM_API_URL` (and `KUMO_RFM_API_KEY` if needed); `prediction` request field |
+| `refine_evidence` | Maps user-supplied evidence onto the schema | `NON_REASONING` LLM | Only when evidence is supplied | `evidence` request field |
+| `construct_sql_from_candidates` | Writes the SQL and its plain-language explanation, or declares the question unanswerable | `REASONING` LLM | On | — |
+| `validate_sql_values` | Checks filter literals against the database before running | `NON_REASONING` LLM + SQL | Off in Chat and REST | `validate_sql_values` (library payload; the eval turns it on) |
+| `validate_sql_query` | Parses the SQL, runs static checks, and judges whether it answers the question | Rules + `NON_REASONING` LLM | On | — |
+| `reconstruct_sql` | Repairs the SQL from the error or rejection | `NON_REASONING` LLM | On a failed check | Up to 7 repairs per attempt |
+| `precheck_combined` | Probes literals, join paths, and JSONB key paths before running | SQL | Off | `DB_PROBE_PROACTIVE`, `DB_PROBE_JOIN_PATH_CHECK`, `DB_PROBE_JSONB_PATH_CHECK` |
+| `execute_sql_query` | Runs the query read-only | SQL | On | **Settings → Agent Settings → SQL Query Timeout** (30 s) |
+| `check_empty_like_result` | On an empty result, asks a model which `LIKE` filters to loosen; also catches all-NULL JSONB columns | `NON_REASONING` LLM | On an empty result | Skipped when `shorten_answer` is set |
+| `check_value_repair` | On an empty result, compares filter literals with the column's real values; a near-miss, or an undiagnosed empty result, goes back to repair once | SQL | On an empty result | — |
+| `format_and_respond` | Assembles the answer, SQL, and rows | Deterministic | On | — |
+| `unconstructable_sql_response` | Returns the refusal | Deterministic | When no valid query | — |
+| Chart (Chat router, after the graph) | Decides whether and how to chart the rows | `NON_REASONING` LLM | On, in conversations | **Settings → Agent Settings → Visualize SQL Results** |
+
+After 5 repairs, the post-execution checks stop blocking and let the SQL
+through; the intent judge keeps running. If the graph ends in a refusal, the
+whole chain reruns once from `question_intent`. If the second run also
+refuses, the response carries the refusal text together with the last query
+that passed the static checks but not the intent judge, unexecuted
+(`main.py`, `_apply_last_deterministic_sql_fallback`).
+
+This chain also added the glossary definitions and custom prompts from
+**Settings → Semantic Input** to its prompts.
+
 ## Check answerability
 
 `POST /api/question-entity-coverage`, exposed over MCP as `check_answerable`,
@@ -481,7 +437,7 @@ grades how well the ontology covers a question without writing SQL
 
 1. `NON_REASONING` LLM: extract the entities the question names.
 2. `EMBED` + `NON_REASONING` LLM: retrieve candidates, as in
-   `retrieve_candidates` above.
+   the previous chain's `retrieve_candidates` step.
 3. Deterministic: grade coverage as the share of entities with a candidate
    within the distance threshold.
 
@@ -502,6 +458,6 @@ user to clarify.
 | **Settings → Single Sign-On** | SSO | Access |
 | Environment (`.env`, Helm values) | `REASONING_*`, `NON_REASONING_*`, `EMBED_*`, `RERANK_*`, `DEFAULT_MODELS_*` | Every model call |
 | Environment | `KUMO_RFM_API_URL`, `KUMO_RFM_API_KEY`, `KUMO_MAX_*` | Predictions |
-| Environment | `DB_PROBE_*`, `SEMANTIC_LLM_MAX_INFLIGHT`, `TEXT_TO_SQL_REACT_*` (next) | Now: fixed-chain probes and compilation concurrency. Next: ReAct limits |
+| Environment | `DB_PROBE_*`, `SEMANTIC_LLM_MAX_INFLIGHT`, `TEXT_TO_SQL_REACT_*` | Previous chain's probes, compilation concurrency, ReAct limits |
 
 [`.env.example`](../.env.example) documents every environment variable.

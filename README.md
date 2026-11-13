@@ -227,7 +227,7 @@ flowchart LR
 
 Clients reach Auto-Ontology only through the web app on port 3000; the MCP
 server calls the same public API. Full pipeline detail, with tool-flow diagrams
-for generating an ontology and answering a question, now and next:
+for generating an ontology and answering a question:
 [docs/architecture.md](./docs/architecture.md).
 
 Auto-Ontology works in two stages: it generates an ontology that people
@@ -251,9 +251,12 @@ on in **Settings → Semantic Compilation**.
   PII if you turn on PII detection; embed tables and columns in pgvector.
 - **Per table:** profile values with SQL. A model finds foreign key candidates
   and junction tables, writes column descriptions, and names the terms.
-- **Across tables:** link foreign keys to the terms they reference and drop
-  links whose columns share no values. A model suggests SQL attributes from
-  query history and for bridge tables.
+- **Across tables:** link foreign keys to the terms they reference, drop links
+  whose columns share no values, and keep links inside a table family (copies
+  of one schema that differ by a prefix, such as `OLD_` and `NEW_`). A model
+  suggests SQL attributes from query history and for bridge tables, then
+  describes any table or column still without a description, and the catalog
+  is re-embedded.
 - **Output:** the ontology in Postgres with embeddings in pgvector, which you
   can import or export as Ossie YAML.
 - **Certify:** test the draft with real questions in Chat, or with
@@ -273,30 +276,28 @@ its description, related terms, mapped columns, and SQL attributes:
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
 </p>
 
-**Answer.** Today the agent runs the same steps for every question:
+**Answer.** The reasoning model answers each question in a loop, choosing one
+tool at a time:
 
-- **Classify:** a model labels the intent and separates any evidence written
-  into the question.
-- **Retrieve:** embedding search finds candidate terms, columns, and SQL
-  attributes, and a model keeps the relevant ones.
-- **Join:** join paths come from the ontology's semantic foreign keys, with no
-  model involved.
-- **Write:** the reasoning model writes SQL and a plain-language explanation.
-- **Check and repair:** static checks and a model judge review the SQL. A
-  rejected or failing query is repaired, and an empty result triggers a probe of
-  the filter values.
+- **`retrieve`:** search the semantic layer by meaning and by name for business
+  concepts, column meanings, and named calculations. Results come back as
+  tables and columns with their descriptions and stored values, definitions
+  with their SQL, and join paths. The model searches again whenever something
+  is missing.
+- **`run_sql`:** look at stored values or test a draft. Table and column names
+  are checked against the catalog and against what `retrieve` showed before
+  the query runs read-only.
+- **`submit`:** give the final query and an explanation. The query is checked
+  and run, and an error goes back to the model to fix.
 - **Answer:** the answer comes back with its SQL and the steps it took, and a
   chart in Chat.
 
-If no valid query comes out, the agent reports that the question can't be
-answered from this data. Predictive questions go to KumoRFM when
-`KUMO_RFM_API_URL` is set (see [Predictions](#predictions)).
-
-Next, a ReAct agent in development replaces these fixed steps with a loop in
-which the reasoning model picks its own tools: `retrieve` to search the
-ontology, `run_sql` to check and test queries, and `submit` to answer. The
-[Answer tool flows](./docs/architecture.md#answer-a-question-now-fixed-chain)
-show both, now and next.
+No tool calls a language model except `predict`, which answers predictive
+questions when `KUMO_RFM_API_URL` is set (see [Predictions](#predictions)). If
+the model runs out of tool calls (24 by default) without an accepted query, the
+agent reports that the question can't be answered from this data. The
+[Answer tool flow](./docs/architecture.md#answer-a-question-now-react) shows the
+loop, and the previous fixed LangGraph chain is documented next to it.
 
 In Chat, each answer shows its SQL, and you can view the rows, download them as
 CSV, or read them as a chart:
@@ -462,8 +463,8 @@ NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 
 | Role            | Default model                           | What it does                                                                                                                   |
 | --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes) and writes each answer's SQL and explanation                       |
-| `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
+| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes) and runs the answering agent's tool loop                            |
+| `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Rewrites chat follow-ups, writes PQL for predictions, picks charts, and extracts entities for `check_answerable`              |
 | `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
 | `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Picks the term that owns each bridge-table SQL attribute during compilation; not used to answer questions                      |
 
