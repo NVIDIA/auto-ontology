@@ -136,12 +136,14 @@ _NOTATION: dict[str, str] = {
 # digits taken from the twelve that exist, so `2024131` reads as 2024-01-31 and not
 # as month 13 plus day 1: a group that simply took as many digits as it could would
 # split that value the wrong way and report the padding of the wrong component.
+# `%d` and `%H` are the two tokens `strptime` also reads space-padded (`2010-07- 9`),
+# so they keep that alternative here; the other numeric tokens refuse it.
 _COMPONENT_RE: dict[str, str] = {
     "%Y": r"\d{4}",
     "%y": r"\d{2}",
     "%m": r"1[0-2]|0[1-9]|[1-9]",
-    "%d": r"3[01]|[0-2]\d|\d",
-    "%H": r"2[0-3]|[0-1]\d|\d",
+    "%d": r"3[01]|[0-2]\d|\d| [1-9]",
+    "%H": r"2[0-3]|[0-1]\d|\d| [0-9]",
     "%M": r"[0-5]\d|\d",
     "%S": r"6[01]|[0-5]\d|\d",
     "%f": r"\d{1,6}",

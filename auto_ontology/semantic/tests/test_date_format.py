@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from auto_ontology.semantic.date_format import infer_date_format, is_date_type
@@ -177,6 +179,31 @@ def test_repeated_whitespace_keeps_the_widths_it_measures() -> None:
     value holding three digits.
     """
     assert infer_date_format(["2010-07-19  19:39:07.123"]) == "YYYY-MM-DD HH:MM:SS.fff"
+
+
+def test_a_space_padded_day_keeps_the_fraction_width() -> None:
+    """``strptime`` reads ``%d`` space-padded, so ``2010-07- 9`` is a valid sample.
+
+    Without that alternative the alignment failed, every width measured for the
+    value was dropped, and the notation said ``.f`` for a column storing three
+    fractional digits -- a notation that describes a different stored width.
+    """
+    assert infer_date_format(["2010-07- 9 19:39:07.123"]) == "YYYY-MM-DD HH:MM:SS.fff"
+
+
+def test_a_space_padded_hour_is_measured_when_strptime_reads_it() -> None:
+    """Python 3.13 reads ``%H`` space-padded where 3.12 refuses it.
+
+    Where the running interpreter accepts the sample the alignment has to measure
+    the hour like any other, and where it refuses the value is not this format.
+    """
+    value = "2010-07-09T 9:00:00"
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        assert infer_date_format([value]) is None
+    else:
+        assert infer_date_format([value]) == "YYYY-MM-DDTHH:MM:SS"
 
 
 def test_a_compact_date_keeps_the_component_boundaries_strptime_uses() -> None:
