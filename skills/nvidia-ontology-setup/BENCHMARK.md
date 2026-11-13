@@ -1,9 +1,3 @@
-<!--
-SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
-All rights reserved.
-SPDX-License-Identifier: Apache-2.0
--->
-
 # Skill Benchmark: nvidia-ontology-setup
 
 > ✅ **Overall verdict: PASS — Recommended for publication**
@@ -15,9 +9,10 @@ Recommended for publication based on the completed evaluation evidence in this r
 ## Evaluation Metadata
 
 - Skill: `nvidia-ontology-setup`
-- Evaluation date: 2026-10-08
-- Evaluator version: `1.5.6`
-- Agents: Claude Code (`aws/anthropic/bedrock-claude-opus-4-8`), Codex (`openai/openai/gpt-5.5`)
+- Validation status: `passed`
+- Evaluation date: 2026-10-29
+- Evaluator version: `1.6.4`
+- Agents: Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`), Codex (`openai/openai/gpt-6.1-sol`)
 - Tasks: 10 evaluation tasks (10 positive)
 - Dataset digest: `sha256:dcbcf0848aefb19cd5b010e9a0d69ed8920e61dc3fdba560ca0f88cd48a8da96` (skill-evaluator-dataset-snapshot/1)
 - Attempts per task: 1
@@ -26,6 +21,20 @@ Recommended for publication based on the completed evaluation evidence in this r
 - Tier 3 evidence: required for publication
 
 Each task attempt ran in its own isolated sandbox pod.
+
+## Tier 1 LLM Provenance
+
+SkillSpector provider, model, analyzer revision, and determinism evidence retained for this scan.
+
+| Skill | Provider | Adapter | Analyzer | Model | Revision | Determinism |
+| --- | --- | --- | --- | --- | --- | --- |
+| nvidia-ontology-setup | nv_inference | openai | mcp_tool_poisoning | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.2` | nondeterministic / provider_defaults |
+| nvidia-ontology-setup | nv_inference | openai | semantic_developer_intent | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.2` | nondeterministic / provider_defaults |
+| nvidia-ontology-setup | nv_inference | openai | semantic_quality_policy | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.2` | nondeterministic / provider_defaults |
+| nvidia-ontology-setup | nv_inference | openai | semantic_security_discovery | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.2` | nondeterministic / provider_defaults |
+| nvidia-ontology-setup | nv_inference | openai | meta_analyzer | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.2` | nondeterministic / provider_defaults |
+
+- Controls for `nvidia-ontology-setup`: temperature=not set (source=provider_default, forwarded=no); seed=not set (source=unset, forwarded=no); reasoning_effort=not set (source=provider_default, forwarded=no)
 
 ## What This Report Answers
 
@@ -41,16 +50,27 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 95.6% — baseline ran, but no comparable score was available; uplift unavailable | 89.5% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 90.0% → 100.0% (+10.0 points) | 60.0% → 85.0% (+25.0 points) |
-| Correctness | 36.0% → 100.0% (+64.0 points) | 68.0% → 100.0% (+32.0 points) |
-| Discoverability | 94.0% — baseline ran, but no comparable score was available; uplift unavailable | 87.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 42.8% → 95.5% (+52.7 points) | 54.5% → 88.5% (+34.0 points) |
-| Efficiency | 88.3% — baseline ran, but no comparable score was available; uplift unavailable | 87.2% — baseline ran, but no comparable score was available; uplift unavailable |
+| Overall | 94.4% — baseline ran, but no comparable score was available; uplift unavailable | 90.2% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 95.0% → 100.0% (+5.0 points) | 80.0% → 100.0% (+20.0 points) |
+| Correctness | 48.0% → 100.0% (+52.0 points) | 60.0% → 96.0% (+36.0 points) |
+| Discoverability | 94.0% — baseline ran, but no comparable score was available; uplift unavailable | 93.5% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 41.4% → 95.0% (+53.6 points) | 59.1% → 79.7% (+20.6 points) |
+| Efficiency | 83.1% — baseline ran, but no comparable score was available; uplift unavailable | 82.0% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
 Example: `47.0% → 92.0% (+45.0 points)` means the skill-assisted run scored 92.0%, 45.0 percentage points above its 47.0% no-skill baseline.
+
+### Comparison details
+
+Shared-source comparisons use the same signals and weights on both conditions. They do not replace the full dimension scores above or change the publication verdict.
+
+| Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
+| --- | --- | --- | --- | --- |
+| claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
+| claude-code | Efficiency | Token-only comparison | 98.3% → 96.2% (-2.1 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
+| codex | Efficiency | Token-only comparison | 89.7% → 90.7% (+1.0 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -58,31 +78,31 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 1,266,901 | 2,038,854 | -771,953 | -37.86% | skill 10/10; base 10/10 |
-| claude-code | setup-eval-001-underspecified | 99,720 | 29,740 | +69,980 | +235.31% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-002-use-existing-scripts | 203,860 | 119,696 | +84,164 | +70.31% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-003-auth-secret-cookies | 99,782 | 472,431 | -372,649 | -78.88% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-004-postgres-port-host-only | 63,562 | 120,299 | -56,737 | -47.16% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-005-mcp-already-up | 137,280 | 387,881 | -250,601 | -64.61% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-006-vault-partial | 93,388 | 91,617 | +1,771 | +1.93% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-007-embed-triplet-mismatch | 100,692 | 149,507 | -48,815 | -32.65% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-008-connect-source-workflow | 144,807 | 322,080 | -177,273 | -55.04% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-009-env-vs-ui-connections | 64,877 | 192,173 | -127,296 | -66.24% | skill 1/1; base 1/1 |
-| claude-code | setup-eval-010-helm-install | 258,933 | 153,430 | +105,503 | +68.76% | skill 1/1; base 1/1 |
-| codex | All cases | 1,610,140 | 2,515,404 | -905,264 | -35.99% | skill 10/10; base 10/10 |
-| codex | setup-eval-001-underspecified | 45,064 | 355,321 | -310,257 | -87.32% | skill 1/1; base 1/1 |
-| codex | setup-eval-002-use-existing-scripts | 47,468 | 65,756 | -18,288 | -27.81% | skill 1/1; base 1/1 |
-| codex | setup-eval-003-auth-secret-cookies | 66,752 | 156,942 | -90,190 | -57.47% | skill 1/1; base 1/1 |
-| codex | setup-eval-004-postgres-port-host-only | 63,392 | 83,348 | -19,956 | -23.94% | skill 1/1; base 1/1 |
-| codex | setup-eval-005-mcp-already-up | 206,529 | 13,377 | +193,152 | +1443.91% | skill 1/1; base 1/1 |
-| codex | setup-eval-006-vault-partial | 125,282 | 68,955 | +56,327 | +81.69% | skill 1/1; base 1/1 |
-| codex | setup-eval-007-embed-triplet-mismatch | 185,401 | 127,201 | +58,200 | +45.75% | skill 1/1; base 1/1 |
-| codex | setup-eval-008-connect-source-workflow | 557,521 | 1,028,990 | -471,469 | -45.82% | skill 1/1; base 1/1 |
-| codex | setup-eval-009-env-vs-ui-connections | 125,220 | 213,094 | -87,874 | -41.24% | skill 1/1; base 1/1 |
-| codex | setup-eval-010-helm-install | 187,511 | 402,420 | -214,909 | -53.40% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 2,877,041 | 4,554,258 | -1,677,217 | -36.83% | skill 20/20; base 20/20 |
+| claude-code | All cases | 1,192,311 | 1,326,619 | -134,308 | -10.12% | skill 10/10; base 10/10 |
+| claude-code | setup-eval-001-underspecified | 115,997 | 70,338 | +45,659 | +64.91% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-002-use-existing-scripts | 75,433 | 106,861 | -31,428 | -29.41% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-003-auth-secret-cookies | 117,176 | 143,789 | -26,613 | -18.51% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-004-postgres-port-host-only | 115,615 | 142,555 | -26,940 | -18.90% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-005-mcp-already-up | 115,070 | 182,175 | -67,105 | -36.84% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-006-vault-partial | 107,469 | 107,106 | +363 | +0.34% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-007-embed-triplet-mismatch | 122,701 | 142,874 | -20,173 | -14.12% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-008-connect-source-workflow | 116,665 | 179,889 | -63,224 | -35.15% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-009-env-vs-ui-connections | 148,716 | 143,329 | +5,387 | +3.76% | skill 1/1; base 1/1 |
+| claude-code | setup-eval-010-helm-install | 157,469 | 107,703 | +49,766 | +46.21% | skill 1/1; base 1/1 |
+| codex | All cases | 522,833 | 597,870 | -75,037 | -12.55% | skill 10/10; base 10/10 |
+| codex | setup-eval-001-underspecified | 29,553 | 86,672 | -57,119 | -65.90% | skill 1/1; base 1/1 |
+| codex | setup-eval-002-use-existing-scripts | 38,009 | 50,976 | -12,967 | -25.44% | skill 1/1; base 1/1 |
+| codex | setup-eval-003-auth-secret-cookies | 46,936 | 54,857 | -7,921 | -14.44% | skill 1/1; base 1/1 |
+| codex | setup-eval-004-postgres-port-host-only | 51,293 | 46,865 | +4,428 | +9.45% | skill 1/1; base 1/1 |
+| codex | setup-eval-005-mcp-already-up | 65,568 | 35,063 | +30,505 | +87.00% | skill 1/1; base 1/1 |
+| codex | setup-eval-006-vault-partial | 74,941 | 58,287 | +16,654 | +28.57% | skill 1/1; base 1/1 |
+| codex | setup-eval-007-embed-triplet-mismatch | 51,429 | 45,161 | +6,268 | +13.88% | skill 1/1; base 1/1 |
+| codex | setup-eval-008-connect-source-workflow | 46,391 | 59,114 | -12,723 | -21.52% | skill 1/1; base 1/1 |
+| codex | setup-eval-009-env-vs-ui-connections | 70,037 | 70,852 | -815 | -1.15% | skill 1/1; base 1/1 |
+| codex | setup-eval-010-helm-install | 48,676 | 90,023 | -41,347 | -45.93% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 1,715,144 | 1,924,489 | -209,345 | -10.88% | skill 20/20; base 20/20 |
 
-Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. N/A means the relevant trajectory counters were not available; coverage is never estimated.
+Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 
 ## Tier Status
 
