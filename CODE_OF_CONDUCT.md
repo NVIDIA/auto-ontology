@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: Contributor Covenant, https://www.contributor-covenant.org
+SPDX-License-Identifier: CC-BY-4.0
+-->
+
 # Code of Conduct
 
 ## Our Pledge

@@ -7,6 +7,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import threading
+from array import array
+from collections import OrderedDict
+from concurrent.futures import Future
 from typing import Any
 
 from auto_ontology.utils.embedding import EmbedParams, embed_texts, get_embed_params
@@ -21,6 +26,99 @@ logger = logging.getLogger(__name__)
 # is the only retry on this path -- the client's own are off -- so a dead
 # endpoint costs three 60s attempts, not three times six.
 _QUERY_TIMEOUT_S = 60.0
+
+# Query vectors kept per process. One 2048-dimension vector is 16 KB as packed
+# doubles, so the default holds about 16 MB. Zero turns the cache off.
+_QUERY_CACHE_SIZE = int(os.environ.get("AUTO_ONTOLOGY_QUERY_EMBED_CACHE_SIZE", "1024"))
+
+
+class _QueryEmbeddingCache:
+    """Embed each distinct query string once.
+
+    One question embeds the same few strings again and again: each entity is
+    searched for attributes during retrieval, for tables during preparation,
+    again to rank hub siblings, and once more by every reconstruction that
+    goes looking for a missing table; a full-pipeline retry repeats all of it.
+    Each of those was its own request to the embedding endpoint, on the
+    question's critical path whenever nothing else was running, and each one a
+    chance to be rate-limited into a multi-second backoff.
+
+    The cached value is the endpoint's own answer for that exact request --
+    same model, same input type, same text -- held as packed doubles, so a hit
+    returns bit-for-bit the vector a new request would have. Nothing is
+    approximated and nothing is batched: a batch is a different request and is
+    not guaranteed the same floats.
+
+    Concurrent requests for a string not yet cached share one call. Retrieval
+    searches the full question under two labels at the same moment, and without
+    this both would miss and both would embed it. A failure is never stored:
+    every waiter gets the exception, and the next request tries again.
+    """
+
+    def __init__(self, max_entries: int) -> None:
+        self._max_entries = max_entries
+        self._lock = threading.Lock()
+        self._vectors: OrderedDict[tuple, array] = OrderedDict()
+        self._pending: dict[tuple, Future] = {}
+
+    def get(self, key: tuple, compute: Any) -> list[float] | None:
+        """The vector for *key*, calling *compute* only if nobody has it yet.
+
+        ``None`` from *compute* (a blank query) is returned and not kept.
+        """
+        if self._max_entries <= 0:
+            return compute()
+
+        with self._lock:
+            packed = self._vectors.get(key)
+            if packed is not None:
+                self._vectors.move_to_end(key)
+                return packed.tolist()
+            pending = self._pending.get(key)
+            if pending is None:
+                pending = self._pending[key] = Future()
+                owner = True
+            else:
+                owner = False
+
+        if not owner:
+            vector = pending.result()
+            return None if vector is None else list(vector)
+
+        try:
+            vector = compute()
+        except BaseException as exc:
+            with self._lock:
+                self._pending.pop(key, None)
+            pending.set_exception(exc)
+            raise
+
+        # Packing can only fail for something that is not a flat list of
+        # numbers. That is not this cache's to judge: the vector goes on to the
+        # store exactly as it would have, and is simply not kept. Whatever
+        # happens here, the waiters are released.
+        packed: array | None = None
+        if vector is not None:
+            try:
+                packed = array("d", vector)
+            except (TypeError, ValueError, OverflowError):
+                packed = None
+
+        with self._lock:
+            self._pending.pop(key, None)
+            if packed is not None:
+                self._vectors[key] = packed
+                while len(self._vectors) > self._max_entries:
+                    self._vectors.popitem(last=False)
+        pending.set_result(vector)
+        return vector
+
+    def clear(self) -> None:
+        with self._lock:
+            self._vectors.clear()
+
+
+_query_embeddings = _QueryEmbeddingCache(_QUERY_CACHE_SIZE)
 
 
 class Retriever:
@@ -54,13 +152,7 @@ class Retriever:
         embedded, with the endpoint's HTTP status in the message, so callers
         can tell a transient failure from an empty result.
         """
-        vector = embed_texts(
-            [text],
-            self.embed_params,
-            "query",
-            timeout=_QUERY_TIMEOUT_S,
-            retries=0,
-        )[0]
+        vector = self._embed_query(text)
         if vector is None:
             raise ValueError("Cannot search for a blank query.")
         where = (vdb_kwargs or {}).get("where")
@@ -73,6 +165,38 @@ class Retriever:
             }
             for hit in hits[:top_k]
         ]
+
+    def _embed_query(self, text: str) -> list[float] | None:
+        """The query vector for *text*, embedded at most once per process.
+
+        The key is everything that decides the request ``embed_texts`` sends:
+        where it goes, which model answers, the modality, and the text as it
+        is sent (stripped). See :class:`_QueryEmbeddingCache`.
+
+        The embedding function itself is part of the key as well. In the
+        running service it is always the same function; a test that swaps in
+        its own embedder gets its own entries instead of vectors another
+        embedder produced for the same string.
+        """
+        params = self.embed_params
+        embed = embed_texts
+        key = (
+            embed,
+            params.embed_invoke_url,
+            params.model_name,
+            params.embed_modality,
+            text.strip() if isinstance(text, str) else text,
+        )
+        return _query_embeddings.get(
+            key,
+            lambda: embed(
+                [text],
+                params,
+                "query",
+                timeout=_QUERY_TIMEOUT_S,
+                retries=0,
+            )[0],
+        )
 
 
 _data_retriever: Retriever | None = None

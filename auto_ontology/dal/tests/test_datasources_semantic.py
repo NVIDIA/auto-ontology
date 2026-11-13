@@ -746,3 +746,81 @@ def test_an_fk_pointing_outside_the_catalog_disqualifies(world) -> None:
     assert "tag_link" not in [
         r["table_name"] for r in d.fetch_bridge_table_candidates(world.prefix)
     ]
+
+
+# ---------------------------------------------------------------------------
+# fetch_catalog_schema_fingerprint
+# ---------------------------------------------------------------------------
+
+
+def _row_set(rows: list[dict]) -> set[tuple]:
+    return {tuple(sorted(row.items(), key=lambda item: item[0])) for row in rows}
+
+
+def test_fingerprint_tracks_exactly_what_the_schema_rows_contain(world: World) -> None:
+    """It must move with every field ``fetch_schemas_by_ids`` returns, and no other.
+
+    Whatever is built from those rows is kept for as long as the fingerprint
+    holds, so a change it misses is a stale catalog served to SQL validation.
+    """
+    seen = [d.fetch_catalog_schema_fingerprint()]
+
+    def changed() -> bool:
+        seen.append(d.fetch_catalog_schema_fingerprint())
+        # The fingerprint that comes back with the rows is the one a cached
+        # map is filed under, so it has to be the same string, every time.
+        snapshot_fingerprint, rows = d.fetch_catalog_schema_snapshot()
+        assert snapshot_fingerprint == seen[-1]
+        assert _row_set(rows) == _row_set(d.fetch_schemas_by_ids())
+        return seen[-1] != seen[-2]
+
+    assert not changed(), "two reads of an untouched catalog must agree"
+
+    world.table("refunds", table_type="base table")
+    assert not changed(), "a table with no columns contributes no rows"
+
+    refund_id = world.column("refunds", "refund_id", 1)
+    assert changed(), "an added column"
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == refund_id)
+        .values(description="Refund identifier", sample_values='["r1"]')
+    )
+    assert not changed(), "a description or sample values are not in the rows"
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == refund_id)
+        .values(data_type="bigint")
+    )
+    assert changed(), "a type going from NULL to a value"
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == refund_id)
+        .values(name="refund_key")
+    )
+    assert changed(), "a renamed column"
+
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["refunds"])
+        .values(name="returns")
+    )
+    assert changed(), "a renamed table"
+
+    store().query_write(
+        s.catalog_schema.update()
+        .where(s.catalog_schema.c.id == world.schema)
+        .values(name="store")
+    )
+    assert changed(), "a renamed schema"
+
+    store().query_write(
+        s.catalog_column.delete().where(s.catalog_column.c.id == refund_id)
+    )
+    assert changed(), "a dropped column"
+    assert len(set(seen)) == len(seen) - 3, (
+        "each change gave a fingerprint not seen before"
+    )

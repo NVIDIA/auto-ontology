@@ -24,9 +24,11 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import (
     ColumnElement,
+    Numeric,
     Text,
     and_,
     case,
+    cast,
     column,
     distinct,
     func,
@@ -249,6 +251,93 @@ def fetch_schemas_by_ids(
         statement = statement.where(s.catalog_schema.c.id.in_(list(schema_ids)))
 
     return [dict(r) for r in store().query_read(statement)]
+
+
+def _schema_row_hash() -> ColumnElement:
+    """One 64-bit hash per row of the ``fetch_schemas_by_ids`` result.
+
+    Over exactly the seven fields that query selects, and nothing else: a
+    description edit or a new sample value leaves it alone, while a renamed
+    column, a retyped one, or a table added, dropped or moved does not.
+
+    ``data_type`` goes last because it is the only nullable field and
+    ``concat_ws`` skips nulls: at the end, a missing type shortens the string
+    rather than shifting another field into its place.
+    """
+    return func.hashtextextended(
+        func.concat_ws(
+            # The unit separator, which no identifier contains, so two rows
+            # cannot hash alike by splitting the same text at different points.
+            literal("\x1f"),
+            s.catalog_column.c.id,
+            s.catalog_column.c.name,
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_schema.c.name,
+            s.catalog_database.c.name,
+            s.catalog_column.c.data_type,
+        ),
+        0,
+    )
+
+
+def _schema_fingerprint(row_count: int, digest: Any) -> str:
+    """How a row count and a sum of row hashes are written down.
+
+    One place, because the two functions below must agree to the character:
+    one gets the sum from Postgres as a ``Decimal``, the other adds the hashes
+    up itself.
+    """
+    return f"{int(row_count)}:{int(digest)}"
+
+
+def fetch_catalog_schema_fingerprint() -> str:
+    """A digest that changes whenever ``fetch_schemas_by_ids()`` would.
+
+    Lets a caller keep what it built from the whole-catalog rows and learn,
+    for the price of one aggregate, whether it is still current. The rows are
+    hashed where they live, so nothing but the answer crosses the wire.
+
+    The sum makes it independent of row order, and the count keeps an added
+    row from being cancelled by a removed one whose hashes happen to offset.
+    Compare it only with the fingerprint
+    :func:`fetch_catalog_schema_snapshot` returned alongside the rows.
+    """
+    statement = select(
+        func.count().label("row_count"),
+        # Numeric: summing bigint hashes overflows bigint long before the
+        # catalog is large.
+        func.coalesce(func.sum(cast(_schema_row_hash(), Numeric)), 0).label("digest"),
+    ).select_from(_catalog_join())
+
+    row = store().query_read(statement)[0]
+    return _schema_fingerprint(row["row_count"], row["digest"])
+
+
+def fetch_catalog_schema_snapshot() -> tuple[str, list[dict[str, str]]]:
+    """Every row ``fetch_schemas_by_ids()`` returns, with their fingerprint.
+
+    The fingerprint is computed from the rows returned, which one statement
+    read from one snapshot of the database. Reading the fingerprint and the
+    rows separately cannot promise that: a commit landing between the two
+    pairs a fingerprint with rows it does not describe, and because the
+    fingerprint is a function of content, a catalog that later returns to the
+    earlier state would match it again and vouch for the wrong rows.
+    """
+    statement = select(
+        s.catalog_column.c.name.label("column_name"),
+        s.catalog_column.c.id.label("column_id"),
+        s.catalog_table.c.name.label("table_name"),
+        s.catalog_table.c.id.label("table_id"),
+        s.catalog_database.c.name.label("database_name"),
+        s.catalog_schema.c.name.label("table_schema"),
+        s.catalog_column.c.data_type,
+        _schema_row_hash().label("row_hash"),
+    ).select_from(_catalog_join())
+
+    rows = [dict(r) for r in store().query_read(statement)]
+    digest = sum(row.pop("row_hash") for row in rows)
+    return _schema_fingerprint(len(rows), digest), rows
 
 
 # ---------------------------------------------------------------------------

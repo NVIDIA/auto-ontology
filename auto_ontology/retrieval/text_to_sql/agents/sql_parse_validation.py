@@ -41,8 +41,9 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.data_access.custom_analyses import get_custom_analyses_ids
 from auto_ontology.retrieval.data_access.graph_schemas import (
-    fetch_all_schema_ids,
-    get_schemas_by_ids,
+    catalog_schemas_lock,
+    forget_parsed_nodes,
+    get_catalog_schemas,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
@@ -796,8 +797,9 @@ class SQLValidationAgent(BaseAgent):
         connector = resolve_connector_from_tables(
             path_state.get("relevant_tables"), connectors
         )
-        schemas_ids = fetch_all_schema_ids()
-        schemas = get_schemas_by_ids(schemas_ids)
+        # The whole catalog, shared across attempts and questions and rebuilt
+        # only when the catalog itself changes -- see get_catalog_schemas.
+        schemas = get_catalog_schemas()
         degenerate_dialect = getattr(connector, "dialect", None)
 
         # Every constructed/reconstructed SQL passes through this node before
@@ -860,9 +862,14 @@ class SQLValidationAgent(BaseAgent):
                     "path_state": path_state,
                 }
 
-        validation_result = self._sql_parse_validation(
-            schemas, response.sql_code, dialects
-        )
+        # The schema map is shared process-wide and builds nodes as it is
+        # parsed against, so only one parse touches it at a time, and each
+        # starts from a map no earlier parse has left its nodes on.
+        with catalog_schemas_lock:
+            forget_parsed_nodes(schemas)
+            validation_result = self._sql_parse_validation(
+                schemas, response.sql_code, dialects
+            )
 
         if validation_result.get("error"):
             error_msg = validation_result["error"]

@@ -11,7 +11,8 @@ import random
 import threading
 import time
 import weakref
-from typing import Iterator, Type, TypeVar
+from http.cookiejar import DefaultCookiePolicy
+from typing import Any, Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
@@ -183,16 +184,116 @@ def _is_retryable(e: Exception) -> bool:
     )
 
 
-class _TimeoutSession(_requests.Session):
-    """requests.Session that enforces a default timeout on every request."""
+# How long a connection may sit unused in a session before it is dropped rather
+# than reused. A server or load balancer closes idle connections on its own
+# schedule, and a request written to one it has just closed fails instead of
+# being answered. Five seconds is the window httpx uses, so it is the one the
+# ChatOpenAI path has always run with; it comfortably covers the gap between
+# consecutive model calls in one question, which is what reuse is for.
+LLM_KEEPALIVE_IDLE_S = float(os.environ.get("LLM_KEEPALIVE_IDLE_S", "5"))
 
-    def __init__(self, timeout: float = LLM_INVOKE_TIMEOUT_S, **kwargs):
+# A request written to a connection the far end already closed fails within a
+# network round trip. A failure later than this is not that: the request was
+# delivered and something went wrong while it was being answered.
+_STALE_CONNECTION_WINDOW_S = 1.0
+
+
+class _TimeoutSession(_requests.Session):
+    """requests.Session with a default timeout, safe to keep and reuse.
+
+    ``ChatNVIDIA`` asks for a session before every request. Handing it a new
+    one each time means a TCP and TLS handshake per model call -- measured at
+    100 ms against integrate.api.nvidia.com and 250 ms against
+    inference-api.nvidia.com -- which a question pays seven to twenty times.
+    Reusing one keeps the connection open between calls.
+
+    Reuse brings one failure a fresh session cannot have: the far end closes a
+    connection just as a request is written to it. Three things keep that from
+    reaching the caller, and keep everything else as it was:
+
+    * Connections idle for longer than ``max_idle`` are closed before the next
+      request, so one the far end has probably dropped is not written to.
+    * A request on a reused session that fails with a connection error within
+      a second is sent once more on a new connection. urllib3 already
+      discards a pooled connection the far end has visibly closed; this covers
+      the far end closing it in the moment between that check and the write.
+      The window is a heuristic, not proof the request was never delivered:
+      an endpoint that reads a request and drops the connection within a
+      second gets it twice. That is the deliberate side to err on. Without the
+      resend, the lost race reaches the caller as an error its retry policy
+      does not retry, and the call falls back to another model or returns
+      nothing -- a worse answer, where the resend costs one generation. A
+      failure later than a second is left to the caller exactly as a fresh
+      session's would be, and timeouts are never resent, whichever exception
+      they arrive as.
+    * No cookie is ever stored. A one-shot session never sent any, and one set
+      by a load balancer would otherwise pin every later call to one backend.
+    """
+
+    def __init__(
+        self,
+        timeout: float = LLM_INVOKE_TIMEOUT_S,
+        *,
+        max_idle: float = LLM_KEEPALIVE_IDLE_S,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._default_timeout = timeout
+        self._max_idle = max_idle
+        self._clock = time.monotonic
+        # When the last request finished, or None while no pooled connection
+        # can exist (never used, or the pool was just emptied).
+        self._last_used: float | None = None
+        self.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
 
-    def request(self, method, url, **kwargs):
+    def request(self, method: Any, url: Any, **kwargs: Any) -> _requests.Response:
         kwargs.setdefault("timeout", self._default_timeout)
-        return super().request(method, url, **kwargs)
+        started = self._clock()
+        reused = self._last_used is not None
+        if reused and started - self._last_used > self._max_idle:
+            self.close()
+            reused = False
+        self._last_used = None
+        try:
+            response = super().request(method, url, **kwargs)
+        except _requests.exceptions.ConnectionError as exc:
+            stale = (
+                reused
+                and not isinstance(exc, _requests.exceptions.Timeout)
+                and self._clock() - started <= _STALE_CONNECTION_WINDOW_S
+            )
+            if not stale:
+                raise
+            logger.info(
+                "LLM connection was closed while idle (%s); retrying once on a "
+                "new connection",
+                type(exc).__name__,
+            )
+            self.close()
+            response = super().request(method, url, **kwargs)
+        self._last_used = self._clock()
+        return response
+
+
+class _ThreadSessions:
+    """One reusable :class:`_TimeoutSession` per thread, for one client.
+
+    A ``requests.Session`` is not documented as safe to share between threads,
+    and nothing here needs it to be: a question's model calls run one after
+    another on a single thread, so a session per thread reuses the connection
+    for exactly the calls that are close together, and concurrent questions
+    never touch each other's.
+    """
+
+    def __init__(self, timeout: float) -> None:
+        self._timeout = timeout
+        self._local = threading.local()
+
+    def __call__(self) -> _TimeoutSession:
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = self._local.session = _TimeoutSession(self._timeout)
+        return session
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -249,8 +350,14 @@ def _build_client(
         base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        # Without this the client passes its own default of 60 seconds on
+        # every request, which silently overrides the session default below:
+        # LLM_INVOKE_TIMEOUT_S was never the limit in force on this path, and a
+        # generation that needed longer than a minute was abandoned, retried
+        # twice the same way, and reported as no answer.
+        timeout=LLM_INVOKE_TIMEOUT_S,
     )
-    client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
+    client._client.get_session_fn = _ThreadSessions(LLM_INVOKE_TIMEOUT_S)
     return client
 
 
@@ -319,6 +426,10 @@ _NON_REASONING_IDS: set[int] = set()
 _NON_REASONING_STRONG_REFS: dict[int, object] = {}
 _REASONING_FALLBACK_CLIENT: BaseChatModel | None = None
 _REASONING_FALLBACK_LOCK = threading.Lock()
+# Per thread: the default non-reasoning client and the factory that built it.
+# See ``_get_default_non_reasoning_client`` for why it is per thread and why
+# the factory is remembered.
+_DEFAULT_NON_REASONING = threading.local()
 
 # How many ``bound`` links to follow. Real ``.bind()`` chains are a level or two
 # deep; the cap stops the walk on objects whose ``bound`` never ends — a
@@ -361,6 +472,32 @@ def _get_reasoning_fallback_client() -> BaseChatModel:
             if _REASONING_FALLBACK_CLIENT is None:
                 _REASONING_FALLBACK_CLIENT = get_llm_client()
     return _REASONING_FALLBACK_CLIENT
+
+
+def _get_default_non_reasoning_client() -> BaseChatModel:
+    """This thread's non-reasoning client with default settings, built once.
+
+    ``safe_invoke_text_nr`` and ``safe_invoke_structured_nr`` used to build a
+    client per call. A client owns its connection pool, so each of those calls
+    opened a new connection, did one request on it, and threw it away. A
+    failure to build is not remembered: the next call tries again.
+
+    One per thread rather than one for the process, because these calls never
+    shared a client before and ``ChatNVIDIA`` is not built to be shared: it
+    stores the outgoing request on the client object and reads it back to send
+    it, so two threads on one client can each send the other's prompt. The
+    calls that benefit from reuse are consecutive ones on the same thread.
+
+    The client is kept together with the factory that produced it and is
+    rebuilt if ``get_non_reasoning_llm_client`` is no longer that function.
+    Several test modules replace the factory; without this, a client one of
+    them built would outlive the patch and be handed to an unrelated caller.
+    """
+    factory = get_non_reasoning_llm_client
+    cached = getattr(_DEFAULT_NON_REASONING, "client", None)
+    if cached is None or cached[0] is not factory:
+        cached = _DEFAULT_NON_REASONING.client = (factory, factory())
+    return cached[1]
 
 
 def _reasoning_fallback_client(llm: object) -> BaseChatModel | None:
@@ -691,7 +828,7 @@ def safe_invoke_text_nr(prompt: str) -> str:
     that single call when the non-reasoning endpoint stays down.
     """
     try:
-        client = get_non_reasoning_llm_client()
+        client = _get_default_non_reasoning_client()
     except Exception as exc:
         _log_non_reasoning_fallback(exc)
         client = _get_reasoning_fallback_client()
@@ -708,7 +845,7 @@ def safe_invoke_structured_nr(
     model for that single call. Returns ``None`` when both models fail.
     """
     try:
-        client = get_non_reasoning_llm_client()
+        client = _get_default_non_reasoning_client()
     except Exception as exc:
         schema_name = getattr(schema, "__name__", str(schema))
         _log_non_reasoning_fallback(exc, schema_name)

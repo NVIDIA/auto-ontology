@@ -171,3 +171,30 @@ def test_written_rows_come_back_from_a_search(
     assert (
         retriever.query("who buys", vdb_kwargs={"where": {"database_name": "x"}}) == []
     )
+
+
+def test_warming_never_creates_a_collection(vdb: Any) -> None:
+    """Warming runs at worker start, before anything may have been ingested."""
+    assert vdb.warm() is False
+    assert vdb._table_exists() is False
+
+    write_embedded_rows(vdb, [_row("orders", _unit(0))])
+    vdb.close()
+
+    assert vdb.warm() is True
+    assert vdb.warm() is True
+    [hits] = vdb.retrieval([_unit(0)], top_k=1)
+    assert hits[0]["metadata"]["id"] == "orders"
+
+
+def test_warming_a_collection_dropped_after_its_check_does_not_recreate_it(
+    vdb: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The existence check says yes, then the table is gone by the time of binding."""
+    monkeypatch.setattr(vdb, "_table_exists", lambda: True)
+
+    with pytest.raises(Exception):
+        vdb.warm()
+
+    monkeypatch.undo()
+    assert vdb._table_exists() is False

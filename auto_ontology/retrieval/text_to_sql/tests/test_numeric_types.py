@@ -428,8 +428,7 @@ def _validate(
     )
 
     connector = SimpleNamespace(dialect=dialect)
-    monkeypatch.setattr(f"{_VALIDATION}.fetch_all_schema_ids", lambda: [])
-    monkeypatch.setattr(f"{_VALIDATION}.get_schemas_by_ids", lambda ids: {})
+    monkeypatch.setattr(f"{_VALIDATION}.get_catalog_schemas", lambda: {})
     monkeypatch.setattr(
         f"{_VALIDATION}.resolve_connector_from_tables", lambda tables, conns: connector
     )
