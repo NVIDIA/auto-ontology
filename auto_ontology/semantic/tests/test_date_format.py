@@ -112,6 +112,65 @@ def test_non_string_values_are_read_through_their_rendering() -> None:
 
 
 @pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (["2024.03.15", "2023.12.01"], "YYYY.MM.DD"),
+        (["2024. 03. 15.", "2023. 12. 01."], "YYYY. MM. DD."),
+        (["2024년 03월 15일"], "YYYY년 MM월 DD일"),
+        (["2024年03月15日"], "YYYY年MM月DD日"),
+    ],
+)
+def test_year_first_forms_outside_the_slash_and_dash_families_are_read(
+    values: list[str], expected: str
+) -> None:
+    """Dotted and East Asian year-first columns used to get no hint at all.
+    ``_CANDIDATES`` held ``DD.MM.YYYY`` but no year-first dotted form, and no
+    spelling that puts a character between the components, so the sample parsed
+    nowhere and the module stayed silent about a column the model still has to
+    write predicates against.
+    """
+    assert infer_date_format(values) == expected
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (["2024. 3. 15."], "YYYY. M. DD."),
+        (["2024년 3월 15일"], "YYYY년 M월 DD일"),
+        (["2024年3月15日"], "YYYY年M月DD日"),
+        (["2024. 3. 5."], "YYYY. M. D."),
+    ],
+)
+def test_an_unpadded_component_is_reported_one_digit_wide(
+    values: list[str], expected: str
+) -> None:
+    """The width is read per component, whatever separates them.
+    Narrowing used to bail out on any notation carrying a space, which is every
+    East Asian spelling and the dotted one with spaces after each dot, so
+    ``2024. 3. 15.`` was reported as ``YYYY. MM. DD.`` and the model would write
+    a literal the column never holds.
+    """
+    assert infer_date_format(values) == expected
+
+
+def test_a_narrow_component_does_not_hide_an_undecidable_order() -> None:
+    """``4/04/20`` stores a one-digit month and still reads both ways.
+    The reading is compared on the padded spelling of each pattern, so the width
+    a column happens to use cannot turn a coin flip into a confident claim.
+    """
+    assert infer_date_format(["4/4/20"]) is None
+    assert infer_date_format(["4/04/20"]) is None
+
+
+def test_a_component_is_widened_to_the_widest_value_stored() -> None:
+    """``13`` cannot be held by ``D``, so the whole column is called ``DD``.
+    Same rule fractional seconds already follow: report the form a literal has
+    to be able to hold.
+    """
+    assert infer_date_format(["4/4/20", "13/6/20"]) == "DD/M/YY"
+
+
+@pytest.mark.parametrize(
     ("declared", "expected"),
     [
         ("DATE", True),

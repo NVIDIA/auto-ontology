@@ -19,6 +19,7 @@ column simply yields no claim rather than a confident wrong one.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import datetime
 
@@ -33,50 +34,50 @@ _MAX_VALUES = 200
 # Longest value worth trying to parse; anything beyond this is prose, not a date.
 _MAX_VALUE_LEN = 40
 
-# Candidates in descending specificity, each with the notation reported to the
-# model. Order settles only genuine ties — a candidate that cannot parse every
-# value is out regardless of where it sits.
-_CANDIDATES: tuple[tuple[str, str], ...] = (
-    ("%Y-%m-%d %H:%M:%S.%f", "YYYY-MM-DD HH:MM:SS.f"),
-    ("%Y-%m-%dT%H:%M:%S.%f", "YYYY-MM-DDTHH:MM:SS.f"),
-    ("%Y-%m-%d %H:%M:%S", "YYYY-MM-DD HH:MM:SS"),
-    ("%Y-%m-%dT%H:%M:%S", "YYYY-MM-DDTHH:MM:SS"),
-    ("%Y-%m-%d %H:%M", "YYYY-MM-DD HH:MM"),
-    ("%Y-%m-%d", "YYYY-MM-DD"),
-    ("%Y/%m/%d", "YYYY/MM/DD"),
-    ("%d/%m/%Y", "DD/MM/YYYY"),
-    ("%m/%d/%Y", "MM/DD/YYYY"),
-    ("%d-%m-%Y", "DD-MM-YYYY"),
-    ("%m-%d-%Y", "MM-DD-YYYY"),
-    ("%d.%m.%Y", "DD.MM.YYYY"),
-    ("%d/%m/%y", "DD/MM/YY"),
-    ("%m/%d/%y", "MM/DD/YY"),
-    ("%d-%m-%y", "DD-MM-YY"),
-    ("%m-%d-%y", "MM-DD-YY"),
-    ("%d.%m.%y", "DD.MM.YY"),
-    ("%Y%m%d", "YYYYMMDD"),
-    ("%Y%m", "YYYYMM"),
-    ("%y%m%d", "YYMMDD"),
-    ("%H:%M:%S", "HH:MM:SS"),
-    ("%H:%M", "HH:MM"),
-    ("%Y", "YYYY"),
+# Candidates in descending specificity. A candidate is only a `strptime` format:
+# the notation handed to the model is derived from it and from the sample, so a
+# padded and an unpadded spelling of the same form share one entry.
+_CANDIDATES: tuple[str, ...] = (
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%Y.%m.%d",
+    "%Y. %m. %d.",
+    "%Y년 %m월 %d일",
+    "%Y年%m月%d日",
+    "%d/%m/%Y",
+    "%m/%d/%Y",
+    "%d-%m-%Y",
+    "%m-%d-%Y",
+    "%d.%m.%Y",
+    "%d/%m/%y",
+    "%m/%d/%y",
+    "%d-%m-%y",
+    "%m-%d-%y",
+    "%d.%m.%y",
+    "%Y%m%d",
+    "%Y%m",
+    "%y%m%d",
+    "%H:%M:%S",
+    "%H:%M",
+    "%Y",
 )
 
 # Readings that differ only in which component comes first. When both parse
 # every value the sample genuinely cannot tell them apart, and saying nothing
-# beats a coin flip the model would take as fact.
+# beats a coin flip the model would take as fact. Pairs are written at the
+# widest spelling each component can take, because that is the form the two
+# patterns are compared on: `4/04/20` stores a narrower month but reads both ways
+# all the same.
 _INDISTINGUISHABLE: tuple[frozenset[str], ...] = (
     frozenset({"DD/MM/YYYY", "MM/DD/YYYY"}),
     frozenset({"DD-MM-YYYY", "MM-DD-YYYY"}),
     frozenset({"DD/MM/YY", "MM/DD/YY"}),
     frozenset({"DD-MM-YY", "MM-DD-YY"}),
-    frozenset({"DD.MM.YY", "MM.DD.YY"}),
-    frozenset({"D/M/YY", "M/D/YY"}),
-    frozenset({"D-M-YY", "M-D-YY"}),
-    frozenset({"D.M.YY", "M.D.YY"}),
-    frozenset({"D/M/YYYY", "M/D/YYYY"}),
-    frozenset({"D-M-YYYY", "M-D-YYYY"}),
-    frozenset({"D.M.YYYY", "M.D.YYYY"}),
 )
 
 # A four-digit run only reads as a year inside this range. Without the guard
@@ -115,38 +116,89 @@ def _parses_all(pattern: str, values: list[str]) -> bool:
     return True
 
 
-def _widen_fraction(label: str, values: list[str]) -> str:
-    """Restate a fractional-seconds notation at the width actually stored.
-    ``%f`` accepts one to six digits, so a column holding ``19:39:07.0`` parses
-    under the same pattern as one holding ``19:39:07.123456``. The label must
-    not paper over that: an equality predicate has to reproduce the stored
-    string exactly, and codebase_community's timestamps all end in a single
-    ``.0``. Where the width varies the widest is reported, since that is the
-    form a literal has to be able to hold.
+# Each `strptime` token, the notation it stands for, and the widest digit run it
+# can hold. `%m` and `%d` are the only tokens rendered one digit wide: a month or
+# a day may be stored unpadded, and the notation has to say so for an equality
+# predicate to match. Minutes, seconds and fractional seconds keep their width
+# whatever the sample says, since a stored time is always zero-padded.
+_NOTATION: dict[str, tuple[str, int]] = {
+    "%Y": ("YYYY", 4),
+    "%y": ("YY", 2),
+    "%m": ("MM", 2),
+    "%d": ("DD", 2),
+    "%H": ("HH", 2),
+    "%M": ("MM", 2),
+    "%S": ("SS", 2),
+    "%f": ("f", 6),
+}
+
+_NARROWABLE = frozenset({"%m", "%d"})
+
+_TOKEN_RE = re.compile(r"%(?:[YymdHMSf])")
+
+
+def _stored_widths(pattern: str, values: list[str]) -> dict[str, int]:
+    """The widest digit run each token holds across *values*.
+
+    The pattern is turned into a regex with one bounded digit group per token,
+    which aligns the sample on the format without assuming which character
+    separates two components -- a separator can be a space, a dot-and-space, or
+    a Korean ``월``. A token missing from the result was absent from a sample the
+    regex could not align, and keeps its padded spelling.
     """
-    widths = {len(value.rpartition(".")[2]) for value in values if "." in value}
-    widest = max(widths, default=1)
-    return label.replace(".f", "." + "f" * widest)
+    parts: list[str] = []
+    tokens: list[str] = []
+    index = 0
+    for match in _TOKEN_RE.finditer(pattern):
+        token = match.group()
+        tokens.append(token)
+        parts.append(re.escape(pattern[index : match.start()]))
+        parts.append(rf"(\d{{1,{_NOTATION[token][1]}}})")
+        index = match.end()
+    parts.append(re.escape(pattern[index:]))
+    aligned = re.compile("".join(parts))
+
+    widths = dict.fromkeys(tokens, 0)
+    for value in values:
+        matched = aligned.fullmatch(value)
+        if matched is None:
+            continue
+        for token, digits in zip(tokens, matched.groups()):
+            widths[token] = max(widths[token], len(digits))
+    return {token: width for token, width in widths.items() if width}
 
 
-def _narrow_padding(label: str, values: list[str]) -> str:
-    """Restate a date notation at the digit width actually stored.
+def _notation(pattern: str, values: list[str] | None = None) -> str:
+    """Render *pattern* as the notation the model has to write.
 
-    ``strptime`` accepts an unpadded month or day, so ``4/4/20`` and
-    ``04/04/20`` both parse as ``%m/%d/%y``. The notation must not blur them:
-    the model writes an equality predicate against the stored string, and
-    regional_sales stores ``4/4/20``, which ``04/04/20`` never matches. Only
-    date-only notations are narrowed -- a label carrying a time would have its
-    minutes rewritten along with its month.
+    ``%f`` spans one to six digits and ``strptime`` accepts an unpadded month or
+    day, so one pattern covers several stored widths. Both are restated at the
+    width actually stored: an equality predicate has to reproduce the string the
+    column holds, and ``04/04/20`` never matches a column storing ``4/4/20``.
+    Where the width varies the widest is reported, since that is the form a
+    literal has to be able to hold.
+
+    Without *values* every token takes its widest spelling, which is the
+    canonical form of the pattern -- padding is not a different reading, so two
+    patterns are compared as candidates on that form, not on what a sample
+    happens to store.
     """
-    if any(ch in label for ch in (" ", "T", ":")):
-        return label
-    separator = next((sep for sep in ("/", "-", ".") if sep in label), None)
-    if separator is None:
-        return label
-    if any(len(part) == 1 for value in values for part in value.split(separator)):
-        return label.replace("MM", "M").replace("DD", "D")
-    return label
+    widths = _stored_widths(pattern, values) if values else {}
+    out: list[str] = []
+    index = 0
+    for match in _TOKEN_RE.finditer(pattern):
+        token = match.group()
+        text = _NOTATION[token][0]
+        width = widths.get(token, 0)
+        if token == "%f" and width:
+            text = text * width
+        elif token in _NARROWABLE and width == 1:
+            text = text[:1]
+        out.append(pattern[index : match.start()])
+        out.append(text)
+        index = match.end()
+    out.append(pattern[index:])
+    return "".join(out)
 
 
 def infer_date_format(values: Iterable[object]) -> str | None:
@@ -171,15 +223,16 @@ def infer_date_format(values: Iterable[object]) -> str | None:
         return None
 
     matches = [
-        (pattern, _narrow_padding(label, seen))
-        for pattern, label in _CANDIDATES
+        (pattern, _notation(pattern, seen))
+        for pattern in _CANDIDATES
         if _parses_all(pattern, seen)
     ]
     if not matches:
         return None
     pattern, winner = matches[0]
-    labels = {label for _, label in matches}
+    canonical = _notation(pattern)
+    readings = {_notation(reading) for reading, _ in matches}
     for group in _INDISTINGUISHABLE:
-        if winner in group and len(group & labels) > 1:
+        if canonical in group and len(group & readings) > 1:
             return None
-    return _widen_fraction(winner, seen) if "%f" in pattern else winner
+    return winner
