@@ -63,4 +63,12 @@ def refresh_catalog_embeddings(node_ids: list[str]) -> None:
     # embed_rows passes the text through and the store writes before it
     # deletes.
     rows = embed_rows(records, get_embed_params(), what="tabular")
-    replace_embedded_rows(get_data_vdb(), unique_ids, rows)
+    written = replace_embedded_rows(get_data_vdb(), unique_ids, rows)
+    # Writing nothing already raises. A partial write returns, and on
+    # Elasticsearch an id with a rejected row keeps its old one, so the edit
+    # would look saved while search still finds the old text.
+    if written < len(rows):
+        raise RuntimeError(
+            f"Refreshed {written}/{len(rows)} catalog rows for {sorted(unique_ids)}; "
+            "the rest keep their previous embedding."
+        )
