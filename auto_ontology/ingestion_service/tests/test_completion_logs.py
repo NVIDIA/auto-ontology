@@ -19,11 +19,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from datetime import timedelta
 from typing import Any
 
 import pytest
 
-from auto_ontology.ingestion_service.data_scheduler import DataScheduler
+from auto_ontology.ingestion_service.data_scheduler import (
+    INGEST_INTERVAL,
+    DataScheduler,
+)
 from auto_ontology.ingestion_service.semantic_scheduler import SemanticScheduler
 
 
@@ -269,6 +273,47 @@ def test_trigger_ingest_re_applies_the_rules(
 # --------------------------------------------------------------------------
 # DataScheduler
 # --------------------------------------------------------------------------
+
+
+def test_data_scheduler_defaults_to_24_hours_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("INGEST_INTERVAL_HOURS", raising=False)
+
+    assert DataScheduler()._interval == INGEST_INTERVAL
+
+
+def test_data_scheduler_reads_ingest_interval_hours_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_INTERVAL_HOURS", "6")
+    assert DataScheduler()._interval == timedelta(hours=6)
+
+    monkeypatch.setenv("INGEST_INTERVAL_HOURS", "0.5")
+    assert DataScheduler()._interval == timedelta(minutes=30)
+
+
+@pytest.mark.parametrize("raw", ["not-a-number", "0", "-4", "nan", "inf"])
+def test_data_scheduler_falls_back_on_invalid_ingest_interval_hours(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    raw: str,
+) -> None:
+    monkeypatch.setenv("INGEST_INTERVAL_HOURS", raw)
+
+    with caplog.at_level(logging.WARNING):
+        scheduler = DataScheduler()
+
+    assert scheduler._interval == INGEST_INTERVAL
+    assert "INGEST_INTERVAL_HOURS" in _messages(caplog)
+
+
+def test_data_scheduler_explicit_interval_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_INTERVAL_HOURS", "6")
+
+    assert DataScheduler(timedelta(hours=2))._interval == timedelta(hours=2)
 
 
 def _patch_data_scheduler(
