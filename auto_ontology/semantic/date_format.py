@@ -116,20 +116,35 @@ def _parses_all(pattern: str, values: list[str]) -> bool:
     return True
 
 
-# Each `strptime` token, the notation it stands for, and the widest digit run it
-# can hold. `%m` and `%d` are the only tokens rendered one digit wide: a month or
-# a day may be stored unpadded, and the notation has to say so for an equality
-# predicate to match. Minutes, seconds and fractional seconds keep their width
-# whatever the sample says, since a stored time is always zero-padded.
-_NOTATION: dict[str, tuple[str, int]] = {
-    "%Y": ("YYYY", 4),
-    "%y": ("YY", 2),
-    "%m": ("MM", 2),
-    "%d": ("DD", 2),
-    "%H": ("HH", 2),
-    "%M": ("MM", 2),
-    "%S": ("SS", 2),
-    "%f": ("f", 6),
+# Each `strptime` token and the notation it stands for. `%m` and `%d` are the only
+# tokens rendered one digit wide: a month or a day may be stored unpadded, and the
+# notation has to say so for an equality predicate to match. Minutes, seconds and
+# fractional seconds keep their width whatever the sample says, since a stored time
+# is always zero-padded.
+_NOTATION: dict[str, str] = {
+    "%Y": "YYYY",
+    "%y": "YY",
+    "%m": "MM",
+    "%d": "DD",
+    "%H": "HH",
+    "%M": "MM",
+    "%S": "SS",
+    "%f": "f",
+}
+
+# The digit runs `strptime` itself accepts, token by token. A month is one or two
+# digits taken from the twelve that exist, so `2024131` reads as 2024-01-31 and not
+# as month 13 plus day 1: a group that simply took as many digits as it could would
+# split that value the wrong way and report the padding of the wrong component.
+_COMPONENT_RE: dict[str, str] = {
+    "%Y": r"\d{4}",
+    "%y": r"\d{2}",
+    "%m": r"1[0-2]|0[1-9]|[1-9]",
+    "%d": r"3[01]|[0-2]\d|\d",
+    "%H": r"2[0-3]|[0-1]\d|\d",
+    "%M": r"[0-5]\d|\d",
+    "%S": r"6[01]|[0-5]\d|\d",
+    "%f": r"\d{1,6}",
 }
 
 _NARROWABLE = frozenset({"%m", "%d"})
@@ -137,14 +152,25 @@ _NARROWABLE = frozenset({"%m", "%d"})
 _TOKEN_RE = re.compile(r"%(?:[YymdHMSf])")
 
 
+def _literal(text: str) -> str:
+    """The literal part of a pattern as a regex, with `strptime`'s space rule.
+
+    A run of spaces in the format matches any run of whitespace, so
+    ``2010-07-19  19:39:07`` parses under a format holding a single space. Escaping
+    the space literally would refuse to align that sample and silently discard every
+    width measured for it.
+    """
+    return re.escape(text).replace(r"\ ", r"\s+").replace(" ", r"\s+")
+
+
 def _stored_widths(pattern: str, values: list[str]) -> dict[str, int]:
     """The widest digit run each token holds across *values*.
 
-    The pattern is turned into a regex with one bounded digit group per token,
-    which aligns the sample on the format without assuming which character
-    separates two components -- a separator can be a space, a dot-and-space, or
-    a Korean ``월``. A token missing from the result was absent from a sample the
-    regex could not align, and keeps its padded spelling.
+    The pattern is turned into a regex with one bounded group per token, which
+    aligns the sample on the format without assuming which character separates two
+    components -- a separator can be a space, a dot-and-space, or a Korean ``월``. A
+    token missing from the result was absent from a sample the regex could not
+    align, and keeps its padded spelling.
     """
     parts: list[str] = []
     tokens: list[str] = []
@@ -152,10 +178,10 @@ def _stored_widths(pattern: str, values: list[str]) -> dict[str, int]:
     for match in _TOKEN_RE.finditer(pattern):
         token = match.group()
         tokens.append(token)
-        parts.append(re.escape(pattern[index : match.start()]))
-        parts.append(rf"(\d{{1,{_NOTATION[token][1]}}})")
+        parts.append(_literal(pattern[index : match.start()]))
+        parts.append(rf"({_COMPONENT_RE[token]})")
         index = match.end()
-    parts.append(re.escape(pattern[index:]))
+    parts.append(_literal(pattern[index:]))
     aligned = re.compile("".join(parts))
 
     widths = dict.fromkeys(tokens, 0)
@@ -188,7 +214,7 @@ def _notation(pattern: str, values: list[str] | None = None) -> str:
     index = 0
     for match in _TOKEN_RE.finditer(pattern):
         token = match.group()
-        text = _NOTATION[token][0]
+        text = _NOTATION[token]
         width = widths.get(token, 0)
         if token == "%f" and width:
             text = text * width

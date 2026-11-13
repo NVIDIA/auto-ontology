@@ -170,6 +170,24 @@ def test_a_component_is_widened_to_the_widest_value_stored() -> None:
     assert infer_date_format(["4/4/20", "13/6/20"]) == "DD/M/YY"
 
 
+def test_repeated_whitespace_keeps_the_widths_it_measures() -> None:
+    """``strptime`` matches a run of spaces in the format against any run of
+    whitespace, so the sample still says how many fractional digits are stored.
+    Aligning on one literal space dropped every width and reported ``.f`` for a
+    value holding three digits.
+    """
+    assert infer_date_format(["2010-07-19  19:39:07.123"]) == "YYYY-MM-DD HH:MM:SS.fff"
+
+
+def test_a_compact_date_keeps_the_component_boundaries_strptime_uses() -> None:
+    """``2024131`` is 2024-01-31, because a month is at most 12.
+    A digit group that took as many digits as it could would split it as year
+    2024, month 13 and day 1, and report the month at two digits and the day at
+    one -- the opposite of what the column stores.
+    """
+    assert infer_date_format(["2024131"]) == "YYYYMDD"
+
+
 @pytest.mark.parametrize(
     ("declared", "expected"),
     [
