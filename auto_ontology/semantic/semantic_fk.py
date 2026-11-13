@@ -14,18 +14,27 @@ Algorithm
       create SEMANTIC_FK directly. A declared FK that targets a column on the
       *same* table is rejected — that's a self-reference, never the entity
       the FK points to.
-   b. **LLM / VDB fallback** — if there is no declared FK, embed the column
-      context, search the *semantic* VDB for the top-5 most similar
-      ColumnAttribute records (excluding candidates on the FK's own table),
-      ask the LLM to pick the best match, and fall back to probing the live
-      database for a candidate whose sample values match when the LLM
-      abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id
-      directly — no additional lookup needed.
+   b. **Inferred** — otherwise, search the *semantic* VDB for ColumnAttributes
+      whose names and descriptions resemble the column (excluding its own
+      table), let the LLM pick one, and confirm the pick by comparing the two
+      columns' ascending distinct values (``semantic.fk_values``); the other
+      hits are tried in distance order when the pick fails. When no hit is
+      confirmed, every key column whose stored values hold the FK's is
+      shortlisted and the LLM picks from that list instead. Neither path
+      offers another term family's copy of a table the column's own family
+      has.
+   c. **Validated** — an inferred edge is stored only when joining the two
+      columns returns a row.
+
+``PREVENT_SEMANTIC_FK_DB_QUERIES`` turns off everything that queries the
+warehouse — on-demand probes, the value-only fallback and the join check —
+leaving the LLM's vector-search pick unconfirmed.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -35,14 +44,27 @@ from sqlglot import exp
 from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
-    delete_semantic_fk,
     fetch_semantic_fk_join_groups,
+    fetch_value_key_candidates,
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
     set_semantic_fk_join_default,
 )
-from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.dal.datasources import store_column_distinct_values
+from auto_ontology.dal.term_families import fetch_table_families
+from auto_ontology.infra.feature_flags import is_semantic_fk_db_query_prevented
+from auto_ontology.semantic.fk_values import (
+    MIN_CONTAINMENT,
+    containment,
+    contains,
+    is_value_search_ambiguous,
+)
+from auto_ontology.semantic.visit_enter import (
+    KEY_DISTINCT_VALUES_LIMIT,
+    execute_capped,
+    probe_ascending_distinct_values,
+)
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
@@ -50,8 +72,10 @@ from auto_ontology.utils.llm_invoke import (
 )
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.retriever import Retriever
-from auto_ontology.utils.sample_values import stringify_sample_values
-from auto_ontology.utils.sql_identifiers import quoted_identifier
+from auto_ontology.utils.sample_values import (
+    parse_sample_values,
+    stringify_sample_values,
+)
 from auto_ontology.semantic.models import (
     FkHitSelection,
     SemanticFkJoinDefaultSelection,
@@ -76,6 +100,21 @@ Rules:
 - Only pick a candidate when you are confident it is the PK being referenced.
 - Do NOT guess. If unsure, return null.
 """
+_VALUE_SYSTEM_PROMPT = """\
+You are a database schema expert. A foreign-key column's name matched no \
+primary key, so candidate key columns were found by their values instead: each \
+candidate, prefixed with its unique column_id, holds most of the foreign key's \
+lowest distinct values. Shared values alone can be a coincidence — consecutive \
+ids and short codes overlap across unrelated tables.
+
+Rules:
+- Pick a candidate only when its table is plausibly the entity the foreign key \
+refers to, judging by names, descriptions and values together.
+- Return the exact column_id of that candidate, or null if none is plausible.
+- Do NOT guess. If unsure, return null.
+"""
+# Candidates the value-only search hands the LLM.
+_VALUE_SHORTLIST_SIZE = 5
 
 _JOIN_DEFAULT_SYSTEM_PROMPT = """\
 You are choosing the default foreign-key relationship used to join two database
@@ -95,64 +134,8 @@ def resolve_semantic_fks(database_name: str) -> int:
     Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
-    created -= prune_disjoint_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
     return created
-
-
-def prune_disjoint_semantic_fks(database_name: str) -> int:
-    """Delete semantic FKs whose column shares no value with its target.
-
-    An inferred edge is a guess from names and descriptions; a seven-digit
-    school code read as the fourteen-digit CDS code it sits beside is one.
-    No overlap at all is the only test applied: real references in loaded
-    data can still miss most of their target, so a low share is no proof.
-    An all-NULL source column is pruned too: joining through it returns no
-    rows, yet it would still be offered as a join path.
-    Returns the number of edges deleted.
-    """
-    connector = _resolve_connector(database_name)
-    if connector is None:
-        return 0
-    dialect = getattr(connector, "dialect", None)
-    pruned = 0
-    for row in fetch_semantic_fk_join_groups(database_name):
-        source = connector.qualify(
-            row.get("source_schema_name"), row["source_table_name"]
-        )
-        target = connector.qualify(
-            row.get("target_schema_name"), row["target_table_name"]
-        )
-        sc = quoted_identifier(row["source_column_name"], dialect)
-        tc = quoted_identifier(row["target_column_name"], dialect)
-        sql = (
-            f"SELECT COUNT(*) AS n FROM (SELECT {sc} FROM {source} "
-            f"WHERE {sc} IS NOT NULL LIMIT 1) AS present "
-            f"UNION ALL SELECT COUNT(*) FROM (SELECT {sc} FROM {source} "
-            f"WHERE {sc} IN (SELECT {tc} FROM {target}) LIMIT 1) AS shared"
-        )
-        try:
-            present, shared = (int(v) for v in connector.execute(sql).iloc[:, 0])
-        except Exception:
-            logger.info(
-                "semantic FK overlap check skipped for %s.%s",
-                row["source_table_name"],
-                row["source_column_name"],
-                exc_info=True,
-            )
-            continue
-        if not shared:
-            delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
-            pruned += 1
-            logger.info(
-                "semantic FK removed, %s: %s.%s -> %s.%s",
-                "no shared values" if present else "empty source column",
-                row["source_table_name"],
-                row["source_column_name"],
-                row["target_table_name"],
-                row["target_column_name"],
-            )
-    return pruned
 
 
 def _resolve_semantic_fks(database_name: str) -> int:
@@ -235,14 +218,30 @@ def _resolve_semantic_fks(database_name: str) -> int:
             len(llm_queue),
         )
         return declared_written
-    connector = _resolve_connector(database_name)
+    keys: _KeyIndex | None = None
+    if is_semantic_fk_db_query_prevented():
+        logger.info(
+            "resolve_semantic_fks: PREVENT_SEMANTIC_FK_DB_QUERIES is set — "
+            "inferred FKs are neither confirmed by values nor validated by a join"
+        )
+    else:
+        connector = _resolve_connector(database_name)
+        if connector is not None:
+            keys = _KeyIndex(database_name, connector)
 
+    families = _Families(fetch_table_families(database_name))
     inferred_written = 0
 
     def _resolve_one(index: int, col: dict[str, Any]) -> bool:
         _log_start(index, col)
         try:
-            attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
+            attr_id = _resolve_via_vdb(col, retriever, database_name, keys, families)
+            if (
+                attr_id
+                and keys is not None
+                and not _join_returns_rows(keys, col, attr_id)
+            ):
+                return False
             # The VDB where-filter already scopes hits to database_name, but
             # it's a query-time filter over a collection shared by every
             # ingested database, not physical isolation -- the same shape of
@@ -463,31 +462,146 @@ def _format_sample_values(raw: Any) -> str:
     return "sample_values: " + ", ".join(values)
 
 
+class _KeyIndex:
+    """The run's candidate key columns and their ascending distinct values.
+
+    A candidate whose values were never stored — compiled before the values
+    existed, or its probe failed — is probed when first compared, and the
+    result stored so the next compile need not ask again.
+    """
+
+    def __init__(self, database_name: str, connector: SQLDatabase) -> None:
+        self.connector = connector
+        self._rows = {
+            row["attribute_id"]: row
+            for row in fetch_value_key_candidates(database_name)
+        }
+        self._values: dict[str, list[Any] | None] = {
+            attribute_id: parse_sample_values(row.get("distinct_values"))
+            for attribute_id, row in self._rows.items()
+        }
+        self._lock = threading.Lock()
+
+    def target(self, attribute_id: str) -> dict[str, Any] | None:
+        return self._rows.get(attribute_id)
+
+    def values(self, attribute_id: str) -> list[Any] | None:
+        row = self._rows.get(attribute_id)
+        if row is None:
+            return None
+        with self._lock:
+            cached = self._values.get(attribute_id)
+        if cached is not None:
+            return cached or None
+        probed = probe_ascending_distinct_values(
+            self.connector,
+            row.get("schema_name"),
+            row["table_name"],
+            row["column_name"],
+        )
+        if probed:
+            store_column_distinct_values(row["table_id"], {row["column_name"]: probed})
+        with self._lock:
+            self._values[attribute_id] = probed or []
+        return probed or None
+
+    def stored(self) -> list[tuple[dict[str, Any], list[Any]]]:
+        """Candidates with values already in hand; never probes."""
+        with self._lock:
+            return [
+                (self._rows[attribute_id], values)
+                for attribute_id, values in self._values.items()
+                if values
+            ]
+
+
+class _Families:
+    """The term families of one database, by table and by base name."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._members: dict[str, set[tuple[str, str]]] = {}
+        self._bases: dict[str, set[str]] = {}
+        for row in rows:
+            self._members.setdefault(row["table_id"], set()).add(
+                (row["family_id"], row["base_name"])
+            )
+            self._bases.setdefault(row["family_id"], set()).add(row["base_name"])
+
+    def crosses(self, source_table_id: str | None, target_table_id: str | None) -> bool:
+        """Whether the target is another family's copy of a table the source's has.
+
+        ``OLD_ROOMS.hotel_id`` refers to ``OLD_HOTELS``, never ``NEW_HOTELS``.
+        Only that is refused: when the source's family has no ``HOTELS`` of
+        its own, ``NEW_HOTELS`` is the only one there is, and a table outside
+        every family — a shared dimension — is open to all of them.
+        """
+        source = self._members.get(source_table_id or "")
+        target = self._members.get(target_table_id or "")
+        if not source or not target:
+            return False
+        source_families = {family for family, _ in source}
+        if any(family in source_families for family, _ in target):
+            return False
+        return any(
+            base in self._bases[family]
+            for family in source_families
+            for _, base in target
+        )
+
+
+_NO_FAMILIES = _Families([])
+
+
 def _resolve_via_vdb(
     col: dict[str, Any],
     retriever: Retriever,
     database_name: str,
-    connector: SQLDatabase | None = None,
+    keys: _KeyIndex | None = None,
+    families: _Families = _NO_FAMILIES,
 ) -> str | None:
-    """Search the semantic VDB for a matching ColumnAttribute and return its id.
+    """Return the id of the ColumnAttribute *col* references, or ``None``.
 
-    Runs two queries and merges up to 6 unique hits:
-    - name + description query (top 3): captures semantic context
-    - name-only query (top 3): catches cases where description is noisy or absent
+    The LLM picks among the vector-search hits; with *keys* (warehouse
+    queries allowed) the pick has to be confirmed by values, and the other
+    hits are tried in distance order when it is not. A column without stored
+    values cannot be compared, so its pick stands unconfirmed. When no hit is
+    confirmed the value-only search runs.
 
-    Candidates on the FK column's own table are excluded — a FK never
-    references a column on the table it lives on. Candidates whose owning
-    column is known (profiled) to be non-unique are excluded at the VDB
-    query level — a non-unique column can't validly serve as the referenced
-    key.
+    A candidate that is another family's copy of a table the column's own
+    family has is never offered (:meth:`_Families.crosses`).
+    """
+    hits = [
+        hit
+        for hit in _vector_hits(col, retriever, database_name)
+        if not families.crosses(
+            col.get("table_id"), (hit.get("metadata") or {}).get("table_id")
+        )
+    ]
+    selected = _llm_pick_hit(col, hits) if hits else None
+    if keys is None:
+        return selected
+    fk_values = parse_sample_values(col.get("distinct_values"))
+    if not fk_values:
+        return selected
+    confirmed = _confirm_by_values(col, fk_values, hits, selected, keys)
+    if confirmed:
+        return confirmed
+    return _match_by_values_only(col, fk_values, keys, families)
 
-    The hit's ``metadata["id"]`` is the ColumnAttribute id directly —
-    no additional graph lookup is required.
 
-    Returns the ColumnAttribute id from a confident LLM match, or — when the
-    LLM abstains — from probing the live database for a candidate whose
-    physical column actually contains the FK's sample values. None if
-    neither step finds a match.
+def _vector_hits(
+    col: dict[str, Any],
+    retriever: Retriever,
+    database_name: str,
+) -> list[dict[str, Any]]:
+    """Up to 6 unique ColumnAttribute hits resembling *col*.
+
+    Runs two queries of top 3 each — name + description, which captures
+    semantic context, and name only, which survives a noisy or absent
+    description. Candidates on the FK column's own table are excluded — a FK
+    never references a column on the table it lives on — and so are
+    candidates whose owning column is not unique, which cannot be the
+    referenced key. The hit's ``metadata["id"]`` is the ColumnAttribute id.
     """
     vdb_kwargs = {
         "where": {
@@ -511,133 +625,178 @@ def _resolve_via_vdb(
             merged.append(hit)
 
     source_table_id = col.get("table_id")
-    if source_table_id and merged:
+    if source_table_id:
         merged = [
             hit
             for hit in merged
             if (hit.get("metadata") or {}).get("table_id")
             and (hit.get("metadata") or {}).get("table_id") != source_table_id
         ]
-
-    if not merged:
-        return None
-
-    selected = _llm_pick_hit(col, merged)
-    if selected:
-        return selected
-    return _match_hit_by_sample_values(col, merged, connector)
+    return merged
 
 
-def _match_hit_by_sample_values(
+def _confirm_by_values(
     col: dict[str, Any],
+    fk_values: list[Any],
     hits: list[dict[str, Any]],
-    connector: SQLDatabase | None,
+    selected: str | None,
+    keys: _KeyIndex,
 ) -> str | None:
-    """Choose the best VDB hit whose physical column contains every FK sample.
-
-    Runs only when the LLM abstains — probes each same-named candidate's live
-    column via a bounded, read-only ``ProbeExecutor`` query and keeps hits
-    where every one of the FK's distinct sample values actually appears.
-    """
-    samples = _distinct_samples(col.get("sample_values"))
-    if connector is None or not samples:
-        return None
-
-    source_column = str(col.get("name") or "").lower()
-    if not source_column:
-        return None
-    matching_name_hits = [
-        hit
-        for hit in hits
-        if str((hit.get("metadata") or {}).get("source_column") or "").lower()
-        == source_column
-    ]
-    if not matching_name_hits:
-        return None
-
-    matches: list[dict[str, Any]] = []
-    with ProbeExecutor(connector, max_calls=len(matching_name_hits)) as executor:
-        for hit in matching_name_hits:
-            sql = _sample_match_sql(
-                hit.get("metadata") or {},
-                samples,
-                getattr(connector, "dialect", None),
-            )
-            if not sql:
-                continue
-            result = executor.run(sql, purpose="semantic FK sample match")
-            if not result["ok"]:
-                continue
-            matched_values = {
-                str(next(iter(row.values())))
-                for row in (result.get("rows") or [])
-                if row and next(iter(row.values())) is not None
-            }
-            if set(samples).issubset(matched_values):
-                matches.append(hit)
-
-    if not matches:
-        return None
-
-    best = min(matches, key=_hit_score)
-    metadata = best.get("metadata") or {}
-    selected = metadata.get("id")
+    """The first hit — the LLM's pick, then by distance — whose values hold *col*'s."""
+    ordered = [selected] if selected else []
+    for hit in sorted(hits, key=_hit_score):
+        hit_id = (hit.get("metadata") or {}).get("id")
+        if hit_id and hit_id not in ordered:
+            ordered.append(hit_id)
+    for attribute_id in ordered:
+        if contains(
+            fk_values, keys.values(attribute_id), limit=KEY_DISTINCT_VALUES_LIMIT
+        ):
+            if attribute_id != selected:
+                logger.info(
+                    "resolve_semantic_fks [values]: %s.%s confirmed by values on "
+                    "hit %s rather than the LLM's pick %s",
+                    col.get("table_name"),
+                    col.get("name"),
+                    attribute_id,
+                    selected,
+                )
+            return attribute_id
     if selected:
         logger.info(
-            "resolve_semantic_fks [sql-fallback]: %s.%s matched %d sample value(s) "
-            "in %s.%s.%s",
+            "resolve_semantic_fks [values]: %s.%s — no vector-search hit holds "
+            "its values, including the LLM's pick %s",
             col.get("table_name"),
             col.get("name"),
-            len(samples),
-            metadata.get("schema_name") or "",
-            metadata.get("table_name") or "",
-            metadata.get("source_column") or "",
+            selected,
+        )
+    return None
+
+
+def _match_by_values_only(
+    col: dict[str, Any],
+    fk_values: list[Any],
+    keys: _KeyIndex,
+    families: _Families,
+) -> str | None:
+    """Pick among the key columns whose stored values hold *col*'s."""
+    if is_value_search_ambiguous(str(col.get("name") or ""), fk_values):
+        return None
+    scored: list[tuple[float, dict[str, Any], list[Any]]] = []
+    for row, values in keys.stored():
+        if row["table_id"] == col.get("table_id") or families.crosses(
+            col.get("table_id"), row["table_id"]
+        ):
+            continue
+        share = containment(fk_values, values, limit=KEY_DISTINCT_VALUES_LIMIT)
+        if share is not None and share >= MIN_CONTAINMENT:
+            scored.append((share, row, values))
+    if not scored:
+        return None
+    scored.sort(
+        key=lambda item: (-item[0], item[1]["table_name"], item[1]["column_name"])
+    )
+    candidates = [
+        {
+            "metadata": {"id": row["attribute_id"]},
+            "text": (
+                f"{row.get('schema_name') or ''}.{row['table_name']}."
+                f"{row['column_name']} ({row.get('data_type') or 'unknown type'}); "
+                f"holds {share:.0%} of the foreign key's comparable values; "
+                f"lowest values: {', '.join(stringify_sample_values(values, max_len=30) or [])}"
+            ),
+        }
+        for share, row, values in scored[:_VALUE_SHORTLIST_SIZE]
+    ]
+    selected = _llm_pick_hit(
+        col,
+        candidates,
+        system_prompt=_VALUE_SYSTEM_PROMPT,
+        source="matched by values",
+    )
+    if selected:
+        logger.info(
+            "resolve_semantic_fks [values-only]: %s.%s → attr %s, from %d candidate(s)",
+            col.get("table_name"),
+            col.get("name"),
+            selected,
+            len(candidates),
         )
     return selected
 
 
-def _distinct_samples(raw: Any) -> list[str]:
-    """Parse, deduplicate, and preserve the order of stored sample values.
+def _join_returns_rows(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) -> bool:
+    """Whether joining *col* to the attribute's column returns a row.
 
-    Rendered as strings because ``_sample_match_sql`` casts the candidate
-    column to TEXT and probes it with string literals, so a numeric sample has
-    to be compared in its rendered form either way.
+    Retried with both sides cast to text when the plain join fails, as it does
+    when the warehouse refuses to compare the two types; a join that runs and
+    returns nothing is final.
     """
-    values = stringify_sample_values(raw) or []
-    return list(dict.fromkeys(values))
-
-
-def _sample_match_sql(
-    metadata: dict[str, Any],
-    samples: list[str],
-    dialect: str | None,
-) -> str | None:
-    """Build a dialect-quoted, bounded query for candidate sample membership."""
-    table_name = metadata.get("table_name")
-    column_name = metadata.get("source_column")
-    if not table_name or not column_name or not samples:
-        return None
-
-    schema_name = metadata.get("schema_name")
-    table = exp.Table(
-        this=exp.to_identifier(str(table_name)),
-        db=exp.to_identifier(str(schema_name)) if schema_name else None,
-    )
-    column = exp.column(str(column_name))
-    text_column = exp.cast(column, "TEXT")
-    query = (
-        exp.select(text_column.copy().as_("matched_value"))
-        .distinct()
-        .from_(table)
-        .where(
-            text_column.copy().isin(*(exp.Literal.string(value) for value in samples))
+    target = keys.target(attribute_id)
+    if target is None:
+        logger.warning(
+            "resolve_semantic_fks [join]: %s.%s — attr %s is not a known key "
+            "column; not stored",
+            col.get("table_name"),
+            col.get("name"),
+            attribute_id,
         )
-        .limit(len(samples))
+        return False
+    label = (
+        f"{col.get('table_name')}.{col.get('name')} -> "
+        f"{target['table_name']}.{target['column_name']}"
     )
+    for as_text in (False, True):
+        sql = _join_probe_sql(keys.connector, col, target, as_text=as_text)
+        try:
+            df = execute_capped(keys.connector, sql)
+        except Exception as exc:
+            logger.info(
+                "resolve_semantic_fks [join]: %s failed%s (%s)",
+                label,
+                " as text" if as_text else "",
+                type(exc).__name__,
+            )
+            continue
+        if df is not None and len(df) > 0:
+            return True
+        logger.info(
+            "resolve_semantic_fks [join]: %s returns no rows; not stored", label
+        )
+        return False
+    logger.info("resolve_semantic_fks [join]: %s could not run; not stored", label)
+    return False
+
+
+def _join_probe_sql(
+    connector: SQLDatabase,
+    col: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    as_text: bool,
+) -> str:
+    """``SELECT 1 ... JOIN ... LIMIT 1`` over the two columns."""
+    dialect = getattr(connector, "dialect", None) or None
+    left: exp.Expression = exp.Column(
+        this=exp.to_identifier(str(col["name"]), quoted=True),
+        table=exp.to_identifier("s"),
+    )
+    right: exp.Expression = exp.Column(
+        this=exp.to_identifier(str(target["column_name"]), quoted=True),
+        table=exp.to_identifier("t"),
+    )
+    if as_text:
+        left, right = exp.cast(left, "TEXT"), exp.cast(right, "TEXT")
+    condition = exp.EQ(this=left, expression=right)
     try:
-        return query.sql(dialect=dialect or None, identify=True)
+        rendered = condition.sql(dialect=dialect)
     except ValueError:
-        return query.sql(identify=True)
+        rendered = condition.sql()
+    source = connector.qualify(col.get("schema_name"), col["table_name"])
+    target_table = connector.qualify(target.get("schema_name"), target["table_name"])
+    return (
+        f"SELECT 1 AS hit FROM {source} s JOIN {target_table} t ON {rendered} LIMIT 1"
+    )
 
 
 def _hit_score(hit: dict[str, Any]) -> float:
@@ -655,6 +814,9 @@ def _hit_score(hit: dict[str, Any]) -> float:
 def _llm_pick_hit(
     col: dict[str, Any],
     hits: list[dict[str, Any]],
+    *,
+    system_prompt: str = _SYSTEM_PROMPT,
+    source: str = "from vector search",
 ) -> str | None:
     """Ask the LLM which candidate column the foreign key references.
 
@@ -671,6 +833,9 @@ def _llm_pick_hit(
         f"Description: {col.get('description') or '(none)'}\n"
         f"Sample values: {_format_sample_values(col.get('sample_values')) or '(none)'}"
     )
+    lowest = stringify_sample_values(col.get("distinct_values"), max_len=30)
+    if lowest:
+        col_ctx += f"\nLowest distinct values: {', '.join(lowest)}"
 
     candidates_lines: list[str] = []
     for hit in hits:
@@ -681,14 +846,14 @@ def _llm_pick_hit(
 
     human_text = (
         f"{col_ctx}\n\n"
-        f"Candidate PK columns (from vector search):\n{candidates_block}\n\n"
+        f"Candidate PK columns ({source}):\n{candidates_block}\n\n"
         "Which candidate does this FK column reference? "
         "Return its exact column_id value, or null if none are a confident match."
     )
 
     result = invoke_with_structured_output(
         get_llm_client(max_tokens=4096),
-        [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
+        [SystemMessage(content=system_prompt), HumanMessage(content=human_text)],
         FkHitSelection,
     )
     if result is None:

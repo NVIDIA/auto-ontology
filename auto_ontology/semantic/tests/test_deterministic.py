@@ -8,19 +8,21 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from auto_ontology.semantic.deterministic import (
     column_attribute_specs,
+    fill_missing_column_descriptions,
     fk_source_columns,
     fk_target_table_names,
+    lacks_description,
     to_term_name,
 )
 
+_MODULE = "auto_ontology.semantic.deterministic"
 
-@patch(
-    "auto_ontology.semantic.deterministic._generate_column_descriptions",
-    return_value={},
-)
-def test_excludes_suggested_fk_columns(_mock_desc) -> None:
+
+def test_excludes_suggested_fk_columns() -> None:
     columns = [
         {"name": "id", "data_type": "integer"},
         {"name": "vendor_id", "data_type": "integer"},
@@ -34,11 +36,7 @@ def test_excludes_suggested_fk_columns(_mock_desc) -> None:
     assert {s.source_column for s in specs} == {"id", "amount"}
 
 
-@patch(
-    "auto_ontology.semantic.deterministic._generate_column_descriptions",
-    return_value={},
-)
-def test_excludes_fk_columns(_mock_desc) -> None:
+def test_excludes_fk_columns() -> None:
     columns = [
         {"name": "id", "data_type": "integer"},
         {"name": "customer_id", "data_type": "integer"},
@@ -50,48 +48,72 @@ def test_excludes_fk_columns(_mock_desc) -> None:
     assert fk_source_columns(fks) == {"customer_id"}
 
 
-@patch(
-    "auto_ontology.semantic.deterministic._generate_column_descriptions",
-    return_value={"amount": "The monetary amount of the order."},
-)
-def test_llm_description_used_as_fallback(_mock_desc) -> None:
+def test_a_spec_carries_the_columns_own_description_only() -> None:
     columns = [
-        {"name": "id", "data_type": "integer", "description": "Primary key."},
-        {"name": "amount", "data_type": "numeric"},
+        {"name": "id", "data_type": "integer", "description": " Primary key. "},
+        {"name": "status", "data_type": "text", "description": "STATUS"},
+        {
+            "name": "amount",
+            "data_type": "numeric",
+            "description": "Borrowed from the attribute",
+            "own_description": None,
+        },
     ]
     specs = {s.source_column: s for s in column_attribute_specs(columns, [])}
-    # Existing description wins over the LLM one.
-    assert specs["id"].description == "Primary key."
-    # LLM description fills in when the column has none.
-    assert specs["amount"].description == "The monetary amount of the order."
+    assert specs["id"].column_description == "Primary key."
+    assert specs["status"].column_description is None
+    assert specs["amount"].column_description is None
 
 
-@patch(
-    "auto_ontology.semantic.deterministic._generate_column_descriptions",
-    return_value={},
+@pytest.mark.parametrize(
+    ("col", "lacks"),
+    [
+        ({"name": "amount"}, True),
+        ({"name": "amount", "description": "  "}, True),
+        ({"name": "order_id", "description": "ORDER_ID"}, True),
+        ({"name": "amount", "description": "Total paid"}, False),
+        ({"name": "amount", "description": "Total paid", "own_description": ""}, True),
+    ],
 )
-def test_date_column_description_states_stored_notation(_mock_desc) -> None:
+def test_lacks_description(col: dict, lacks: bool) -> None:
+    assert lacks_description(col) is lacks
+
+
+def test_fill_stores_only_undocumented_columns_and_refreshes_them() -> None:
     columns = [
-        {
-            "name": "game_date",
-            "data_type": "text",
-            "description": "Date the match was played.",
-        }
+        {"id": "c1", "name": "id", "data_type": "integer", "description": "Key"},
+        {"id": "c2", "name": "amount", "data_type": "numeric"},
+        {"id": "c3", "name": "note", "data_type": "text", "description": "note"},
     ]
-    profiling = {"game_date": {"format": "YYMMDD", "sample_values": []}}
-    specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
-    assert specs[0].description == ("Date the match was played. — format: YYMMDD")
+    with (
+        patch(
+            f"{_MODULE}._generate_column_descriptions",
+            return_value={"amount": "Total paid.", "note": "Free-text remark."},
+        ) as generate,
+        patch(f"{_MODULE}.store_column_descriptions", return_value=["c2"]) as store,
+        patch(f"{_MODULE}.refresh_catalog_embeddings") as refresh,
+    ):
+        written = fill_missing_column_descriptions("t1", columns)
+
+    assert [c["name"] for c in generate.call_args.args[0]] == ["amount", "note"]
+    store.assert_called_once_with(
+        "t1", {"amount": "Total paid.", "note": "Free-text remark."}
+    )
+    # Only what the store accepted is reflected back onto the column dicts.
+    assert written == ["amount"]
+    assert columns[1]["description"] == "Total paid."
+    assert columns[2]["description"] == "note"
+    refresh.assert_called_once_with(["c2", "t1"])
 
 
-@patch(
-    "auto_ontology.semantic.deterministic._generate_column_descriptions",
-    return_value={"game_date": "When the match took place."},
-)
-def test_llm_date_description_also_gets_the_notation(_mock_desc) -> None:
-    columns = [{"name": "game_date", "data_type": "date"}]
-    profiling = {"game_date": {"format": "YYYY-MM-DD"}}
-    specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
-    assert specs[0].description == ("When the match took place. — format: YYYY-MM-DD")
+def test_fill_without_undocumented_columns_calls_nothing() -> None:
+    columns = [{"id": "c1", "name": "id", "description": "Key"}]
+    with (
+        patch(f"{_MODULE}._generate_column_descriptions", return_value={}),
+        patch(f"{_MODULE}.store_column_descriptions") as store,
+    ):
+        assert fill_missing_column_descriptions("t1", columns) == []
+    store.assert_not_called()
 
 
 def test_to_term_name() -> None:
