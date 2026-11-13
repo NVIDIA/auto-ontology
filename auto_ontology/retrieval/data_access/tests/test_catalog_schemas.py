@@ -280,3 +280,39 @@ def test_column_index_follows_a_replaced_frame(catalog: _Catalog) -> None:
     ].copy()
 
     assert schema.column_names_by_table()["customers"] == ("customer_id",)
+
+
+def test_reused_sqlglot_schema_does_not_grow_with_parses(catalog: _Catalog) -> None:
+    """A worker parses for days; per-query lookups must not accumulate.
+
+    Measured over every dict sqlglot keeps on the schema except the catalog
+    mapping itself, so a later sqlglot that renames or adds a memo table fails
+    here instead of leaking quietly.
+    """
+    shared = graph_schemas.get_catalog_schemas()
+
+    def parse(index: int) -> None:
+        sql = (
+            f"SELECT o{index}.total, c{index}.name FROM orders o{index} "
+            f"JOIN customers c{index} ON o{index}.customer_id = c{index}.customer_id"
+        )
+        with graph_schemas.catalog_schemas_lock:
+            extract_tables_and_columns(
+                sql=sql, dialects=["postgres"], all_schemas=shared
+            )
+
+    def retained() -> int:
+        schema = shared._qualify_schemas["postgres"]
+        return sum(
+            len(value)
+            for name, value in vars(schema).items()
+            if isinstance(value, dict) and name not in ("mapping", "udf_mapping")
+        )
+
+    for index in range(5):
+        parse(index)
+    after_a_few = retained()
+    for index in range(5, 300):
+        parse(index)
+
+    assert retained() == after_a_few

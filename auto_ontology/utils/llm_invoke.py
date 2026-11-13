@@ -213,13 +213,19 @@ class _TimeoutSession(_requests.Session):
 
     * Connections idle for longer than ``max_idle`` are closed before the next
       request, so one the far end has probably dropped is not written to.
-    * A request on a reused session that fails to connect *immediately* is
-      sent once more on a new connection. Immediately is the whole condition:
-      a connection that was already closed fails within a round trip, whereas
-      a failure seconds in means the endpoint received the request and broke
-      off while answering -- the failure a fresh session would have had too,
-      which is left to the caller's retry policy exactly as before. Timeouts
-      are never resent, whichever exception they arrive as.
+    * A request on a reused session that fails with a connection error within
+      a second is sent once more on a new connection. urllib3 already
+      discards a pooled connection the far end has visibly closed; this covers
+      the far end closing it in the moment between that check and the write.
+      The window is a heuristic, not proof the request was never delivered:
+      an endpoint that reads a request and drops the connection within a
+      second gets it twice. That is the deliberate side to err on. Without the
+      resend, the lost race reaches the caller as an error its retry policy
+      does not retry, and the call falls back to another model or returns
+      nothing -- a worse answer, where the resend costs one generation. A
+      failure later than a second is left to the caller exactly as a fresh
+      session's would be, and timeouts are never resent, whichever exception
+      they arrive as.
     * No cookie is ever stored. A one-shot session never sent any, and one set
       by a load balancer would otherwise pin every later call to one backend.
     """

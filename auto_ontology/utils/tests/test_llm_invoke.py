@@ -515,6 +515,9 @@ class _Endpoint:
         endpoint = self
         self.connections: list[tuple[str, int]] = []
         self.cookies: list[str | None] = []
+        # When set, the next request is read in full and recorded, and the
+        # connection is then closed without a response.
+        self.drop_next = False
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -523,6 +526,10 @@ class _Endpoint:
                 self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 endpoint.connections.append(self.client_address)
                 endpoint.cookies.append(self.headers.get("Cookie"))
+                if endpoint.drop_next:
+                    endpoint.drop_next = False
+                    self.close_connection = True
+                    return
                 body = b"{}"
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -634,6 +641,27 @@ def test_a_failure_while_the_endpoint_was_answering_is_not_resent(
         session.post(endpoint.url, json={})
 
     assert session.sends == 2
+
+
+def test_a_request_dropped_right_after_delivery_is_sent_twice(
+    endpoint: _Endpoint,
+) -> None:
+    """The documented cost of the resend: the window cannot see delivery.
+
+    The endpoint reads the whole request and closes without answering, inside
+    the window, which is indistinguishable from a connection closed just
+    before the write. The request is delivered twice and the call succeeds,
+    where without the resend it would have failed outright.
+    """
+    session = llm_invoke._TimeoutSession(5)
+    session.post(endpoint.url, json={})
+    endpoint.drop_next = True
+
+    response = session.post(endpoint.url, json={"q": 1})
+
+    assert response.status_code == 200
+    assert len(endpoint.connections) == 3
+    assert len(set(endpoint.connections)) == 2
 
 
 def test_first_request_connection_failure_is_not_retried(endpoint: _Endpoint) -> None:

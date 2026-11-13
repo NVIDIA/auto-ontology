@@ -228,6 +228,16 @@ def _build_schema_dict(all_schemas: dict) -> dict[str, dict[str, str]]:
     return schema
 
 
+# Memo tables sqlglot's MappingSchema fills during a parse, keyed by the query's
+# own table expressions (aliases included) and names. They are lookups only:
+# clearing one makes the next lookup recompute what it would have returned.
+_MAPPING_SCHEMA_QUERY_CACHES = (
+    "_normalized_table_cache",
+    "_find_cache",
+    "_normalized_name_cache",
+)
+
+
 def _qualify_schema(
     all_schemas: dict, schema_dict: dict[str, dict[str, str]], dialect: str
 ) -> "MappingSchema | dict[str, dict[str, str]]":
@@ -238,6 +248,12 @@ def _qualify_schema(
     untouched. For a :class:`SchemaCatalog` that object is built once per
     dialect here, by that exact call, and reused; sqlglot only reads from it.
     Everything else gets the mapping, as before.
+
+    A reused one has its per-query memo tables emptied first. sqlglot keys them
+    by the parsed query's table expressions, so a schema kept for the life of a
+    worker would otherwise hold an entry for every alias any query ever used:
+    2,000 parses left 4,000 entries in each. What is worth keeping -- the
+    catalog mapping, normalised once at construction -- is not among them.
     """
     if not isinstance(all_schemas, SchemaCatalog) or not schema_dict:
         return schema_dict
@@ -245,6 +261,11 @@ def _qualify_schema(
     if cached is None:
         cached = MappingSchema(schema_dict, dialect=dialect)
         all_schemas._qualify_schemas[dialect] = cached
+    else:
+        for name in _MAPPING_SCHEMA_QUERY_CACHES:
+            memo = getattr(cached, name, None)
+            if isinstance(memo, dict):
+                memo.clear()
     return cached
 
 

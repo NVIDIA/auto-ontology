@@ -215,7 +215,11 @@ class PostgresVDB:
         return self._engine
 
     def _table_exists(self) -> bool:
-        with psycopg.connect(self.connection_string) as conn:
+        # Bounded like every other direct Postgres connection in the repo: a
+        # blackholed database drops packets rather than refusing them, and an
+        # unbounded connect would hang the caller instead of failing. The
+        # chat worker reaches this from its warm-up, before reading questions.
+        with psycopg.connect(self.connection_string, connect_timeout=3) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """

@@ -13,6 +13,7 @@ answer, and if a failed or blank request is never mistaken for one.
 from __future__ import annotations
 
 import threading
+from concurrent.futures import Future
 from typing import Any
 
 import pytest
@@ -171,8 +172,31 @@ def test_concurrent_waiters_see_the_owners_failure(embedder: _Embedder) -> None:
     assert all("503" in str(error) for error in errors)
 
 
-def test_a_vector_that_cannot_be_packed_is_passed_on_and_strands_nobody() -> None:
+class _CountingFuture(Future):
+    """A Future that counts the threads blocked on its result."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = 0
+        self._count_lock = threading.Lock()
+
+    def result(self, timeout: float | None = None) -> Any:
+        with self._count_lock:
+            self.waiting += 1
+        return super().result(timeout)
+
+
+def test_a_vector_that_cannot_be_packed_is_passed_on_and_strands_nobody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Whatever the endpoint returned still reaches the store, and every waiter."""
+    futures: list[_CountingFuture] = []
+
+    def make_future() -> _CountingFuture:
+        futures.append(_CountingFuture())
+        return futures[-1]
+
+    monkeypatch.setattr(retriever_mod, "Future", make_future)
     cache = _QueryEmbeddingCache(8)
     gate = threading.Event()
     odd = [[0.1, 0.2]]  # nested: not a flat list of numbers
@@ -190,14 +214,21 @@ def test_a_vector_that_cannot_be_packed_is_passed_on_and_strands_nobody() -> Non
     ]
     for thread in threads:
         thread.start()
-    while not calls:
-        pass
+    # Release the owner only once the other two are blocked on its result, so
+    # none of them can arrive late and become an owner itself.
+    deadline = threading.Event()
+    for _ in range(500):
+        if futures and futures[0].waiting == 2:
+            break
+        deadline.wait(0.01)
+    assert futures and futures[0].waiting == 2
     gate.set()
     for thread in threads:
         thread.join(5)
 
     assert not any(thread.is_alive() for thread in threads)
     assert results == [odd, odd, odd]
+    assert len(calls) == 1
     # Not kept, so the next request asks again instead of reusing it.
     assert cache.get(("k",), compute) == odd
     assert len(calls) == 2
