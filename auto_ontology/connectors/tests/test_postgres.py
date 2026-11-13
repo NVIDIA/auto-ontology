@@ -17,11 +17,74 @@ Set up with::
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import pytest
+from psycopg.rows import tuple_row
 
 from auto_ontology.catalog.constants import TableTypes
+from auto_ontology.connectors.postgres import _fetch_frame
 from auto_ontology.connectors.registry import create_connector
+
+
+def test_fetch_frame_preserves_duplicate_column_values() -> None:
+    seen_row_factory: list[Any] = []
+
+    class _Cursor:
+        description = [("id",), ("id",), ("name",), ("name",)]
+
+        def __enter__(self) -> "_Cursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            return None
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return [(1, 100, "Ada", "first order")]
+
+    class _Conn:
+        def cursor(self, *, row_factory: Any = None) -> _Cursor:
+            seen_row_factory.append(row_factory)
+            return _Cursor()
+
+    result = _fetch_frame(
+        _Conn(),  # type: ignore[arg-type]
+        "SELECT c.id, o.id, c.name, o.name FROM customers c JOIN orders o ON o.customer_id = c.id",
+        None,
+    )
+
+    assert seen_row_factory == [tuple_row]
+    assert list(result.columns) == ["id", "id", "name", "name"]
+    assert result.values.tolist() == [[1, 100, "Ada", "first order"]]
+
+
+def test_fetch_frame_keeps_column_names_on_empty_result() -> None:
+    class _Cursor:
+        description = [("id",), ("name",)]
+
+        def __enter__(self) -> "_Cursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            return None
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return []
+
+    class _Conn:
+        def cursor(self, *, row_factory: Any = None) -> _Cursor:
+            return _Cursor()
+
+    result = _fetch_frame(_Conn(), "SELECT id, name FROM customers WHERE false", None)  # type: ignore[arg-type]
+
+    assert result.empty
+    assert list(result.columns) == ["id", "name"]
 
 
 @pytest.fixture(scope="module")
