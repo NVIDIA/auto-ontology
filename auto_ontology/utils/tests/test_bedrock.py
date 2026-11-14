@@ -36,6 +36,8 @@ class _FakeBedrock:
         self.meta = SimpleNamespace(region_name="ap-northeast-2")
         self.calls: list[Any] = []
         self.clients: list[tuple[str, str | None, float, int]] = []
+        # Results per rerank response, the rest behind a nextToken; None sends all.
+        self.rerank_page_size: int | None = None
 
     def invoke_model(self, *, modelId: str, body: str, **_: Any) -> dict[str, Any]:
         request = json.loads(body)
@@ -56,10 +58,21 @@ class _FakeBedrock:
             s["inlineDocumentSource"]["textDocument"]["text"]
             for s in request["sources"]
         ]
-        results = [
-            {"index": i, "relevanceScore": float(len(t))} for i, t in enumerate(texts)
-        ]
-        return {"results": sorted(results, key=lambda r: -r["relevanceScore"])}
+        results = sorted(
+            (
+                {"index": i, "relevanceScore": float(len(t))}
+                for i, t in enumerate(texts)
+            ),
+            key=lambda r: -r["relevanceScore"],
+        )
+        if self.rerank_page_size is None:
+            return {"results": results}
+        start = int(request.get("nextToken", "0"))
+        end = start + self.rerank_page_size
+        page: dict[str, Any] = {"results": results[start:end]}
+        if end < len(results):
+            page["nextToken"] = str(end)
+        return page
 
 
 @pytest.fixture
@@ -199,6 +212,18 @@ def test_rerank_scores_by_index_and_skips_blank_documents(fake: _FakeBedrock) ->
         "modelConfiguration": {"modelArn": _TOKYO_RERANK},
     }
     assert fake.clients == [("bedrock-agent-runtime", "ap-northeast-1", 30, 1)]
+
+
+def test_rerank_follows_next_token_through_every_page(fake: _FakeBedrock) -> None:
+    fake.rerank_page_size = 2
+
+    scores = bedrock.rerank_scores(
+        "q", ["a", "bbb", "cc", "dddd", " "], "bedrock/cohere.rerank-v3-5:0", timeout=30
+    )
+
+    assert scores == [1.0, 3.0, 2.0, 4.0, -math.inf]
+    assert [call.get("nextToken") for call in fake.calls] == [None, "2"]
+    assert fake.calls[0]["sources"] == fake.calls[1]["sources"]
 
 
 def test_a_plain_rerank_id_gets_an_arn_in_the_configured_region(

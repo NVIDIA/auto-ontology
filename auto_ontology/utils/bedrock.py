@@ -183,8 +183,8 @@ def rerank_scores(
 ) -> list[float]:
     """One relevance score per document, higher is better; ``-inf`` for a blank one.
 
-    Calls Bedrock's Rerank API once, without retrying: the caller picks the
-    fallback when it fails.
+    Calls Bedrock's Rerank API without retrying: the caller picks the fallback
+    when it fails.
     """
     resolved = model_id(model)
     client = _client(
@@ -198,9 +198,9 @@ def rerank_scores(
     scores = [-math.inf] * len(documents)
     sendable = [i for i, document in enumerate(documents) if document.strip()]
     for chunk in itertools.batched(sendable, _RERANK_MAX_SOURCES):
-        response = client.rerank(
-            queries=[{"type": "TEXT", "textQuery": {"text": query}}],
-            sources=[
+        request: dict[str, Any] = {
+            "queries": [{"type": "TEXT", "textQuery": {"text": query}}],
+            "sources": [
                 {
                     "type": "INLINE",
                     "inlineDocumentSource": {
@@ -210,14 +210,22 @@ def rerank_scores(
                 }
                 for i in chunk
             ],
-            rerankingConfiguration={
+            "rerankingConfiguration": {
                 "type": "BEDROCK_RERANKING_MODEL",
                 "bedrockRerankingConfiguration": {
                     "numberOfResults": len(chunk),
                     "modelConfiguration": {"modelArn": arn},
                 },
             },
-        )
-        for result in response["results"]:
-            scores[chunk[result["index"]]] = float(result["relevanceScore"])
+        }
+        # A response holds only as many results as fit, and its nextToken
+        # resumes the same request. A result's index is its position in
+        # sources on every page.
+        while True:
+            response = client.rerank(**request)
+            for result in response["results"]:
+                scores[chunk[result["index"]]] = float(result["relevanceScore"])
+            if not response.get("nextToken"):
+                break
+            request["nextToken"] = response["nextToken"]
     return scores
