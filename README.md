@@ -225,8 +225,9 @@ flowchart LR
   be -.-> kumo
 ```
 
-Clients reach Auto-Ontology only through the web app on port 3000; the MCP
-server calls the same public API. Full pipeline detail, with tool-flow diagrams
+Browser and API clients reach Auto-Ontology through the web app on port 3000.
+MCP clients connect to the MCP server on port 3003, which calls that same
+public API. Full pipeline detail, with tool-flow diagrams
 for generating an ontology and answering a question:
 [docs/architecture.md](./docs/architecture.md).
 
@@ -324,7 +325,8 @@ Use **Settings → Import / Export**, or `POST /api/model/import` and
 Keep ports 3001 and 3002 on a private network. FastAPI trusts the user identity
 the frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
 service's endpoints (ingest, delete, reset, compile) have no authentication of
-their own. Clients go through the web app on port 3000.
+their own. Browser and API clients go through the web app on port 3000, and
+MCP clients through the MCP server on port 3003.
 
 ## Use it from your agent
 
