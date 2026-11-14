@@ -17,6 +17,7 @@ import base64
 import copy
 import math
 import os
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -1568,3 +1569,27 @@ def test_a_query_started_after_the_deadline_is_still_interrupted(
     with pytest.raises(StatementTimeout):
         connector.execute("SELECT 1", timeout_s=0.3)
     assert time.monotonic() - started < 3
+
+
+def test_a_stalling_server_never_ties_up_more_than_a_few_threads(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    def outstanding() -> int:
+        return sum(
+            1
+            for thread in threading.enumerate()
+            if thread.name == "mongodb-call" and thread.is_alive()
+        )
+
+    already = outstanding()
+    server.reject_time_limits = True
+    server.sample_delay = 1.0  # every sample stalls well past its statement
+    for _ in range(12):
+        started = time.monotonic()
+        with pytest.raises(StatementTimeout):
+            connector.execute("SELECT COUNT(*) FROM orders", timeout_s=0.05)
+        assert time.monotonic() - started < 0.5
+        assert outstanding() - already <= mongodb._MAX_WORKER_CALLS
+    # The calls that never got a slot were never started either.
+    sampled = [call for call in server.calls if call[0] == "aggregate"]
+    assert len(sampled) <= mongodb._MAX_WORKER_CALLS + 1

@@ -139,6 +139,11 @@ _SERVER_SELECTION_TIMEOUT_MS = 10_000
 _SOCKET_TIMEOUT_MS = 120_000
 # Collections sampled at once when the whole database is introspected.
 _SAMPLING_WORKERS = 8
+# Calls a connector may have running on worker threads for servers that refuse
+# maxTimeMS; see _within. One a statement stopped waiting for keeps its thread
+# and its connection until it ends by itself, up to socketTimeoutMS -- so a
+# server that keeps stalling would otherwise collect one per statement.
+_MAX_WORKER_CALLS = 4
 
 _CONNECTOR_OPTIONS = frozenset({"sample_size", "max_documents", "tls_ca_data"})
 
@@ -923,6 +928,12 @@ class _Deadline:
         if self.timeout_s is not None:
             self.remaining_ms()
 
+    def seconds_left(self) -> float | None:
+        """Seconds left, never below zero; ``None`` without a timeout."""
+        if self.timeout_s is None:
+            return None
+        return max(0.0, self.started + self.timeout_s - time.monotonic())
+
     def spent_by(self, exc: PyMongoError) -> bool:
         """Whether *exc* is this deadline running out.
 
@@ -1261,6 +1272,7 @@ class MongoDBDatabase(SQLDatabase):
         # Elastic DocumentDB clusters reject maxTimeMS. Learned from the first
         # rejection; the client-side deadline still applies without it.
         self._server_time_limits = True
+        self._worker_slots = threading.BoundedSemaphore(_MAX_WORKER_CALLS)
         self._lock = threading.Lock()
         self._relations: dict[str, bool] = {}
         self._relations_at: float | None = None
@@ -1552,7 +1564,9 @@ class MongoDBDatabase(SQLDatabase):
             try:
                 with scope:
                     if deadline.timeout_s is not None and not self._server_time_limits:
-                        return _within(deadline, lambda: operation(limit))
+                        return _within(
+                            deadline, self._worker_slots, lambda: operation(limit)
+                        )
                     return operation(limit)
             except ExecutionTimeout:
                 raise
@@ -2007,14 +2021,28 @@ class _Watchdog:
             self._thread.join()
 
 
-def _within(deadline: _Deadline, call: Callable[[], Any]) -> Any:
+def _within(
+    deadline: _Deadline, slots: threading.BoundedSemaphore, call: Callable[[], Any]
+) -> Any:
     """Run *call* on a worker thread, and stop waiting for it at the deadline.
 
     For servers that refuse maxTimeMS nothing else can end a call blocked on
     a socket in time. The abandoned call finishes on its own -- a fetch at its
     next document, since it checks the deadline, a stalled read at
     ``socketTimeoutMS`` -- and its result is dropped.
+
+    Each call holds one of *slots* until it ends, abandoned or not, so a
+    stalling server ties up at most :data:`_MAX_WORKER_CALLS` threads. Waiting
+    for a slot counts against the statement, and a call whose statement ran
+    out while it waited is never started.
     """
+    if not slots.acquire(timeout=deadline.remaining_ms() / 1000):
+        raise StatementTimeout(deadline.timeout_s or 0.0)
+    try:
+        deadline.check()
+    except StatementTimeout:
+        slots.release()
+        raise
     outcome: dict[str, Any] = {}
 
     def run() -> None:
@@ -2022,10 +2050,12 @@ def _within(deadline: _Deadline, call: Callable[[], Any]) -> Any:
             outcome["value"] = call()
         except BaseException as exc:  # noqa: BLE001 -- re-raised below
             outcome["error"] = exc
+        finally:
+            slots.release()
 
     worker = threading.Thread(target=run, name="mongodb-call", daemon=True)
     worker.start()
-    worker.join(deadline.remaining_ms() / 1000)
+    worker.join(deadline.seconds_left())
     if worker.is_alive():
         raise StatementTimeout(deadline.timeout_s or 0.0)
     if "error" in outcome:
