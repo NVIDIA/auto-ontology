@@ -23,6 +23,8 @@ export default defineConfig({
 		// lets the connection's search_path decide where it lands; without this
 		// the tables follow the server default, which resolves `"$user"` to the
 		// `auto_ontology` schema because the role is also called `auto_ontology`.
-		url: `postgresql://${user}:${password}@${host}:${port}/${database}?schema=frontend`,
+		// Credentials are percent-encoded so a password with `@`, `:`, `/` or a
+		// space doesn't split the URL.
+		url: `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}?schema=frontend`,
 	},
 });
