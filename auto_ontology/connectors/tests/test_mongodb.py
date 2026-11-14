@@ -259,6 +259,8 @@ class FakeServer:
     list_error: Exception | None = None
     find_error: Exception | None = None
     sample_delay: float = 0.0
+    # Holds every $sample until set, like a read that never times out.
+    sample_gate: threading.Event | None = None
     delay: float = 0.0
     # Seconds of the pymongo.timeout() scope an operation runs in, if any.
     scope: float | None = None
@@ -290,6 +292,8 @@ class FakeCollection:
         )
         self._server.check_time_limit(options.get("maxTimeMS"))
         time.sleep(self._server.sample_delay)
+        if self._server.sample_gate is not None:
+            self._server.sample_gate.wait(10)  # bounded, so a failure cannot hang
         if self._server.sample_error is not None:
             raise self._server.sample_error
         (stage,) = pipeline
@@ -470,6 +474,8 @@ def test_connector_options_never_reach_pymongo(server: FakeServer) -> None:
         assert options["tls"] is True
         assert options["appname"] == "auto-ontology"
         assert options["serverSelectionTimeoutMS"] == 10_000
+        assert options["socketTimeoutMS"] == 120_000
+        assert options["waitQueueTimeoutMS"] == 120_000
         assert options["uuidRepresentation"] == "standard"
         ca_file = options["tlsCAFile"]
         with open(ca_file, "rb") as handle:
@@ -485,13 +491,17 @@ def test_settings_in_the_url_win_over_the_connector_defaults(
 ) -> None:
     connector = MongoDBDatabase(
         "mongodb://h/shop?appName=reports&serverSelectionTimeoutMS=500"
-        "&uuidRepresentation=javaLegacy"
+        "&uuidRepresentation=javaLegacy&socketTimeoutMS=0&waitQueueTimeoutMS=0"
     )
     connector.close()
     _, options = server.client_args
-    assert not {"appname", "serverSelectionTimeoutMS", "uuidRepresentation"} & set(
-        options
-    )
+    assert not {
+        "appname",
+        "serverSelectionTimeoutMS",
+        "uuidRepresentation",
+        "socketTimeoutMS",
+        "waitQueueTimeoutMS",
+    } & set(options)
 
 
 @pytest.mark.parametrize(
@@ -1571,25 +1581,53 @@ def test_a_query_started_after_the_deadline_is_still_interrupted(
     assert time.monotonic() - started < 3
 
 
+def _outstanding_calls() -> list[threading.Thread]:
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread.name == "mongodb-call" and thread.is_alive()
+    ]
+
+
 def test_a_stalling_server_never_ties_up_more_than_a_few_threads(
     server: FakeServer, connector: MongoDBDatabase
 ) -> None:
-    def outstanding() -> int:
-        return sum(
-            1
-            for thread in threading.enumerate()
-            if thread.name == "mongodb-call" and thread.is_alive()
-        )
-
-    already = outstanding()
+    already = set(_outstanding_calls())
     server.reject_time_limits = True
-    server.sample_delay = 1.0  # every sample stalls well past its statement
-    for _ in range(12):
-        started = time.monotonic()
-        with pytest.raises(StatementTimeout):
-            connector.execute("SELECT COUNT(*) FROM orders", timeout_s=0.05)
-        assert time.monotonic() - started < 0.5
-        assert outstanding() - already <= mongodb._MAX_WORKER_CALLS
-    # The calls that never got a slot were never started either.
-    sampled = [call for call in server.calls if call[0] == "aggregate"]
-    assert len(sampled) <= mongodb._MAX_WORKER_CALLS + 1
+    # Every sample stalls until the assertions are done, the way a read with
+    # socketTimeoutMS=0 would: no slot comes back on its own.
+    server.sample_gate = threading.Event()
+    try:
+        for _ in range(12):
+            started = time.monotonic()
+            with pytest.raises(StatementTimeout):
+                connector.execute("SELECT COUNT(*) FROM orders", timeout_s=0.05)
+            assert time.monotonic() - started < 0.5
+            assert len(set(_outstanding_calls()) - already) <= (
+                mongodb._MAX_WORKER_CALLS
+            )
+        # The calls that never got a slot never reached the server.
+        sampled = [call for call in server.calls if call[0] == "aggregate"]
+        assert len(sampled) == mongodb._MAX_WORKER_CALLS
+    finally:
+        server.sample_gate.set()
+        for thread in set(_outstanding_calls()) - already:
+            thread.join(5)
+
+
+def test_a_worker_that_cannot_start_gives_its_slot_back(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class Unstartable(threading.Thread):
+        def start(self) -> None:
+            if self.name == "mongodb-call":
+                raise RuntimeError("can't start new thread")
+            super().start()
+
+    monkeypatch.setattr(mongodb.threading, "Thread", Unstartable)
+    slots = threading.BoundedSemaphore(mongodb._MAX_WORKER_CALLS)
+    deadline = mongodb._Deadline(time.monotonic(), 5.0)
+    for _ in range(mongodb._MAX_WORKER_CALLS + 2):
+        with pytest.raises(RuntimeError, match="can't start"):
+            mongodb._within(deadline, slots, lambda: None)
+    assert all(slots.acquire(blocking=False) for _ in range(mongodb._MAX_WORKER_CALLS))

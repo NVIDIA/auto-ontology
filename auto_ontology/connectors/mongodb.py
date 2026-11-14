@@ -137,6 +137,9 @@ _SERVER_SELECTION_TIMEOUT_MS = 10_000
 # stops answering. Longer than the sample's time limit, so a slow sample still
 # ends with the server's error rather than a dropped socket.
 _SOCKET_TIMEOUT_MS = 120_000
+# PyMongo also waits for a free pooled connection forever by default. The same
+# bound, for the same calls. A URL that sets either value wins, 0 included.
+_WAIT_QUEUE_TIMEOUT_MS = 120_000
 # Collections sampled at once when the whole database is introspected.
 _SAMPLING_WORKERS = 8
 # Calls a connector may have running on worker threads for servers that refuse
@@ -1256,6 +1259,8 @@ class MongoDBDatabase(SQLDatabase):
             options["serverSelectionTimeoutMS"] = _SERVER_SELECTION_TIMEOUT_MS
         if not settings.uri_options & {"sockettimeoutms", "timeoutms"}:
             options["socketTimeoutMS"] = _SOCKET_TIMEOUT_MS
+        if not settings.uri_options & {"waitqueuetimeoutms", "timeoutms"}:
+            options["waitQueueTimeoutMS"] = _WAIT_QUEUE_TIMEOUT_MS
         if settings.tls_ca_pem is not None:
             self._ca_file = _write_ca_file(settings.tls_ca_pem)
             options["tlsCAFile"] = self._ca_file
@@ -2032,9 +2037,10 @@ def _within(
     ``socketTimeoutMS`` -- and its result is dropped.
 
     Each call holds one of *slots* until it ends, abandoned or not, so a
-    stalling server ties up at most :data:`_MAX_WORKER_CALLS` threads. Waiting
-    for a slot counts against the statement, and a call whose statement ran
-    out while it waited is never started.
+    stalling server ties up at most :data:`_MAX_WORKER_CALLS` threads -- even
+    one a URL lets block for good with ``socketTimeoutMS=0``. Waiting for a
+    slot counts against the statement, and a call whose statement ran out
+    while it waited is never started.
     """
     if not slots.acquire(timeout=deadline.remaining_ms() / 1000):
         raise StatementTimeout(deadline.timeout_s or 0.0)
@@ -2053,8 +2059,13 @@ def _within(
         finally:
             slots.release()
 
-    worker = threading.Thread(target=run, name="mongodb-call", daemon=True)
-    worker.start()
+    try:
+        worker = threading.Thread(target=run, name="mongodb-call", daemon=True)
+        worker.start()
+    except BaseException:
+        # The worker never ran, so its own release never will.
+        slots.release()
+        raise
     worker.join(deadline.seconds_left())
     if worker.is_alive():
         raise StatementTimeout(deadline.timeout_s or 0.0)
