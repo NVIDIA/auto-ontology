@@ -227,7 +227,7 @@ flowchart LR
 
 Clients reach Auto-Ontology only through the web app on port 3000; the MCP
 server calls the same public API. Full pipeline detail, with tool-flow diagrams
-for generating an ontology and answering a question, now and next:
+for generating an ontology and answering a question:
 [docs/architecture.md](./docs/architecture.md).
 
 Auto-Ontology works in two stages: it generates an ontology that people
@@ -251,9 +251,11 @@ on in **Settings → Semantic Compilation**.
   PII if you turn on PII detection; embed tables and columns in pgvector.
 - **Per table:** profile values with SQL. A model finds foreign key candidates
   and junction tables, writes column descriptions, and names the terms.
-- **Across tables:** link foreign keys to the terms they reference and drop
-  links whose columns share no values. A model suggests SQL attributes from
-  query history and for bridge tables.
+- **Across tables:** group copies of a schema into term families, and link
+  foreign keys to the terms they reference, keeping an inferred link only when
+  the data confirms it. A model attaches foreign key columns left unlinked,
+  suggests SQL attributes from query history and for bridge tables, and
+  describes each column attribute.
 - **Output:** the ontology in Postgres with embeddings in pgvector, which you
   can import or export as Ossie YAML.
 - **Certify:** test the draft with real questions in Chat, or with
@@ -273,7 +275,7 @@ its description, related terms, mapped columns, and SQL attributes:
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
 </p>
 
-**Answer.** Today the agent runs the same steps for every question:
+**Answer.** The agent runs the same steps for every question:
 
 - **Classify:** a model labels the intent and separates any evidence written
   into the question.
@@ -292,11 +294,8 @@ If no valid query comes out, the agent reports that the question can't be
 answered from this data. Predictive questions go to KumoRFM when
 `KUMO_RFM_API_URL` is set (see [Predictions](#predictions)).
 
-Next, a ReAct agent in development replaces these fixed steps with a loop in
-which the reasoning model picks its own tools: `retrieve` to search the
-ontology, `run_sql` to check and test queries, and `submit` to answer. The
-[Answer tool flows](./docs/architecture.md#answer-a-question-now-fixed-chain)
-show both, now and next.
+The [Answer tool flow](./docs/architecture.md#answer-a-question) shows
+every step, with the model or SQL each one uses.
 
 In Chat, each answer shows its SQL, and you can view the rows, download them as
 CSV, or read them as a chart:
