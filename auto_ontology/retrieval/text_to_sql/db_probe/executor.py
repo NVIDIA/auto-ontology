@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import sqlglot
+from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -77,11 +79,34 @@ def _ensure_limit(sql: str, max_rows: int, dialect: str | None = None) -> str:
     if dialect == "tsql":
         try:
             expression = sqlglot.parse_one(stripped, read="tsql")
-            if expression.args.get("limit") is None:
-                expression = expression.limit(max_rows)
+        except SqlglotError as exc:
+            raise ValueError(f"could not apply SQL Server row cap: {exc}") from exc
+
+        limit = expression.args.get("limit")
+        if limit is None:
+            if expression.args.get("offset") is not None:
+                raise ValueError(
+                    "could not apply SQL Server row cap to OFFSET without FETCH"
+                )
+            expression = expression.limit(max_rows)
+        else:
+            options = limit.args.get("limit_options")
+            if options is not None and (
+                options.args.get("percent") or options.args.get("with_ties")
+            ):
+                raise ValueError(
+                    "SQL Server PERCENT and WITH TIES limits do not provide a hard row cap"
+                )
+            count_key = "count" if isinstance(limit, exp.Fetch) else "expression"
+            count = limit.args.get(count_key)
+            if not isinstance(count, exp.Literal) or not count.is_int:
+                raise ValueError("SQL Server probe limit must be an integer literal")
+            bounded_count = min(int(count.this), max_rows)
+            limit.set(count_key, exp.Literal.number(bounded_count))
+        try:
             return expression.sql(dialect="tsql")
-        except Exception:
-            return stripped
+        except SqlglotError as exc:
+            raise ValueError(f"could not apply SQL Server row cap: {exc}") from exc
     if _LIMIT_RE.search(stripped):
         return stripped
     return f"{stripped} LIMIT {max_rows}"
@@ -157,9 +182,17 @@ class ProbeExecutor:
             self.log.append(entry)
             return entry
 
-        bounded_sql = _ensure_limit(
-            sql, self.max_rows, getattr(self.connector, "dialect", None)
-        )
+        try:
+            bounded_sql = _ensure_limit(
+                sql, self.max_rows, getattr(self.connector, "dialect", None)
+            )
+        except ValueError as exc:
+            entry["error"] = str(exc)
+            logger.warning(
+                "Probe rejected because its row cap could not be applied: %s", exc
+            )
+            self.log.append(entry)
+            return entry
         entry["sql"] = bounded_sql
         self.calls += 1
 

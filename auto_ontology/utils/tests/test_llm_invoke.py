@@ -5,8 +5,10 @@
 """Tests for LLM invocation helpers."""
 
 import contextlib
+import sys
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -89,6 +91,58 @@ def test_openai_client_setting_selects_openai_adapter(
     monkeypatch.setenv("LLM_CLIENT", "openai")
 
     assert _use_openai_client("gpt-6.1-sol") is True
+
+
+def test_openai_client_forwards_temperature_for_compatible_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+    captured: dict[str, Any] = {}
+
+    def chat_openai(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setitem(
+        sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=chat_openai)
+    )
+
+    llm_invoke._build_client(
+        model="gpt-6.1-sol",
+        api_key="test-key",
+        base_url="https://api.example.test/v1",
+        temperature=0.25,
+        max_tokens=123,
+    )
+
+    assert captured["temperature"] == 0.25
+    assert captured["max_tokens"] == 123
+
+
+@pytest.mark.parametrize("model", ["gpt-5.4", "openai/o3-mini"])
+def test_openai_client_omits_temperature_for_reasoning_models(
+    monkeypatch: pytest.MonkeyPatch, model: str
+) -> None:
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+    captured: dict[str, Any] = {}
+
+    def chat_openai(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setitem(
+        sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=chat_openai)
+    )
+
+    llm_invoke._build_client(
+        model=model,
+        api_key="test-key",
+        base_url="https://api.example.test/v1",
+        temperature=0.25,
+        max_tokens=123,
+    )
+
+    assert "temperature" not in captured
 
 
 def test_nvidia_client_remains_the_default_adapter(
