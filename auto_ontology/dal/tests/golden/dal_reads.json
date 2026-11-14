@@ -4286,215 +4286,278 @@
       {
         "columns": [
           {
-            "data_type": "integer",
-            "description": "Primary key of customer.",
-            "format": null,
-            "is_nullable": false,
-            "name": "customer_id",
-            "sample_values": null,
-            "semantic_fk": "public.customer.customer_id"
-          },
-          {
-            "data_type": "integer",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "inventory_id",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "integer",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "rental_id",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "integer",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "staff_id",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "timestamp with time zone",
-            "description": "When the rental started.",
-            "format": null,
-            "is_nullable": false,
-            "name": "rental_date",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "timestamp with time zone",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "last_update",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "timestamp with time zone",
-            "description": null,
-            "format": null,
-            "is_nullable": true,
-            "name": "return_date",
-            "sample_values": null,
-            "semantic_fk": null
-          }
-        ],
-        "database_name": "pagila",
-        "description": "",
-        "id": "<table:pagila.public.rental>",
-        "label": "Table",
-        "name": "rental",
-        "pk": [
-          "rental_id"
-        ],
-        "schema_name": "public"
-      },
-      {
-        "columns": [
-          {
-            "data_type": "integer",
-            "description": "Primary key of film.",
-            "format": null,
-            "is_nullable": false,
-            "name": "film_id",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "integer",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "language_id",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "integer",
-            "description": null,
-            "format": null,
-            "is_nullable": true,
-            "name": "original_language_id",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
+            "attribute_description": "MPAA rating; an enum.",
             "data_type": "mpaa_rating",
             "description": "MPAA rating; an enum.",
+            "distinct_values": null,
             "format": null,
             "is_nullable": true,
+            "is_unique": null,
             "name": "rating",
             "sample_values": null,
             "semantic_fk": null
           },
           {
-            "data_type": "numeric",
-            "description": null,
+            "attribute_description": "Primary key of film.",
+            "data_type": "integer",
+            "description": "Primary key of film.",
+            "distinct_values": null,
             "format": null,
             "is_nullable": false,
-            "name": "rental_rate",
+            "is_unique": null,
+            "name": "film_id",
             "sample_values": null,
             "semantic_fk": null
           },
           {
-            "data_type": "numeric",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "replacement_cost",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "smallint",
-            "description": null,
-            "format": null,
-            "is_nullable": false,
-            "name": "rental_duration",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
-            "data_type": "smallint",
-            "description": null,
-            "format": null,
-            "is_nullable": true,
-            "name": "length",
-            "sample_values": null,
-            "semantic_fk": null
-          },
-          {
+            "attribute_description": "The film's title.",
             "data_type": "text",
             "description": "The film's title.",
+            "distinct_values": null,
             "format": null,
             "is_nullable": false,
+            "is_unique": null,
             "name": "title",
             "sample_values": null,
             "semantic_fk": null
           },
           {
-            "data_type": "text",
+            "attribute_description": null,
+            "data_type": "integer",
             "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "language_id",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "integer",
+            "description": null,
+            "distinct_values": null,
             "format": null,
             "is_nullable": true,
+            "is_unique": null,
+            "name": "original_language_id",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "numeric",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "rental_rate",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "numeric",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "replacement_cost",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "smallint",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "rental_duration",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "smallint",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": true,
+            "is_unique": null,
+            "name": "length",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "text",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": true,
+            "is_unique": null,
             "name": "description",
             "sample_values": null,
             "semantic_fk": null
           },
           {
+            "attribute_description": null,
             "data_type": "text[]",
             "description": null,
+            "distinct_values": null,
             "format": null,
             "is_nullable": true,
+            "is_unique": null,
             "name": "special_features",
             "sample_values": null,
             "semantic_fk": null
           },
           {
+            "attribute_description": null,
             "data_type": "timestamp with time zone",
             "description": null,
+            "distinct_values": null,
             "format": null,
             "is_nullable": false,
+            "is_unique": null,
             "name": "last_update",
             "sample_values": null,
             "semantic_fk": null
           },
           {
+            "attribute_description": null,
             "data_type": "tsvector",
             "description": null,
+            "distinct_values": null,
             "format": null,
             "is_nullable": false,
+            "is_unique": null,
             "name": "fulltext",
             "sample_values": null,
             "semantic_fk": null
           },
           {
+            "attribute_description": null,
             "data_type": "year",
             "description": null,
+            "distinct_values": null,
             "format": null,
             "is_nullable": true,
+            "is_unique": null,
             "name": "release_year",
             "sample_values": null,
             "semantic_fk": null
           }
         ],
         "database_name": "pagila",
-        "description": "",
+        "description": "A motion picture available for rental.",
         "id": "<table:pagila.public.film>",
         "label": "Table",
         "name": "film",
         "pk": [
           "film_id"
+        ],
+        "schema_name": "public"
+      },
+      {
+        "columns": [
+          {
+            "attribute_description": "When the rental started.",
+            "data_type": "timestamp with time zone",
+            "description": "When the rental started.",
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "rental_date",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "integer",
+            "description": "Primary key of customer.",
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "customer_id",
+            "sample_values": null,
+            "semantic_fk": "public.customer.customer_id"
+          },
+          {
+            "attribute_description": null,
+            "data_type": "integer",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "inventory_id",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "integer",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "rental_id",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "integer",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "staff_id",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "timestamp with time zone",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": false,
+            "is_unique": null,
+            "name": "last_update",
+            "sample_values": null,
+            "semantic_fk": null
+          },
+          {
+            "attribute_description": null,
+            "data_type": "timestamp with time zone",
+            "description": null,
+            "distinct_values": null,
+            "format": null,
+            "is_nullable": true,
+            "is_unique": null,
+            "name": "return_date",
+            "sample_values": null,
+            "semantic_fk": null
+          }
+        ],
+        "database_name": "pagila",
+        "description": "A single film rental transaction.",
+        "id": "<table:pagila.public.rental>",
+        "label": "Table",
+        "name": "rental",
+        "pk": [
+          "rental_id"
         ],
         "schema_name": "public"
       }

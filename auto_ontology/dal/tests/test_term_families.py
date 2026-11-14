@@ -239,3 +239,35 @@ def test_table_families_map_tables_through_their_terms(world) -> None:
         (new_rooms, "ROOMS"),
     }
     assert len({r["family_id"] for r in rows}) == 2
+
+
+def test_family_tags_name_twins_in_the_other_families_only(world) -> None:
+    db = world("shop")
+    v1_rooms = db.table("V1_ROOMS", ["ID"])
+    v2_rooms = db.table("V2_ROOMS", ["ID"])
+    v3_rooms = db.table("V3_ROOMS", ["ID"])
+    v1_staff = db.table("V1_STAFF", ["ID"])
+    hotels = db.table("HOTELS", ["ID"])
+    tf.replace_term_families(
+        db.name,
+        [
+            (
+                db.schema,
+                "V1",
+                {db.term_of(v1_rooms): "ROOMS", db.term_of(v1_staff): "STAFF"},
+            ),
+            (db.schema, "V2", {db.term_of(v2_rooms): "ROOMS"}),
+            (db.schema, "V3", {db.term_of(v3_rooms): "ROOMS"}),
+        ],
+    )
+
+    tags = tf.fetch_table_family_tags([v1_rooms, v1_staff, hotels])
+
+    assert set(tags) == {v1_rooms, v1_staff}
+    assert tags[v1_rooms]["family"] == "V1"
+    assert tags[v1_rooms]["twins"] == [
+        {"id": v2_rooms, "name": "V2_ROOMS", "schema_name": "dw", "family": "V2"},
+        {"id": v3_rooms, "name": "V3_ROOMS", "schema_name": "dw", "family": "V3"},
+    ]
+    assert tags[v1_staff] == {"family": "V1", "twins": []}
+    assert tf.fetch_table_family_tags([]) == {}

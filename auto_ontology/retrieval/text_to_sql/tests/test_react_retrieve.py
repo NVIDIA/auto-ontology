@@ -67,13 +67,17 @@ ATTRIBUTE_COLUMNS = {
 
 
 @pytest.fixture
-def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
-    """Stub every data-access call the tool makes, recording what it asked."""
-    seen: dict[str, list[Any]] = {
+def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Stub every data-access call the tool makes, recording what it asked.
+
+    ``family_tags`` is what the family read returns; a test fills it in.
+    """
+    seen: dict[str, Any] = {
         "meaning": [],
         "names": [],
         "name_scopes": [],
         "join": [],
+        "family_tags": {},
     }
     meaning_hits: dict[str, list[dict]] = {
         "how is revenue calculated": [REVENUE],
@@ -126,7 +130,16 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     monkeypatch.setattr(tool, "fetch_schema_ids_for_database", lambda _db: [])
     monkeypatch.setattr(tool, "expand_info", expand)
     monkeypatch.setattr(
-        tool, "fetch_tables_by_ids", lambda ids: [TABLES[i] for i in ids if i in TABLES]
+        tool,
+        "fetch_tables_by_ids",
+        lambda ids: [dict(TABLES[i]) for i in ids if i in TABLES],
+    )
+    monkeypatch.setattr(
+        tool,
+        "fetch_table_family_tags",
+        lambda ids: {
+            i: seen["family_tags"][i] for i in ids if i in seen["family_tags"]
+        },
     )
     monkeypatch.setattr(
         tool,
@@ -686,3 +699,80 @@ def test_a_lookup_copied_into_a_wide_table_is_not_a_sibling() -> None:
     }
 
     assert siblings.find_siblings(lookup, [wide]) == []
+
+
+def test_a_column_shows_its_attribute_description_over_its_own() -> None:
+    column = {
+        "name": "status",
+        "data_type": "TEXT",
+        "description": "Status",
+        "attribute_description": "Lifecycle stage of a customer account",
+    }
+
+    assert tool._column_line(column, set()) == (
+        "  status TEXT — Lifecycle stage of a customer account"
+    )
+    assert tool._column_line({**column, "attribute_description": None}, set()) == (
+        "  status TEXT — Status"
+    )
+
+
+def test_a_column_says_whether_it_is_the_key_or_unique() -> None:
+    column = {"name": "order_id", "data_type": "INT", "is_unique": True}
+
+    assert tool._column_line(column, {"order_id"}) == "  order_id INT — key"
+    assert tool._column_line(column, set()) == "  order_id INT — unique"
+
+
+def test_a_key_s_lowest_values_stand_in_only_for_missing_samples() -> None:
+    column = {"name": "code", "data_type": "TEXT", "distinct_values": ["A01", "A02"]}
+
+    assert tool._column_line(column, set()) == (
+        "  code TEXT — lowest values: 'A01', 'A02'"
+    )
+    assert tool._column_line({**column, "sample_values": ["B07"]}, set()) == (
+        "  code TEXT — values: 'B07'"
+    )
+
+
+def test_a_table_in_a_family_names_its_family_and_twins(calls: dict) -> None:
+    calls["family_tags"]["t-orders"] = {
+        "family": "NEW",
+        "twins": [
+            {
+                "id": "t-old-orders",
+                "name": "OLD_orders",
+                "schema_name": "sales",
+                "family": "OLD",
+            }
+        ],
+    }
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert "TABLE sales.orders [family NEW] — One row per order\n" in text
+    assert (
+        "  TWINS (the same table in another family): sales.OLD_orders [family OLD]"
+    ) in text
+    assert "order_id INT — key" in text
+
+
+def test_a_family_twin_is_not_also_named_as_similar(
+    calls: dict, with_siblings: CountingConnector
+) -> None:
+    calls["family_tags"]["t-orders"] = {
+        "family": "NEW",
+        "twins": [
+            {
+                "id": "t-orders-archive",
+                "name": "orders_archive",
+                "schema_name": "sales",
+                "family": "OLD",
+            }
+        ],
+    }
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert "TWINS (the same table in another family): sales.orders_archive" in text
+    assert "SIMILAR" not in text

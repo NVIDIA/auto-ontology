@@ -56,6 +56,7 @@ from auto_ontology.dal.datasources import (
     find_column_id_by_table_and_name,
 )
 from auto_ontology.dal.search import fetch_global_search, search_tokens
+from auto_ontology.dal.term_families import fetch_table_family_tags
 from auto_ontology.dal.terms import fetch_semantic_coverage, fetch_term_table_pairs
 from auto_ontology.retrieval.data_access.candidates import _get_candidates_information
 from auto_ontology.retrieval.text_to_sql.react import config
@@ -103,6 +104,8 @@ _NAME_SEARCH_LIMIT = 10
 _TERM_TABLE_LIMIT = 3
 _JOIN_PAIRS_PER_CALL = 10
 _MAX_DESCRIPTION_CHARS = 160
+#: An attribute description is one sentence of up to 30 words.
+_MAX_COLUMN_DESCRIPTION_CHARS = 240
 _MAX_DEFINITION_CHARS = 500
 _MAX_SAMPLE_VALUES = 5
 
@@ -323,13 +326,31 @@ def _sample_values(values: Any) -> str:
     return ", ".join(shown)
 
 
-def _column_line(column: dict) -> str:
-    parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
+def _keys(table: dict) -> set[str]:
+    return {str(k) for k in table.get("pk") or []}
+
+
+def _column_line(column: dict, keys: set[str]) -> str:
+    """One column: its key role, meaning, values, format and reference.
+
+    The attribute's description is preferred to the column's own: the column's
+    is kept short, the attribute's adds what the Term, table and references
+    around it say. A suspected key's lowest values stand in for samples only
+    when there are none, since they are the start of the column, not a sample.
+    """
+    name = str(column.get("name"))
+    parts = [f"  {name} {column.get('data_type') or ''}".rstrip()]
     details = []
-    if column.get("description"):
-        details.append(_clip(column["description"], _MAX_DESCRIPTION_CHARS))
+    if name in keys:
+        details.append("key")
+    elif column.get("is_unique"):
+        details.append("unique")
+    if description := column.get("attribute_description") or column.get("description"):
+        details.append(_clip(description, _MAX_COLUMN_DESCRIPTION_CHARS))
     if samples := _sample_values(column.get("sample_values")):
         details.append(f"values: {samples}")
+    elif lowest := _sample_values(column.get("distinct_values")):
+        details.append(f"lowest values: {lowest}")
     if column.get("format"):
         details.append(f"format: {column['format']}")
     if column.get("semantic_fk"):
@@ -350,7 +371,7 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
     cap = config.max_columns_per_table()
     if len(columns) <= cap:
         return columns, 0
-    keys = {str(k) for k in table.get("pk") or []}
+    keys = _keys(table)
     lowered = {m.lower() for m in matched}
 
     def priority(column: dict) -> int:
@@ -367,10 +388,27 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
     return chosen, len(columns) - len(chosen)
 
 
-def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
+def _table_header(table: dict) -> str:
     header = f"TABLE {_qualified(table)}"
+    if table.get("family"):
+        header += f" [family {table['family']}]"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
+    return header
+
+
+def _twins_line(table: dict) -> str | None:
+    """The copies of *table* in the other families of its schema, if any."""
+    twins = table.get("twins") or []
+    if not twins:
+        return None
+    named = ", ".join(f"{_qualified(t)} [family {t.get('family')}]" for t in twins)
+    return f"  TWINS (the same table in another family): {named}"
+
+
+def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
+    header = _table_header(table)
+    keys = _keys(table)
     if seen_before:
         lowered = {m.lower() for m in matched}
         columns = [
@@ -379,9 +417,12 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
             if str(c.get("name")).lower() in lowered
         ]
         lines = [header + " (shown earlier; matched columns only)"]
-        return "\n".join(lines + [_column_line(c) for c in columns])
+        return "\n".join(lines + [_column_line(c, keys) for c in columns])
     columns, hidden = _shown_columns(table, matched)
-    lines = [header] + [_column_line(c) for c in columns]
+    lines = [header]
+    if twins := _twins_line(table):
+        lines.append(twins)
+    lines += [_column_line(c, keys) for c in columns]
     if hidden:
         lines.append(
             f"  … {hidden} more columns not shown; retrieve with a narrower query "
@@ -397,10 +438,8 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     matched ones, the key and the foreign keys -- without their descriptions,
     and says how to see the rest.
     """
-    header = f"TABLE {_qualified(table)}"
-    if table.get("description"):
-        header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
-    keys = {str(k) for k in table.get("pk") or []}
+    header = _table_header(table)
+    keys = _keys(table)
     lowered = {m.lower() for m in matched}
     columns = list(table.get("columns") or [])
     kept = [
@@ -411,6 +450,8 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
         or c.get("semantic_fk")
     ]
     lines = [header + " (shortened to fit)"]
+    if twins := _twins_line(table):
+        lines.append(twins)
     for column in kept:
         line = f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()
         if column.get("semantic_fk"):
@@ -616,6 +657,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # Filtered before the limit, so a table from another database never takes
     # the place of one from this database.
     fetched = {str(t["id"]): t for t in fetch_tables_by_ids(new_ids)}
+    for table_id, tags in fetch_table_family_tags(list(fetched)).items():
+        fetched[table_id].update(tags)
     found = [
         fetched[tid]
         for tid in new_ids

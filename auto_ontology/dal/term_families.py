@@ -10,6 +10,7 @@ decides what a family is.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -28,6 +29,8 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
+
+logger = logging.getLogger(__name__)
 
 
 def _database_schema_ids(database_name: str) -> Select:
@@ -173,6 +176,87 @@ def fetch_table_families(database_name: str) -> list[dict[str, Any]]:
         .order_by(s.table__term.c.table_id, s.term__term_family.c.family_id)
     )
     return [dict(row) for row in store().query_read(statement)]
+
+
+def _memberships() -> Select:
+    """Every (table, family) pair, with the family's schema, prefix and base name."""
+    return (
+        select(
+            s.table__term.c.table_id,
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+            s.term_family.c.id.label("family_id"),
+            s.term_family.c.schema_id,
+            s.term_family.c.prefix,
+            s.term__term_family.c.base_name,
+        )
+        .select_from(
+            s.table__term.join(
+                s.term__term_family,
+                s.term__term_family.c.term_id == s.table__term.c.term_id,
+            )
+            .join(s.term_family, s.term_family.c.id == s.term__term_family.c.family_id)
+            .join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .order_by(s.term_family.c.prefix, s.catalog_table.c.name)
+    )
+
+
+def fetch_table_family_tags(table_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """The family of each table in *table_ids*, and the table's twins.
+
+    ``{table_id: {"family": prefix, "twins": [{id, name, schema_name,
+    family}]}}``. Twins are the tables of the other families of the same
+    schema with the same base name -- pairs are not stored, so this is how
+    they are recovered. A table in several families takes the first prefix,
+    as :func:`attribute_family_prefix` does. A table in no family is absent.
+
+    Returns ``{}`` if a query fails: the tags decorate retrieval results, like
+    :func:`auto_ontology.dal.datasources.fetch_tables_by_ids`.
+    """
+    if not table_ids:
+        return {}
+    try:
+        mine = store().query_read(
+            _memberships().where(s.table__term.c.table_id.in_(list(table_ids)))
+        )
+        if not mine:
+            return {}
+        others = store().query_read(
+            _memberships().where(
+                s.term_family.c.schema_id.in_({r["schema_id"] for r in mine}),
+                s.term__term_family.c.base_name.in_({r["base_name"] for r in mine}),
+            )
+        )
+    except Exception:
+        logger.warning("fetch_table_family_tags: query failed", exc_info=True)
+        return {}
+    tags: dict[str, dict[str, Any]] = {}
+    for row in mine:
+        table_id = str(row["table_id"])
+        tag = tags.setdefault(table_id, {"family": row["prefix"], "twins": []})
+        for other in others:
+            twin_id = str(other["table_id"])
+            if (
+                other["family_id"] == row["family_id"]
+                or other["schema_id"] != row["schema_id"]
+                or other["base_name"] != row["base_name"]
+                or twin_id == table_id
+                or any(t["id"] == twin_id for t in tag["twins"])
+            ):
+                continue
+            tag["twins"].append(
+                {
+                    "id": twin_id,
+                    "name": other["table_name"],
+                    "schema_name": other["schema_name"],
+                    "family": other["prefix"],
+                }
+            )
+    return tags
 
 
 def replace_term_families(

@@ -40,6 +40,7 @@ from sqlalchemy import values as sa_values
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
+    attribute_description_expr,
     column_description_expr,
     table_description_expr,
 )
@@ -1029,16 +1030,21 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
     ``sample_values`` is what lets a SQL-generating model write a correct
     ``->``/``->>`` path into a JSONB column instead of guessing a plausible
-    sibling key — this is the only per-column field ``candidates_preparation``'s
-    "back-fill" step (§4a: any table whose columns arrived without
-    sample_values from the vector-index hit) exists to supply. It was
-    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
-    dropped it from this query's rewrite (the Neo4j Cypher version had it);
-    restored so the back-fill isn't a no-op again. ``is_nullable`` is included
-    alongside it so projection rules can tell when a requested item may be
-    missing; ``None`` means the connector could not determine it.
-    ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    sibling key. It was selected here from Aug 2026 until the
+    Neo4j-to-Postgres port silently dropped it from this query's rewrite (the
+    Neo4j Cypher version had it); restored so a table whose columns arrived
+    without sample_values from the vector-index hit can be back-filled.
+    ``is_nullable`` is included alongside it so projection rules can tell when
+    a requested item may be missing; ``None`` means the connector could not
+    determine it. ``semantic_fk`` resolves the referenced attribute back to its
+    owning column and returns that target as ``schema.table.column`` for SQL
+    prompts.
+
+    ``description`` is the column's own, short one (with the attribute
+    fallback of :func:`column_description_expr`) and ``attribute_description``
+    the longer one of the attribute the column is, ``None`` without one.
+    ``distinct_values`` is a suspected key's lowest distinct values in
+    ascending order, not the whole column.
     """
     if not table_ids:
         return []
@@ -1095,8 +1101,11 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
+                attribute_description_expr().label("attribute_description"),
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
+                s.catalog_column.c.distinct_values,
+                s.catalog_column.c.is_unique,
                 s.catalog_column.c.is_nullable,
                 semantic_fk_target.label("semantic_fk"),
             )
@@ -1140,8 +1149,11 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],
+                    "attribute_description": row["attribute_description"],
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
+                    "distinct_values": parse_sample_values(row["distinct_values"]),
+                    "is_unique": row["is_unique"],
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
                 }

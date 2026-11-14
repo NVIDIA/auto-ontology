@@ -11,6 +11,10 @@ and returns plausible rows that are not the answer. So every table ``retrieve``
 shows is compared by column names with the rest of the catalog, and each close
 match is named with its row count and the columns only one side has: enough
 for the model to check which copy fits before it commits to one.
+
+Copies the semantic layer already grouped into term families (``OLD_ROOMS``
+beside ``NEW_ROOMS``) are named by ``retrieve`` as twins instead; this module
+covers the copies no prefix gives away.
 """
 
 from __future__ import annotations
@@ -160,15 +164,17 @@ def sibling_lines(
 ) -> list[tuple[str, list[dict]]]:
     """A line for each near-copy of each new table, once per pair per episode.
 
-    Each line comes with the two tables it names.
+    Each line comes with the two tables it names. A family twin is skipped:
+    the table's own block already names it.
     """
     lines: list[tuple[str, list[dict]]] = []
     ctx.counts_left = config.max_sibling_counts()
     catalog = _catalog(ctx) if new_tables else []
     for table in new_tables:
+        twins = {str(t.get("id")) for t in table.get("twins") or []}
         for sibling in find_siblings(table, catalog):
             pair = frozenset((str(table["id"]), str(sibling.table["id"])))
-            if pair in ctx.sibling_pairs:
+            if pair in ctx.sibling_pairs or str(sibling.table["id"]) in twins:
                 continue
             ctx.sibling_pairs.add(pair)
             line = (

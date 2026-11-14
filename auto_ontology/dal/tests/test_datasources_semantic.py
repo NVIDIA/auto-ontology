@@ -437,6 +437,37 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["total"]["semantic_fk"] is None
 
 
+def test_tables_by_ids_keeps_the_column_and_attribute_descriptions_apart(
+    world,
+) -> None:
+    """The column's short description and its attribute's longer one, both."""
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.total"])
+        .values(description="Total", is_unique=False)
+    )
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.order_id"])
+        .values(is_unique=True, distinct_values='["1", "2"]')
+    )
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["orders.total"],
+        attribute_id=world.attribute("total", "Amount charged for the order"),
+    )
+    columns = {
+        c["name"]: c
+        for c in d.fetch_tables_by_ids([world.tables["orders"]])[0]["columns"]
+    }
+    assert columns["total"]["description"] == "Total"
+    assert columns["total"]["attribute_description"] == "Amount charged for the order"
+    assert columns["total"]["is_unique"] is False
+    assert columns["order_id"]["attribute_description"] is None
+    assert columns["order_id"]["is_unique"] is True
+    assert columns["order_id"]["distinct_values"] == ["1", "2"]
+
+
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
     assert d.fetch_tables_by_ids([]) == []
 

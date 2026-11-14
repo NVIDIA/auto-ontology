@@ -41,7 +41,10 @@ Return exactly the requested output fields and no others.
 
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
-choose one."""
+choose one. A table in a [family] is one copy of a schema kept under several \
+table-name prefixes (OLD_, NEW_); its TWINS are the same table in the other \
+copies. Pick the family the question means, and do not join a table of one \
+family to a table of another."""
 
 _GREP_LINE = """\
 - grep: search all rows of a run_sql result too long to show (run_sql says \
@@ -141,9 +144,10 @@ RETRIEVE_TOOL = {
             "foreign keys and link tables, are searched directly. An exact "
             "table or column name is matched too. Every term and "
             "attribute found comes back as the table that stores it, with its "
-            "columns, stored values and references; definitions come with "
-            "their SQL. Also returns how new tables join to ones already "
-            "found, and tables that are near copies of them."
+            "columns, keys, stored values and references; definitions come "
+            "with their SQL. Also returns how new tables join to ones already "
+            "found, their twins in other table families, and tables that are "
+            "near copies of them."
         ),
         "parameters": {
             "type": "object",
