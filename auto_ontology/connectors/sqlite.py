@@ -166,8 +166,28 @@ class SQLiteDatabase(SQLDatabase):
         tables = self.get_tables()
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
-            info = self._conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-            for cid, name, data_type, notnull, _default, _pk in info:
+            info = self._conn.execute(f'PRAGMA table_xinfo("{table_name}")').fetchall()
+            if not info:
+                info = self._conn.execute(
+                    f'PRAGMA table_info("{table_name}")'
+                ).fetchall()
+                for cid, name, data_type, notnull, _default, _pk in info:
+                    rows.append(
+                        {
+                            "table_schema": "main",
+                            "table_name": table_name,
+                            "column_name": name,
+                            "data_type": data_type or "TEXT",
+                            "is_nullable": not notnull,
+                            "ordinal_position": cid + 1,
+                        }
+                    )
+                continue
+
+            position = 1
+            for _cid, name, data_type, notnull, _default, _pk, hidden in info:
+                if hidden == 1:
+                    continue
                 rows.append(
                     {
                         "table_schema": "main",
@@ -175,9 +195,10 @@ class SQLiteDatabase(SQLDatabase):
                         "column_name": name,
                         "data_type": data_type or "TEXT",
                         "is_nullable": not notnull,
-                        "ordinal_position": cid + 1,
+                        "ordinal_position": position,
                     }
                 )
+                position += 1
         return pd.DataFrame(rows)
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
@@ -229,9 +250,15 @@ class SQLiteDatabase(SQLDatabase):
 
         def columns_of(table_name: str) -> list:
             if table_name not in table_info:
-                table_info[table_name] = self._conn.execute(
-                    f'PRAGMA table_info("{table_name}")'
+                info = self._conn.execute(
+                    f'PRAGMA table_xinfo("{table_name}")'
                 ).fetchall()
+                if not info:
+                    table_info[table_name] = self._conn.execute(
+                        f'PRAGMA table_info("{table_name}")'
+                    ).fetchall()
+                else:
+                    table_info[table_name] = [c for c in info if c[6] != 1]
             return table_info[table_name]
 
         def declared_column(table_name: str, column_name: str) -> str:
