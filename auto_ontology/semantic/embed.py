@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from auto_ontology.utils import bedrock
 from auto_ontology.utils.embedding import EmbedParams, batch_embed
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
@@ -104,7 +105,9 @@ def build_semantic_embedder(
 ) -> SemanticEmbedder | None:
     """Construct an embedder bound to the semantic VDB, or None when disabled."""
     api_key = resolve("EMBED", "API_KEY")
-    if not api_key:
+    model_name = resolve("EMBED", "MODEL")
+    # A bedrock/ model authenticates with the AWS credential chain, not a key.
+    if not api_key and not bedrock.is_bedrock_model(model_name):
         logger.warning(
             "EMBED_API_KEY / DEFAULT_MODELS_API_KEY not set — "
             "semantic VDB embedding disabled"
@@ -113,7 +116,7 @@ def build_semantic_embedder(
 
     embed_params = EmbedParams(
         embed_invoke_url=resolve("EMBED", "ENDPOINT"),
-        model_name=resolve("EMBED", "MODEL"),
+        model_name=model_name,
         api_key=api_key,
     )
     vdb = get_semantic_vdb(database_name=database_name, reset=reset)

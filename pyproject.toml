@@ -63,6 +63,8 @@ dependencies = [
     # Not imported, but FastAPI refuses to register the model-import upload
     # route without it.
     "python-multipart>=0.0.32",
+    "boto3>=1.44.3",
+    "langchain-aws>=1.9.3",
 ]
 
 [project.optional-dependencies]

@@ -6,6 +6,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
+import pytest
+
+from auto_ontology.semantic import embed
 from auto_ontology.semantic.embed import _build_rows, _format_sample_values
 
 
@@ -68,3 +73,24 @@ def test_an_undocumented_column_embeds_its_name_and_samples() -> None:
     assert _attr_text(sample_values='["a"]') == (
         "ColumnAttribute: Total of Term Order.  Sample values: a."
     )
+
+
+def test_a_bedrock_embed_model_needs_no_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It authenticates with the AWS credential chain; any other model needs a key."""
+    fields = {
+        "API_KEY": "",
+        "ENDPOINT": "",
+        "MODEL": "bedrock/global.cohere.embed-v4:0",
+    }
+    monkeypatch.setattr(embed, "resolve", lambda _prefix, field: fields[field])
+    monkeypatch.setattr(embed, "get_semantic_vdb", lambda **_kwargs: MagicMock())
+
+    embedder = embed.build_semantic_embedder("shop", reset=False)
+
+    assert embedder is not None
+    assert embedder.embed_params.model_name == "bedrock/global.cohere.embed-v4:0"
+
+    fields["MODEL"] = "nvidia/nemotron-3.5-embed-1b"
+    assert embed.build_semantic_embedder("shop", reset=False) is None

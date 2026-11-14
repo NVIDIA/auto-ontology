@@ -422,6 +422,30 @@ that support structured output, and keep the embedding model the same for
 ingestion and queries. [`.env.example`](./.env.example) documents every
 variable.
 
+To call [Amazon Bedrock](https://aws.amazon.com/bedrock/) with AWS credentials
+instead of an API key, prefix the model with `bedrock/`:
+
+```bash
+REASONING_MODEL=bedrock/us.anthropic.claude-sonnet-5-5
+NON_REASONING_MODEL=bedrock/us.anthropic.claude-sonnet-5-5
+EMBED_MODEL=bedrock/us.cohere.embed-v4:0
+RERANK_MODEL=bedrock/cohere.rerank-v3-5:0
+AWS_PROFILE=your-profile
+AWS_REGION=us-east-1
+```
+
+A `bedrock/` model ignores its role's `_ENDPOINT` and `_API_KEY`. Requests are
+signed with the standard AWS credential chain (a profile, `AWS_ACCESS_KEY_ID`
+and `AWS_SECRET_ACCESS_KEY`, SSO, or an instance or pod role) and go to
+`AWS_REGION`. The model can be a model ID, an inference profile ID (`us.`,
+`global.`), or a model ARN, which also names the region to call. Embeddings
+use Cohere Embed (`cohere.embed-*`) or Titan Text Embeddings
+(`amazon.titan-embed-text-*`) models, zero-padded to the 2048-wide vector
+store, and reranking uses the Bedrock Rerank API. The credentials need
+`bedrock:InvokeModel`, plus `bedrock:Rerank` for reranking. Docker Compose
+passes `.env` to the containers but not your `~/.aws`, so put access keys in
+`.env` or mount `~/.aws` read-only.
+
 ### Predictions
 
 Set `KUMO_RFM_API_KEY` and the agent routes predictive questions to KumoRFM.
