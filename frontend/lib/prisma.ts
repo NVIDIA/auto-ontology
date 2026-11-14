@@ -27,7 +27,9 @@ function buildConnectionString(): string {
 		);
 	}
 
-	return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+	// Percent-encode the credentials: a password with `@`, `:`, `/` or a space
+	// otherwise splits the URL (the driver reads part of it as the host).
+	return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
 
 function createPrismaClient(): PrismaClient {
