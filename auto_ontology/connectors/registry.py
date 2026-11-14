@@ -61,13 +61,29 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
 
 _connectors: list[SQLDatabase] | None = None
 
+# A newline always ends a connection string; a comma only where another
+# connection string starts after it: a registered scheme, an optional
+# ``+driver``, and a colon not followed by a digit. MongoDB URLs carry commas of
+# their own -- in a replica set's host list (``mongodb://a:27017,b:27017/db``,
+# where a host may itself be called ``mongodb``) and in option values such as
+# ``readPreferenceTags=dc:ny,rack:1`` -- and splitting on every comma cut them
+# into pieces that each failed to parse. The ``//`` stays optional, because
+# ``sqlite:relative/path.sqlite`` is a valid SQLite connection string.
+_CONNECTION_STRING_SEPARATOR = re.compile(
+    r"[\r\n]+|,(?=\s*(?i:"
+    + "|".join(
+        re.escape(scheme) for scheme in sorted(CONNECTOR_REGISTRY, key=len)[::-1]
+    )
+    + r")(?:\+[A-Za-z0-9.\-]+)?:(?!\d))"
+)
+
 
 def parse_connection_strings(raw: str) -> list[str]:
     """Return connection URLs separated by commas, newlines, or both."""
     return [
-        connection_string.strip()
-        for connection_string in re.split(r"[,\r\n]+", raw)
-        if connection_string.strip()
+        connection_string.strip().strip(",").strip()
+        for connection_string in _CONNECTION_STRING_SEPARATOR.split(raw)
+        if connection_string.strip().strip(",").strip()
     ]
 
 

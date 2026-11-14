@@ -36,8 +36,10 @@ Where the credentials live depends on whether Vault is configured:
 ## `CONNECTION_STRINGS`
 
 A comma- or newline-separated list of connection URLs supplied at deploy time
-(`.env` for Docker Compose, `--set connectionStrings=...` for Helm). It carries
-no schema or table filters. `GET /api/connections/source` reports whether it is set.
+(`.env` for Docker Compose, `--set connectionStrings=...` for Helm). A comma
+separates two URLs only where the next one starts, so the commas inside a
+MongoDB host list stay part of their URL. It carries no schema or table
+filters. `GET /api/connections/source` reports whether it is set.
 
 The URL scheme selects the connector:
 
