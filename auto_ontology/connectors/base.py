@@ -101,15 +101,15 @@ class SQLDatabase(ABC):
 
     Subclasses must implement all abstract methods. The context-manager
     protocol (``__enter__`` / ``__exit__``) is provided by this base class
-    and delegates to :meth:`close`.
+    and delegates to :meth:`close`. The SQL dialect is not a constructor
+    argument: each connector reports its own through the abstract
+    :attr:`dialect` property, which the text-to-SQL agent reads to emit
+    dialect-appropriate SQL.
 
     Parameters
     ----------
     connection_string:
         A driver-specific connection string or database path.
-    dialect:
-        SQL dialect used by this connector (e.g. ``"duckdb"``, ``"snowflake"``).
-        Used by the text-to-SQL agent to emit dialect-appropriate SQL.
     """
 
     #: Whether :meth:`execute` takes a ``timeout_s`` cap that is free to apply.
