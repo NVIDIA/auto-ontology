@@ -262,7 +262,8 @@ on in **Settings → Semantic Compilation**.
   `check_answerable` and `ask_question` over MCP. Refine terms, descriptions,
   and SQL attributes in the UI or through the API, and certify them once
   they're correct. Edits are re-embedded right away, and the next compilation
-  keeps them.
+  keeps them, except which semantic foreign key each join uses, which every
+  compilation re-selects.
 
 The [Generate tool flow](./docs/architecture.md#generate-an-ontology) shows
 which steps call a model and which are SQL or rules.
@@ -546,7 +547,7 @@ External materials Auto-Ontology interacts with at run time:
 - Model endpoints you configure, by default the NVIDIA API catalog
   (`integrate.api.nvidia.com`, `ai.api.nvidia.com`), under each provider's and
   model's terms.
-- The KumoRFM service, only when `KUMO_RFM_API_KEY` is set, under Kumo's terms.
+- The KumoRFM service, only when `KUMO_RFM_API_URL` is set, under Kumo's terms.
 - Your source databases, under your agreements for those systems.
 
 ## Security

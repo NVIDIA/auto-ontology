@@ -169,7 +169,7 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 | Link each foreign key column to the term attribute it references: declared key first; otherwise embedding search and an LLM pick, confirmed by comparing the two columns' distinct values, then a shortlist of keys whose values hold the column's. An inferred link is stored only if joining the two columns returns a row (retried with both sides cast to text), and never points into another family's copy of a table | `EMBED` + LLM + SQL | On (`PREVENT_SEMANTIC_FK_DB_QUERIES` turns off the value and join checks) | `semantic/semantic_fk.py` (`resolve_semantic_fks`) |
 | Choose one default join per group of alternative links | LLM, deterministic fallback | On | `select_semantic_fk_join_defaults` |
 | Attach foreign key columns no link was found for to their table's term, or to a new term for a junction table | LLM + `EMBED` | On | `semantic/unmatched_fks.py` (`attach_unmatched_fk_columns`) |
-| Suggest SQL attributes from the 10 most-used expressions per term in query history | Parse (rules) + LLM | On | `semantic/sql_attribute_suggester.py` |
+| Suggest SQL attributes from up to 10 expressions per term in query history. Usage ranking isn't active yet, so these are the first 10 found, not the most used | Parse (rules) + LLM | On | `semantic/sql_attribute_suggester.py` |
 | Write SQL attributes for bridge tables; the reranker picks the term that owns each | LLM + `RERANK` | On | `semantic/bridge_tables.py` |
 | Describe each column attribute in one sentence from its term, column, samples, format, the foreign keys at either end, and its family | LLM | On | `semantic/attribute_descriptions.py` (`describe_column_attributes`) |
 | Replay tagging rules over the catalog and ontology | Rules | On when rules exist | `ingestion_service/semantic_scheduler.py` |
@@ -185,7 +185,8 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 - Refine terms, descriptions, SQL attributes, and relationships in the UI or
   through the REST API. Edits are re-embedded when saved, so the next question
   uses them, and the next compilation keeps them: it compiles only tables that
-  don't have a term yet.
+  don't have a term yet. One exception: every compilation re-selects which
+  semantic foreign key each join uses, so turning one off doesn't stick.
 - Certifying a name, description, or attribute marks it as reviewed in the UI
   and in search results. It doesn't change how the agent retrieves.
 - Import and export model definitions as Ossie YAML with **Settings → Import /
