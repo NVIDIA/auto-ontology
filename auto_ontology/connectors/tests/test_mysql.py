@@ -94,6 +94,34 @@ def test_execute_returns_dataframe_and_closes_connection(
     assert connections[1].closed
 
 
+def test_execute_preserves_duplicate_column_values(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def connect(**kwargs: Any) -> "Connection":
+        connection = Connection(connect_kwargs=kwargs)
+        connection.cursor_instance.description = [
+            ("id",),
+            ("id",),
+            ("name",),
+            ("name",),
+        ]
+        connection.cursor_instance.rows = [(1, 100, "Ada", "first order")]
+        return connection
+
+    monkeypatch.setattr(
+        "auto_ontology.connectors.mysql.mysql.connector.connect", connect
+    )
+    database = MySQLDatabase(_connection_string())
+
+    result = database.execute(
+        "SELECT c.id, o.id, c.name, o.name "
+        "FROM customers c JOIN orders o ON o.customer_id = c.id"
+    )
+
+    assert list(result.columns) == ["id", "id", "name", "name"]
+    assert result.values.tolist() == [[1, 100, "Ada", "first order"]]
+
+
 def _live_connection() -> dict[str, Any]:
     # Opt in explicitly so pytest never dials a real server just because MYSQL_*
     # happens to be exported in the shell.
@@ -176,14 +204,15 @@ def test_live_mysql_connector_end_to_end() -> None:
 
 class Cursor:
     description = [("value",)]
+    rows: list[tuple[Any, ...]] = [(1,)]
     executed: tuple[str, list[int] | None] | None = None
     closed = False
 
     def execute(self, statement: str, parameters: list[int] | None = None) -> None:
         self.executed = (statement, parameters)
 
-    def fetchall(self) -> list[dict[str, int]]:
-        return [{"value": 1}]
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self.rows
 
     def close(self) -> None:
         self.closed = True
@@ -197,7 +226,7 @@ class Connection:
         self.closed = False
 
     def cursor(self, *, dictionary: bool = False) -> Cursor:
-        assert dictionary
+        assert not dictionary
         return self.cursor_instance
 
     def ping(self, *, reconnect: bool = False) -> None:
