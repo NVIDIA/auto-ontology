@@ -70,7 +70,8 @@ ATTRIBUTE_COLUMNS = {
 def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Stub every data-access call the tool makes, recording what it asked.
 
-    ``family_tags`` is what the family read returns; a test fills it in.
+    ``family_tags`` and ``referrers`` are what the family and referrer reads
+    return; a test fills them in.
     """
     seen: dict[str, Any] = {
         "meaning": [],
@@ -78,6 +79,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "name_scopes": [],
         "join": [],
         "family_tags": {},
+        "referrers": {},
     }
     meaning_hits: dict[str, list[dict]] = {
         "how is revenue calculated": [REVENUE],
@@ -140,6 +142,11 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         lambda ids: {
             i: seen["family_tags"][i] for i in ids if i in seen["family_tags"]
         },
+    )
+    monkeypatch.setattr(
+        tool,
+        "fetch_semantic_fk_referrers",
+        lambda ids: {i: seen["referrers"][i] for i in ids if i in seen["referrers"]},
     )
     monkeypatch.setattr(
         tool,
@@ -776,3 +783,33 @@ def test_a_family_twin_is_not_also_named_as_similar(
 
     assert "TWINS (the same table in another family): sales.orders_archive" in text
     assert "SIMILAR" not in text
+
+
+def test_a_table_names_every_column_that_references_it(calls: dict) -> None:
+    calls["referrers"]["t-customers"] = [
+        {"schema_name": "sales", "table_name": "orders", "column_name": "cust_ref"},
+        {"schema_name": "sales", "table_name": "orders", "column_name": "billed_to"},
+        {"schema_name": "crm", "table_name": "visits", "column_name": "customer_id"},
+    ]
+    ctx = _ctx()
+
+    text = tool.retrieve(ctx, "customer status")
+
+    assert (
+        "  REFERENCED BY: sales.orders.cust_ref, sales.orders.billed_to, "
+        "crm.visits.customer_id"
+    ) in text
+    assert ctx.was_shown("crm", "visits")
+
+
+def test_a_long_referrer_list_is_cut_with_a_count(calls: dict) -> None:
+    calls["referrers"]["t-customers"] = [
+        {"schema_name": "s", "table_name": f"t{i:02d}", "column_name": "c"}
+        for i in range(tool._MAX_REFERRERS + 3)
+    ]
+    ctx = _ctx()
+
+    text = tool.retrieve(ctx, "customer status")
+
+    assert f"s.t{tool._MAX_REFERRERS - 1:02d}.c and 3 more" in text
+    assert not ctx.was_shown("s", f"t{tool._MAX_REFERRERS:02d}")

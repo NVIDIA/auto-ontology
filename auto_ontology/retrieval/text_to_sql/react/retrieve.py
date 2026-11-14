@@ -27,7 +27,8 @@ One call does three things, all through existing data-access functions:
 3. **Expand one step along the graph** — a term's tables
    (:func:`fetch_term_table_pairs`) and an attribute's owning column
    (:func:`fetch_attr_column_contexts`), each table with its columns, stored
-   values and semantic FKs (:func:`fetch_tables_by_ids`), the join route from
+   values and semantic FKs (:func:`fetch_tables_by_ids`), the columns whose
+   semantic FK lands on it (:func:`fetch_semantic_fk_referrers`), the join route from
    every new table to the tables earlier calls already showed
    (:func:`find_join_path`), and the near-copies of every new table
    (:mod:`.siblings`).
@@ -52,6 +53,7 @@ from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_p
 from auto_ontology.dal.candidates import expand_info
 from auto_ontology.dal.datasources import (
     fetch_schema_ids_for_database,
+    fetch_semantic_fk_referrers,
     fetch_tables_by_ids,
     find_column_id_by_table_and_name,
 )
@@ -106,6 +108,7 @@ _JOIN_PAIRS_PER_CALL = 10
 _MAX_DESCRIPTION_CHARS = 160
 #: An attribute description is one sentence of up to 30 words.
 _MAX_COLUMN_DESCRIPTION_CHARS = 240
+_MAX_REFERRERS = 12
 _MAX_DEFINITION_CHARS = 500
 _MAX_SAMPLE_VALUES = 5
 
@@ -346,7 +349,7 @@ def _column_line(column: dict, keys: set[str]) -> str:
     elif column.get("is_unique"):
         details.append("unique")
     if description := column.get("attribute_description") or column.get("description"):
-        details.append(_clip(description, _MAX_COLUMN_DESCRIPTION_CHARS))
+        details.append(_clip(description, _MAX_COLUMN_DESCRIPTION_CHARS).rstrip("."))
     if samples := _sample_values(column.get("sample_values")):
         details.append(f"values: {samples}")
     elif lowest := _sample_values(column.get("distinct_values")):
@@ -406,6 +409,35 @@ def _twins_line(table: dict) -> str | None:
     return f"  TWINS (the same table in another family): {named}"
 
 
+def _referrer_tables(table: dict) -> set[tuple[str | None, str | None]]:
+    return {
+        (r.get("schema_name") or None, r.get("table_name"))
+        for r in (table.get("referenced_by") or [])[:_MAX_REFERRERS]
+    }
+
+
+def _referrers_line(table: dict) -> str | None:
+    """The columns of other tables (or this one) whose FK lands on *table*.
+
+    The incoming half of the table's one-hop FKs; each column line carries the
+    outgoing half as ``references``.
+    """
+    referrers = table.get("referenced_by") or []
+    if not referrers:
+        return None
+    named = ", ".join(
+        ".".join(
+            p
+            for p in (r.get("schema_name"), r.get("table_name"), r.get("column_name"))
+            if p
+        )
+        for r in referrers[:_MAX_REFERRERS]
+    )
+    if len(referrers) > _MAX_REFERRERS:
+        named += f" and {len(referrers) - _MAX_REFERRERS} more"
+    return f"  REFERENCED BY: {named}"
+
+
 def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     header = _table_header(table)
     keys = _keys(table)
@@ -423,6 +455,8 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     if twins := _twins_line(table):
         lines.append(twins)
     lines += [_column_line(c, keys) for c in columns]
+    if referrers := _referrers_line(table):
+        lines.append(referrers)
     if hidden:
         lines.append(
             f"  … {hidden} more columns not shown; retrieve with a narrower query "
@@ -457,6 +491,8 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
         if column.get("semantic_fk"):
             line += f" — references {column['semantic_fk']}"
         lines.append(line)
+    if referrers := _referrers_line(table):
+        lines.append(referrers)
     if hidden := len(columns) - len(kept):
         lines.append(
             f"  … {hidden} more columns not shown; retrieve {_qualified(table)} "
@@ -659,6 +695,9 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     fetched = {str(t["id"]): t for t in fetch_tables_by_ids(new_ids)}
     for table_id, tags in fetch_table_family_tags(list(fetched)).items():
         fetched[table_id].update(tags)
+    for table_id, referrers in fetch_semantic_fk_referrers(list(fetched)).items():
+        if table_id in fetched:
+            fetched[table_id]["referenced_by"] = referrers
     found = [
         fetched[tid]
         for tid in new_ids
@@ -683,7 +722,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         for t in new_tables
     }
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
-        (new_blocks[str(t["id"])], own(t)) for t in new_tables
+        (new_blocks[str(t["id"])], own(t) | _referrer_tables(t)) for t in new_tables
     ]
     named += _join_lines(ctx, new_tables)
     if config.siblings_enabled():

@@ -31,6 +31,7 @@ from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
 from auto_ontology.dal.sql_fragments import column_description_expr
+from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_TERM
 from auto_ontology.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
@@ -284,6 +285,10 @@ _EXPANDERS = {
     Labels.COLUMN: _expand_columns,
 }
 
+#: Semantic labels the searches return that have no catalog row to merge: the
+#: index metadata is all they carry here, and callers resolve them to tables.
+_NOT_EXPANDED = {LABEL_TERM, LABEL_COLUMN_ATTRIBUTE}
+
 
 def expand_info(ids_and_labels: list | None) -> dict:
     """``{id: properties}`` for each ``{"id", "label"}`` pair given.
@@ -304,6 +309,8 @@ def expand_info(ids_and_labels: list | None) -> dict:
     results: dict[str, Any] = {}
     allowed = set(Labels.LIST_OF_ALL) | set(_EXPANDERS)
     for label, ids in by_label.items():
+        if label in _NOT_EXPANDED:
+            continue
         if label not in allowed:
             logger.warning("Skipping unknown label %r in expand_info", label)
             continue

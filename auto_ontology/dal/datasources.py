@@ -1205,6 +1205,70 @@ def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
     return list(tables.values())
 
 
+def fetch_semantic_fk_referrers(
+    table_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """``{table_id: [{schema_name, table_name, column_name}]}``: the columns
+    whose semantic FK lands on each of *table_ids*.
+
+    The incoming half of a table's one-hop semantic FKs; the outgoing half is
+    ``semantic_fk`` on each column of :func:`fetch_tables_by_ids`. Every FK is
+    listed, including the ones ``use_in_join_paths`` leaves out of join
+    routes: a table referenced by both an owner and an editor column needs
+    both named. Returns ``{}`` if the query fails, like
+    :func:`fetch_tables_by_ids`.
+    """
+    if not table_ids:
+        return {}
+    source = s.catalog_column.alias("referrer_column")
+    source_table = s.catalog_table.alias("referrer_table")
+    source_schema = s.catalog_schema.alias("referrer_schema")
+    target = s.catalog_column.alias("referenced_column")
+    try:
+        rows = store().query_read(
+            select(
+                target.c.table_id,
+                source_schema.c.name.label("schema_name"),
+                source_table.c.name.label("table_name"),
+                source.c.name.label("column_name"),
+            )
+            .select_from(
+                s.column__semantic_fk.join(
+                    source, source.c.id == s.column__semantic_fk.c.column_id
+                )
+                .join(source_table, source_table.c.id == source.c.table_id)
+                .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+                .join(
+                    s.column__has_attribute,
+                    s.column__has_attribute.c.attribute_id
+                    == s.column__semantic_fk.c.attribute_id,
+                )
+                .join(target, target.c.id == s.column__has_attribute.c.column_id)
+            )
+            .where(target.c.table_id.in_(list(table_ids)))
+            .distinct()
+            .order_by(
+                target.c.table_id,
+                source_schema.c.name,
+                source_table.c.name,
+                source.c.name,
+            )
+        )
+    except Exception:
+        logger.warning("fetch_semantic_fk_referrers: query failed", exc_info=True)
+        return {}
+    referrers: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        referrers.setdefault(str(row["table_id"]), []).append(
+            {
+                "schema_name": row["schema_name"] or "",
+                "table_name": row["table_name"],
+                "column_name": row["column_name"],
+            }
+        )
+    return referrers
+
+
 def fetch_table_context(table_id: str) -> dict[str, Any]:
     """``{columns, fks}`` for one table — what the SQL generator is handed.
 

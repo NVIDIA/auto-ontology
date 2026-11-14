@@ -468,6 +468,39 @@ def test_tables_by_ids_keeps_the_column_and_attribute_descriptions_apart(
     assert columns["order_id"]["distinct_values"] == ["1", "2"]
 
 
+def test_semantic_fk_referrers_list_every_column_landing_on_a_table(world) -> None:
+    """Both roles, though only one of them may be used in join routes."""
+    customer_ref = world.attribute("customer-ref-roles")
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["customers.customer_id"],
+        attribute_id=customer_ref,
+    )
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["orders.customer_id"],
+        attribute_id=customer_ref,
+    )
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["orders.total"],
+        attribute_id=customer_ref,
+        use_in_join_paths=False,
+    )
+
+    referrers = d.fetch_semantic_fk_referrers(
+        [world.tables["customers"], world.tables["orders"]]
+    )
+
+    assert referrers == {
+        world.tables["customers"]: [
+            {"schema_name": "shop", "table_name": "orders", "column_name": c}
+            for c in ("customer_id", "total")
+        ]
+    }
+    assert d.fetch_semantic_fk_referrers([]) == {}
+
+
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
     assert d.fetch_tables_by_ids([]) == []
 

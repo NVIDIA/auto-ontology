@@ -66,6 +66,7 @@
     "fetch_schema_ids_for_database": "(database_name: 'str') -> 'list[str]'",
     "fetch_schemas_by_ids": "(relevant_schemas_ids: 'list | None' = None) -> 'list[dict[str, str]]'",
     "fetch_schemas_for_database": "(db_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any] | None'",
+    "fetch_semantic_fk_referrers": "(table_ids: 'list[str]') -> 'dict[str, list[dict[str, Any]]]'",
     "fetch_sorted_tables": "() -> 'list[dict[str, Any]]'",
     "fetch_table_by_id": "(table_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_table_by_name": "(name: 'str') -> 'dict[str, Any] | None'",

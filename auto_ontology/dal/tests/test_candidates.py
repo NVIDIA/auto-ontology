@@ -128,6 +128,15 @@ def test_an_unknown_label_is_skipped_with_a_warning(world, caplog) -> None:
     assert "Nonsense" in caplog.text
 
 
+def test_terms_and_column_attributes_are_skipped_silently(caplog) -> None:
+    """Searches return them; they have no catalog row, and callers resolve them."""
+    result = c.expand_info(
+        [{"id": "t-1", "label": "Term"}, {"id": "a-1", "label": "ColumnAttribute"}]
+    )
+    assert result == {}
+    assert caplog.text == ""
+
+
 # --------------------------------------------------------------------------
 # Columns
 # --------------------------------------------------------------------------
