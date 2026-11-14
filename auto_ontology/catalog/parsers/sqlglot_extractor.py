@@ -188,10 +188,17 @@ def _schema_column_index(schema: Any) -> dict[str, tuple[str, ...]]:
     A :class:`~auto_ontology.catalog.model.Schema` keeps this itself; anything
     else that merely looks like one (a ``columns_df`` and nothing more) has it
     derived here, the same way.
+
+    Only a real mapping is taken from the accessor. A ``MagicMock`` standing in
+    for a schema answers to any attribute name, so it has a callable
+    ``column_names_by_table`` that returns another mock; trusting that would
+    read the mock as a schema with no columns and ignore its ``columns_df``.
     """
     accessor = getattr(schema, "column_names_by_table", None)
     if callable(accessor):
-        return accessor()
+        index = accessor()
+        if isinstance(index, dict):
+            return index
     df = getattr(schema, "columns_df", None)
     if df is None or df.empty:
         return {}

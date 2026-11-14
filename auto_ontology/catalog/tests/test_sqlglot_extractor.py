@@ -74,3 +74,32 @@ def test_parse_query_single_succeeds_for_count_star() -> None:
     assert query_obj is not None
     assert query_obj.get_tables_ids() == ["node-customers"]
     assert query_obj.get_column_ids() == []
+
+
+def test_a_mocked_schema_is_read_from_its_columns_frame() -> None:
+    """A ``MagicMock`` schema's ``columns_df`` is what attributes bare columns.
+
+    A mock answers to any attribute name, so it appears to have the
+    ``column_names_by_table`` accessor a real ``Schema`` has, and calling it
+    returns another mock. Taking that for the column index would parse every
+    mocked schema as an empty catalog: ``name`` and ``total`` below would be
+    attributed to no table at all.
+    """
+    schema = MagicMock()
+    schema.columns_df = pd.DataFrame(
+        [
+            {"table_name": "customers", "column_name": "id"},
+            {"table_name": "customers", "column_name": "name"},
+            {"table_name": "orders", "column_name": "customer_id"},
+            {"table_name": "orders", "column_name": "total"},
+        ]
+    )
+
+    result = extract_tables_and_columns(
+        "SELECT name, total FROM customers c JOIN orders o ON c.id = o.customer_id",
+        ["postgres"],
+        {"shop": schema},
+    )
+
+    assert result.tables["customers"].columns == {"id", "name"}
+    assert result.tables["orders"].columns == {"customer_id", "total"}
