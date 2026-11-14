@@ -18,6 +18,7 @@ from auto_ontology.utils import llm_invoke
 from auto_ontology.utils.llm_invoke import (
     _structured_output_kwargs,
     _system_messages_first,
+    _use_openai_client,
 )
 
 
@@ -62,10 +63,40 @@ def test_claude_is_matched_on_either_vendor_or_family_name() -> None:
         assert _structured_output_kwargs(_Model(name))["method"] == "function_calling"
 
 
-def test_other_models_keep_the_langchain_default() -> None:
+def test_other_models_keep_the_langchain_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """json_schema is preferred where supported, so nothing is forced for them."""
+    monkeypatch.delenv("LLM_CLIENT", raising=False)
     for name in ("nvidia/nemotron-3.5-lightning-30b-a3b", "gpt-4o", ""):
         assert _structured_output_kwargs(_Model(name)) == {}
+
+
+def test_openai_client_forces_function_calling_for_compatible_gateways(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAI-compatible gateways may reject LangChain's json_schema payload."""
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+
+    assert _structured_output_kwargs(_Model("gpt-6.1-sol")) == {
+        "method": "function_calling"
+    }
+
+
+def test_openai_client_setting_selects_openai_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+
+    assert _use_openai_client("gpt-6.1-sol") is True
+
+
+def test_nvidia_client_remains_the_default_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_CLIENT", raising=False)
+
+    assert _use_openai_client("nvidia/nemotron-3.5-lightning-30b-a3b") is False
 
 
 def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:

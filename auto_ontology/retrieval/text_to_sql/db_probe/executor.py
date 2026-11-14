@@ -7,14 +7,14 @@
 This is the single choke point for every live query the probing layer issues.
 It guarantees a probe:
 - is a single ``SELECT`` / ``WITH`` statement (no DDL/DML, no multi-statement),
-- is ``LIMIT``-bounded (auto-appended when missing),
+- is bounded by the connector dialect's row-limit syntax,
 - counts against a per-question call budget.
 
 Probes run **inline on the calling thread**. The pipeline's connectors are
 shared and long-lived, and thread-affine connectors (e.g. SQLite binds each
 connection to its creating thread) reuse the calling thread's existing
 connection — so inline execution avoids leaking a fresh connection per probe.
-Bounding therefore relies on ``LIMIT`` + the call budget rather than a hard
+Bounding therefore relies on the row cap + the call budget rather than a hard
 wall-clock timeout; per-dialect statement timeouts (Postgres ``statement_timeout``,
 SQLite ``set_progress_handler``) are the right tool once Phase 2 runs arbitrary
 model-authored SQL.
@@ -30,6 +30,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+import sqlglot
 
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -69,9 +71,17 @@ def is_read_only_select(sql: str) -> bool:
     return True
 
 
-def _ensure_limit(sql: str, max_rows: int) -> str:
-    """Append ``LIMIT max_rows`` when the query has no explicit LIMIT."""
+def _ensure_limit(sql: str, max_rows: int, dialect: str | None = None) -> str:
+    """Bound a probe using the target dialect row-limit syntax."""
     stripped = sql.strip().rstrip(";").strip()
+    if dialect == "tsql":
+        try:
+            expression = sqlglot.parse_one(stripped, read="tsql")
+            if expression.args.get("limit") is None:
+                expression = expression.limit(max_rows)
+            return expression.sql(dialect="tsql")
+        except Exception:
+            return stripped
     if _LIMIT_RE.search(stripped):
         return stripped
     return f"{stripped} LIMIT {max_rows}"
@@ -147,7 +157,9 @@ class ProbeExecutor:
             self.log.append(entry)
             return entry
 
-        bounded_sql = _ensure_limit(sql, self.max_rows)
+        bounded_sql = _ensure_limit(
+            sql, self.max_rows, getattr(self.connector, "dialect", None)
+        )
         entry["sql"] = bounded_sql
         self.calls += 1
 

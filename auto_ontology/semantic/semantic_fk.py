@@ -794,8 +794,11 @@ def _join_probe_sql(
         rendered = condition.sql()
     source = connector.qualify(col.get("schema_name"), col["table_name"])
     target_table = connector.qualify(target.get("schema_name"), target["table_name"])
+    row_cap = "TOP 1 " if dialect == "tsql" else ""
+    limit_clause = "" if dialect == "tsql" else " LIMIT 1"
     return (
-        f"SELECT 1 AS hit FROM {source} s JOIN {target_table} t ON {rendered} LIMIT 1"
+        f"SELECT {row_cap}1 AS hit FROM {source} s "
+        f"JOIN {target_table} t ON {rendered}{limit_clause}"
     )
 
 

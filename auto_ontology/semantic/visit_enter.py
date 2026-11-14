@@ -178,6 +178,31 @@ def execute_capped(connector: "SQLDatabase", sql: str) -> pd.DataFrame:
     return connector.execute(sql)
 
 
+def _limited_select(
+    connector: "SQLDatabase",
+    select_list: str,
+    qualified: str,
+    limit: int,
+    *,
+    distinct: bool = False,
+    where: str | None = None,
+    order_by: str | None = None,
+) -> str:
+    """Build a dialect-appropriate row-capped SELECT statement."""
+    distinct_sql = " DISTINCT" if distinct else ""
+    if getattr(connector, "dialect", None) == "tsql":
+        sql = f"SELECT{distinct_sql} TOP {limit} {select_list} FROM {qualified}"
+    else:
+        sql = f"SELECT{distinct_sql} {select_list} FROM {qualified}"
+    if where:
+        sql += f" WHERE {where}"
+    if order_by:
+        sql += f" ORDER BY {order_by}"
+    if getattr(connector, "dialect", None) != "tsql":
+        sql += f" LIMIT {limit}"
+    return sql
+
+
 class _SamplingCircuitBreaker:
     """Stop sampling a warehouse that has stopped answering sample queries.
 
@@ -382,19 +407,25 @@ def _distinct_values_if_low_cardinality(
 ) -> list[Any] | None:
     """Return the full distinct value set for a low-cardinality column.
 
-    Runs ``SELECT DISTINCT <col> ... LIMIT cap + 1``. Returns the distinct
+    Runs a dialect-appropriate distinct-value query capped at *cap + 1* rows.
     values (in their native types) when the column has at most *cap* distinct
     non-null values; returns ``None`` for high-cardinality columns (more than *cap*
     distinct values) or on any error, so the caller falls back to the
-    most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
+    most-common-values behaviour. The row cap keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
     quoted = quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
         df = execute_capped(
             connector,
-            f"SELECT DISTINCT {quoted} FROM {qualified} "
-            f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}",
+            _limited_select(
+                connector,
+                quoted,
+                qualified,
+                cap + 1,
+                distinct=True,
+                where=f"{quoted} IS NOT NULL",
+            ),
         )
     except Exception as exc:
         # Falling back to the row sample's top-N is a fine outcome, but a probe
@@ -439,8 +470,15 @@ def probe_ascending_distinct_values(
     try:
         df = execute_capped(
             connector,
-            f"SELECT DISTINCT {quoted} FROM {qualified} WHERE {quoted} IS NOT NULL "
-            f"ORDER BY {quoted} LIMIT {KEY_DISTINCT_VALUES_LIMIT}",
+            _limited_select(
+                connector,
+                quoted,
+                qualified,
+                KEY_DISTINCT_VALUES_LIMIT,
+                distinct=True,
+                where=f"{quoted} IS NOT NULL",
+                order_by=quoted,
+            ),
         )
     except Exception as exc:
         _sampling_breaker.record_failure(connector, exc)
@@ -484,17 +522,17 @@ def calculate_columns_profiling(
 ) -> dict[str, dict[str, Any]]:
     """Profile a table's columns from a live sample of up to 1000 rows.
 
-    Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
+    Runs a dialect-appropriate sample query capped at 1000 rows and, for every column, computes an
     ``is_unique`` flag (at least 95% of non-null values distinct, the measured
     share persisted as ``distinct_ratio``) and the 5 most-common
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
 
-    ``probe_distinct_values`` gates only that second step. The bounded
-    ``SELECT * ... LIMIT 1000`` always runs; the DISTINCT probe is the
+    ``probe_distinct_values`` gates only that second step. The bounded row
+    sample always runs; the DISTINCT probe is the
     unbounded one (a full-column scan per column on warehouses where
-    ``DISTINCT`` + ``LIMIT`` does not early-stop), so it is what the
+    distinct-value cap does not early-stop), so it is what the
     "Distinct Value Scanning" setting turns off. With it off, a column keeps
     the top-N values from the row sample rather than gaining nothing.
 
@@ -534,7 +572,8 @@ def calculate_columns_profiling(
 
     try:
         df = execute_capped(
-            connector, f"SELECT * FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}"
+            connector,
+            _limited_select(connector, "*", qualified, _PROFILING_SAMPLE_LIMIT),
         )
     except Exception as exc:
         _sampling_breaker.record_failure(connector, exc)
@@ -594,7 +633,7 @@ def calculate_columns_profiling(
         # description when a dominant value fills the sampled row prefix.
         # Skip the DISTINCT probe when the sample already produced _PROFILING_TOP_N
         # values — that is enough for embedding and avoids a full-table scan
-        # per column on warehouses where DISTINCT + LIMIT does not early-stop.
+        # per column on warehouses where the distinct-value cap does not early-stop.
         col_values = top5
         if (
             probe_distinct_values
@@ -858,7 +897,7 @@ def process_table(
     table_name = table["name"]
 
     # Columns profiling — requires a live connector; skipped only when one is
-    # unavailable. The bounded SELECT * ... LIMIT sample runs unconditionally;
+    # unavailable. The bounded SELECT * sample runs unconditionally;
     # the setting gates the unbounded DISTINCT probes inside. It persists
     # sample_values, is_unique, and format onto Column nodes, and maps those
     # values for FK detection below.

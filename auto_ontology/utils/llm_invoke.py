@@ -211,6 +211,13 @@ _NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
 _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
+def _use_openai_client(model: str) -> bool:
+    """Whether to build a generic OpenAI-compatible client for *model*."""
+    if os.environ.get("LLM_CLIENT", "nvidia").strip().lower() == "openai":
+        return True
+    return model.startswith(("openai/", "azure/", "aws/"))
+
+
 def _build_client(
     *,
     model: str,
@@ -225,7 +232,7 @@ def _build_client(
     ``ChatOpenAI``, which supports structured output. Everything else uses
     ``ChatNVIDIA``.
     """
-    if model.startswith(("openai/", "azure/", "aws/")):
+    if _use_openai_client(model):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
@@ -472,8 +479,17 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     omitting it succeeds. The model still calls the tool without being forced to, and
     the caller retries if it ever answers without one.
     """
+    client = os.environ.get("LLM_CLIENT", "nvidia").strip().lower()
+    if client not in {"nvidia", "openai"}:
+        logger.warning(
+            "Unknown LLM_CLIENT %r; using the default structured-output method",
+            client,
+        )
+        client = "nvidia"
     if _is_claude(llm):
         return {"method": "function_calling", "tool_choice": None}
+    if client == "openai":
+        return {"method": "function_calling"}
     return {}
 
 
