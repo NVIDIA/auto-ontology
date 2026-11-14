@@ -477,6 +477,62 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     return {}
 
 
+def _is_chat_nvidia(llm: object) -> bool:
+    """Whether *llm* is a ``ChatNVIDIA`` client, including a ``.bind()`` wrapper."""
+    try:
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+    except ImportError:
+        return False
+    current = llm
+    for _ in range(_MAX_BINDING_DEPTH):
+        if isinstance(current, ChatNVIDIA):
+            return True
+        bound = getattr(current, "bound", None)
+        if bound is None or isinstance(bound, (str, bytes, int, float, bool)):
+            return False
+        current = bound
+    return False
+
+
+def _response_text(response: object) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, list):
+        content = "".join(
+            part if isinstance(part, str) else str(part.get("text", ""))
+            for part in content
+            if isinstance(part, (str, dict))
+        )
+    return content if isinstance(content, str) else str(content)
+
+
+def _invoke_guided_json(
+    llm: BaseChatModel, messages: list[BaseMessage], schema: Type[T]
+) -> T | None:
+    """Structured call for ``ChatNVIDIA`` with ``guided_json`` at the payload top level.
+
+    ``ChatNVIDIA.with_structured_output`` (langchain-nvidia-ai-endpoints 1.4.3)
+    tries OpenAI ``response_format``, then top-level ``guided_json``, then
+    ``nvext.guided_json``, re-raising only the last failure. Against the hosted
+    ``integrate.api.nvidia.com`` endpoint ``response_format`` comes back with
+    empty content and ``nvext.guided_json`` is rejected with HTTP 400 ("unknown
+    field `guided_json`"), so every failed attempt cost three requests and
+    surfaced the misleading ``nvext`` 400. Top-level ``guided_json`` is the shape
+    the endpoint accepts, and the one self-hosted NIMs are tried with first.
+
+    Parsing here instead of in langchain's forgiving parser means a malformed
+    answer raises ``ValidationError`` and reaches the self-correcting retry,
+    rather than turning into ``None``. Empty content returns ``None``.
+    """
+    response = llm.bind(guided_json=schema.model_json_schema()).invoke(messages)
+    text = _response_text(response).strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        text = text.rsplit("```", 1)[0].strip()
+    if not text:
+        return None
+    return schema.model_validate_json(text)
+
+
 def _invoke_text_once(llm: BaseChatModel, prompt: str) -> str:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
@@ -562,12 +618,18 @@ def safe_invoke_with_structured_output(
     current_messages = _ensure_non_system_message(messages.copy())
     schema_name = getattr(schema, "__name__", str(schema))
     structured_kwargs = _structured_output_kwargs(llm)
+    guided_json = _is_chat_nvidia(llm)
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            model_llm = llm.with_structured_output(schema, **structured_kwargs)
-            with _inflight_guard():
-                result = model_llm.invoke(_system_messages_first(llm, current_messages))
+            ordered = _system_messages_first(llm, current_messages)
+            if guided_json:
+                with _inflight_guard():
+                    result = _invoke_guided_json(llm, ordered, schema)
+            else:
+                model_llm = llm.with_structured_output(schema, **structured_kwargs)
+                with _inflight_guard():
+                    result = model_llm.invoke(ordered)
         except _requests.exceptions.ReadTimeout:
             logger.error(
                 "LLM invoke timed out after %ds on attempt %d/%d for %s",
