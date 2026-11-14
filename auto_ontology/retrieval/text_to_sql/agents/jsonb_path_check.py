@@ -112,11 +112,14 @@ class JsonbPathCheckAgent(BaseAgent):
                 len(mismatches),
             )
 
-        path_state["jsonb_path_repair_attempts"] = attempts + 1
-
         if not mismatches:
-            # Every mismatch was self-applied — nothing left for reconstruction.
+            # Every mismatch was self-applied — nothing left for
+            # reconstruction. Not counted against jsonb_path_repair_attempts
+            # below: a fully self-applied fix isn't a reconstruction round
+            # spent, same as join_path_check.py's equivalent early return.
             return {"decision": "valid_sql", "path_state": path_state}
+
+        path_state["jsonb_path_repair_attempts"] = attempts + 1
 
         path_state["error"] = build_jsonb_path_repair_error(mismatches)
         # This error was derived from a live probe against the query's own
