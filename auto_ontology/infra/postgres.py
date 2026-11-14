@@ -11,6 +11,7 @@ local Postgres URL from the same ``POSTGRES_*`` env vars via this helper.
 from __future__ import annotations
 
 import os
+from urllib.parse import quote_plus
 
 #: Schema holding the tables Prisma owns (`conversations`, `messages`,
 #: `acronyms`, `prompts`, `configurations`, `conversation_analytics`, auth).
@@ -41,4 +42,4 @@ def get_postgres_connection_string() -> str:
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
     db = os.environ.get("POSTGRES_DATABASE", "auto_ontology")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{db}"
