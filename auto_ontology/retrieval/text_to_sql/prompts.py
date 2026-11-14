@@ -434,6 +434,16 @@ ORDER BY total_sales DESC;"""
 
 {sql_examples_block} Key rules:
 {table_name_rule}
+- CRITICAL: NEVER invent or guess table or column names. Use ONLY the exact names
+  shown in AVAILABLE TABLES. If a table or column the question asks for is NOT
+  listed in AVAILABLE TABLES, your response field MUST state "Table <name> not
+  found in available schema" or "Column <name> not found" instead of guessing a
+  similar name. Do NOT substitute a similar-sounding name (e.g., do NOT use
+  "v_rctmst_02" if only "bf_rctmst_02" is available).
+- For date/time filtering, use ONLY column names that appear in AVAILABLE TABLES.
+  Common date columns include names like "sdt", "regymd", "rokymd", "created_at",
+  "updated_at", or "date". Do NOT guess abbreviations like "CDT", "UDT", or
+  "RokDT" unless they are explicitly listed in the schema.
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
