@@ -309,6 +309,25 @@ def test_a_column_attribute_goes_with_its_table(world) -> None:
     assert _exists(s.column_attribute, theirs)
 
 
+def test_scoped_reset_sweeps_orphaned_terms_and_attributes(world) -> None:
+    """Terms and attributes whose catalog table was dropped still get cleaned up."""
+    prefix, make = world
+    shop = make("shop")
+    orphan_term = _add(s.term, name=f"{prefix}-OrphanTerm")
+    orphan_attr = _add(
+        s.column_attribute,
+        name=f"{prefix}-orphan-attr",
+        source_column="id",
+        term_name=f"{prefix}-OrphanTerm",
+        table_id=f"{prefix}-deleted-table",
+    )
+
+    r.delete_semantic_layer(shop.name)
+
+    assert not _exists(s.term, orphan_term)
+    assert not _exists(s.column_attribute, orphan_attr)
+
+
 # --------------------------------------------------------------------------
 # the scoped gap, preserved
 # --------------------------------------------------------------------------
