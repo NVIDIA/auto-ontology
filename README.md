@@ -58,7 +58,7 @@ Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted
 [NVIDIA API catalog](https://build.nvidia.com) (`integrate.api.nvidia.com`) or
 self-hosted NIMs. The defaults in `.env.example` are:
 
-- **LLM:** `nvidia/nemotron-3-nano-30b-a3b`
+- **LLM:** `nvidia/nemotron-3.5-lightning-30b-a3b`
 - **Embeddings:** `nvidia/nemotron-3-embed-1b`
 - **Reranking:** `nvidia/llama-nemotron-rerank-vl-1b-v2`
 
@@ -85,197 +85,376 @@ setup is to fill in `DEFAULT_MODELS_*` and override per-triplet fields only wher
 they differ (e.g. `EMBED_MODEL`, `NON_REASONING_MODEL`). `*_API_KEY` also falls
 back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 
-## Deployment
+## Quickstart
 
-### Prerequisites
+This runs Auto-Ontology with Docker Compose against Wide World Importers,
+Microsoft's sample sales database. You need Docker with Compose v2,
+[uv](https://docs.astral.sh/uv/), and an NVIDIA API key (`nvapi-...`) from
+[build.nvidia.com](https://build.nvidia.com).
 
-- **Docker** with **Docker Compose v2** (e.g. Docker Desktop on macOS/Windows,
-  Docker Engine on Linux) for the local stack. For Kubernetes deployments see
-  [`DEPLOYMENT.md`](./DEPLOYMENT.md).
-- An **NVIDIA API key** (`nvapi-...`) for NVIDIA NIM (chat and ingestion) from
-  the NVIDIA API catalog at <https://build.nvidia.com>.
-- Connection details for the source database(s) you want to query
-  (Databricks, Postgres, Snowflake, or DuckDB).
-
-### Installation
-
-**Kubernetes**
-
-To deploy Auto Ontology on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
-
-**Local (Docker Compose)**
-
-1. Clone the repository:
+1. Clone the repository and create `.env`:
 
    ```bash
-   git clone <repo-url> auto_ontology && cd auto_ontology
-   ```
-
-2. Create your environment file (.env) from the template and fill in the values
-   (Postgres credentials, `DEFAULT_MODELS_API_KEY`, `CONNECTION_STRINGS`, etc.).
-   See [`.env.example`](./.env.example) for the full list of variables:
-
-   ```bash
+   git clone https://github.com/NVIDIA/auto-ontology.git && cd auto-ontology
    cp .env.example .env
-   # edit .env
    ```
 
-   Note:
-   - `AUTH_SECRET` and `APP_URL` are **required** — without them every page
-     fails with a Better Auth "default secret" error.
-   - `POSTGRES_PORT` only changes the **host-side** port mapping (set it if
-     5432 is already taken on your machine); containers always reach Postgres
-     on the internal network port.
+   Then set these values in `.env`:
 
-3. Build the images and start the stack:
+   ```dotenv
+   DEFAULT_MODELS_API_KEY=nvapi-...
+   AUTH_SECRET=<a long random string, e.g. from openssl rand -base64 32>
+   APP_URL=http://localhost:3000
+   POSTGRES_PASSWORD=<a new password>
+   CONNECTION_STRINGS=postgresql://postgres:<the same password>@postgres:5432/wideworldimporters
+   AUTO_ONTOLOGY_ADMIN_PASSWORD=<a new password>
+   PGADMIN_PASSWORD=<a new password>
+   ```
+
+   Compose publishes Postgres, pgAdmin, and the web app on the host, so replace
+   each default password before you start it. `.env.example` also sets an API
+   key per model role: replace each `nvapi-your-api-key-here` with your key, or
+   delete those lines so they fall back to `DEFAULT_MODELS_API_KEY`.
+
+2. Start Postgres and load the sample database. The seed script lives in
+   auto-ontology-eval; pass it the Postgres password you set:
+
+   ```bash
+   docker compose up -d --wait postgres
+   git clone https://github.com/NVIDIA/auto-ontology-eval.git ../auto-ontology-eval
+   (cd ../auto-ontology-eval && uv sync && cp .env.example .env && \
+     POSTGRES_PASSWORD='<the same password>' \
+     uv run python scripts/seed/seed_wwi.py --database-name wideworldimporters --drop)
+   ```
+
+3. Build and start the rest of the stack:
 
    ```bash
    docker compose up -d --build
    ```
 
-   This builds the backend (`auto_ontology`) and frontend (`auto-ontology-frontend`) images, brings
-   up Postgres and pgAdmin, runs the one-shot `frontend-migrate` job to
-   sync the database schema, and starts the app (backend, ingestion service,
-   and frontend).
+4. Open <http://localhost:3000> and sign in with `AUTO_ONTOLOGY_ADMIN_EMAIL` and
+   `AUTO_ONTOLOGY_ADMIN_PASSWORD` from `.env`. Go to **Settings → Semantic
+   Compilation** and turn it on. Ingestion runs at startup; compilation starts
+   immediately and reports **Semantic compilation is ready** when it finishes.
 
-4. Open the UI at <http://localhost:3000> (the backend API is on `:3001`,
-   pgAdmin on `:5050`).
+5. Ask a question in **Chat**:
 
-   > **Troubleshooting:** if the UI loads without the left navigation panel
-   > (or otherwise looks broken after a restart), your browser is holding a
-   > stale session cookie — this happens when `AUTH_SECRET` changes or the
-   > database is reset. Clear the site data for `localhost:3000` (or delete
-   > the `better-auth.session_token` cookie) and sign in again.
+   > What was revenue for the USB food flash drive - sushi roll in Pennsylvania
+   > in June 2015?
 
-## Connections Management
+   The agent resolves *revenue*, *product*, and *state* to terms in the
+   ontology, follows their relationships to the joins it needs, and runs the
+   query. The answer comes back with its SQL and the steps that produced it,
+   so you can check the result against the source:
 
-Auto Ontology resolves the source databases it connects to from two sources:
+   ```text
+   Answer:  Revenue for USB food flash drive - sushi roll in Pennsylvania in
+            June 2015 was $588.80, from 3 invoice lines.
 
-1. **Added through the UI** — connections created from within the app. With this
-   option the connection credentials are **stored in plaintext in Postgres unless
-   Vault is configured**:
-   - **Without Vault:** the full connection object (including the password) is
-     JSON-serialized and stored, unencrypted, on the catalog's database row.
-   - **With Vault:** the credentials are written to Vault, keyed by the database
-     name, and the catalog row stores no credentials (the database name is the
-     lookup key — there is no separate reference field).
+   SQL:     SELECT SUM(il.extendedprice) AS revenue, COUNT(*) AS invoice_lines
+            FROM sales.invoicelines il
+            JOIN sales.invoices i             ON il.invoiceid = i.invoiceid
+            JOIN warehouse.stockitems si      ON il.stockitemid = si.stockitemid
+            JOIN sales.customers c            ON i.customerid = c.customerid
+            JOIN application.cities ct        ON c.deliverycityid = ct.cityid
+            JOIN application.stateprovinces sp ON ct.stateprovinceid = sp.stateprovinceid
+            WHERE si.stockitemname = 'USB food flash drive - sushi roll'
+              AND sp.stateprovincename = 'Pennsylvania'
+              AND i.invoicedate >= '2015-06-01' AND i.invoicedate < '2015-07-01'
 
-   Vault is enabled only when all of `VAULT_ADDR`, `VAULT_NAMESPACE`,
-   `VAULT_ROLE_ID`, and `VAULT_SECRET_ID` are set (`VAULT_AUTH_MOUNT` and
-   `VAULT_KV_MOUNT` are optional overrides). It is off by default; a partial
-   configuration is ignored with a warning and falls back to plaintext storage.
+   Steps:   Resolved terms: Invoice Line (revenue), Stock Item, State Province, Invoice
+            Joined: invoice line -> invoice -> customer -> city -> state province
+            Validated the filter values against the data, then executed
+   ```
 
-2. **`CONNECTION_STRINGS` environment variable** — a comma-separated list of
-   connection strings supplied at deploy time (e.g. the Helm
-   `--set connectionStrings=<CONNECTION-STRINGS>` flag). This is a fallback: it
-   is used only when there are no UI-added connections.
+6. Ask something the data can't answer. Wide World Importers has no
+   advertising data, so a question about ad spend has nothing to resolve
+   against. An agent connected through [MCP](#mcp-server) checks answerability
+   first and asks you to clarify:
 
-## Authentication
+   ```text
+   You:    What was return on ad spend for the sushi roll flash drive in June 2015?
+   Agent:  check_answerable -> coverage 0.5; no term covers "ad spend"
+   Agent:  I can find revenue for that product, but this data has no
+           advertising spend, so I can't compute return on ad spend. Do you
+           want June 2015 revenue instead, or is ad spend tracked in another
+           source I should connect?
+   ```
 
-Auto Ontology Supports SSO for authentication.
-The Redirect URI should be configured in the IdP as: APP_URL/api/auth/sso/callback
+If the UI loads without its left navigation after a restart, the browser is
+holding a stale session cookie. Clear site data for `localhost:3000` and sign in
+again. For other setup failures, see the
+[setup skill's troubleshooting guide](./skills/nvidia-ontology-setup/references/troubleshooting.md).
 
-### API tokens (scripting)
+## How it works
 
-A browser signs in and gets a session cookie, which a script cannot obtain. For
-scripts, notebooks, and scheduled jobs, mint an **API token** instead:
+<p>
+<img src="./docs/assets/arch.png" alt="Auto-Ontology architecture" width="800">
+</p>
 
-1. Open the user menu (top right) → **API Tokens** → **New token**.
-2. Name it, optionally pick an expiry (default: never), and **copy the token**.
-   Auto Ontology stores only a SHA-256 hash of it, so it is shown exactly once. Losing it
-   means minting a new one.
+Auto-Ontology works in three stages: it generates an ontology, people certify
+it, and the agent answers questions from it.
 
-Send it as `x-api-key` on any `/api/...` call — `Authorization: Bearer <token>`
-works too:
+The ontology holds three kinds of definition:
 
-```sh
-curl -H "x-api-key: $AUTO_ONTOLOGY_API_TOKEN" https://auto_ontology.example.com/api/terms
+- **Terms.** Business concepts such as *Customer* or *Invoice Line*, each with a
+  description and synonyms, mapped to the columns that hold them.
+- **SQL attributes.** Reviewed SQL expressions under a term, such as a margin or
+  a rolling total. The agent reuses them, so answers compute each measure the
+  same way.
+- **Relationships.** How tables join, including bridge tables, inferred from
+  keys and from the data.
+
+**Generate.** The ingestion service builds a first draft from the source
+databases:
+
+1. Read sources: extract schemas, profile columns, and sample values into the
+   catalog.
+2. Name entities: extract terms table by table and map each to columns.
+3. Resolve relationships: infer joins between tables and bridge tables, and
+   suggest SQL attributes from query history.
+4. Write the ontology: store terms, relationships, and SQL attributes in
+   Postgres, with embeddings in pgvector for retrieval.
+
+The result is a semantic graph you can explore in the UI. In this example, one
+compilation of Wide World Importers produced 31 terms; selecting **Order** shows
+its description, related terms, mapped columns, and SQL attributes:
+
+<p>
+<img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
+</p>
+
+**Certify.** People make the draft trustworthy:
+
+1. Test with real questions in Chat, or with `check_answerable` and
+   `ask_question` over MCP.
+2. Refine terms, descriptions, and SQL attributes in the UI or through the API.
+3. Certify names, descriptions, and SQL attributes once they're correct.
+
+**Answer.** For each question, the agent:
+
+1. Classifies the intent and extracts the entities the question names.
+2. Retrieves candidate terms, columns, and SQL attributes by embedding search.
+3. Writes SQL from those candidates.
+4. Checks the filter values and the query against the database, repairing the
+   SQL when a check fails.
+5. Runs the query and returns the answer with its SQL and the steps it took.
+
+When the candidates can't support a query, the agent reports that the question
+can't be answered from this data. Predictive questions go to KumoRFM when it's
+configured (see [Predictions](#predictions)).
+
+In Chat, each answer shows its SQL, and you can view the rows, download them as
+CSV, or read them as a chart:
+
+<p>
+<img src="./docs/assets/qa-example.png" alt="Chat answering which products drive the most revenue and highest customer count, with the generated SQL and a revenue chart" width="550">
+</p>
+
+Auto-Ontology is compatible with [Apache Ossie](https://ossie.apache.org/), the
+open standard for exchanging semantic models. Ossie includes a
+[converter for Auto-Ontology](https://github.com/apache/ossie-converters/tree/main/nvidia),
+which Auto-Ontology uses to import and export model definitions as Ossie YAML.
+Use **Settings → Import / Export**, or `POST /api/model/import` and
+`POST /api/model/export`.
+
+| Component           | Technology                        | Role                                       | Port |
+| ------------------- | --------------------------------- | ------------------------------------------ | ---- |
+| Frontend            | Next.js, Better Auth, Prisma      | Web UI, authentication, public API gateway | 3000 |
+| Backend             | FastAPI (Python 3.12+), LangChain | Text-to-SQL agent, catalog, ontology APIs  | 3001 |
+| Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation         | 3002 |
+| MCP server          | FastMCP                           | Read-only agent tools over the public API  | 3003 |
+| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store  | 5432 |
+| HashiCorp Vault     | Optional                          | Connection credential storage              | n/a  |
+
+Keep ports 3001 and 3002 on a private network. FastAPI trusts the user identity
+the frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
+service's endpoints (ingest, delete, reset, compile) have no authentication of
+their own. Clients go through the web app on port 3000.
+
+## Use it from your agent
+
+### MCP server
+
+The [MCP](https://modelcontextprotocol.io) server gives any MCP client read-only
+tools over the ontology. Each user signs in through Auto-Ontology, and every
+call runs with that user's permissions.
+
+| Job           | Tools                                                         |
+| ------------- | ------------------------------------------------------------- |
+| Readiness     | `check_readiness`: can this deployment answer anything at all |
+| Terms         | `search_terms`, `get_term`, `get_term_columns`, `get_term_sql_attributes`, `get_sql_attribute`, `describe_table` |
+| Answerability | `check_answerable`: does the ontology cover this question     |
+| Questions     | `ask_question`: the answer, the SQL, and the rows             |
+
+Run the server against your deployment:
+
+```bash
+AUTO_ONTOLOGY_API_URL=http://localhost:3000 \
+  uvx --from "git+https://github.com/NVIDIA/auto-ontology.git#subdirectory=mcp" auto-ontology-mcp
 ```
 
-```python
-import os
-import requests
-
-session = requests.Session()
-session.headers["x-api-key"] = os.environ["AUTO_ONTOLOGY_API_TOKEN"]
-
-terms = session.get("https://auto_ontology.example.com/api/terms").json()
-
-answer = session.post(
-    "https://auto_ontology.example.com/api/chat/completions",
-    json={"question": "How many orders shipped last week?"},
-).json()
-```
-
-Things worth knowing:
-
-- **A token acts as its owner.** It carries no permissions of its own — every
-  call is authorized against the owner's role, exactly as it would be in the
-  browser. A viewer's token cannot do admin things.
-- **The whole API surface accepts it.** Authentication is resolved in one place
-  (`frontend/auth/resolve-user.ts`) for every route, so any endpoint in
-  [`docs/openapi/auto-ontology-api.json`](./docs/openapi/auto-ontology-api.json) that is not
-  `withPublic` works with a token.
-- **Revocation is immediate.** Delete the token in the UI, or delete/ban the
-  owning user, and the next request with it gets a 401.
-- **Tokens cannot manage tokens.** Creating and revoking requires a signed-in
-  session, so a leaked token cannot issue itself successors.
-  
-## Agent API conversations
-
-Public clients call the authenticated Next.js gateway at
-`POST /api/chat/completions`. The response is an SSE stream containing `step`,
-`result`, or `error` events, followed by `[DONE]`.
-
-`conversation_id` is optional:
-
-- Omit it for a stateless, one-shot request.
-- Supply a client-generated UUID to create or continue a conversation.
-- Reuse the same UUID for every turn in the thread. Wait for `[DONE]` before
-  sending the next turn; overlapping requests for one conversation return
-  `409 Conversation in progress`.
+Cursor (`~/.cursor/mcp.json`):
 
 ```json
 {
-  "question": "What about last month?",
-  "conversation_id": "d61d8aa3-d496-4fa7-97ce-4f831c162e7f"
+  "mcpServers": {
+    "auto-ontology": { "url": "http://localhost:3003/mcp" }
+  }
 }
 ```
 
-For conversational requests, FastAPI loads up to the five most recent completed
-turns (bounded to 12,000 characters) and rewrites contextual input such as
-“What about August?” into a standalone question before running the existing
-text-to-SQL graph. Independent questions are passed through unchanged. Internal
-agent thoughts, chart payloads, errors, and raw SQL result sets are not reused as
-context.
+Claude Desktop (`claude_desktop_config.json`), bridged with
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
 
-Conversation history is scoped to the authenticated Auto Ontology user. Browser and
-service callers should use the Next.js gateway, which resolves the user and
-forwards the internal `x-auto-ontology-user-id` header to FastAPI. The FastAPI port is a
-trusted internal service boundary: it must not be exposed publicly because that
-header is not independently verified by FastAPI. A direct FastAPI request
-without `conversation_id` remains stateless; a direct request with
-`conversation_id` requires the trusted identity header.
+```json
+{
+  "mcpServers": {
+    "auto-ontology": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://localhost:3003/mcp"]
+    }
+  }
+}
+```
 
-The web UI manages the UUID automatically. An API-created conversation can be
-opened in the UI at `/chat?focus=<conversation_id>` when it belongs to the
-signed-in user.
+Restart the client after editing its config, then sign in when it prompts.
+Sign-in, configuration, and troubleshooting are in [docs/mcp.md](./docs/mcp.md).
 
-## Agent skills
+### Agent skills
 
-Coding agents: start at [`AGENTS.md`](./AGENTS.md). Skills live in
-[`skills/`](./skills/) (`nvidia-ontology-setup`, `nvidia-ontology-management`, `nvidia-ontology-query`).
-Maintainers keep using [`CLAUDE.md`](./CLAUDE.md).
+Three skills teach a coding agent to work with Auto-Ontology. Start at
+[AGENTS.md](./AGENTS.md).
 
-## MCP server
+| Skill                                                                | Covers                                               |
+| -------------------------------------------------------------------- | ---------------------------------------------------- |
+| [`nvidia-ontology-setup`](./skills/nvidia-ontology-setup/)           | Install, connect sources, compile, prove readiness   |
+| [`nvidia-ontology-management`](./skills/nvidia-ontology-management/) | Inspect, model, certify, import/export, and publish  |
+| [`nvidia-ontology-query`](./skills/nvidia-ontology-query/)           | Ask questions and validate the SQL, rows, and answer |
 
-Agent harnesses such as Cursor and Claude Desktop can query your data through
-Auto Ontology's [MCP](https://modelcontextprotocol.io) server. See
-[`mcp/`](./mcp/) to run it and [`docs/mcp.md`](./docs/mcp.md) for the details.
+### REST API
+
+Ask a question with `POST /api/chat/completions` on the web app's origin. Mint
+an API token under the user menu → **API Tokens**. The response is a
+server-sent event stream: a `result` event carries the answer, and
+`data: [DONE]` ends the stream.
+
+```bash
+curl -N http://localhost:3000/api/chat/completions \
+  -H "x-api-key: $AUTO_ONTOLOGY_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "How many orders shipped last week?"}'
+```
+
+```python
+import json
+import os
+
+import requests
+
+response = requests.post(
+    "http://localhost:3000/api/chat/completions",
+    headers={"x-api-key": os.environ["AUTO_ONTOLOGY_API_TOKEN"]},
+    json={"question": "How many orders shipped last week?"},
+    stream=True,
+    timeout=900,
+)
+response.raise_for_status()
+
+for line in response.iter_lines(decode_unicode=True):
+    if not line or not line.startswith("data:"):
+        continue
+    payload = line.removeprefix("data:").strip()
+    if payload == "[DONE]":
+        break
+    event = json.loads(payload)
+    if event["type"] == "result":
+        print(event["answer"]["response"])
+        print(event["answer"]["sql_code"])
+    elif event["type"] == "error":
+        raise RuntimeError(event["message"])
+```
+
+Event types, multi-turn conversations, and the gateway trust boundary are in
+[docs/conversation-api.md](./docs/conversation-api.md). Every other operation is
+in the [OpenAPI spec](./docs/openapi/auto-ontology-api.json).
+
+## Connectors, models, and predictions
+
+### Sources
+
+Auto-Ontology connects to ten engines:
+
+- PostgreSQL
+- MySQL
+- Databricks
+- Snowflake
+- ClickHouse
+- Trino
+- Apache Kyuubi
+- HeavyDB
+- DuckDB
+- SQLite
+
+Add connections under **Settings → Connections**, or list them in
+`CONNECTION_STRINGS`. DuckDB and SQLite are connection-string only. See
+[docs/connections.md](./docs/connections.md) for URL schemes, scoping, and
+credential storage.
+
+### Models
+
+Auto-Ontology uses four model roles. With an `nvapi-` key, each defaults to an
+NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
+
+| Role            | Default model                           | What it does                                                                                                                   |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes), writes each answer's SQL and explanation, and grades answerability |
+| `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
+| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
+| `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Ranks candidate tables when compilation builds bridge-table SQL attributes                                                     |
+
+To use self-hosted NIM or any OpenAI-compatible endpoint, set
+`<ROLE>_ENDPOINT`, `<ROLE>_API_KEY`, and `<ROLE>_MODEL`. Any field you leave
+unset falls back to `DEFAULT_MODELS_<FIELD>`, so the simplest setup fills in
+`DEFAULT_MODELS_*` and overrides only what differs. Use models
+that support structured output, and keep the embedding model the same for
+ingestion and queries. [`.env.example`](./.env.example) documents every
+variable.
+
+### Predictions
+
+Set `KUMO_RFM_API_KEY` and the agent routes predictive questions to KumoRFM.
+KumoRFM is a hosted service: to answer, the agent uploads the connected tables
+to it, capped by `KUMO_MAX_TABLES` (20 by default) and
+`KUMO_MAX_ROWS_PER_TABLE` (unlimited unless set). Review what that sends, and
+complete your organization's data review, before you enable it.
+
+## Integrate with us
+
+To integrate an agent platform, application, or storage provider with
+Auto-Ontology,
+[open an integration request](https://github.com/NVIDIA/auto-ontology/issues/new?template=integration.yml).
+
+The Auto-Ontology team maintains the code and doesn't accept external pull
+requests. Integration requests and bug reports are welcome as issues. Report
+security vulnerabilities through [SECURITY.md](./SECURITY.md). Maintainer
+workflow is in [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Reference
+
+| Topic                                   | Doc                                                  |
+| --------------------------------------- | ---------------------------------------------------- |
+| Kubernetes deployment with Helm         | [DEPLOYMENT.md](./DEPLOYMENT.md)                     |
+| Connections, scoping, and Vault         | [docs/connections.md](./docs/connections.md)         |
+| Authentication, SSO, and API tokens     | [docs/authentication.md](./docs/authentication.md)   |
+| Conversation API                        | [docs/conversation-api.md](./docs/conversation-api.md) |
+| MCP server                              | [docs/mcp.md](./docs/mcp.md)                         |
+| REST API                                | [docs/openapi/auto-ontology-api.json](./docs/openapi/auto-ontology-api.json) |
 
 ## License
 
-Auto Ontology is licensed under the [Apache License, Version 2.0](./LICENSE).
+Auto-Ontology is licensed under the [Apache License, Version 2.0](./LICENSE).
 SPDX identifier: `Apache-2.0`.
 
 Each NVIDIA-authored source file in this repository carries an SPDX header
@@ -287,7 +466,7 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 ```
 
-Third-party open-source components used by Auto Ontology are enumerated, with their
+Third-party open-source components used by Auto-Ontology are enumerated, with their
 upstream licenses and project URLs, in
 [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). Components added by the
 container images are listed separately in
@@ -308,19 +487,14 @@ liabilities or legal consequences from your use or inability to use this
 software or any retrieved materials. Use this software and the retrieved
 materials at your own risk.
 
-External materials Auto Ontology interacts with at run time:
+External materials Auto-Ontology interacts with at run time:
 
-| Material | When | Terms |
-| --- | --- | --- |
-| NVIDIA-hosted model APIs ([build.nvidia.com](https://build.nvidia.com), `integrate.api.nvidia.com`) for LLM, embedding, and reranking | Chat, ingestion, and semantic compilation, with the default model configuration | Terms of the NVIDIA API catalog and of each model |
-| Any other OpenAI-compatible model endpoint you configure (`*_ENDPOINT` / `*_MODEL`) | Same | Terms of that provider and model |
-| KumoRFM predictive-query service | Only when `KUMO_RFM_API_KEY` is set | Kumo's terms |
-| Your source databases | Ingestion, profiling, and query execution | Your agreements for those systems |
+- Model endpoints you configure, by default the NVIDIA API catalog
+  (`integrate.api.nvidia.com`, `ai.api.nvidia.com`), under each provider's and
+  model's terms.
+- The KumoRFM service, only when `KUMO_RFM_API_KEY` is set, under Kumo's terms.
+- Your source databases, under your agreements for those systems.
 
-## Contributing
+## Security
 
-**This project is currently not accepting contributions.** Issues, pull
-requests, and patches submitted from outside the Auto Ontology maintainer team will
-not be reviewed or merged. Security-relevant reports should follow the
-process described in [`SECURITY.md`](./SECURITY.md). Maintainer workflow is in
-[`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Report security vulnerabilities as described in [SECURITY.md](./SECURITY.md).

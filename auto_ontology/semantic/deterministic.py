@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from auto_ontology.dal.datasources import store_column_descriptions
 from auto_ontology.semantic.date_format import is_date_type
 from auto_ontology.semantic.models import ColumnAttributeSpec, ColumnDescriptionResult
+from auto_ontology.utils.catalog_reembed import refresh_catalog_embeddings
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
@@ -40,21 +43,45 @@ Rules:
 - Return exactly one entry per column provided, using the physical column name."""
 
 
+def _is_word_char(char: str) -> bool:
+    """Letters, digits and combining marks in any script.
+
+    Marks count so that Devanagari vowel signs or a decomposed accent stay
+    inside their word; Python's ``\\w`` leaves them out.
+    """
+    return char.isalnum() or unicodedata.category(char).startswith("M")
+
+
+def _words(text: str) -> list[str]:
+    words: list[str] = []
+    current: list[str] = []
+    for char in text:
+        if _is_word_char(char):
+            current.append(char)
+        elif current:
+            words.append("".join(current))
+            current = []
+    if current:
+        words.append("".join(current))
+    return words
+
+
 def to_term_name(table_name: str) -> str:
-    """Return a human-readable fallback Term name from a physical table name."""
-    separated = re.sub(
-        r"(?<=[A-Z])(?=[A-Z][a-z])",
-        " ",
-        table_name.strip(),
-    )
+    """Return a human-readable fallback Term name from a physical table name.
+
+    Words in any script are kept: ``고객`` stays ``고객`` and ``Société_Générale``
+    becomes ``Société Générale``. An ASCII-only split used to turn non-Latin
+    names into ``""``, a Term that is never embedded and so never retrieved.
+    If nothing word-like remains, the stripped table name itself is returned,
+    never an empty name.
+    """
+    stripped = unicodedata.normalize("NFC", table_name.strip())
+    separated = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", stripped)
     separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", separated)
-    parts = re.split(r"[^A-Za-z0-9]+", separated)
-    return " ".join(
-        part if part.isupper() else part.capitalize() for part in parts if part
+    name = " ".join(
+        part if part.isupper() else part.capitalize() for part in _words(separated)
     )
-
-
-_FORMAT_MARKER = "format:"
+    return name or stripped
 
 
 def fk_source_columns(fks: list[dict[str, Any]]) -> set[str]:
@@ -78,48 +105,6 @@ def _get_column_samples(
     return [str(s) for s in samples]
 
 
-def _add_samples_suffix(text: str, samples: list[str]) -> str:
-    """Append " — samples: v1, v2" to *text* when samples are present."""
-    if not samples:
-        return text
-    return f"{text} — samples: {', '.join(samples)}"
-
-
-def _date_format_clause(
-    col: dict[str, Any],
-    columns_profiling_samples: dict[str, dict[str, Any]],
-) -> str | None:
-    """How stored values are written, when a single notation fits them all.
-
-    ``format`` is the column's storage notation — currently filled only for
-    dates, but the same property would hold an id or address pattern later.
-    """
-    profile = columns_profiling_samples.get(col.get("name", "")) or {}
-    notation = profile.get("format") or col.get("format")
-    if not notation:
-        return None
-    return f"{_FORMAT_MARKER} {notation}"
-
-
-def _add_date_format_clause(text: str, clause: str | None) -> str:
-    """Append the notation, idempotently on its own marker."""
-    if not clause or _FORMAT_MARKER in text:
-        return text
-    return f"{text} — {clause}" if text else clause
-
-
-def _enrich_description(
-    col: dict[str, Any],
-    columns_profiling_samples: dict[str, dict[str, Any]],
-    text: str | None,
-) -> str | None:
-    """Attach date notation (and, for existing descriptions, samples)."""
-    enriched = _add_date_format_clause(
-        text or "", _date_format_clause(col, columns_profiling_samples)
-    )
-    return enriched or None
-
-
 def _describe_column_batch(
     columns: list[dict[str, Any]],
     columns_profiling_samples: dict[str, dict[str, Any]],
@@ -132,17 +117,32 @@ def _describe_column_batch(
     for col in columns:
         name = col.get("name", "")
         data_type = col.get("data_type") or "unknown"
-        samples = _get_column_samples(col, columns_profiling_samples)
-        line = _add_samples_suffix(f"  - {name} ({data_type})", samples)
+        line = f"  - {name} ({data_type})"
+        if samples := _get_column_samples(col, columns_profiling_samples):
+            line += f" — samples: {', '.join(samples)}"
         lines.append(line)
 
-    prompt = "Columns:\n" + "\n".join(lines)
+    return describe_columns(
+        _DESCRIPTION_SYSTEM,
+        "Columns:\n" + "\n".join(lines),
+        [c.get("name", "") for c in columns if c.get("name")],
+    )
 
+
+def describe_columns(
+    system_prompt: str,
+    prompt: str,
+    requested_names: list[str],
+) -> dict[str, str]:
+    """Run one column-description prompt and key its answers by column name.
+
+    Returns a ``{column_name: description}`` map; empty when the call fails.
+    """
     try:
         result = invoke_with_structured_output(
             get_llm_client(temperature=0.0),
             [
-                SystemMessage(content=_DESCRIPTION_SYSTEM),
+                SystemMessage(content=system_prompt),
                 HumanMessage(content=prompt),
             ],
             ColumnDescriptionResult,
@@ -162,7 +162,6 @@ def _describe_column_batch(
     # the column_name (e.g. "Academic Year (TEXT)"). Resolve each returned name
     # to the requested physical name: exact match first, then the longest
     # requested name the returned string starts with.
-    requested_names = [c.get("name", "") for c in columns if c.get("name")]
     requested_set = set(requested_names)
     out: dict[str, str] = {}
     for d in result.descriptions:
@@ -215,67 +214,79 @@ def _generate_column_descriptions(
     return descriptions
 
 
+def _own_description(col: dict[str, Any]) -> str:
+    """The column's own description, not one borrowed from its attributes."""
+    raw = col["own_description"] if "own_description" in col else col.get("description")
+    return (raw or "").strip()
+
+
+def lacks_description(col: dict[str, Any]) -> bool:
+    """Whether a column's own description is blank or merely repeats its name."""
+    description = _own_description(col)
+    return not description or description.casefold() == col.get("name", "").casefold()
+
+
+def fill_missing_column_descriptions(
+    table_id: str,
+    columns: list[dict[str, Any]],
+    columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    """Give each of *columns* lacking a description a short generated one.
+
+    The description is stored on the Column itself, and each written column
+    dict is updated in place so the caller's prompts see it. The Column and
+    Table rows of the data VDB embed that text, so they are refreshed.
+    Returns the names of the columns written.
+    """
+    undocumented = [
+        col for col in columns if col.get("name") and lacks_description(col)
+    ]
+    generated = _generate_column_descriptions(undocumented, columns_profiling_samples)
+    if not generated:
+        return []
+    written_ids = store_column_descriptions(table_id, generated)
+    written: list[str] = []
+    for col in undocumented:
+        if col.get("id") in written_ids:
+            col["description"] = col["own_description"] = generated[col["name"]]
+            written.append(col["name"])
+    if written_ids:
+        try:
+            refresh_catalog_embeddings([*written_ids, table_id])
+        except Exception:
+            logger.warning(
+                "data VDB refresh after describing columns of table %s failed",
+                table_id,
+                exc_info=True,
+            )
+    return written
+
+
 def column_attribute_specs(
     columns: list[dict[str, Any]],
     fks: list[dict[str, Any]],
     suggested_fk_columns: set[str] | None = None,
-    columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
 ) -> list[ColumnAttributeSpec]:
-    """Non-FK columns mapped 1:1 to ColumnAttribute candidates."""
+    """Non-FK columns mapped 1:1 to ColumnAttribute candidates.
+
+    A spec carries the column's own description as evidence for the Term
+    prompt only; the attribute's description is written after FK resolution.
+    """
     fk_cols = fk_source_columns(fks)
     if suggested_fk_columns:
         fk_cols |= suggested_fk_columns
-
-    candidates = [
-        col for col in columns if (name := col.get("name", "")) and name not in fk_cols
-    ]
-
-    # Only ask the LLM for columns that don't already have a description
-    cols_with_description = [col for col in candidates if col.get("description")]
-    cols_without_description = [col for col in candidates if not col.get("description")]
-    llm_descriptions = _generate_column_descriptions(
-        cols_without_description, columns_profiling_samples
-    )
-
-    profiling = columns_profiling_samples or {}
-
-    def _build_column_attribute_spec(
-        col: dict[str, Any], description: str | None
-    ) -> ColumnAttributeSpec:
-        name = col["name"]
-        return ColumnAttributeSpec(
+    return [
+        ColumnAttributeSpec(
             source_column=name,
             name=_column_to_attr_name(name),
             datatype=str(col.get("data_type") or ""),
-            description=description,
+            column_description=None
+            if lacks_description(col)
+            else _own_description(col),
         )
-
-    # Columns with an existing description skip the LLM entirely, so unlike
-    # LLM descriptions (which were already generated with the samples as
-    # evidence) their description never saw the sample values — bundle them
-    # in now via the same " — samples: ..." suffix.
-    specs = [
-        _build_column_attribute_spec(
-            col,
-            _enrich_description(
-                col,
-                profiling,
-                _add_samples_suffix(
-                    col["description"], _get_column_samples(col, profiling)
-                ),
-            ),
-        )
-        for col in cols_with_description
+        for col in columns
+        if (name := col.get("name", "")) and name not in fk_cols
     ]
-    # Columns without a description: keep the LLM description as generated
-    specs += [
-        _build_column_attribute_spec(
-            col,
-            _enrich_description(col, profiling, llm_descriptions.get(col["name"])),
-        )
-        for col in cols_without_description
-    ]
-    return specs
 
 
 def fk_target_table_names(fks: list[dict[str, Any]]) -> list[str]:

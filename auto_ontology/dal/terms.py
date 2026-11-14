@@ -46,6 +46,7 @@ from auto_ontology.dal.attributes import fetch_column_attribute_columns_map
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.tags import TARGET_COLUMN_ATTRIBUTE, TARGET_TERM, fetch_tags_map
+from auto_ontology.dal.term_families import attribute_family_prefix
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.dal.zones import fetch_table_zones_map, zone_covers_table
 from auto_ontology.semantic.constants import (
@@ -449,6 +450,10 @@ def upsert_table_term(
             return None
 
         table = tables[0]
+        # An empty proposal would be stored as "" (never embedded, so never
+        # retrieved), and the next one as " (db.schema.table)". Use the
+        # physical table name instead.
+        name = name.strip() or table["table_name"]
         qualified_table = ".".join(
             part
             for part in (
@@ -659,6 +664,8 @@ def fetch_all_terms_and_attributes(
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.description.label("column_description"),
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
             s.catalog_column.c.sample_values,
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
@@ -996,6 +1003,8 @@ def _embedding_attrs_for_table(table_id: str):
             s.column_attribute.c.description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
+            s.catalog_column.c.description.label("column_description"),
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
             s.catalog_column.c.sample_values,
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
@@ -1095,6 +1104,8 @@ def fetch_term_and_column_attributes_for_embedding(
             s.column_attribute.c.description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
+            s.catalog_column.c.description.label("column_description"),
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
             s.catalog_column.c.sample_values,
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
@@ -1131,9 +1142,9 @@ def fetch_term_and_column_attributes_for_embedding(
 def fetch_column_attribute_embedding_contexts_by_column_id(
     column_id: str,
 ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-    """The Term contexts a column's sample-value update invalidates.
+    """The Term contexts a column's description or sample-value update invalidates.
 
-    Sample values are part of a ColumnAttribute's embedding text, so profiling a
+    Both are part of a ColumnAttribute's embedding text, so editing either on a
     column stales every attribute on it and every term behind those.
     """
     rows = store().query_read(
@@ -1147,10 +1158,13 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
             s.column_attribute.c.description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
+            s.catalog_column.c.description.label("column_description"),
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
             s.catalog_column.c.sample_values,
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
             s.column_attribute.c.id,
         )
         .select_from(
@@ -1204,7 +1218,13 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
                 "description": row["description"],
                 "term_name": row["term_name"],
                 "source_column": row["source_column"],
+                "column_description": row["column_description"],
+                "family_prefix": row["family_prefix"],
                 "sample_values": row["sample_values"],
+                "is_unique": row["is_unique"],
+                "table_id": row["table_id"],
+                "table_name": row["table_name"],
+                "schema_name": row["schema_name"],
                 "id": row["id"],
             }
         )

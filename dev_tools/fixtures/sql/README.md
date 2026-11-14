@@ -20,7 +20,7 @@ fixture from scratch, drop the database first; for SQLite, delete the
 | Fixture | Engine | Source | Licence |
 |---|---|---|---|
 | `pagila` | Postgres | [devrimgunduz/pagila] `pagila-v3.1.0`, trimmed | MIT |
-| `pagila_analytics` | Postgres | Auto Ontology-authored addendum to `pagila` | — |
+| `pagila_analytics` | Postgres | Auto-Ontology-authored addendum to `pagila` | — |
 | `chinook` | SQLite | [lerocha/chinook-database], unmodified | MIT |
 
 [devrimgunduz/pagila]: https://github.com/devrimgunduz/pagila
@@ -60,7 +60,7 @@ Not a verbatim upstream file. Reproduce with
 
 1. **Pinned to `pagila-v3.1.0`, not `master`.** Upstream master targets
    PostgreSQL 18 — it uses `uuidv7()` defaults and `VIRTUAL` generated columns,
-   neither of which exists in PG17. Auto Ontology runs `pgvector/pgvector:pg17`. `v3.1.0`
+   neither of which exists in PG17. Auto-Ontology runs `pgvector/pgvector:pg17`. `v3.1.0`
    is the newest tag that loads on PG17 **unmodified**, and it still has the
    partitioned table, both domains, the enum, and all 8 views. Pinning beats
    patching: no local edits to a third-party fixture to keep re-applying.
