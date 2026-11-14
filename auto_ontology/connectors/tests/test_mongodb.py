@@ -18,6 +18,7 @@ import copy
 import math
 import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -26,9 +27,14 @@ from typing import Any, Iterator
 import duckdb
 import pandas as pd
 import pytest
+import sqlglot
 from bson import DBRef, Decimal128, ObjectId, Timestamp
 from bson.datetime_ms import DatetimeMS
-from pymongo.errors import ExecutionTimeout, OperationFailure
+from pymongo.errors import (
+    ExecutionTimeout,
+    OperationFailure,
+    ServerSelectionTimeoutError,
+)
 from pytest import MonkeyPatch
 
 from auto_ontology.catalog.extract import create_dataframe
@@ -248,8 +254,11 @@ class FakeServer:
     ignore_filters: bool = False
     reject_time_limits: bool = False
     sample_error: Exception | None = None
+    list_error: Exception | None = None
     sample_delay: float = 0.0
     delay: float = 0.0
+    # Seconds of the pymongo.timeout() scope an operation runs in, if any.
+    scope: float | None = None
 
     def finds(self, collection: str | None = None) -> list[tuple[Any, ...]]:
         return [
@@ -259,7 +268,8 @@ class FakeServer:
         ]
 
     def check_time_limit(self, value: Any) -> None:
-        if value is not None and self.reject_time_limits:
+        """Refuse maxTimeMS, explicit or the one pymongo.timeout() derives."""
+        if (value is not None or self.scope is not None) and self.reject_time_limits:
             raise OperationFailure("Field 'maxTimeMS' is not supported", code=115)
 
 
@@ -270,7 +280,9 @@ class FakeCollection:
         self.name = name
 
     def aggregate(self, pipeline: list[dict[str, Any]], **options: Any) -> Any:
-        self._server.calls.append(("aggregate", self._name, pipeline, options))
+        self._server.calls.append(
+            ("aggregate", self._name, pipeline, options, self._server.scope)
+        )
         self._server.check_time_limit(options.get("maxTimeMS"))
         time.sleep(self._server.sample_delay)
         if self._server.sample_error is not None:
@@ -280,7 +292,10 @@ class FakeCollection:
         return iter(copy.deepcopy(self._server.data[self._name][:size]))
 
     def estimated_document_count(self) -> int:
-        self._server.calls.append(("estimated_document_count", self._name))
+        self._server.calls.append(
+            ("estimated_document_count", self._name, self._server.scope)
+        )
+        self._server.check_time_limit(None)
         return len(self._server.data[self._name])
 
     def count_documents(
@@ -303,7 +318,15 @@ class FakeCollection:
         max_time_ms: int | None = None,
     ) -> FakeCursor:
         self._server.calls.append(
-            ("find", self._name, query, projection, limit, max_time_ms)
+            (
+                "find",
+                self._name,
+                query,
+                projection,
+                limit,
+                max_time_ms,
+                self._server.scope,
+            )
         )
         self._server.check_time_limit(max_time_ms)
         documents = [
@@ -323,7 +346,10 @@ class FakeDatabase:
         self._server = server
 
     def list_collections(self) -> list[dict[str, Any]]:
-        self._server.calls.append(("list_collections",))
+        self._server.calls.append(("list_collections", self._server.scope))
+        self._server.check_time_limit(None)
+        if self._server.list_error is not None:
+            raise self._server.list_error
         return [
             {"name": name, "type": kind} for name, kind in self._server.types.items()
         ]
@@ -359,6 +385,16 @@ def server(monkeypatch: MonkeyPatch) -> FakeServer:
     monkeypatch.setattr(
         mongodb, "MongoClient", lambda uri, **options: FakeClient(fake, uri, **options)
     )
+
+    @contextmanager
+    def timeout(seconds: float) -> Iterator[None]:
+        previous, fake.scope = fake.scope, seconds
+        try:
+            yield
+        finally:
+            fake.scope = previous
+
+    monkeypatch.setattr(mongodb.pymongo, "timeout", timeout)
     return fake
 
 
@@ -633,7 +669,7 @@ def test_sampling_falls_back_to_the_first_documents(
     )
     columns = connector.get_columns()
     assert "customer_id" in set(columns["column_name"])
-    assert ("find", "orders", {}, None, 3, 60_000) in server.calls
+    assert ("find", "orders", {}, None, 3, 60_000, None) in server.calls
 
 
 def test_ping_needs_a_readable_database(
@@ -957,7 +993,7 @@ def test_a_slow_fetch_times_out(server: FakeServer, connector: MongoDBDatabase) 
     server.delay = 0.1
     with pytest.raises(StatementTimeout):
         connector.execute("SELECT COUNT(*) FROM orders", timeout_s=0.15)
-    assert server.finds("orders")[0][5] is not None
+    assert server.finds("orders")[0][6] is not None  # under pymongo.timeout()
 
 
 def test_a_slow_statement_times_out(connector: MongoDBDatabase) -> None:
@@ -977,10 +1013,44 @@ def test_servers_without_max_time_ms_fall_back_to_the_client_deadline(
     server.reject_time_limits = True
     frame = connector.execute("SELECT COUNT(*) AS n FROM orders", timeout_s=30)
     assert frame["n"].tolist() == [5]
+    # The first call ran under pymongo.timeout(), which sends maxTimeMS, and was
+    # refused; everything after it runs without either.
+    listed = [call for call in server.calls if call[0] == "list_collections"]
+    assert listed[0][1] is not None
+    assert listed[-1][1] is None
     sampled = [call for call in server.calls if call[0] == "aggregate"]
-    assert set(sampled[0][3]) == {"maxTimeMS"}
-    assert sampled[-1][3] == {}
-    assert server.finds("orders")[-1][5] is None
+    assert all(call[3] == {} and call[4] is None for call in sampled)
+    (fetch,) = server.finds("orders")
+    assert fetch[5] is None and fetch[6] is None
+
+
+def test_ingestion_sends_its_own_time_limit(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    connector.get_tables()
+    sampled = [call for call in server.calls if call[0] == "aggregate"]
+    assert all(call[3] == {"maxTimeMS": 60_000} and call[4] is None for call in sampled)
+
+
+def test_every_wait_of_a_statement_is_bounded_by_its_timeout(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    connector.execute("SELECT COUNT(*) FROM orders WHERE qty > 0", timeout_s=30)
+    scopes = [
+        call[-1]
+        for call in server.calls
+        if call[0]
+        in ("list_collections", "aggregate", "estimated_document_count", "find")
+    ]
+    assert scopes and all(scope is not None and scope <= 30 for scope in scopes)
+
+
+def test_a_connection_failure_is_not_reported_as_a_timeout(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    server.list_error = ServerSelectionTimeoutError("No servers found yet")
+    with pytest.raises(ServerSelectionTimeoutError):
+        connector.execute("SELECT COUNT(*) FROM orders", timeout_s=30)
 
 
 def test_a_resample_keeps_columns_the_catalog_already_has(
@@ -1226,7 +1296,7 @@ def test_a_sample_that_runs_out_of_time_keeps_server_time_limits(
     connector.execute("SELECT COUNT(*) FROM orders", timeout_s=30)
     sample_fallback, fetch = server.finds("orders")
     assert sample_fallback[2:5] == ({}, None, 3)
-    assert fetch[5] is not None
+    assert fetch[6] is not None  # still under pymongo.timeout()
 
 
 def test_sampling_counts_against_the_statement_timeout(
@@ -1236,7 +1306,7 @@ def test_sampling_counts_against_the_statement_timeout(
     with pytest.raises(StatementTimeout):
         connector.execute("SELECT COUNT(*) FROM orders", timeout_s=0.2)
     (sampled,) = [call for call in server.calls if call[0] == "aggregate"]
-    assert sampled[3]["maxTimeMS"] <= 200
+    assert sampled[4] <= 0.2  # the pymongo.timeout() it ran under
 
 
 def test_large_collections_fail_before_streaming(server: FakeServer) -> None:
@@ -1263,3 +1333,109 @@ def test_generated_sql_cannot_read_duckdb_temp_files(
     ):
         with pytest.raises(duckdb.Error):
             connector.execute(sql)
+
+
+# ---------------------------------------------------------------------------
+# Second review
+# ---------------------------------------------------------------------------
+
+
+def test_a_34_digit_decimal_that_fits_is_kept() -> None:
+    (_, amount) = infer_columns(
+        [
+            {"_id": 1, "amount": Decimal128("1.000000000000000001")},
+            {"_id": 2, "amount": Decimal128("5")},
+        ]
+    )
+    assert amount.sql_type == "DECIMAL(38, 18)"
+    value = "99999999999999999999.99999999999999"
+    assert convert(amount, Decimal128(value)) == value
+
+
+@pytest.mark.parametrize(
+    ("where", "pushed"),
+    [
+        ("created_at >= date_trunc('month', current_date)", True),
+        ("created_at >= CAST(now() AS DATE)", True),
+        ("qty >= 60 - date_part('second', CURRENT_TIMESTAMP)", False),
+        ("qty >= 0 - epoch(now())", False),
+    ],
+)
+def test_only_lower_bounds_that_rise_with_the_clock_are_pushed(
+    server: FakeServer, connector: MongoDBDatabase, where: str, pushed: bool
+) -> None:
+    connector.execute(f"SELECT COUNT(*) FROM orders WHERE {where}")
+    assert bool(server.finds("orders")[0][2]) is pushed
+
+
+@pytest.mark.parametrize(
+    "expression", ["current_time", "localtime", "CAST(now() AS TIME)"]
+)
+def test_a_time_of_day_does_not_rise_with_the_clock(expression: str) -> None:
+    node = sqlglot.parse_one(f"SELECT {expression}", read="duckdb").expressions[0]
+    assert not mongodb._rises_with_the_clock(node)
+
+
+def test_constant_evaluation_runs_under_the_statement_timeout(
+    server: FakeServer, connector: MongoDBDatabase, monkeypatch: MonkeyPatch
+) -> None:
+    def endless(self: Any, sql: str) -> tuple[bool, Any]:
+        try:
+            self._connection.execute(
+                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) "
+                "SELECT count(*) FROM n"
+            ).fetchone()
+        except duckdb.Error:
+            return False, None
+        return True, None
+
+    monkeypatch.setattr(mongodb._Pushdown, "_evaluate", endless)
+    started = time.monotonic()
+    with pytest.raises(StatementTimeout):
+        connector.execute("SELECT COUNT(*) FROM orders WHERE qty > 1", timeout_s=0.3)
+    assert time.monotonic() - started < 5
+
+
+def test_an_alias_column_list_keeps_the_filter_in_duckdb(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    # Renamed by position: this "status" is the customer_id field.
+    frame = _same_answer(
+        server,
+        connector,
+        f"SELECT COUNT(*) AS n FROM orders AS o(_id, status) WHERE status = '{C1}'",
+    )
+    assert frame["n"].tolist() == [2]
+    assert server.finds("orders")[0][2] == {}
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        (
+            "SELECT COUNT(*) AS n FROM orders "
+            "WHERE EXISTS (WITH orders AS (SELECT 1 AS x) SELECT * FROM orders)",
+            5,
+        ),
+        (
+            "WITH orders AS (SELECT * FROM orders WHERE status = 'paid') "
+            "SELECT COUNT(*) AS n FROM orders",
+            2,
+        ),
+    ],
+)
+def test_a_cte_hides_a_collection_only_in_its_own_scope(
+    connector: MongoDBDatabase, sql: str, expected: int
+) -> None:
+    assert connector.execute(sql)["n"].tolist() == [expected]
+
+
+def test_redact_masks_mongodb_secrets_in_any_spelling() -> None:
+    redacted = _redact(
+        "mongodb://h/shop?TLSCertificateKeyFilePassword=key-pass"
+        "&authMechanismProperties=AWS_SESSION_TOKEN:session-tok"
+        "&tlsCertificateKeyFile%50assword=encoded-pass&tls=true"
+    )
+    for secret in ("key-pass", "session-tok", "encoded-pass"):
+        assert secret not in redacted
+    assert redacted.endswith("&tls=true")

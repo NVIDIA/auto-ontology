@@ -95,10 +95,14 @@ option is PyMongo's.
 | `tls_ca_data`   | —       | Base64 of a PEM CA bundle, used instead of a `tlsCAFile` path |
 
 ```text
-mongodb://reader:<password>@mongo.example.com:27017/shop?authSource=admin
-mongodb://reader:<password>@mongo-1:27017,mongo-2:27017/shop?replicaSet=rs0&authSource=admin
+mongodb://reader:<password>@mongo.example.com:27017/shop?tls=true&authSource=admin
+mongodb://reader:<password>@mongo-1:27017,mongo-2:27017/shop?tls=true&replicaSet=rs0&authSource=admin
 mongodb+srv://reader:<password>@cluster0.example.mongodb.net/shop
 ```
+
+PyMongo connects without TLS unless the URL asks for it (`mongodb+srv://`
+turns it on by default), so keep `tls=true` for any server reached over a
+network you do not control.
 
 For Amazon DocumentDB, use the cluster endpoint with the options AWS gives
 for drivers: TLS with the Amazon RDS CA bundle, `replicaSet=rs0`,

@@ -51,7 +51,7 @@ Connection strings
 ------------------
 Any MongoDB URL, with the database to ingest in the path::
 
-    mongodb://user:password@host:27017/shop?authSource=admin
+    mongodb://user:password@host:27017/shop?tls=true&authSource=admin
     mongodb+srv://user:password@cluster0.example.mongodb.net/shop
     mongodb://user:password@docdb.cluster-xyz.us-east-1.docdb.amazonaws.com:27017/shop
         ?tls=true&tlsCAFile=/certs/global-bundle.pem&replicaSet=rs0
@@ -77,14 +77,16 @@ import time
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import duckdb
 import pandas as pd
+import pymongo
 import sqlglot
 from bson import DBRef, Decimal128, ObjectId, Timestamp
 from bson.codec_options import DatetimeConversion
@@ -128,6 +130,15 @@ _SAMPLE_TIME_LIMIT_MS = 60_000
 # PyMongo waits 30s for a reachable server by default; a wrong host should
 # fail a connection test faster than that. A URL that sets its own value wins.
 _SERVER_SELECTION_TIMEOUT_MS = 10_000
+# PyMongo waits for a socket read forever by default. Statements run under
+# PyMongo's own per-statement timeout, which overrides this; it bounds the
+# rest -- ingestion, and servers that refuse maxTimeMS -- when a connection
+# stops answering. Longer than the sample's time limit, so a slow sample still
+# ends with the server's error rather than a dropped socket.
+_SOCKET_TIMEOUT_MS = 120_000
+# Share of the statement timeout after which a timeout error counts as the
+# statement's own; see _Deadline.nearly_over.
+_DEADLINE_SHARE = 0.9
 # Collections sampled at once when the whole database is introspected.
 _SAMPLING_WORKERS = 8
 
@@ -161,8 +172,10 @@ _VOLATILE_FUNCTIONS = frozenset(
     }
 )
 # Functions that read the clock. DuckDB evaluates them after the connector has
-# fetched, so they are later there: safe in a lower bound, which only gets
-# stricter, but not in an upper bound, which would miss what arrived meanwhile.
+# fetched, so they are later there. A lower bound that only rises with time
+# then only gets stricter, which is safe; anything else -- an upper bound, or a
+# bound that can fall as time passes -- could drop documents DuckDB would keep.
+# See _rises_with_the_clock.
 _CLOCK_FUNCTIONS = frozenset(
     {
         "currentdate",
@@ -226,8 +239,16 @@ _ORDERED = frozenset({"int", "double", "date"})
 _STRICT = frozenset({"bool", "date", "double", "int", "objectid", "string"})
 
 _INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
+_TIME_OF_DAY_FUNCTIONS = frozenset({"currenttime", "get_current_time", "localtime"})
 # What DuckDB hands back for TIMESTAMP 'infinity' and '-infinity'.
 _TIMESTAMP_SENTINELS = frozenset({datetime.max, datetime.min})
+# Date and timestamp types: casting a rising clock to one keeps it rising. A
+# time of day does not -- it wraps at midnight.
+_INSTANT_TYPES = tuple(
+    kind
+    for kind in exp.DataType.TEMPORAL_TYPES
+    if kind not in (exp.DataType.Type.TIME, exp.DataType.Type.TIMETZ)
+)
 
 
 class MongoDBDocumentLimitError(ValueError):
@@ -634,7 +655,9 @@ def _to_decimal(value: Any, scale: int) -> str | None:
         number = value.to_decimal()
     else:
         return None
-    if not number.is_finite() or abs(number) >= Decimal(10) ** (38 - scale):
+    # copy_abs, not abs(): abs() rounds to the context's 28 digits, which would
+    # push a 34-digit value that fits DECIMAL(38, 18) over the bound.
+    if not number.is_finite() or number.copy_abs() >= Decimal(10) ** (38 - scale):
         return None
     return str(number)
 
@@ -814,6 +837,45 @@ def _is_constant(node: exp.Expression, *, clock: bool) -> bool:
     return clock or not names & _CLOCK_FUNCTIONS
 
 
+def _rises_with_the_clock(node: exp.Expression) -> bool:
+    """Whether *node* can only stay level or go up as time passes.
+
+    A lower bound read from the clock is safe only then: DuckDB evaluates it
+    after the connector did, so it must come out the same or higher. Proven
+    for the shapes "last N days" questions take -- the clock itself, shifted
+    by a constant, truncated, or cast to a date or timestamp -- and refused
+    for anything else, such as ``60 - date_part('second', now())``.
+    """
+    while isinstance(node, exp.Paren):
+        node = node.this
+    if not _function_names(node) & _CLOCK_FUNCTIONS:
+        return True  # does not read the clock at all
+    if isinstance(node, exp.Anonymous):  # now(), get_current_timestamp()...
+        name = str(node.name).lower()
+        return (
+            name in _CLOCK_FUNCTIONS
+            and name not in _TIME_OF_DAY_FUNCTIONS
+            and not node.expressions
+        )
+    if isinstance(node, exp.Func) and node.key in _CLOCK_FUNCTIONS:
+        # CURRENT_DATE, CURRENT_TIMESTAMP(3)... but not a time of day, which
+        # wraps at midnight.
+        return node.key not in _TIME_OF_DAY_FUNCTIONS
+    if isinstance(node, exp.Add):
+        return _rises_with_the_clock(node.this) and _rises_with_the_clock(
+            node.expression
+        )
+    if isinstance(node, (exp.Sub, exp.DateAdd, exp.DateSub)):
+        return _rises_with_the_clock(node.this) and not (
+            _function_names(node.expression) & _CLOCK_FUNCTIONS
+        )
+    if isinstance(node, (exp.TimestampTrunc, exp.DateTrunc)):
+        return _rises_with_the_clock(node.this)
+    if isinstance(node, (exp.Cast, exp.TryCast)):
+        return node.to.is_type(*_INSTANT_TYPES) and _rises_with_the_clock(node.this)
+    return False
+
+
 def _int_literal(node: exp.Expression | None) -> int | None:
     """A plain non-negative integer ``LIMIT``/``OFFSET``; ``None`` otherwise."""
     if node is None:
@@ -857,6 +919,18 @@ class _Deadline:
     def check(self) -> None:
         if self.timeout_s is not None:
             self.remaining_ms()
+
+    def nearly_over(self) -> bool:
+        """Whether a timeout raised now came from this deadline.
+
+        PyMongo's own timeout stops an operation up to a round trip early. One
+        raised well before the deadline -- server selection giving up after
+        ``serverSelectionTimeoutMS`` -- is a connection failure, not this.
+        """
+        if self.timeout_s is None:
+            return False
+        elapsed = time.monotonic() - self.started
+        return elapsed >= self.timeout_s * _DEADLINE_SHARE
 
 
 #: Ingestion runs without a statement timeout.
@@ -1038,7 +1112,9 @@ class _Pushdown:
         *lower* says the value is a lower bound, the only place a value read
         from the clock is safe.
         """
-        if node is None or not _is_constant(node, clock=lower):
+        if node is None or not _is_constant(
+            node, clock=lower and _rises_with_the_clock(node)
+        ):
             return None
         rendered = node.sql(dialect=_DIALECT)
         conversion = column.conversion
@@ -1148,6 +1224,8 @@ class MongoDBDatabase(SQLDatabase):
             options["appname"] = "auto-ontology"
         if "serverselectiontimeoutms" not in settings.uri_options:
             options["serverSelectionTimeoutMS"] = _SERVER_SELECTION_TIMEOUT_MS
+        if not settings.uri_options & {"sockettimeoutms", "timeoutms"}:
+            options["socketTimeoutMS"] = _SOCKET_TIMEOUT_MS
         if settings.tls_ca_pem is not None:
             self._ca_file = _write_ca_file(settings.tls_ca_pem)
             options["tlsCAFile"] = self._ca_file
@@ -1299,7 +1377,9 @@ class MongoDBDatabase(SQLDatabase):
             ]
         )
 
-    def _list_relations(self, *, refresh: bool = False) -> dict[str, bool]:
+    def _list_relations(
+        self, *, refresh: bool = False, deadline: _Deadline | None = None
+    ) -> dict[str, bool]:
         """Collection name -> whether it is a view."""
         with self._lock:
             fresh = (
@@ -1312,7 +1392,11 @@ class MongoDBDatabase(SQLDatabase):
         relations: dict[str, bool] = {}
         # Filtered here rather than with a ``type`` filter on the command:
         # DocumentDB does not support that key.
-        for info in self._database.list_collections():
+        infos = self._call(
+            deadline or _NO_DEADLINE,
+            lambda _limit: list(self._database.list_collections()),
+        )
+        for info in infos:
             name = info.get("name")
             if not isinstance(name, str) or not name or name.startswith("system."):
                 continue
@@ -1408,10 +1492,48 @@ class MongoDBDatabase(SQLDatabase):
             self._schemas[name] = collection
         return collection
 
-    def _time_limit(self, milliseconds: float | None) -> int | None:
-        if milliseconds is None or not self._server_time_limits:
-            return None
-        return max(1, int(milliseconds))
+    def _scope(
+        self, deadline: _Deadline, cap_ms: float | None = None
+    ) -> tuple[AbstractContextManager[Any], int | None]:
+        """The context one MongoDB operation runs in, and the maxTimeMS to send.
+
+        Under a statement deadline, on a server that accepts maxTimeMS,
+        PyMongo's own timeout bounds every wait in the operation -- server
+        selection, each socket read, and the server's work, through a
+        maxTimeMS it derives itself -- so none is sent explicitly. Otherwise
+        only an explicit maxTimeMS of *cap_ms* bounds the server's work, and
+        ``socketTimeoutMS`` bounds a connection that stops answering.
+        """
+        if deadline.timeout_s is not None and self._server_time_limits:
+            return pymongo.timeout(deadline.remaining_ms(cap_ms) / 1000), None
+        if cap_ms is None or not self._server_time_limits:
+            return nullcontext(), None
+        return nullcontext(), max(1, int(cap_ms))
+
+    def _call(
+        self,
+        deadline: _Deadline,
+        operation: Callable[[int | None], Any],
+        cap_ms: float | None = None,
+    ) -> Any:
+        """Run *operation* in :meth:`_scope`, passing it the maxTimeMS to send.
+
+        A server that refuses maxTimeMS -- an elastic DocumentDB cluster --
+        refuses the one PyMongo derives as well, so the operation is retried
+        once without either.
+        """
+        for attempt in range(2):
+            scope, limit = self._scope(deadline, cap_ms)
+            try:
+                with scope:
+                    return operation(limit)
+            except ExecutionTimeout:
+                raise
+            except OperationFailure as exc:
+                if attempt == 0 and self._time_limit_rejected(exc):
+                    continue
+                raise
+        raise AssertionError("unreachable: the second attempt returns or raises")
 
     def _time_limit_rejected(self, exc: OperationFailure) -> bool:
         """Whether *exc* is the server refusing ``maxTimeMS`` itself.
@@ -1437,31 +1559,28 @@ class MongoDBDatabase(SQLDatabase):
     def _sample(self, name: str, deadline: _Deadline) -> list[dict[str, Any]]:
         collection = self._database.get_collection(name)
         pipeline = [{"$sample": {"size": self._sample_size}}]
-        for _ in range(2):
-            limit = self._time_limit(deadline.remaining_ms(_SAMPLE_TIME_LIMIT_MS))
-            try:
-                if limit is None:
-                    return list(collection.aggregate(pipeline))
-                return list(collection.aggregate(pipeline, maxTimeMS=limit))
-            except ExecutionTimeout:
+
+        def sample(limit: int | None) -> list[dict[str, Any]]:
+            options = {} if limit is None else {"maxTimeMS": limit}
+            return list(collection.aggregate(pipeline, **options))
+
+        def first(limit: int | None) -> list[dict[str, Any]]:
+            options = {} if limit is None else {"max_time_ms": limit}
+            return list(collection.find({}, limit=self._sample_size, **options))
+
+        try:
+            return self._call(deadline, sample, _SAMPLE_TIME_LIMIT_MS)
+        except PyMongoError as exc:
+            if getattr(exc, "timeout", False):
                 deadline.check()  # the statement's time, not the sample's, is up
-                logger.info(
-                    "$sample timed out on %r; typing the first documents instead",
-                    name,
-                )
-                break
-            except OperationFailure as exc:
-                if self._time_limit_rejected(exc):
-                    continue
-                logger.info(
-                    "$sample failed on %r (%s); typing the first documents instead",
-                    name,
-                    exc,
-                )
-                break
-        limit = self._time_limit(deadline.remaining_ms(_SAMPLE_TIME_LIMIT_MS))
-        options = {} if limit is None else {"max_time_ms": limit}
-        return list(collection.find({}, limit=self._sample_size, **options))
+            elif not isinstance(exc, OperationFailure):
+                raise
+            logger.info(
+                "$sample failed on %r (%s); typing the first documents instead",
+                name,
+                exc,
+            )
+        return self._call(deadline, first, _SAMPLE_TIME_LIMIT_MS)
 
     # ------------------------------------------------------------------
     # Execution
@@ -1484,22 +1603,32 @@ class MongoDBDatabase(SQLDatabase):
             Optional positional parameters, bound by DuckDB.
         timeout_s:
             Stop after this many seconds and raise :class:`StatementTimeout`.
-            Covers fetching the documents as well as running the statement.
+            Covers everything the statement does: listing and sampling
+            collections, evaluating constants for pushdown, fetching the
+            documents, and running the statement.
         """
         deadline = _Deadline(time.monotonic(), timeout_s)
         statement = _parse_query(sql)
 
         connection = self._open_duckdb()
+        timer, fired = _arm_interrupt(connection, deadline)
         try:
             try:
                 for scan in self._plan(statement, connection, deadline):
                     self._load(connection, scan, deadline)
-            except ExecutionTimeout as exc:
-                if timeout_s is None:
-                    raise
-                raise StatementTimeout.since(timeout_s, deadline.started) from exc
-            return _run(connection, sql, parameters, deadline)
+                return _run(connection, sql, parameters, deadline)
+            except PyMongoError as exc:
+                if timeout_s is not None and exc.timeout and deadline.nearly_over():
+                    raise StatementTimeout.since(timeout_s, deadline.started) from exc
+                raise
+            except duckdb.InterruptException as exc:
+                if timeout_s is not None and fired.is_set():
+                    raise StatementTimeout(timeout_s) from exc
+                raise
         finally:
+            if timer is not None:
+                timer.cancel()
+                timer.join()
             connection.close()
 
     def _open_duckdb(self) -> duckdb.DuckDBPyConnection:
@@ -1534,23 +1663,22 @@ class MongoDBDatabase(SQLDatabase):
         deadline: _Deadline,
     ) -> list[_Scan]:
         tables = list(statement.find_all(exp.Table))
-        ctes = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
 
-        relations = self._list_relations()
+        relations = self._list_relations(deadline=deadline)
         deadline.check()
         refreshed = False
         references: list[tuple[exp.Table, str]] = []
         for table in tables:
             if not isinstance(table.this, exp.Identifier):
                 continue  # a table function such as range(10)
-            if not table.db and table.name.lower() in ctes:
+            if _is_cte_reference(table):
                 continue
             if not self._names_this_database(table):
                 continue
             name = _match(table.name, relations)
             if name is None and not refreshed:
                 # Possibly a collection created since the list was read.
-                relations = self._list_relations(refresh=True)
+                relations = self._list_relations(refresh=True, deadline=deadline)
                 refreshed = True
                 name = _match(table.name, relations)
             if name is not None:
@@ -1624,20 +1752,23 @@ class MongoDBDatabase(SQLDatabase):
             return
         if scan.collection.is_view:
             return
-        try:
+
+        def count(limit: int | None) -> int | None:
             if mongo.estimated_document_count() <= self._max_documents:
-                return
-            limit = self._time_limit(deadline.remaining_ms())
+                return None
             options = {} if limit is None else {"maxTimeMS": limit}
-            matched = mongo.count_documents(
+            return mongo.count_documents(
                 scan.filter, limit=self._max_documents + 1, **options
             )
-        except ExecutionTimeout:
-            raise
-        except PyMongoError:
+
+        try:
+            matched = self._call(deadline, count)
+        except PyMongoError as exc:
+            if exc.timeout:
+                raise
             logger.debug("Counting %r before the fetch failed", mongo.name)
             return
-        if matched > self._max_documents:
+        if matched is not None and matched > self._max_documents:
             raise self._too_many(scan.collection.name)
 
     def _load(
@@ -1659,12 +1790,12 @@ class MongoDBDatabase(SQLDatabase):
 
         mongo = self._database.get_collection(collection.name)
         self._check_size(mongo, scan, deadline)
-        for attempt in range(2):
+
+        def fetch(limit: int | None) -> list[list[Any]]:
             cells: list[list[Any]] = [[] for _ in columns]
             options: dict[str, Any] = {}
             if scan.limit is not None:
                 options["limit"] = scan.limit
-            limit = self._time_limit(deadline.remaining_ms())
             if limit is not None:
                 options["max_time_ms"] = limit
             cursor = mongo.find(scan.filter, projection, **options)
@@ -1675,16 +1806,11 @@ class MongoDBDatabase(SQLDatabase):
                     deadline.check()
                     for index, column in enumerate(columns):
                         cells[index].append(convert(column, document.get(column.name)))
-                break
-            except ExecutionTimeout:
-                raise
-            except OperationFailure as exc:
-                if attempt == 0 and self._time_limit_rejected(exc):
-                    continue
-                raise
             finally:
                 cursor.close()
+            return cells
 
+        cells = self._call(deadline, fetch)
         frame = pd.DataFrame(
             {
                 f"c{index}": _series(column, cells[index])
@@ -1739,11 +1865,74 @@ def _single_collection(
         return None
     if table.args.get("sample") or _arg(statement, "with") is not None:
         return None
+    # ``FROM c AS t(id, b, a)`` renames the fields by position, so the ``a``
+    # in the WHERE is not the field the server knows as ``a``.
+    alias = table.args.get("alias")
+    if alias is not None and alias.columns:
+        return None
     if any(
         statement.args.get(key) for key in ("joins", "laterals", "pivots", "sample")
     ):
         return None
     return table, name
+
+
+def _is_cte_reference(table: exp.Table) -> bool:
+    """Whether *table* names a CTE visible where it stands, not a collection.
+
+    Resolved by scope, the way DuckDB does: a CTE is visible to the query that
+    defines it and to the CTEs after it, and to its own body only under
+    ``WITH RECURSIVE``. So in ``SELECT * FROM c WHERE EXISTS (WITH c AS (...)
+    SELECT * FROM c)`` the outer ``c`` is still the collection, and in
+    ``WITH orders AS (SELECT * FROM orders) ...`` the inner one is.
+    """
+    if table.db or table.catalog:
+        return False
+    name = table.name.lower()
+    child: exp.Expression = table
+    node = table.parent
+    holder: exp.Expression | None = None
+    while node is not None:
+        if isinstance(node, exp.With):
+            holder = child  # the CTE whose body holds the reference
+        elif isinstance(node, exp.Query):
+            with_ = _arg(node, "with")
+            if with_ is not None:
+                ctes = list(with_.expressions)
+                names = [cte.alias_or_name.lower() for cte in ctes]
+                if child is with_ and holder is not None:
+                    position = next(i for i, cte in enumerate(ctes) if cte is holder)
+                    if with_.args.get("recursive"):
+                        position += 1
+                    names = names[:position]
+                if name in names:
+                    return True
+            holder = None
+        child, node = node, node.parent
+    return False
+
+
+def _arm_interrupt(
+    connection: duckdb.DuckDBPyConnection, deadline: _Deadline
+) -> tuple[threading.Timer | None, threading.Event]:
+    """Interrupt whatever DuckDB is running on *connection* at the deadline.
+
+    Armed once for the whole statement, so constant evaluation for pushdown
+    and loading the documents are covered as well as the statement itself.
+    """
+    fired = threading.Event()
+    if deadline.timeout_s is None:
+        return None, fired
+    remaining = deadline.remaining_ms()
+
+    def interrupt() -> None:
+        fired.set()
+        connection.interrupt()
+
+    timer = threading.Timer(remaining / 1000, interrupt)
+    timer.daemon = True
+    timer.start()
+    return timer, fired
 
 
 def _run(
@@ -1752,34 +1941,14 @@ def _run(
     parameters: Optional[list],
     deadline: _Deadline,
 ) -> pd.DataFrame:
-    """Run *sql* on the loaded tables, interrupted when the deadline passes."""
-    timer: threading.Timer | None = None
-    fired = threading.Event()
-    remaining = deadline.remaining_ms()
-    if remaining is not None:
-
-        def interrupt() -> None:
-            fired.set()
-            connection.interrupt()
-
-        timer = threading.Timer(remaining / 1000, interrupt)
-        timer.daemon = True
-        timer.start()
-    try:
-        if parameters:
-            connection.execute(sql, parameters)
-        else:
-            connection.execute(sql)
-        types = [str(column[1]) for column in connection.description or []]
-        frame = connection.df()
-    except duckdb.InterruptException as exc:
-        if fired.is_set():
-            raise StatementTimeout(deadline.timeout_s or 0.0) from exc
-        raise
-    finally:
-        if timer is not None:
-            timer.cancel()
-            timer.join()
+    """Run *sql* on the loaded tables."""
+    deadline.check()
+    if parameters:
+        connection.execute(sql, parameters)
+    else:
+        connection.execute(sql)
+    types = [str(column[1]) for column in connection.description or []]
+    frame = connection.df()
 
     # DuckDB returns JSON as text. Hand it on as Python values, the way
     # Postgres drivers return JSONB, which is what profiling expects.

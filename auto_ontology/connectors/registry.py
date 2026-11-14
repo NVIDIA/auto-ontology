@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from auto_ontology.catalog.table_filter import TableFilter, from_connection
 from auto_ontology.connectors.base import SQLDatabase
@@ -96,7 +96,7 @@ def _redact(connection_string: str) -> str:
     An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
     and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
     on every connector failure. A MongoDB ``tls_ca_data`` bundle is collapsed
-    for the same reason.
+    for the same reason, and the MongoDB options that carry secrets are masked.
     """
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
@@ -104,10 +104,32 @@ def _redact(connection_string: str) -> str:
     connection_string = re.sub(
         r"(tls_ca_data=)[^&;]+", r"\1<certificates>", connection_string
     )
+    connection_string = _mask_secret_options(connection_string)
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string
     return connection_string.replace(parsed.password, "***", 1)
+
+
+# MongoDB URL options whose values are secrets: the passphrase of a client
+# certificate's private key (and its legacy name), and the AWS session token
+# MONGODB-AWS authentication can carry.
+_SECRET_OPTIONS = frozenset(
+    {"tlscertificatekeyfilepassword", "sslpemkeypassword", "authmechanismproperties"}
+)
+
+
+def _mask_secret_options(connection_string: str) -> str:
+    """Mask the values of :data:`_SECRET_OPTIONS`, whatever the key's case or encoding."""
+    head, separator, query = connection_string.partition("?")
+    if not separator:
+        return connection_string
+    parts = re.split(r"([&;])", query)
+    for index, part in enumerate(parts):
+        key, equals, _ = part.partition("=")
+        if equals and unquote(key).strip().lower() in _SECRET_OPTIONS:
+            parts[index] = f"{key}=***"
+    return head + separator + "".join(parts)
 
 
 def _schema_filter(connection: dict) -> list[str] | None:
