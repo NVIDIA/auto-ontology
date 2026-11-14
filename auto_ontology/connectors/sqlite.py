@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 # enough to stop within milliseconds, rare enough to cost nothing measurable.
 _PROGRESS_INTERVAL = 10_000
 
+# SQLite matches identifiers case-insensitively for ASCII letters only, so "Ä"
+# and "ä" stay distinct tables; ``str.casefold`` would merge them.
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _fold_identifier(name: str) -> str:
+    return name.translate(_ASCII_LOWER)
+
 
 def _sqlite_path_from_connection_string(connection_string: str) -> Path:
     """Resolve a ``sqlite:///`` URI or bare filesystem path to a ``.sqlite`` file."""
@@ -206,20 +214,55 @@ class SQLiteDatabase(SQLDatabase):
         return pd.DataFrame(rows)
 
     def get_fks(self) -> pd.DataFrame:
+        """Foreign keys, naming each column as the catalog stores it.
+
+        ``PRAGMA foreign_key_list`` reports the constraint as it was written:
+        ``REFERENCES parent`` (no column list, meaning the parent's primary key)
+        leaves the referenced column empty, and names keep whatever case the
+        DDL used, which SQLite matches case-insensitively. Both are resolved
+        against the declared tables here, so ``add_fks`` can find every column
+        instead of silently dropping the key.
+        """
         tables = self.get_tables()
+        declared = {_fold_identifier(name): name for name in tables["table_name"]}
+        table_info: dict[str, list] = {}
+
+        def columns_of(table_name: str) -> list:
+            if table_name not in table_info:
+                table_info[table_name] = self._conn.execute(
+                    f'PRAGMA table_info("{table_name}")'
+                ).fetchall()
+            return table_info[table_name]
+
+        def declared_column(table_name: str, column_name: str) -> str:
+            for column in columns_of(table_name):
+                if _fold_identifier(column[1]) == _fold_identifier(column_name):
+                    return column[1]
+            return column_name
+
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
             fks = self._conn.execute(
                 f'PRAGMA foreign_key_list("{table_name}")'
             ).fetchall()
-            for _id, _seq, ref_table, from_col, ref_col, *_rest in fks:
+            for _id, seq, ref_table, from_col, ref_col, *_rest in fks:
+                parent = declared.get(_fold_identifier(ref_table))
+                if parent is not None:
+                    if ref_col is None:
+                        key = sorted(
+                            (c for c in columns_of(parent) if c[5] > 0),
+                            key=lambda c: c[5],
+                        )
+                        ref_col = key[seq][1] if seq < len(key) else None
+                    else:
+                        ref_col = declared_column(parent, ref_col)
                 rows.append(
                     {
                         "table_schema": "main",
                         "table_name": table_name,
-                        "column_name": from_col,
+                        "column_name": declared_column(table_name, from_col),
                         "referenced_schema": "main",
-                        "referenced_table": ref_table,
+                        "referenced_table": parent or ref_table,
                         "referenced_column": ref_col,
                     }
                 )
