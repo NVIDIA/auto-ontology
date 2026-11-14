@@ -17,7 +17,6 @@ from auto_ontology.utils.embedding_rows import (
     build_table_text,
 )
 
-from auto_ontology.dal.terms import fetch_term_and_column_attributes_for_embedding
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 from auto_ontology.semantic.embed import _build_rows
 from auto_ontology.utils import get_embed_params
@@ -35,7 +34,6 @@ class ImportEmbedBuffer:
 
     data_rows: list[dict[str, Any]] = field(default_factory=list)
     semantic_rows: list[dict[str, Any]] = field(default_factory=list)
-    term_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -111,23 +109,25 @@ def build_table_data_row(
     )
 
 
-def build_term_semantic_rows(term_ids: list[str]) -> list[dict[str, Any]]:
-    """Semantic-layer embed rows for imported Terms, read back from the store.
-
-    Built once the import is written: a Term's text lists its attributes, which
-    are imported after the Term itself.
-    """
-    rows: list[dict[str, Any]] = []
-    for term_id in term_ids:
-        term, attrs = fetch_term_and_column_attributes_for_embedding(term_id)
-        if term is None:
-            continue
-        rows += [
-            row
-            for row in _build_rows(term.get("database_name") or "", term, attrs)
-            if row["metadata"]["label"] == "Term"
-        ]
-    return rows
+def build_term_semantic_rows(
+    *,
+    database_name: str,
+    live_id: str,
+    name: str,
+    description: str,
+    schema_names: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build semantic-layer embed rows for a Term."""
+    return _build_rows(
+        database_name,
+        {
+            "name": name,
+            "description": description,
+            "id": live_id,
+            "schema_names": schema_names or [],
+        },
+        [],
+    )
 
 
 def build_column_attribute_semantic_rows(
@@ -143,8 +143,6 @@ def build_column_attribute_semantic_rows(
     is_unique: bool,
     sample_values: list[Any] | None,
     schema_name: str | None = None,
-    column_description: str | None = None,
-    column_data_type: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build semantic-layer embed rows for a ColumnAttribute."""
     return _build_rows(
@@ -156,8 +154,6 @@ def build_column_attribute_semantic_rows(
                 "description": description,
                 "term_name": term_name,
                 "source_column": source_column,
-                "column_description": column_description,
-                "column_data_type": column_data_type,
                 "table_id": table_id,
                 "table_name": table_name,
                 "is_unique": is_unique,
@@ -274,10 +270,9 @@ def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:
     else:
         result["data_rows"] = 0
 
-    semantic_rows = buffer.semantic_rows + build_term_semantic_rows(buffer.term_ids)
-    if semantic_rows:
+    if buffer.semantic_rows:
         result["semantic_rows"] = _embed_and_ingest_rows(
-            semantic_rows,
+            buffer.semantic_rows,
             get_semantic_vdb(),
         )
     else:

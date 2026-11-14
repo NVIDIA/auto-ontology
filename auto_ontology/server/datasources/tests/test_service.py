@@ -19,7 +19,7 @@ def _patched_column(**props: object) -> dict[str, object]:
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "refresh_catalog_embeddings")
+@patch.object(service, "_refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_sample_values_reach_a_text_column(
@@ -40,7 +40,7 @@ def test_sample_values_reach_a_text_column(
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "refresh_catalog_embeddings")
+@patch.object(service, "_refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_patched_sample_values_come_back_as_text(
@@ -73,9 +73,8 @@ def test_sample_values_are_refused_on_a_non_text_column(
     mock_patch.assert_not_called()
 
 
-@patch.object(service, "_refresh_semantic_column_attribute_embeddings")
 @patch.object(service, "fetch_parent_table_id_for_column", return_value="tbl-1")
-@patch.object(service, "refresh_catalog_embeddings")
+@patch.object(service, "_refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_other_properties_of_a_non_text_column_stay_editable(
@@ -83,7 +82,6 @@ def test_other_properties_of_a_non_text_column_stay_editable(
     mock_patch: MagicMock,
     _mock_vdb: MagicMock,
     _mock_parent: MagicMock,
-    _mock_semantic: MagicMock,
 ) -> None:
     """Only sample values are typed; a description is text whatever the column is."""
     mock_fetch.return_value = {"data_type": "integer"}
@@ -96,7 +94,7 @@ def test_other_properties_of_a_non_text_column_stay_editable(
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "refresh_catalog_embeddings")
+@patch.object(service, "_refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_sample_values_on_a_node_that_is_no_column_are_left_alone(
@@ -116,71 +114,3 @@ def test_sample_values_on_a_node_that_is_no_column_are_left_alone(
     result = service.update_node_properties("tbl-1", {"sample_values": ["x"]})
 
     assert result == {"id": "tbl-1", "sample_values": ["x"]}
-
-
-@patch.object(service, "_refresh_semantic_term_rows")
-@patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "fetch_parent_table_id_for_column", return_value="tbl-1")
-@patch.object(service, "refresh_catalog_embeddings")
-@patch.object(service, "patch_catalog_node")
-def test_a_column_description_edit_refreshes_its_attributes_and_terms(
-    mock_patch: MagicMock,
-    mock_catalog: MagicMock,
-    _mock_parent: MagicMock,
-    mock_attrs: MagicMock,
-    mock_terms: MagicMock,
-) -> None:
-    mock_patch.return_value = _patched_column(description="Order total")
-
-    service.update_node_properties("col-1", {"description": "Order total"})
-
-    mock_catalog.assert_called_once_with(["col-1", "tbl-1"])
-    mock_attrs.assert_called_once_with("col-1", with_terms=True)
-    mock_terms.assert_not_called()
-
-
-@patch.object(service, "fetch_term_ids_for_table", return_value=["term-1"])
-@patch.object(service, "_refresh_semantic_term_rows")
-@patch.object(service, "_refresh_semantic_column_attribute_embeddings")
-@patch.object(service, "refresh_catalog_embeddings")
-@patch.object(service, "patch_catalog_node")
-def test_a_table_description_edit_refreshes_its_terms(
-    mock_patch: MagicMock,
-    mock_catalog: MagicMock,
-    mock_attrs: MagicMock,
-    mock_terms: MagicMock,
-    _mock_term_ids: MagicMock,
-) -> None:
-    mock_patch.return_value = {
-        "id": "tbl-1",
-        "label": Labels.TABLE,
-        "props": {"description": "One row per order"},
-    }
-
-    service.update_node_properties("tbl-1", {"description": "One row per order"})
-
-    mock_catalog.assert_called_once_with(["tbl-1"])
-    mock_terms.assert_called_once_with(["term-1"])
-    mock_attrs.assert_not_called()
-
-
-@patch.object(service, "build_semantic_embedder")
-@patch.object(service, "fetch_term_and_column_attributes_for_embedding")
-@patch.object(service, "fetch_column_attribute_embedding_contexts_by_column_id")
-def test_column_refresh_rewrites_attribute_rows_then_term_rows(
-    mock_contexts: MagicMock,
-    mock_term: MagicMock,
-    mock_embedder: MagicMock,
-) -> None:
-    term = {"id": "term-1", "name": "Order", "database_name": "shop"}
-    attrs = [{"id": "attr-1", "name": "Total"}]
-    mock_contexts.return_value = [(term, attrs)]
-    mock_term.return_value = (term, attrs)
-    embedder = mock_embedder.return_value
-
-    service._refresh_semantic_column_attribute_embeddings("col-1", with_terms=True)
-
-    embedder.embed_column_attributes.assert_called_once_with(attrs)
-    embedder.embed_term.assert_called_once_with(term, attrs, embed_attrs=False)
-    deleted = [c.args[0] for c in embedder.vdb.delete_by_id.call_args_list]
-    assert deleted == ["attr-1", "term-1"]

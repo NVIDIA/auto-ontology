@@ -292,20 +292,6 @@ def semantic_layer_calculated() -> bool:
     )
 
 
-def fetch_term_ids_for_table(table_id: str) -> list[str]:
-    """Ids of every semantic Term the table represents."""
-    rows = store().query_read(
-        select(s.term.c.id)
-        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
-        .where(
-            s.table__term.c.table_id == table_id,
-            s.term.c.source == SEMANTIC_SOURCE,
-        )
-        .order_by(s.term.c.id)
-    )
-    return [str(r["id"]) for r in rows]
-
-
 def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
     """``{id, name, description}`` for the Term a table represents.
 
@@ -666,9 +652,36 @@ def fetch_all_terms_and_attributes(
     """
     terms = fetch_all_terms(zone_ids=zone_ids)
 
-    statement = _attribute_embedding_select().where(
-        s.column_attribute.c.source == SEMANTIC_SOURCE,
-        s.catalog_column.c.id.is_not(None),
+    statement = (
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+            s.catalog_schema.c.name.label("schema_name"),
+            s.column_attribute.c.datatype,
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(s.column_attribute.c.source == SEMANTIC_SOURCE)
     )
     table_ids = _scope_table_ids(zone_ids)
     if table_ids is not None:
@@ -976,76 +989,39 @@ def fetch_terms_with_sqls(
     return list(grouped.values())
 
 
-def _attribute_embedding_select():
-    """A ColumnAttribute with everything its embedding text is built from.
-
-    The text repeats what the owning column's own embedding carries, so every
-    path that re-embeds an attribute has to read the same fields. Joins are
-    outer: an attribute need not reach a column or a term.
-    """
-    return select(
-        s.column_attribute.c.id,
-        s.column_attribute.c.name,
-        s.column_attribute.c.description,
-        s.column_attribute.c.term_name,
-        s.column_attribute.c.source_column,
-        s.column_attribute.c.datatype,
-        s.term.c.synonyms.label("term_synonyms"),
-        s.catalog_column.c.name.label("column_name"),
-        s.catalog_column.c.description.label("column_description"),
-        s.catalog_column.c.data_type.label("column_data_type"),
-        s.catalog_column.c.format,
-        s.catalog_column.c.sample_values,
-        s.catalog_column.c.is_unique,
-        s.catalog_table.c.id.label("table_id"),
-        s.catalog_table.c.name.label("table_name"),
-        s.catalog_table.c.description.label("table_description"),
-        s.catalog_schema.c.name.label("schema_name"),
-        s.catalog_database.c.name.label("database_name"),
-    ).select_from(
-        s.column_attribute.outerjoin(
-            s.column__has_attribute,
-            s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
-        )
-        .outerjoin(
-            s.catalog_column,
-            s.catalog_column.c.id == s.column__has_attribute.c.column_id,
-        )
-        .outerjoin(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
-        .outerjoin(
-            s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
-        )
-        .outerjoin(
-            s.catalog_database,
-            s.catalog_database.c.id == s.catalog_schema.c.database_id,
-        )
-        .outerjoin(
-            s.column_attribute__term,
-            s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
-        )
-        .outerjoin(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
-    )
-
-
 def _embedding_attrs_for_table(table_id: str):
-    return _attribute_embedding_select().where(
-        s.catalog_table.c.id == table_id,
-        s.column_attribute.c.source == SEMANTIC_SOURCE,
+    return (
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(
+            s.catalog_table.c.id == table_id,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+        )
     )
-
-
-def fetch_column_attributes_for_embedding(
-    attribute_ids: list[str],
-) -> list[dict[str, Any]]:
-    """ColumnAttributes by id, with the fields their embedding text needs."""
-    if not attribute_ids:
-        return []
-    rows = store().query_read(
-        _attribute_embedding_select()
-        .where(s.column_attribute.c.id.in_(attribute_ids))
-        .order_by(s.column_attribute.c.id)
-    )
-    return [dict(r) for r in rows]
 
 
 def fetch_terms_and_attributes_for_table(
@@ -1114,7 +1090,38 @@ def fetch_term_and_column_attributes_for_embedding(
         return None, []
 
     attrs = store().query_read(
-        _attribute_embedding_select()
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+        )
+        .select_from(
+            s.column_attribute__term.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column_attribute__term.c.attribute_id,
+            )
+            .outerjoin(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .outerjoin(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            # Outer, like the join above it: an attribute need not reach a
+            # column, and an inner join here would drop those attributes
+            # entirely rather than leaving their table fields null.
+            .outerjoin(
+                s.catalog_table,
+                s.catalog_table.c.id == s.catalog_column.c.table_id,
+            )
+        )
         .where(s.column_attribute__term.c.term_id == term_id)
         .order_by(s.column_attribute.c.id)
     )
@@ -1124,18 +1131,52 @@ def fetch_term_and_column_attributes_for_embedding(
 def fetch_column_attribute_embedding_contexts_by_column_id(
     column_id: str,
 ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-    """The Term contexts a column's sample-value or description update invalidates.
+    """The Term contexts a column's sample-value update invalidates.
 
-    Sample values and the column's description are part of a ColumnAttribute's
-    embedding text, so either edit stales every attribute on the column and
-    every term behind those.
+    Sample values are part of a ColumnAttribute's embedding text, so profiling a
+    column stales every attribute on it and every term behind those.
     """
     rows = store().query_read(
-        _attribute_embedding_select()
-        .add_columns(
-            s.term.c.id.label("term_id"),
-            s.term.c.name.label("term_display_name"),
+        select(
+            s.term.c.name.label("term_name"),
             s.term.c.description.label("term_description"),
+            s.term.c.synonyms.label("term_synonyms"),
+            s.term.c.id.label("term_id"),
+            s.catalog_database.c.name.label("database_name"),
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+        )
+        .select_from(
+            s.catalog_column.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
+            )
+            .join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+            .join(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+            .outerjoin(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .outerjoin(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .outerjoin(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
         )
         .where(s.catalog_column.c.id == column_id)
         .order_by(s.term.c.id, s.column_attribute.c.id)
@@ -1143,24 +1184,30 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
 
     contexts: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
     for row in rows:
-        attr = dict(row)
-        term_id = attr.pop("term_id")
-        term_name = attr.pop("term_display_name")
-        term_description = attr.pop("term_description")
+        term_id = row["term_id"]
         if not term_id:
             continue
         if term_id not in contexts:
             contexts[term_id] = (
                 {
-                    "name": term_name or "",
-                    "description": term_description or "",
-                    "synonyms": attr.get("term_synonyms") or [],
+                    "name": row["term_name"] or "",
+                    "description": row["term_description"] or "",
+                    "synonyms": row["term_synonyms"] or [],
                     "id": term_id,
-                    "database_name": attr.get("database_name") or "",
+                    "database_name": row["database_name"] or "",
                 },
                 [],
             )
-        contexts[term_id][1].append(attr)
+        contexts[term_id][1].append(
+            {
+                "name": row["name"],
+                "description": row["description"],
+                "term_name": row["term_name"],
+                "source_column": row["source_column"],
+                "sample_values": row["sample_values"],
+                "id": row["id"],
+            }
+        )
     return list(contexts.values())
 
 

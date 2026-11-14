@@ -12,11 +12,9 @@ import time
 
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
-from auto_ontology.semantic.catalog_descriptions import describe_catalog
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
-from auto_ontology.semantic.semantic_fk import _resolve_connector, resolve_semantic_fks
-from auto_ontology.semantic.table_families import resolve_table_families
+from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
@@ -93,14 +91,6 @@ def _run_semantic_compilation(
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
 
-    logger.info("=" * 60)
-    logger.info("Resolving table families…")
-    logger.info("=" * 60)
-    family_count = resolve_table_families(
-        database_name, _resolve_connector(database_name)
-    )
-    logger.info("Table family pairs found: %d", family_count)
-
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 
     logger.info("=" * 60)
@@ -115,27 +105,21 @@ def _run_semantic_compilation(
     bridge_table_count = build_bridge_tables_sql_attributes(database_name)
     logger.info("Bridge tables built: %d", bridge_table_count)
 
-    logger.info("=" * 60)
-    logger.info("Describing tables and columns, re-embedding the catalog…")
-    logger.info("=" * 60)
-    described_count = describe_catalog(database_name)
-
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all five stages completed.
+    # exceptions, so reaching this means all four stages completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s), %d description(s) written in %.1fs",
+        "%d bridge table(s) in %.1fs",
         database_name,
         count,
         fk_count,
         attr_count,
         bridge_table_count,
-        described_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)

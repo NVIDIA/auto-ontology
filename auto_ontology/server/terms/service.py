@@ -162,12 +162,21 @@ def update_column_attribute(
     embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
     if embedder is not None:
         embedder.vdb.delete_by_id(attr_id)
-        embedder.embed_column_attributes(
-            terms_dal.fetch_column_attributes_for_embedding([attr_id])
-        )
-    if name is not None or description is not None:
-        # The Term's own text lists its attributes' names and descriptions.
-        refresh_term_embeddings(term_id, refresh_dependent_attrs=False)
+        attr = {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row.get("description"),
+            "term_name": row.get("term_name"),
+            "source_column": row.get("source_column"),
+            "sample_values": row.get("sample_values"),
+            "is_unique": row.get("is_unique"),
+            "table_id": row.get("table_id"),
+            "table_name": row.get("table_name"),
+            "schema_name": row.get("schema_name"),
+        }
+        # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
+        term_ctx = {"synonyms": row.get("term_synonyms") or []}
+        embedder.embed_term(term_ctx, [attr])
 
     return row
 
@@ -192,7 +201,7 @@ def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> N
             if attr_id:
                 vdb.delete_by_id(attr_id)
 
-    embedder.embed_term(term, column_attrs, embed_attrs=refresh_dependent_attrs)
+    embedder.embed_term(term, column_attrs if refresh_dependent_attrs else [])
 
     if refresh_dependent_attrs:
         embed_params = get_embed_params()

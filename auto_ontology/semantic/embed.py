@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,8 +46,6 @@ class SemanticEmbedder:
         self,
         term: dict[str, Any],
         attrs: list[dict[str, Any]],
-        *,
-        embed_attrs: bool = True,
     ) -> int:
         """Embed and ingest one Term and its attribute rows in a single batch.
 
@@ -57,13 +54,9 @@ class SemanticEmbedder:
         ``description``, ``id``, and the owning table metadata.
         ``id`` is the catalog ``id`` (UUID) and, when present, lands
         in the embedded row's metadata.
-        The Term's text lists every attribute in *attrs*; with ``embed_attrs``
-        false only the Term row is written.
         Returns the number of rows actually written to the VDB.
         """
         rows = _build_rows(self.database_name, term, attrs)
-        if not embed_attrs:
-            rows = [r for r in rows if r["metadata"]["label"] == "Term"]
         if not rows:
             return 0
 
@@ -190,8 +183,8 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _sample_values(raw: Any, data_type: str | None = None) -> list[str]:
-    """The sample values short enough to embed.
+def _format_sample_values(raw: Any, data_type: str | None = None) -> str:
+    """Return a ' Sample values: ...' suffix string, or empty string if unavailable.
 
     *data_type* is the owning column's declared type. JSON-typed columns get a
     higher per-entry length cutoff (see ``_MAX_EMBEDDED_JSON_SAMPLE_LEN``)
@@ -204,165 +197,10 @@ def _sample_values(raw: Any, data_type: str | None = None) -> list[str]:
         if "json" in (data_type or "").lower()
         else _MAX_EMBEDDED_SAMPLE_LEN
     )
-    return stringify_sample_values(raw, max_len=max_len) or []
-
-
-# Ingestion appends the column's samples and storage notation to an attribute's
-# description (see ``semantic.deterministic``). The embedding states both once,
-# from the column, so they are cut from the description here.
-_SAMPLES_SUFFIX_RE = re.compile(r"\s*—\s*samples:.*?(?=\s*—\s*format:|$)", re.S)
-_FORMAT_CLAUSE_RE = re.compile(r"(?:^|\s*—\s*)format:\s*(.*?)\s*$", re.S)
-
-
-def _split_description(text: str | None) -> tuple[str, str | None]:
-    """``(description, format)`` with the appended samples and format removed."""
-    text = _SAMPLES_SUFFIX_RE.sub("", (text or "").strip())
-    notation = None
-    if match := _FORMAT_CLAUSE_RE.search(text):
-        notation = match.group(1) or None
-        text = text[: match.start()]
-    return text.strip(), notation
-
-
-def _same_text(a: str, b: str) -> bool:
-    def norm(t: str) -> str:
-        return re.sub(r"\W+", " ", t).strip().lower()
-
-    return norm(a) == norm(b)
-
-
-def _sentence(text: str) -> str:
-    text = text.strip()
-    return text if not text or text[-1] in ".!?" else f"{text}."
-
-
-def _yes_no(value: Any) -> str | None:
-    return None if value is None else ("yes" if value else "no")
-
-
-def _term_text(
-    term: dict[str, Any], attrs: list[dict[str, Any]], database_name: str
-) -> str:
-    """A Term first, then its table in the shape of the table's own embedding.
-
-    ``term, synonyms, term_description, database_name, schema_name,
-    table_name, table_description, attributes: {name, column, data_type,
-    description}``. A Term over several tables lists them as
-    ``tables: {table, table_description}`` and names each attribute's table. Sample values are left to the attribute rows, so
-    profiling a column does not stale its Term.
-    """
-    members = [a for a in attrs if a.get("name")]
-    tables: dict[str, dict[str, Any]] = {}
-    for a in members:
-        if a.get("table_name"):
-            tables.setdefault(_qualified_table(a), a)
-
-    parts = [f"term: {term['name']}"]
-    if synonyms := [s for s in term.get("synonyms") or [] if s]:
-        parts.append(f"synonyms: {', '.join(synonyms)}")
-    if term.get("description"):
-        parts.append(f"term_description: {term['description'].strip()}")
-    database = next(
-        (a["database_name"] for a in members if a.get("database_name")), database_name
-    )
-    if database:
-        parts.append(f"database_name: {database}")
-
-    if len(tables) == 1:
-        (table,) = tables.values()
-        parts += [
-            f"schema_name: {table.get('schema_name') or ''}",
-            f"table_name: {table['table_name']}",
-        ]
-        parts += [
-            f"{k}: {v}" for k, v in _table_facts(table, term.get("description")).items()
-        ]
-    elif tables:
-        pieces = [
-            _braces({"table": name, **_table_facts(table, term.get("description"))})
-            for name, table in tables.items()
-        ]
-        parts.append(f"tables: {','.join(pieces)}")
-
-    pieces = []
-    for a in members:
-        description = (
-            _split_description(a.get("description"))[0]
-            or (_split_description(a.get("column_description"))[0])
-        )
-        pieces.append(
-            _braces(
-                {
-                    "name": a["name"],
-                    "table": _qualified_table(a) if len(tables) > 1 else None,
-                    "column": a.get("column_name") or a.get("source_column"),
-                    "data_type": a.get("column_data_type") or a.get("datatype"),
-                    "description": description,
-                }
-            )
-        )
-    if pieces:
-        parts.append(f"attributes: {','.join(pieces)}")
-    return ", ".join(parts)
-
-
-def _qualified_table(a: dict[str, Any]) -> str:
-    return ".".join(p for p in (a.get("schema_name"), a.get("table_name")) if p)
-
-
-def _table_facts(a: dict[str, Any], term_description: str | None) -> dict[str, str]:
-    """The table's description, unless it only repeats the Term's."""
-    description = (a.get("table_description") or "").strip()
-    if not description or _same_text(description, term_description or ""):
-        return {}
-    return {"table_description": description}
-
-
-def _braces(fields: dict[str, Any]) -> str:
-    return "{" + ", ".join(f"{k}: {v}" for k, v in fields.items() if v) + "}"
-
-
-def _attribute_text(
-    a: dict[str, Any], owner: str, synonyms: list[str], database_name: str
-) -> str:
-    """An attribute in words, then everything the owning column's own text has.
-
-    ``Order Date is an attribute of Purchase Order (also: PO). It represents
-    column ord_dt of table sales.orders in database shop. Description: … data
-    type: date, format: YYYY-MM-DD, unique: no, sample values: …``
-    """
-    text = f"{a['name']} is an attribute of {owner}" if owner else a["name"]
-    if synonyms:
-        text += f" (also: {', '.join(synonyms)})"
-    text += "."
-
-    column = a.get("column_name") or a.get("source_column")
-    if column:
-        table = ".".join(p for p in (a.get("schema_name"), a.get("table_name")) if p)
-        where = f" of table {table}" if table else ""
-        database = a.get("database_name") or database_name
-        where += f" in database {database}" if database else ""
-        text += f" It represents column {column}{where}."
-
-    description, notation = _split_description(a.get("description"))
-    column_description, _ = _split_description(a.get("column_description"))
-    if description:
-        text += f" Description: {_sentence(description)}"
-    if column_description and not _same_text(column_description, description):
-        text += f" Column description: {_sentence(column_description)}"
-
-    data_type = a.get("column_data_type") or a.get("datatype")
-    samples = _sample_values(a.get("sample_values"), data_type)
-    pk = {str(c).lower() for c in a.get("table_pk") or []}
-    facts = {
-        "data type": data_type,
-        "format": a.get("format") or notation,
-        "primary key": "yes" if column and column.lower() in pk else None,
-        "unique": _yes_no(a.get("is_unique")),
-        "sample values": ", ".join(samples),
-    }
-    details = ", ".join(f"{k}: {v}" for k, v in facts.items() if v)
-    return f"{text} {_sentence(details)}" if details else text
+    values = stringify_sample_values(raw, max_len=max_len)
+    if not values:
+        return ""
+    return " Sample values: " + ", ".join(values) + "."
 
 
 def _build_rows(
@@ -374,7 +212,7 @@ def _build_rows(
 
     term_name = term.get("name")
     if term_name:
-        text = _term_text(term, attrs, database_name)
+        text = f"Term: {term_name}. {term.get('description') or ''}".strip()
         path = f"semantic:term:{term_name}"
         fields: dict[str, Any] = {
             "label": "Term",
@@ -397,14 +235,19 @@ def _build_rows(
         )
 
     term_synonyms: list[str] = term.get("synonyms") or []
+    synonym_suffix = f" ({', '.join(term_synonyms)})" if term_synonyms else ""
 
     for a in attrs:
         attr_name = a.get("name")
         if not attr_name:
             continue
         owner = a.get("term_name") or term_name or ""
-        synonyms = [s for s in (a.get("term_synonyms") or term_synonyms) if s]
-        text = _attribute_text(a, owner, synonyms, database_name)
+        sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
+        text = (
+            f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
+            f"{a.get('description') or ''}"
+            f"{sample_block}"
+        ).strip()
         path = (
             f"semantic:attr:{a['id']}"
             if a.get("id")
@@ -426,13 +269,13 @@ def _build_rows(
         }
         if a.get("schema_name"):
             fields["schema_name"] = a["schema_name"]
-        if data_type := a.get("datatype") or a.get("column_data_type"):
+        if a.get("datatype"):
             # Threaded through so downstream consumers (e.g. entity_resolution's
             # composite-column check) can read the real column type instead of
             # guessing from description text. Only present on rows embedded after
             # this field was added — existing embedded rows keep the text-based
             # fallback until they're re-embedded.
-            fields["data_type"] = data_type
+            fields["data_type"] = a["datatype"]
         if a.get("id"):
             fields["id"] = a["id"]
         rows.append(
