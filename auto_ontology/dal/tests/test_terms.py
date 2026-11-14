@@ -445,6 +445,28 @@ def test_upsert_table_term_is_idempotent_for_one_table(world) -> None:
     assert row["description"] == "rebuilt"
 
 
+def test_upsert_table_term_never_stores_an_empty_name(world: World) -> None:
+    """An empty proposal falls back to the physical table name instead of
+    being stored as "" (never embedded) or the next as " (db.schema.table)".
+
+    The table name carries the world prefix, so the fixture teardown removes
+    the fallback Term and every run exercises the bare-name case."""
+    table = f"{world.prefix}_orders"
+    world.table(table)
+
+    persisted = [
+        t.upsert_table_term(proposed, table, world.tables[table])
+        for proposed in ("", "   ")
+    ]
+
+    assert persisted[0] == (persisted[0][0], table)
+    assert persisted[1] == persisted[0]
+    stored = store().query_read(
+        select(s.term.c.name).where(s.term.c.id == persisted[0][0])
+    )
+    assert stored[0]["name"] == table
+
+
 def test_upsert_table_term_qualifies_only_a_cross_table_name_collision(world) -> None:
     world.table("orders")
     world.table("invoices")
