@@ -5743,6 +5743,184 @@
         "title": "TermListItem",
         "type": "object"
       },
+      "TermSearchResponse": {
+        "additionalProperties": true,
+        "description": "Search-box results: name matches first, then matches by meaning.\n\n``semantic`` is ``False`` when the embedding call failed and only name\nmatches could be returned.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TermSearchResult"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "semantic": {
+            "title": "Semantic",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "semantic"
+        ],
+        "title": "TermSearchResponse",
+        "type": "object"
+      },
+      "TermSearchResult": {
+        "additionalProperties": true,
+        "description": "A Term returned by the search box, with how it matched.\n\n``match`` is ``\"name\"`` for a literal substring of the name and\n``\"meaning\"`` for a vector hit only. ``similarity`` is\n``1 - cosine distance`` from the semantic index, or ``None`` when the term\nhad no vector hit.",
+        "properties": {
+          "certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certification"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "match": {
+            "enum": [
+              "name",
+              "meaning"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "name_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "schema_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Names"
+          },
+          "similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similarity"
+          },
+          "synonyms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synonyms"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ZoneChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zones"
+          }
+        },
+        "required": [
+          "id",
+          "match"
+        ],
+        "title": "TermSearchResult",
+        "type": "object"
+      },
       "TermSummary": {
         "additionalProperties": true,
         "description": "The three fields every Term projection carries.",
@@ -9735,6 +9913,65 @@
           }
         },
         "summary": "List Terms",
+        "tags": [
+          "terms"
+        ]
+      }
+    },
+    "/api/terms/search": {
+      "get": {
+        "description": "Search Terms by name and by meaning, for a search box's dropdown.\n\nName matches (case-insensitive substring) come first, exact names before\nprefixes before other substrings. Then come Terms the semantic index ranks\nclose to *q* by embedding similarity, best first, so \"client\" can find\n*Customer*. Each item says which way it matched.\n\nWhen the embedding service is unavailable the name matches are still\nreturned and ``semantic`` is ``false``.",
+        "operationId": "search_terms_api_terms_search_get",
+        "parameters": [
+          {
+            "description": "What the user typed: a term name, a synonym, or a phrase.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "What the user typed: a term name, a synonym, or a phrase.",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Terms",
         "tags": [
           "terms"
         ]

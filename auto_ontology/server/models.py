@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -592,6 +592,19 @@ class TermListItem(Term):
 
     schema_names: list[str] | None = None
     tags: list[TagChip] = Field(default_factory=list)
+
+
+class TermSearchResult(TermListItem):
+    """A Term returned by the search box, with how it matched.
+
+    ``match`` is ``"name"`` for a literal substring of the name and
+    ``"meaning"`` for a vector hit only. ``similarity`` is
+    ``1 - cosine distance`` from the semantic index, or ``None`` when the term
+    had no vector hit.
+    """
+
+    match: Literal["name", "meaning"]
+    similarity: float | None = None
 
 
 class TermCountEntry(ApiModel):

@@ -60,6 +60,7 @@ from auto_ontology.server.models import (
     TermDetail,
     TermExplorationDetails,
     TermListItem,
+    TermSearchResult,
     Zone,
     ZoneChip,
 )
@@ -128,6 +129,7 @@ __all__ = [
     "TermDetailResponse",
     "TermExplorationDetailsResponse",
     "TermResponse",
+    "TermSearchResponse",
     "TermsPageResponse",
     "ZoneListResponse",
     "ZoneResponse",
@@ -282,6 +284,16 @@ class TermsPageResponse(_Payload):
     column_attribute_counts: list[TermCountEntry]
     sql_attribute_counts: list[TermCountEntry]
     related_counts: list[TermCountEntry]
+
+
+class TermSearchResponse(ListResponse[TermSearchResult]):
+    """Search-box results: name matches first, then matches by meaning.
+
+    ``semantic`` is ``False`` when the embedding call failed and only name
+    matches could be returned.
+    """
+
+    semantic: bool
 
 
 # ---------------------------------------------------------------------------

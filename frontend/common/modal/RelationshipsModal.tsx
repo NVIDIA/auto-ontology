@@ -22,6 +22,7 @@ import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
+import { termHref } from '@/lib/termHref';
 
 type RelationshipsModalProps = {
 	node: ExplorationNode | null;
@@ -41,7 +42,7 @@ type RelationshipsModalProps = {
  */
 const nodeHref = (row: ExplorationNode): string | null => {
 	if (row.layer === ExplorationLayer.Semantic) {
-		return `/terms?focus=${encodeURIComponent(row.id)}`;
+		return termHref(row.id);
 	}
 	if (!row.databaseId || !row.schemaId) return null;
 	return catalogPathFromFocusId(`${row.databaseId}|${row.schemaId}|${row.id}`);
