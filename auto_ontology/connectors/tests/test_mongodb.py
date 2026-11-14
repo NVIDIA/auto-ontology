@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, Iterator
 
 import duckdb
@@ -255,10 +256,13 @@ class FakeServer:
     reject_time_limits: bool = False
     sample_error: Exception | None = None
     list_error: Exception | None = None
+    find_error: Exception | None = None
     sample_delay: float = 0.0
     delay: float = 0.0
     # Seconds of the pymongo.timeout() scope an operation runs in, if any.
     scope: float | None = None
+    # Whether the client already knows a server it can read from.
+    readable: bool = True
 
     def finds(self, collection: str | None = None) -> list[tuple[Any, ...]]:
         return [
@@ -329,6 +333,8 @@ class FakeCollection:
             )
         )
         self._server.check_time_limit(max_time_ms)
+        if self._server.find_error is not None:
+            raise self._server.find_error
         documents = [
             document
             for document in self._server.data[self._name]
@@ -342,6 +348,8 @@ class FakeCollection:
 
 
 class FakeDatabase:
+    read_preference = "primary"
+
     def __init__(self, server: FakeServer) -> None:
         self._server = server
 
@@ -354,8 +362,10 @@ class FakeDatabase:
             {"name": name, "type": kind} for name, kind in self._server.types.items()
         ]
 
-    def list_collection_names(self) -> list[str]:
-        self._server.calls.append(("list_collection_names",))
+    def list_collection_names(self, filter: dict[str, Any] | None = None) -> list[str]:
+        self._server.calls.append(("list_collection_names", filter, self._server.scope))
+        if self._server.list_error is not None:
+            raise self._server.list_error
         return list(self._server.types)
 
     def get_collection(self, name: str) -> FakeCollection:
@@ -367,6 +377,13 @@ class FakeClient:
         server.client_args = (uri, options)
         self._server = server
         self.closed = False
+        self.options = SimpleNamespace(server_selection_timeout=10.0)
+
+    @property
+    def topology_description(self) -> Any:
+        return SimpleNamespace(
+            has_readable_server=lambda read_preference: self._server.readable
+        )
 
     def get_database(self, name: str) -> FakeDatabase:
         assert name == "shop"
@@ -676,7 +693,7 @@ def test_ping_needs_a_readable_database(
     server: FakeServer, connector: MongoDBDatabase
 ) -> None:
     connector.ping()
-    assert ("list_collection_names",) in server.calls
+    assert any(call[0] == "list_collection_names" for call in server.calls)
 
 
 # ---------------------------------------------------------------------------
@@ -1359,6 +1376,12 @@ def test_a_34_digit_decimal_that_fits_is_kept() -> None:
         ("created_at >= CAST(now() AS DATE)", True),
         ("qty >= 60 - date_part('second', CURRENT_TIMESTAMP)", False),
         ("qty >= 0 - epoch(now())", False),
+        (
+            "created_at >= date_trunc(CASE WHEN date_part('second', "
+            "current_timestamp) < 30 THEN 'second' ELSE 'year' END, "
+            "current_timestamp)",
+            False,
+        ),
     ],
 )
 def test_only_lower_bounds_that_rise_with_the_clock_are_pushed(
@@ -1369,11 +1392,35 @@ def test_only_lower_bounds_that_rise_with_the_clock_are_pushed(
 
 
 @pytest.mark.parametrize(
-    "expression", ["current_time", "localtime", "CAST(now() AS TIME)"]
+    "expression",
+    [
+        "current_time",
+        "localtime",
+        "CAST(now() AS TIME)",
+        # A unit read from the clock can switch from 'second' to 'year'.
+        "date_trunc(CASE WHEN date_part('second', now()) < 30 "
+        "THEN 'second' ELSE 'year' END, now())",
+    ],
 )
-def test_a_time_of_day_does_not_rise_with_the_clock(expression: str) -> None:
+def test_a_bound_that_can_fall_with_the_clock_is_not_trusted(
+    expression: str,
+) -> None:
     node = sqlglot.parse_one(f"SELECT {expression}", read="duckdb").expressions[0]
     assert not mongodb._rises_with_the_clock(node)
+
+
+def test_an_early_driver_timeout_is_the_statement_timeout(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    # PyMongo raises before sending once the time left cannot cover a round
+    # trip, well before the deadline itself.
+    server.find_error = ExecutionTimeout(
+        "operation would exceed time limit, remaining timeout:0.20000 <= "
+        "network round trip time:0.25000",
+        code=50,
+    )
+    with pytest.raises(StatementTimeout):
+        connector.execute("SELECT COUNT(*) FROM orders", timeout_s=30)
 
 
 def test_constant_evaluation_runs_under_the_statement_timeout(
@@ -1439,3 +1486,24 @@ def test_redact_masks_mongodb_secrets_in_any_spelling() -> None:
     for secret in ("key-pass", "session-tok", "encoded-pass"):
         assert secret not in redacted
     assert redacted.endswith("&tls=true")
+
+
+def test_an_unreachable_server_fails_at_server_selection_timeout(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    # pymongo.timeout() would otherwise wait the whole 30 s for a server.
+    server.readable = False
+    server.list_error = ServerSelectionTimeoutError(
+        "127.0.0.1:1: [Errno 61] Connection refused"
+    )
+    with pytest.raises(ServerSelectionTimeoutError, match="Connection refused"):
+        connector.execute("SELECT COUNT(*) FROM orders", timeout_s=30)
+    (probe,) = [call for call in server.calls if call[0] == "list_collection_names"]
+    assert probe[2] == 10.0
+
+
+def test_a_known_server_is_not_probed(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    connector.execute("SELECT COUNT(*) FROM orders", timeout_s=30)
+    assert not [call for call in server.calls if call[0] == "list_collection_names"]

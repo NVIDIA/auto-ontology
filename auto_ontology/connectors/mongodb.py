@@ -136,9 +136,6 @@ _SERVER_SELECTION_TIMEOUT_MS = 10_000
 # stops answering. Longer than the sample's time limit, so a slow sample still
 # ends with the server's error rather than a dropped socket.
 _SOCKET_TIMEOUT_MS = 120_000
-# Share of the statement timeout after which a timeout error counts as the
-# statement's own; see _Deadline.nearly_over.
-_DEADLINE_SHARE = 0.9
 # Collections sampled at once when the whole database is introspected.
 _SAMPLING_WORKERS = 8
 
@@ -870,7 +867,12 @@ def _rises_with_the_clock(node: exp.Expression) -> bool:
             _function_names(node.expression) & _CLOCK_FUNCTIONS
         )
     if isinstance(node, (exp.TimestampTrunc, exp.DateTrunc)):
-        return _rises_with_the_clock(node.this)
+        # Only a fixed unit: one computed from the clock could switch from
+        # 'second' to 'year' and move the bound back.
+        unit = node.args.get("unit")
+        return isinstance(unit, (exp.Var, exp.Literal)) and _rises_with_the_clock(
+            node.this
+        )
     if isinstance(node, (exp.Cast, exp.TryCast)):
         return node.to.is_type(*_INSTANT_TYPES) and _rises_with_the_clock(node.this)
     return False
@@ -920,17 +922,22 @@ class _Deadline:
         if self.timeout_s is not None:
             self.remaining_ms()
 
-    def nearly_over(self) -> bool:
-        """Whether a timeout raised now came from this deadline.
+    def spent_by(self, exc: PyMongoError) -> bool:
+        """Whether *exc* is this deadline running out.
 
-        PyMongo's own timeout stops an operation up to a round trip early. One
-        raised well before the deadline -- server selection giving up after
-        ``serverSelectionTimeoutMS`` -- is a connection failure, not this.
+        An ``ExecutionTimeout`` always is: under a statement deadline the only
+        time limit sent is the one ``pymongo.timeout()`` derives from it, and
+        PyMongo also raises one early, before sending, once the time left
+        cannot cover a round trip. Any other timeout -- a socket read, server
+        selection -- is this deadline only once it has actually passed;
+        server selection giving up after ``serverSelectionTimeoutMS`` earlier
+        than that is a connection failure.
         """
         if self.timeout_s is None:
             return False
-        elapsed = time.monotonic() - self.started
-        return elapsed >= self.timeout_s * _DEADLINE_SHARE
+        if isinstance(exc, ExecutionTimeout):
+            return True
+        return bool(exc.timeout) and (time.monotonic() >= self.started + self.timeout_s)
 
 
 #: Ingestion runs without a statement timeout.
@@ -1614,11 +1621,12 @@ class MongoDBDatabase(SQLDatabase):
         timer, fired = _arm_interrupt(connection, deadline)
         try:
             try:
+                self._reach(deadline)
                 for scan in self._plan(statement, connection, deadline):
                     self._load(connection, scan, deadline)
                 return _run(connection, sql, parameters, deadline)
             except PyMongoError as exc:
-                if timeout_s is not None and exc.timeout and deadline.nearly_over():
+                if timeout_s is not None and deadline.spent_by(exc):
                     raise StatementTimeout.since(timeout_s, deadline.started) from exc
                 raise
             except duckdb.InterruptException as exc:
@@ -1729,6 +1737,29 @@ class MongoDBDatabase(SQLDatabase):
         if catalog:
             return catalog == database and schema in ("", SCHEMA)
         return schema in ("", SCHEMA, database)
+
+    def _reach(self, deadline: _Deadline) -> None:
+        """Fail as soon as ``serverSelectionTimeoutMS`` when no server answers.
+
+        Under ``pymongo.timeout()`` PyMongo waits for a server for the whole
+        remaining statement time instead, so a server that is down would hold
+        every statement -- a chat answer, each profiling probe -- for its full
+        timeout and then report a timeout rather than the connection failure.
+        Only checked when PyMongo knows no readable server yet, which costs
+        nothing once one has answered.
+        """
+        if deadline.timeout_s is None or not self._server_time_limits:
+            return
+        topology = self._client.topology_description
+        if topology.has_readable_server(self._database.read_preference):
+            return
+        selection_s = self._client.options.server_selection_timeout
+        seconds = min(selection_s, deadline.remaining_ms() / 1000)
+        try:
+            with pymongo.timeout(seconds):
+                self._database.list_collection_names(filter={"name": "_"})
+        except OperationFailure:
+            pass  # it answered, which is all this asks
 
     def _too_many(self, collection: str) -> MongoDBDocumentLimitError:
         return MongoDBDocumentLimitError(
