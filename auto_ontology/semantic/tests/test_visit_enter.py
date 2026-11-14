@@ -383,6 +383,48 @@ def test_calculate_columns_profiling(
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
 @patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
 @patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_uses_tsql_top_for_row_caps(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """SQL Server needs TOP for both capped profiling queries."""
+    df = pd.DataFrame({"status": ["open", "open", "closed"]})
+    connector = _mock_connector("tsql")
+    connector.execute.side_effect = [
+        df,
+        pd.DataFrame({"status": ["open", "closed"]}),
+    ]
+
+    table = {"id": "t1", "name": "orders", "schema_name": "dbo"}
+    columns = [{"name": "status", "data_type": "varchar"}]
+
+    calculate_columns_profiling(table, columns, connector)
+
+    statements = [call.args[0] for call in connector.execute.call_args_list]
+    assert statements[0].startswith("SELECT TOP 1000 ")
+    assert " LIMIT " not in statements[0]
+    assert statements[1].startswith("SELECT DISTINCT TOP 26 ")
+    assert " LIMIT " not in statements[1]
+
+
+def test_ascending_distinct_values_uses_tsql_top() -> None:
+    connector = _mock_connector("tsql")
+    connector.database_name = "db"
+    connector.execute.return_value = pd.DataFrame({"customer_id": [1, 2]})
+
+    values = probe_ascending_distinct_values(connector, "dbo", "orders", "customer_id")
+
+    assert values == [1, 2]
+    sql = connector.execute.call_args.args[0]
+    assert sql.startswith("SELECT DISTINCT TOP 20 ")
+    assert "ORDER BY [customer_id]" in sql
+    assert "LIMIT" not in sql
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling_preserves_scalar_types(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,

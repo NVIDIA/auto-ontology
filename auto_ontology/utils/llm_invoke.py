@@ -11,7 +11,7 @@ import random
 import threading
 import time
 import weakref
-from typing import Iterator, Type, TypeVar
+from typing import Any, Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
@@ -211,6 +211,21 @@ _NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
 _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
+def _use_openai_client(model: str) -> bool:
+    """Whether to build a generic OpenAI-compatible client for *model*."""
+    if os.environ.get("LLM_CLIENT", "nvidia").strip().lower() == "openai":
+        return True
+    return model.startswith(("openai/", "azure/", "aws/"))
+
+
+def _openai_model_accepts_temperature(model: str) -> bool:
+    """Reasoning model families reject an explicit temperature parameter."""
+    model_name = model.strip().casefold().rsplit("/", 1)[-1]
+    return not (
+        model_name.startswith("gpt-5") or model_name.startswith(("o1", "o3", "o4"))
+    )
+
+
 def _build_client(
     *,
     model: str,
@@ -225,21 +240,20 @@ def _build_client(
     ``ChatOpenAI``, which supports structured output. Everything else uses
     ``ChatNVIDIA``.
     """
-    if model.startswith(("openai/", "azure/", "aws/")):
+    if _use_openai_client(model):
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            # temperature omitted: gpt-5.x/o-series reject any explicit value and
-            # only allow the server default (1). Unset => langchain sends no
-            # temperature field, so the provider default applies.
-            # temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=LLM_INVOKE_TIMEOUT_S,
-            max_retries=0,
-        )
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "max_tokens": max_tokens,
+            "timeout": LLM_INVOKE_TIMEOUT_S,
+            "max_retries": 0,
+        }
+        if _openai_model_accepts_temperature(model):
+            kwargs["temperature"] = temperature
+        return ChatOpenAI(**kwargs)
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
@@ -472,8 +486,17 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     omitting it succeeds. The model still calls the tool without being forced to, and
     the caller retries if it ever answers without one.
     """
+    client = os.environ.get("LLM_CLIENT", "nvidia").strip().lower()
+    if client not in {"nvidia", "openai"}:
+        logger.warning(
+            "Unknown LLM_CLIENT %r; using the default structured-output method",
+            client,
+        )
+        client = "nvidia"
     if _is_claude(llm):
         return {"method": "function_calling", "tool_choice": None}
+    if client == "openai":
+        return {"method": "function_calling"}
     return {}
 
 

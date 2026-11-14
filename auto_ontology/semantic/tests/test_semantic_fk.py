@@ -306,6 +306,24 @@ def test_a_target_sharing_any_family_is_not_crossing() -> None:
     assert not families.crosses("table-1", "table-2")
 
 
+def test_join_probe_uses_tsql_top_for_sql_server() -> None:
+    connector = MagicMock(dialect="tsql")
+    connector.qualify.side_effect = lambda schema, table: f"[{schema}].[{table}]"
+    sql = semantic_fk._join_probe_sql(
+        connector,
+        {"schema_name": "dbo", "table_name": "orders", "name": "customer_id"},
+        {
+            "schema_name": "dbo",
+            "table_name": "customers",
+            "column_name": "id",
+        },
+        as_text=False,
+    )
+
+    assert sql.startswith("SELECT TOP 1 1 AS hit")
+    assert "LIMIT" not in sql
+
+
 @patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="same-family")
 def test_vector_hits_from_another_family_are_never_offered(
     mock_llm_pick: MagicMock,

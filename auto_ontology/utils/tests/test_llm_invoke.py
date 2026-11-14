@@ -5,8 +5,10 @@
 """Tests for LLM invocation helpers."""
 
 import contextlib
+import sys
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -18,6 +20,7 @@ from auto_ontology.utils import llm_invoke
 from auto_ontology.utils.llm_invoke import (
     _structured_output_kwargs,
     _system_messages_first,
+    _use_openai_client,
 )
 
 
@@ -62,10 +65,92 @@ def test_claude_is_matched_on_either_vendor_or_family_name() -> None:
         assert _structured_output_kwargs(_Model(name))["method"] == "function_calling"
 
 
-def test_other_models_keep_the_langchain_default() -> None:
+def test_other_models_keep_the_langchain_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """json_schema is preferred where supported, so nothing is forced for them."""
+    monkeypatch.delenv("LLM_CLIENT", raising=False)
     for name in ("nvidia/nemotron-3.5-lightning-30b-a3b", "gpt-4o", ""):
         assert _structured_output_kwargs(_Model(name)) == {}
+
+
+def test_openai_client_forces_function_calling_for_compatible_gateways(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAI-compatible gateways may reject LangChain's json_schema payload."""
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+
+    assert _structured_output_kwargs(_Model("gpt-6.1-sol")) == {
+        "method": "function_calling"
+    }
+
+
+def test_openai_client_setting_selects_openai_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+
+    assert _use_openai_client("gpt-6.1-sol") is True
+
+
+def test_openai_client_forwards_temperature_for_compatible_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+    captured: dict[str, Any] = {}
+
+    def chat_openai(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setitem(
+        sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=chat_openai)
+    )
+
+    llm_invoke._build_client(
+        model="gpt-6.1-sol",
+        api_key="test-key",
+        base_url="https://api.example.test/v1",
+        temperature=0.25,
+        max_tokens=123,
+    )
+
+    assert captured["temperature"] == 0.25
+    assert captured["max_tokens"] == 123
+
+
+@pytest.mark.parametrize("model", ["gpt-5.4", "openai/o3-mini"])
+def test_openai_client_omits_temperature_for_reasoning_models(
+    monkeypatch: pytest.MonkeyPatch, model: str
+) -> None:
+    monkeypatch.setenv("LLM_CLIENT", "openai")
+    captured: dict[str, Any] = {}
+
+    def chat_openai(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setitem(
+        sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=chat_openai)
+    )
+
+    llm_invoke._build_client(
+        model=model,
+        api_key="test-key",
+        base_url="https://api.example.test/v1",
+        temperature=0.25,
+        max_tokens=123,
+    )
+
+    assert "temperature" not in captured
+
+
+def test_nvidia_client_remains_the_default_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_CLIENT", raising=False)
+
+    assert _use_openai_client("nvidia/nemotron-3.5-lightning-30b-a3b") is False
 
 
 def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:

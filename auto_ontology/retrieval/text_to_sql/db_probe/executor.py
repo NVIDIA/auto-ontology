@@ -7,14 +7,14 @@
 This is the single choke point for every live query the probing layer issues.
 It guarantees a probe:
 - is a single ``SELECT`` / ``WITH`` statement (no DDL/DML, no multi-statement),
-- is ``LIMIT``-bounded (auto-appended when missing),
+- is bounded by the connector dialect's row-limit syntax,
 - counts against a per-question call budget.
 
 Probes run **inline on the calling thread**. The pipeline's connectors are
 shared and long-lived, and thread-affine connectors (e.g. SQLite binds each
 connection to its creating thread) reuse the calling thread's existing
 connection — so inline execution avoids leaking a fresh connection per probe.
-Bounding therefore relies on ``LIMIT`` + the call budget rather than a hard
+Bounding therefore relies on the row cap + the call budget rather than a hard
 wall-clock timeout; per-dialect statement timeouts (Postgres ``statement_timeout``,
 SQLite ``set_progress_handler``) are the right tool once Phase 2 runs arbitrary
 model-authored SQL.
@@ -30,6 +30,10 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -69,9 +73,40 @@ def is_read_only_select(sql: str) -> bool:
     return True
 
 
-def _ensure_limit(sql: str, max_rows: int) -> str:
-    """Append ``LIMIT max_rows`` when the query has no explicit LIMIT."""
+def _ensure_limit(sql: str, max_rows: int, dialect: str | None = None) -> str:
+    """Bound a probe using the target dialect row-limit syntax."""
     stripped = sql.strip().rstrip(";").strip()
+    if dialect == "tsql":
+        try:
+            expression = sqlglot.parse_one(stripped, read="tsql")
+        except SqlglotError as exc:
+            raise ValueError(f"could not apply SQL Server row cap: {exc}") from exc
+
+        limit = expression.args.get("limit")
+        if limit is None:
+            if expression.args.get("offset") is not None:
+                raise ValueError(
+                    "could not apply SQL Server row cap to OFFSET without FETCH"
+                )
+            expression = expression.limit(max_rows)
+        else:
+            options = limit.args.get("limit_options")
+            if options is not None and (
+                options.args.get("percent") or options.args.get("with_ties")
+            ):
+                raise ValueError(
+                    "SQL Server PERCENT and WITH TIES limits do not provide a hard row cap"
+                )
+            count_key = "count" if isinstance(limit, exp.Fetch) else "expression"
+            count = limit.args.get(count_key)
+            if not isinstance(count, exp.Literal) or not count.is_int:
+                raise ValueError("SQL Server probe limit must be an integer literal")
+            bounded_count = min(int(count.this), max_rows)
+            limit.set(count_key, exp.Literal.number(bounded_count))
+        try:
+            return expression.sql(dialect="tsql")
+        except SqlglotError as exc:
+            raise ValueError(f"could not apply SQL Server row cap: {exc}") from exc
     if _LIMIT_RE.search(stripped):
         return stripped
     return f"{stripped} LIMIT {max_rows}"
@@ -147,7 +182,17 @@ class ProbeExecutor:
             self.log.append(entry)
             return entry
 
-        bounded_sql = _ensure_limit(sql, self.max_rows)
+        try:
+            bounded_sql = _ensure_limit(
+                sql, self.max_rows, getattr(self.connector, "dialect", None)
+            )
+        except ValueError as exc:
+            entry["error"] = str(exc)
+            logger.warning(
+                "Probe rejected because its row cap could not be applied: %s", exc
+            )
+            self.log.append(entry)
+            return entry
         entry["sql"] = bounded_sql
         self.calls += 1
 

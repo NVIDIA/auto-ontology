@@ -171,7 +171,10 @@ class PostgresVDB:
 
         self._engine: Optional[PGEngine] = None
         self._store: Optional[PGVectorStore] = None
-        self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
+        configured_vector_size = kwargs.get(
+            "vector_size", os.environ.get("EMBEDDING_DIMENSIONS", "2048")
+        )
+        self.vector_size: Optional[int] = int(configured_vector_size)
         # Resetting the database embeddings prior to ingestion
         # In order to support without recreate:
         # 1. The ingestion should return which tables/columns were added/updated/deleted
