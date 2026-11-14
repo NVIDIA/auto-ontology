@@ -5,13 +5,15 @@
 """LLM client construction and structured-output invocation wrappers."""
 
 import contextlib
+import copy
+import functools
 import logging
 import os
 import random
 import threading
 import time
 import weakref
-from typing import Iterator, Type, TypeVar
+from typing import Any, Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
@@ -62,6 +64,38 @@ LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 # Fan-out that needs a bound now asks for one with `limit_inflight`, which
 # applies it for the duration of a block. See `run_semantic_compilation`.
 LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "0"))
+
+# Hybrid reasoning models such as Nemotron 3.5 think before every answer unless
+# the chat template is told not to. ``off`` sends ``enable_thinking: false`` with
+# every non-reasoning call; leave it unset for models whose template has no such
+# switch. Only ``ChatNVIDIA`` clients send it: ``openai/``, ``azure/`` and
+# ``aws/`` models ignore the setting.
+NON_REASONING_THINKING = os.environ.get("NON_REASONING_THINKING", "")
+
+_THINKING_OFF = frozenset({"off", "false", "0", "no"})
+_THINKING_ON = frozenset({"", "on", "true", "1", "yes"})
+
+
+@functools.cache
+def _thinking_enabled(setting: str) -> bool:
+    """``False`` only for an explicit off value.
+
+    Anything unrecognised leaves thinking on, as before the setting existed, but
+    says so: a typo such as ``of`` would otherwise be indistinguishable from a
+    deliberate default. Cached, so the warning comes once per value rather than
+    on every call (the ``_nr`` helpers build a client per call).
+    """
+    value = setting.strip().lower()
+    if value in _THINKING_OFF:
+        return False
+    if value not in _THINKING_ON:
+        logger.warning(
+            "NON_REASONING_THINKING=%r is not recognised; thinking stays on. "
+            "Use 'off' to turn it off.",
+            setting,
+        )
+    return True
+
 
 # The process-wide default, from the environment. None means unbounded. This is
 # what the guard falls back to whenever no `limit_inflight` block is active.
@@ -218,12 +252,13 @@ def _build_client(
     base_url: str,
     temperature: float,
     max_tokens: int,
+    thinking: bool = True,
 ) -> BaseChatModel:
     """Build a chat client for the given model/endpoint.
 
     OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
     ``ChatOpenAI``, which supports structured output. Everything else uses
-    ``ChatNVIDIA``.
+    ``ChatNVIDIA``, where ``thinking=False`` turns a hybrid model's reasoning off.
     """
     if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
@@ -250,8 +285,44 @@ def _build_client(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    if not thinking:
+        client.model_kwargs = _thinking_off_params(client)
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
+
+
+# What Nemotron's chat template reads. Used for every model with no recorded
+# switch, including Nemotron 3.5, which the library does not know yet.
+_DEFAULT_THINKING_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def _thinking_off_params(client: BaseChatModel) -> dict[str, Any]:
+    """The request fields that turn this model's thinking off.
+
+    ``langchain-nvidia-ai-endpoints`` records the switch per model, and it is
+    not the same everywhere (DeepSeek v4 reads ``thinking``, not
+    ``enable_thinking``), so a known model's own switch wins. Some known models
+    are switched by a system-prompt tag instead (``detailed thinking off``,
+    ``/no_think``); a request field cannot do that, so they get nothing and a
+    warning rather than a field their template ignores.
+    """
+    known = getattr(client._client, "model", None)
+    params = getattr(known, "thinking_param_disable", None)
+    if params:
+        return copy.deepcopy(params)
+    if getattr(known, "no_thinking_prefix", None):
+        _warn_tag_switched(known.id)
+        return {}
+    return copy.deepcopy(_DEFAULT_THINKING_OFF)
+
+
+@functools.cache
+def _warn_tag_switched(model: str) -> None:
+    logger.warning(
+        "NON_REASONING_THINKING=off has no effect on %s: it turns thinking off "
+        "with a system-prompt tag, not a request field.",
+        model,
+    )
 
 
 def get_llm_client(
@@ -289,7 +360,8 @@ def get_non_reasoning_llm_client(
 
     Uses ``NON_REASONING_API_KEY`` / ``NON_REASONING_ENDPOINT`` /
     ``NON_REASONING_MODEL`` so it can target a different endpoint than the
-    main agent model.
+    main agent model, and ``NON_REASONING_THINKING=off`` to turn a hybrid
+    model's reasoning off.
 
     Parameters
     ----------
@@ -305,6 +377,7 @@ def get_non_reasoning_llm_client(
         base_url=_NON_REASONING_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
+        thinking=_thinking_enabled(NON_REASONING_THINKING),
     )
     _remember_non_reasoning(client)
     return client

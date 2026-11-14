@@ -57,6 +57,12 @@ kumoRfmApiUrl: ""
 # auto-derive from the API key prefix; set to override just the embedder.
 embedEndpoint: ""
 embedModel: ""
+# "off" turns a hybrid reasoning model's thinking off for non-reasoning calls
+# (ChatNVIDIA clients, hosted or self-hosted NIM; openai/, azure/ and aws/
+# models ignore it). Leave empty to keep the model's default. Rendered
+# into the bundled Secret: with bundledSecret.enabled=false, set
+# NON_REASONING_THINKING in the external Secret instead.
+nonReasoningThinking: ""
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.
