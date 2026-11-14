@@ -45,13 +45,18 @@ async def trigger() -> dict[str, str]:
 @router.post(
     "/semantic-compilation/reset", status_code=202, response_model=StatusResponse
 )
-async def reset() -> dict[str, str]:
-    """Ask the ingestion service to rebuild every database's semantic layer.
+def reset(database_name: str | None = None) -> dict[str, str]:
+    """Ask the ingestion service to rebuild a database's semantic layer.
 
     The service deletes the semantic nodes and embeddings and compiles them
     again, so the layer is rebuilt without waiting for the next scheduled run.
+    Omitting ``database_name`` resets every database.
+
+    A plain ``def`` (like ``semantic_status`` below) so FastAPI runs the
+    blocking ``trigger_semantic_reset`` HTTP proxy call in its thread pool
+    instead of stalling the event loop for up to the proxy timeout.
     """
-    trigger_semantic_reset()
+    trigger_semantic_reset(database_name)
     return {"status": "accepted"}
 
 
