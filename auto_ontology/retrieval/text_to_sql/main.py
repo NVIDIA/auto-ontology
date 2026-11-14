@@ -121,6 +121,8 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "custom_prompts": custom_prompts_section(
             payload.get("custom_prompts"), payload.get("acronyms")
         ),
+        "sql_examples": list(payload.get("sql_examples") or []),
+        "value_anchors": list(payload.get("value_anchors") or []),
     }
     return state
 

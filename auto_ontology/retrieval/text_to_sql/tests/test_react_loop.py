@@ -28,6 +28,11 @@ FINAL_SQL = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_min_retrieves(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MIN_RETRIEVES", "0")
+
+
 @pytest.fixture
 def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     catalog = FakeCatalog(SHOP_CATALOG)
@@ -375,3 +380,114 @@ def test_retries_end_and_the_episode_gives_up(
     assert result.reason == "model_error"
     assert len(model.seen) == 3
     assert len(sleeps) == 2
+
+
+def test_an_answer_before_enough_retrieves_is_refused_once(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MIN_RETRIEVES", "2")
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="revenue")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.tool_calls == 3
+    tool_results = [m.content for m in model.seen[-1] if isinstance(m, ToolMessage)]
+    assert tool_results[1] == prompts.EXPLORE_FIRST
+
+
+def test_an_answer_after_enough_retrieves_is_taken(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MIN_RETRIEVES", "2")
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="revenue")),
+            _reply(call("retrieve", "2", query="customer status")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.tool_calls == 3
+
+
+def test_examples_and_anchors_are_shown_with_the_question(ctx: ToolContext) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(
+        model,
+        ctx,
+        "Revenue from active customers?",
+        sql_examples=[
+            {"question": "Total sales of open stores?", "sql": "SELECT SUM(x)\n FROM s"}
+        ],
+        value_anchors=[
+            {
+                "phrase": "active",
+                "kind": "value",
+                "tbl": "customers",
+                "col": "status",
+                "stored_value": "ACTIVE",
+                "n_rows": "2",
+            }
+        ],
+    )
+
+    question = model.seen[0][1].content
+    assert "REFERENCE QUERY PATTERNS" in question
+    assert "   SQL: SELECT SUM(x) FROM s" in question
+    assert "VERIFIED DATABASE VALUES" in question
+    assert "- \"active\": customers.status = 'ACTIVE' (2 rows)" in question
+
+
+def test_user_message_without_examples_or_anchors_is_unchanged() -> None:
+    assert prompts.user_message("q", "e") == "QUESTION\nq\n\nEVIDENCE\ne\n"
+
+
+def test_value_anchors_section_marks_contains_absent_and_contested() -> None:
+    text = prompts.value_anchors_section(
+        [
+            {
+                "phrase": "LA",
+                "tbl": "t",
+                "col": "City",
+                "stored_value": "LA",
+                "n_rows": "5",
+            },
+            {
+                "phrase": "LA",
+                "tbl": "t",
+                "col": "MailCity",
+                "stored_value": "LA",
+                "n_rows": "3",
+                "description": "mailing city",
+            },
+            {
+                "phrase": "pro",
+                "kind": "contains",
+                "tbl": "t",
+                "col": "name",
+                "stored_value": "Pro Shop",
+            },
+            {"phrase": "Mars", "kind": "absent"},
+        ]
+    )
+
+    assert "- \"LA\": t.City = 'LA'\n" in text
+    assert "- \"LA\": t.MailCity (mailing city) = 'LA'" in text
+    assert "contains it inside values such as 'Pro Shop'" in text
+    assert (
+        'Stored nowhere in this database, so do not filter on them as written: "Mars"'
+        in text
+    )
+    assert prompts.value_anchors_section([]) == ""
+    assert prompts.sql_examples_section([{"question": "q", "sql": ""}]) == ""

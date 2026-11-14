@@ -39,12 +39,25 @@ the error and can keep working.
 
 Return exactly the requested output fields and no others.
 
+Before you answer, ask whether another column or table could hold what the \
+question asks: an owner and an editor, an amount kept in two tables, a \
+standing and a result. When one could, search for it by name and compare the \
+candidates with run_sql; choose by what the question's words mean, not by \
+which you found first.
+
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
 choose one. A table in a [family] is one copy of a schema kept under several \
 table-name prefixes (OLD_, NEW_); its TWINS are the same table in the other \
 copies. Pick the family the question means, and do not join a table of one \
 family to a table of another."""
+
+EXPLORE_FIRST = """\
+Not accepted yet. Before answering, check that you have the right columns: \
+retrieve again for a column or table that could hold what the question asks \
+in another way (another role, another table with the same kind of value), and \
+compare it with run_sql if one turns up. Then answer again; the same query is \
+accepted if it still holds."""
 
 _GREP_LINE = """\
 - grep: search all rows of a run_sql result too long to show (run_sql says \
@@ -113,7 +126,106 @@ def custom_prompts_section(
 USER_TEMPLATE = """\
 QUESTION
 {question}
-{evidence_block}"""
+{evidence_block}{context_blocks}"""
+
+_SQL_EXAMPLES_HEADER = """\
+REFERENCE QUERY PATTERNS
+Questions like this one, answered on other databases. Each shows how a request \
+of its kind is usually built: the join path, the aggregation, how a superlative \
+or a ratio is written. Their tables, columns and values are not yours: find \
+those with retrieve, and return the fields THIS question asks for."""
+
+_VALUE_ANCHORS_HEADER = """\
+VERIFIED DATABASE VALUES
+Phrases from the question, looked up in this database. Take the column and the \
+exact stored spelling from here when you filter on one of them; a column that \
+only contains a phrase calls for LIKE, not =. A phrase listed under several \
+columns is ambiguous: choose the column the question's wording means. Evidence \
+outranks these lines, and phrases not listed were not looked up."""
+
+
+def sql_examples_section(sql_examples: list[dict] | None) -> str:
+    """Question/evidence/SQL precedent from other databases, or "" when none.
+
+    Rendered whole, because the transferable lesson is the mapping from a
+    request to its query: the evidence line shows how a stated formula became
+    SQL, which is what the model has to reproduce here.
+    """
+    blocks = []
+    for example in sql_examples or []:
+        sql = " ".join((example.get("sql") or "").split())
+        if not sql:
+            continue
+        lines = [f"{len(blocks) + 1}."]
+        if question := (example.get("question") or "").strip():
+            lines.append(f"   Question: {question}")
+        if evidence := " ".join((example.get("evidence") or "").split()):
+            lines.append(f"   Evidence: {evidence}")
+        lines.append(f"   SQL: {sql}")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return _SQL_EXAMPLES_HEADER + "\n" + "\n".join(blocks)
+
+
+def value_anchors_section(value_anchors: list[dict] | None) -> str:
+    """Question phrases found in (or absent from) the database, or "" when none.
+
+    A phrase often sits in several plausible columns, and filtering on the
+    wrong one still returns rows; an anchor says which column stores it, with
+    which spelling. A phrase stored nowhere means the filter has to be built
+    another way.
+    """
+    anchors = value_anchors or []
+    rivals: dict[tuple[str, str], set[str]] = {}
+    for anchor in anchors:
+        key = (
+            (anchor.get("phrase") or "").strip().lower(),
+            (anchor.get("tbl") or "").strip().lower(),
+        )
+        rivals.setdefault(key, set()).add((anchor.get("col") or "").strip().lower())
+
+    found, absent = [], []
+    for anchor in anchors:
+        phrase = (anchor.get("phrase") or "").strip()
+        if not phrase:
+            continue
+        kind = (anchor.get("kind") or "value").strip()
+        if kind == "absent":
+            absent.append(f'"{phrase}"')
+            continue
+        table = (anchor.get("tbl") or "").strip()
+        column = (anchor.get("col") or "").strip()
+        value = (anchor.get("stored_value") or "").strip()
+        if not (table and column and value):
+            continue
+        # Between columns of one table a row count says nothing about which
+        # column the question means, so it is left out there.
+        rows = str(anchor.get("n_rows") or "")
+        contested = len(rivals.get((phrase.lower(), table.lower()), ())) > 1
+        count = (
+            f" ({int(rows):,} row{'' if int(rows) == 1 else 's'})"
+            if rows.isdigit() and not contested
+            else ""
+        )
+        claim = (
+            f"contains it inside values such as '{value}' (no value equals it)"
+            if kind == "contains"
+            else f"= '{value}'{count}"
+        )
+        gloss = (anchor.get("description") or "").strip()
+        named = f" ({gloss})" if gloss else ""
+        found.append(f'- "{phrase}": {table}.{column}{named} {claim}')
+    if not found and not absent:
+        return ""
+    lines = [_VALUE_ANCHORS_HEADER, *found]
+    if absent:
+        lines.append(
+            "Stored nowhere in this database, so do not filter on them as "
+            "written: " + ", ".join(sorted(set(absent)))
+        )
+    return "\n".join(lines)
+
 
 NUDGE = "Call a tool: retrieve, run_sql, or submit your final query."
 
@@ -355,9 +467,25 @@ def out_of_calls_for(mode: EpisodeMode) -> str:
     return f"No tool calls left; {final}."
 
 
-def user_message(question: str, evidence: str | None) -> str:
+def user_message(
+    question: str,
+    evidence: str | None,
+    sql_examples: list[dict] | None = None,
+    value_anchors: list[dict] | None = None,
+) -> str:
     evidence = (evidence or "").strip()
     evidence_block = f"\nEVIDENCE\n{evidence}\n" if evidence else ""
+    sections = [
+        section
+        for section in (
+            value_anchors_section(value_anchors),
+            sql_examples_section(sql_examples),
+        )
+        if section
+    ]
+    context_blocks = "".join(f"\n{section}\n" for section in sections)
     return USER_TEMPLATE.format(
-        question=question.strip(), evidence_block=evidence_block
+        question=question.strip(),
+        evidence_block=evidence_block,
+        context_blocks=context_blocks,
     )

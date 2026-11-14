@@ -28,6 +28,7 @@ ALL_ORDERS = "SELECT order_id, amount FROM orders ORDER BY order_id"
 def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "true")
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_RESULT_ROWS", "2")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MIN_RETRIEVES", "0")
     catalog = FakeCatalog(SHOP_CATALOG)
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
     return show_shop_tables(

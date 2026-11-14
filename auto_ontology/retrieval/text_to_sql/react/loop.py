@@ -160,12 +160,16 @@ def run_episode(
     dialect: str | None = None,
     mode: EpisodeMode = EpisodeMode.SQL,
     custom_prompts: str | None = None,
+    sql_examples: list[dict] | None = None,
+    value_anchors: list[dict] | None = None,
 ) -> EpisodeResult:
     """Run the model with *mode*'s tools until it answers or the budget ends.
 
     ``sql`` answers with ``submit``, ``predict`` with ``predict``, and ``auto``
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
+    *sql_examples* and *value_anchors* are the caller's per-question context,
+    shown with the question.
     """
     system_prompt = prompts.system_prompt_for(mode, dialect)
     if custom_prompts:
@@ -179,7 +183,11 @@ def run_episode(
         system_prompt = f"{system_prompt}\n\n{dialect_rules}"
     messages: list[BaseMessage] = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=prompts.user_message(question, evidence)),
+        HumanMessage(
+            content=prompts.user_message(
+                question, evidence, sql_examples, value_anchors
+            )
+        ),
     ]
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
@@ -191,6 +199,8 @@ def run_episode(
     calls = 0
     nudges = 0
     made: set[str] = set()
+    retrieves = 0
+    explore_asked = False
 
     while True:
         last_turn = calls >= budget
@@ -240,6 +250,16 @@ def run_episode(
             answers = prompts.is_answer(name, args)
             if calls >= budget and not answers:
                 observation, answer = (prompts.out_of_calls_for(mode), None)
+            elif (
+                answers
+                and name != ToolName.PREDICT
+                and not explore_asked
+                and not last_turn
+                and retrieves < config.min_retrieves()
+            ):
+                explore_asked = True
+                calls += 1
+                observation, answer = (prompts.EXPLORE_FIRST, None)
             elif key in made and not answers:
                 # Counted though not run: otherwise a model that repeats one
                 # call never reaches the budget and the episode never ends.
@@ -251,6 +271,8 @@ def run_episode(
             else:
                 made.add(key)
                 calls += 1
+                if name == ToolName.RETRIEVE:
+                    retrieves += 1
                 observation, answer = _dispatch(ctx, name, args, offered)
             messages.append(
                 ToolMessage(content=observation, tool_call_id=call.get("id") or name)

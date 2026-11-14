@@ -43,6 +43,16 @@ def model_retries() -> int:
     return _int_env("TEXT_TO_SQL_REACT_MODEL_RETRIES", 6)
 
 
+def min_retrieves() -> int:
+    """``retrieve`` calls an episode makes before its first answer is taken.
+
+    One search usually surfaces the first plausible column, not the one the
+    question means; an earlier answer is refused once with a request to look
+    for alternatives. ``0`` turns the check off.
+    """
+    return _int_env("TEXT_TO_SQL_REACT_MIN_RETRIEVES", 2)
+
+
 def max_sql_runs() -> int:
     """``run_sql`` calls allowed per episode, submissions excluded."""
     return _int_env("TEXT_TO_SQL_REACT_MAX_SQL_RUNS", 10)

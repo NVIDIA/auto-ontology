@@ -39,7 +39,8 @@ class TextToSQLPayload(TypedDict):
     prediction: NotRequired[bool | None]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
-    # Accepted from callers but not read by the ReAct agent.
+    # Question/SQL precedent from other databases, and question phrases looked
+    # up in this one; the ReAct agent shows both with the question.
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
 
@@ -61,6 +62,8 @@ class AgentState(TypedDict):
     prediction_override: NotRequired[bool | None]
     # The payload's custom prompts and acronyms as one system-prompt section.
     custom_prompts: NotRequired[str]
+    sql_examples: NotRequired[list[dict[str, str]]]
+    value_anchors: NotRequired[list[dict[str, str]]]
     # Read by the entity-coverage pipeline, which shares this state type.
     domain_rules: NotRequired[list[dict[str, str]]]
     # User-curated Glossary definitions (the ``acronyms`` table), kept apart from
