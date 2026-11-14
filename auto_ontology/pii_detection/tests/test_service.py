@@ -203,6 +203,78 @@ def test_classifier_failure_remains_unprocessed(
     assert processed == []
 
 
+def _non_latin_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "id": "rrn-id",
+                "column_name": "주민등록번호",
+                "table_name": "고객",
+                "description": "Korean national ID",
+            }
+        ]
+    )
+
+
+def test_non_latin_column_is_not_marked_processed_without_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for the reported bug: a non-Latin name used to draw a
+    REVIEW decision from the rules, and the service marks every non-fallback
+    decision processed, so the column was never classified and never
+    revisited. A fallback review must leave it unprocessed."""
+    processed: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "mark_columns_pii_processed",
+        lambda column_ids: processed.extend(column_ids) or len(column_ids),
+    )
+
+    result = service.detect_and_tag_pii(_non_latin_frame(), detector=PiiDetector())
+
+    assert result.scanned == 1
+    assert result.review == 1
+    assert result.rules_decided == 0
+    assert result.processed == 0
+    assert processed == []
+
+
+def test_non_latin_column_reaches_llm_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With a classifier configured, the non-Latin column is routed to it,
+    and only that genuine classification marks it processed."""
+    backend = _RecordingBackend()
+    processed: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "mark_columns_pii_processed",
+        lambda column_ids: processed.extend(column_ids) or len(column_ids),
+    )
+    monkeypatch.setattr(
+        service, "get_or_create_tag", lambda **_kwargs: {"id": "pii-tag"}
+    )
+    monkeypatch.setattr(service, "fetch_tags_map", lambda _kind, _ids: {})
+    monkeypatch.setattr(service, "attach_tag", lambda **_kwargs: [])
+
+    result = service.detect_and_tag_pii(
+        _non_latin_frame(), detector=PiiDetector(backend)
+    )
+
+    assert backend.columns == [
+        ColumnInput(
+            column_name="주민등록번호",
+            table_name="고객",
+            description="Korean national ID",
+        )
+    ]
+    assert result.llm_decided == 1
+    assert result.rules_decided == 0
+    assert result.tagged == 1
+    assert result.processed == 1
+    assert processed == ["rrn-id"]
+
+
 def test_propagation_labels_attributes_of_the_existing_pii_tag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
