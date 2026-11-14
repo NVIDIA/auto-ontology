@@ -11,18 +11,20 @@ Algorithm
 2. For each such column:
    a. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
       graph, look up the ColumnAttribute attached to the target Column and
-      create SEMANTIC_FK directly. A declared FK that targets a column on the
-      *same* table is rejected — that's a self-reference, never the entity
-      the FK points to.
+      create SEMANTIC_FK directly. A declared FK that targets *the column
+      itself* is rejected; one that targets another column of the same table
+      is a self-reference (``posts.parent_id → posts.id``) and is kept.
    b. **Inferred** — otherwise, search the *semantic* VDB for ColumnAttributes
-      whose names and descriptions resemble the column (excluding its own
-      table), let the LLM pick one, and confirm the pick by comparing the two
-      columns' ascending distinct values (``semantic.fk_values``); the other
-      hits are tried in distance order when the pick fails. When no hit is
-      confirmed, every key column whose stored values hold the FK's is
-      shortlisted and the LLM picks from that list instead. Neither path
-      offers another term family's copy of a table the column's own family
-      has.
+      whose names and descriptions resemble the column, let the LLM pick one,
+      and confirm the pick by comparing the two columns' ascending distinct
+      values (``semantic.fk_values``); the other hits are tried in distance
+      order when the pick fails. When no hit is confirmed, every key column
+      whose stored values hold the FK's is shortlisted and the LLM picks from
+      that list instead. Neither path offers another term family's copy of a
+      table the column's own family has. A key on the column's own table is
+      offered marked as a self-reference, and only the LLM's explicit pick of
+      it is accepted — the distance-order fallback never lands there, since a
+      table's own dense ``id`` holds nearly any integer FK's values.
    c. **Validated** — an inferred edge is stored only when joining the two
       columns returns a row.
 
@@ -98,6 +100,9 @@ foreign key references.
 Rules:
 - Return the exact column_id of the best matching candidate, or null if none fit.
 - Only pick a candidate when you are confident it is the PK being referenced.
+- A candidate marked [same table] is a self-reference: rows pointing at other \
+rows of the same entity (a parent, a manager, an accepted answer). Pick it only \
+when the column's name or description says so.
 - Do NOT guess. If unsure, return null.
 """
 _VALUE_SYSTEM_PROMPT = """\
@@ -110,6 +115,10 @@ ids and short codes overlap across unrelated tables.
 Rules:
 - Pick a candidate only when its table is plausibly the entity the foreign key \
 refers to, judging by names, descriptions and values together.
+- A candidate marked [same table] is a self-reference: rows pointing at other \
+rows of the same entity (a parent, a manager, an accepted answer). Pick it only \
+when the column's name or description says so — the table's own key holds most \
+of its integer columns' values.
 - Return the exact column_id of that candidate, or null if none is plausible.
 - Do NOT guess. If unsure, return null.
 """
@@ -165,11 +174,11 @@ def _resolve_semantic_fks(database_name: str) -> int:
     for index, col in enumerate(candidates, start=1):
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
-            if col.get("fk_target_table_id") == col.get("table_id"):
+            if fk_target_col_id == col["id"]:
                 _log_start(index, col)
                 logger.debug(
-                    "resolve_semantic_fks [declared]: %s.%s declared FK targets its "
-                    "own table — rejecting self-reference",
+                    "resolve_semantic_fks [declared]: %s.%s declared FK targets "
+                    "itself — rejecting",
                     col.get("table_name"),
                     col.get("name"),
                 )
@@ -598,10 +607,10 @@ def _vector_hits(
 
     Runs two queries of top 3 each — name + description, which captures
     semantic context, and name only, which survives a noisy or absent
-    description. Candidates on the FK column's own table are excluded — a FK
-    never references a column on the table it lives on — and so are
-    candidates whose owning column is not unique, which cannot be the
-    referenced key. The hit's ``metadata["id"]`` is the ColumnAttribute id.
+    description. The FK column itself is excluded, and so are candidates whose
+    owning column is not unique, which cannot be the referenced key; another
+    key of its own table stays, as a possible self-reference. The hit's
+    ``metadata["id"]`` is the ColumnAttribute id.
     """
     vdb_kwargs = {
         "where": {
@@ -624,15 +633,21 @@ def _vector_hits(
             seen_ids.add(hit_id)
             merged.append(hit)
 
-    source_table_id = col.get("table_id")
-    if source_table_id:
-        merged = [
-            hit
-            for hit in merged
-            if (hit.get("metadata") or {}).get("table_id")
-            and (hit.get("metadata") or {}).get("table_id") != source_table_id
-        ]
-    return merged
+    return [
+        hit
+        for hit in merged
+        if (hit.get("metadata") or {}).get("table_id")
+        and not (
+            _on_own_table(col, hit)
+            and (hit.get("metadata") or {}).get("source_column") == col.get("name")
+        )
+    ]
+
+
+def _on_own_table(col: dict[str, Any], hit: dict[str, Any]) -> bool:
+    """Whether the candidate *hit* lives on the FK column's own table."""
+    table_id = col.get("table_id")
+    return bool(table_id) and (hit.get("metadata") or {}).get("table_id") == table_id
 
 
 def _confirm_by_values(
@@ -642,11 +657,14 @@ def _confirm_by_values(
     selected: str | None,
     keys: _KeyIndex,
 ) -> str | None:
-    """The first hit — the LLM's pick, then by distance — whose values hold *col*'s."""
+    """The first hit — the LLM's pick, then by distance — whose values hold *col*'s.
+
+    A hit on *col*'s own table is tried only as the LLM's pick.
+    """
     ordered = [selected] if selected else []
     for hit in sorted(hits, key=_hit_score):
         hit_id = (hit.get("metadata") or {}).get("id")
-        if hit_id and hit_id not in ordered:
+        if hit_id and hit_id not in ordered and not _on_own_table(col, hit):
             ordered.append(hit_id)
     for attribute_id in ordered:
         if contains(
@@ -684,7 +702,7 @@ def _match_by_values_only(
         return None
     scored: list[tuple[float, dict[str, Any], list[Any]]] = []
     for row, values in keys.stored():
-        if row["table_id"] == col.get("table_id") or families.crosses(
+        if row["column_id"] == col.get("id") or families.crosses(
             col.get("table_id"), row["table_id"]
         ):
             continue
@@ -698,7 +716,7 @@ def _match_by_values_only(
     )
     candidates = [
         {
-            "metadata": {"id": row["attribute_id"]},
+            "metadata": {"id": row["attribute_id"], "table_id": row["table_id"]},
             "text": (
                 f"{row.get('schema_name') or ''}.{row['table_name']}."
                 f"{row['column_name']} ({row.get('data_type') or 'unknown type'}); "
@@ -841,7 +859,8 @@ def _llm_pick_hit(
     for hit in hits:
         column_id = (hit.get("metadata") or {}).get("id", "")
         text = (hit.get("text") or "")[:300]
-        candidates_lines.append(f"column_id={column_id} | {text}")
+        marker = " [same table]" if _on_own_table(col, hit) else ""
+        candidates_lines.append(f"column_id={column_id}{marker} | {text}")
     candidates_block = "\n".join(candidates_lines)
 
     human_text = (

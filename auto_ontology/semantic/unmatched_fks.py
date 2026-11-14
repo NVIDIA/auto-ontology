@@ -7,7 +7,7 @@
 ``process_table`` keeps every suspected FK column — declared, or suggested by
 the LLM — out of its table's Term, expecting semantic FK resolution to link it
 to the attribute it references instead. A column resolution could not link (a
-self-reference, a key that is also a foreign key, a reference to a table that
+key that is also a foreign key, a reference to a table that
 was never ingested, an inferred match the values or the join refuted) would
 otherwise belong to nothing. After resolution it is attached like any other
 column: to its table's Term, or to a new Term when the table has none — a
