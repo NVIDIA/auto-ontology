@@ -1507,3 +1507,64 @@ def test_a_known_server_is_not_probed(
 ) -> None:
     connector.execute("SELECT COUNT(*) FROM orders", timeout_s=30)
     assert not [call for call in server.calls if call[0] == "list_collection_names"]
+
+
+# ---------------------------------------------------------------------------
+# Third review
+# ---------------------------------------------------------------------------
+
+_ENDLESS = (
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) "
+    "SELECT count(*) FROM n"
+)
+
+
+def test_sampling_in_a_statement_has_no_cap_of_its_own(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    # A 60 s cap inside a 120 s statement would raise the very
+    # ExecutionTimeout that means "the statement's time is up".
+    connector.execute("SELECT COUNT(*) FROM orders", timeout_s=120)
+    (sampled,) = [call for call in server.calls if call[0] == "aggregate"]
+    assert sampled[3] == {} and sampled[4] > 60
+
+
+def test_a_stalled_call_without_server_time_limits_stops_at_the_deadline(
+    server: FakeServer, connector: MongoDBDatabase
+) -> None:
+    server.reject_time_limits = True
+    server.sample_delay = 2.0  # stands in for a socket that stopped answering
+    started = time.monotonic()
+    with pytest.raises(StatementTimeout):
+        connector.execute("SELECT COUNT(*) FROM orders", timeout_s=0.3)
+    assert time.monotonic() - started < 1.5
+
+
+def test_no_constant_is_evaluated_after_the_deadline(
+    server: FakeServer, connector: MongoDBDatabase, monkeypatch: MonkeyPatch
+) -> None:
+    # Two expensive bounds: the second must not start once the first has been
+    # interrupted at the deadline.
+    monkeypatch.setattr(mongodb, "_is_constant", lambda node, clock: True)
+    slow = "(SELECT sum(i) FROM range(10000000000) t(i))"
+    started = time.monotonic()
+    with pytest.raises(StatementTimeout):
+        connector.execute(
+            f"SELECT COUNT(*) FROM orders WHERE qty BETWEEN {slow} AND {slow}",
+            timeout_s=0.3,
+        )
+    assert time.monotonic() - started < 3
+
+
+def test_a_query_started_after_the_deadline_is_still_interrupted(
+    server: FakeServer, connector: MongoDBDatabase, monkeypatch: MonkeyPatch
+) -> None:
+    def late(connection: Any, sql: str, parameters: Any, deadline: Any) -> Any:
+        time.sleep(0.5)  # the deadline passes while the connection is idle
+        return connection.execute(_ENDLESS).fetchall()
+
+    monkeypatch.setattr(mongodb, "_run", late)
+    started = time.monotonic()
+    with pytest.raises(StatementTimeout):
+        connector.execute("SELECT 1", timeout_s=0.3)
+    assert time.monotonic() - started < 3

@@ -124,8 +124,9 @@ _MAX_COLUMNS = 500
 # happened to catch it -- and the ingestion service and the server sample
 # separately, so they would disagree about the column almost every other time.
 _MINORITY_SHARE = 0.01
-# Cap on one collection's ``$sample``. Sampling runs once per collection at
-# ingestion, so it may take longer than a profiling query, but not forever.
+# Cap on one collection's ``$sample`` at ingestion, where no statement timeout
+# applies: it may take longer than a profiling query, but not forever. Inside a
+# statement the statement's own timeout is the only limit; see _scope.
 _SAMPLE_TIME_LIMIT_MS = 60_000
 # PyMongo waits 30s for a reachable server by default; a wrong host should
 # fail a connection test faster than that. A URL that sets its own value wins.
@@ -970,10 +971,12 @@ class _Pushdown:
         connection: duckdb.DuckDBPyConnection,
         collection: _Collection,
         table: exp.Table,
+        deadline: _Deadline,
     ) -> None:
         self._connection = connection
         self._collection = collection
         self._qualifiers = {table.name.lower(), table.alias_or_name.lower()}
+        self._deadline = deadline
 
     def filter(self, where: exp.Where | None) -> dict[str, Any]:
         if where is None:
@@ -1105,8 +1108,17 @@ class _Pushdown:
         return column
 
     def _evaluate(self, sql: str) -> tuple[bool, Any]:
+        """DuckDB's value for the constant *sql*; ``(False, None)`` if it fails.
+
+        Never started once the statement's time is up, and an interrupt is
+        passed on rather than taken for an expression that failed -- otherwise
+        the next bound of a ``BETWEEN`` would start after the deadline.
+        """
+        self._deadline.check()
         try:
             row = self._connection.execute(f"SELECT {sql}").fetchone()
+        except duckdb.InterruptException:
+            raise
         except duckdb.Error:
             return False, None
         return True, row[0] if row else None
@@ -1507,12 +1519,16 @@ class MongoDBDatabase(SQLDatabase):
         Under a statement deadline, on a server that accepts maxTimeMS,
         PyMongo's own timeout bounds every wait in the operation -- server
         selection, each socket read, and the server's work, through a
-        maxTimeMS it derives itself -- so none is sent explicitly. Otherwise
-        only an explicit maxTimeMS of *cap_ms* bounds the server's work, and
-        ``socketTimeoutMS`` bounds a connection that stops answering.
+        maxTimeMS it derives itself -- so none is sent explicitly. It is the
+        statement's remaining time and nothing shorter: *cap_ms* is for work
+        with no statement around it, and a cap inside one would raise the same
+        ``ExecutionTimeout`` with statement time still left. Without a
+        statement deadline only an explicit maxTimeMS of *cap_ms* bounds the
+        server's work, and ``socketTimeoutMS`` a connection that stops
+        answering.
         """
         if deadline.timeout_s is not None and self._server_time_limits:
-            return pymongo.timeout(deadline.remaining_ms(cap_ms) / 1000), None
+            return pymongo.timeout(deadline.remaining_ms() / 1000), None
         if cap_ms is None or not self._server_time_limits:
             return nullcontext(), None
         return nullcontext(), max(1, int(cap_ms))
@@ -1527,12 +1543,16 @@ class MongoDBDatabase(SQLDatabase):
 
         A server that refuses maxTimeMS -- an elastic DocumentDB cluster --
         refuses the one PyMongo derives as well, so the operation is retried
-        once without either.
+        once without either. From then on nothing on the connection can end a
+        call blocked on a socket at the statement's deadline, so under one the
+        call runs on a worker thread that the statement stops waiting for.
         """
         for attempt in range(2):
             scope, limit = self._scope(deadline, cap_ms)
             try:
                 with scope:
+                    if deadline.timeout_s is not None and not self._server_time_limits:
+                        return _within(deadline, lambda: operation(limit))
                     return operation(limit)
             except ExecutionTimeout:
                 raise
@@ -1579,7 +1599,10 @@ class MongoDBDatabase(SQLDatabase):
             return self._call(deadline, sample, _SAMPLE_TIME_LIMIT_MS)
         except PyMongoError as exc:
             if getattr(exc, "timeout", False):
-                deadline.check()  # the statement's time, not the sample's, is up
+                # Inside a statement this is the statement's time running out;
+                # at ingestion it is the sample's cap, and the fallback is
+                # worth a try.
+                deadline.check()
             elif not isinstance(exc, OperationFailure):
                 raise
             logger.info(
@@ -1618,7 +1641,7 @@ class MongoDBDatabase(SQLDatabase):
         statement = _parse_query(sql)
 
         connection = self._open_duckdb()
-        timer, fired = _arm_interrupt(connection, deadline)
+        watchdog = _Watchdog(connection, deadline)
         try:
             try:
                 self._reach(deadline)
@@ -1630,13 +1653,11 @@ class MongoDBDatabase(SQLDatabase):
                     raise StatementTimeout.since(timeout_s, deadline.started) from exc
                 raise
             except duckdb.InterruptException as exc:
-                if timeout_s is not None and fired.is_set():
+                if timeout_s is not None and watchdog.fired.is_set():
                     raise StatementTimeout(timeout_s) from exc
                 raise
         finally:
-            if timer is not None:
-                timer.cancel()
-                timer.join()
+            watchdog.stop()
             connection.close()
 
     def _open_duckdb(self) -> duckdb.DuckDBPyConnection:
@@ -1721,7 +1742,8 @@ class MongoDBDatabase(SQLDatabase):
             table, name = single
             scan = scans[name]
             where = statement.args.get("where")
-            scan.filter = _Pushdown(connection, scan.collection, table).filter(where)
+            pushdown = _Pushdown(connection, scan.collection, table, deadline)
+            scan.filter = pushdown.filter(where)
             # A filter that may be a superset must not be paired with a
             # server-side limit: the server could return N documents DuckDB then
             # filters away while other matching ones exist.
@@ -1855,6 +1877,7 @@ class MongoDBDatabase(SQLDatabase):
         )
         table = f"{SCHEMA}.{quoted_identifier(collection.name, _DIALECT)}"
         source = f"__ao_documents_{uuid.uuid4().hex}"
+        deadline.check()
         connection.register(source, frame)
         try:
             connection.execute(
@@ -1943,27 +1966,71 @@ def _is_cte_reference(table: exp.Table) -> bool:
     return False
 
 
-def _arm_interrupt(
-    connection: duckdb.DuckDBPyConnection, deadline: _Deadline
-) -> tuple[threading.Timer | None, threading.Event]:
-    """Interrupt whatever DuckDB is running on *connection* at the deadline.
+class _Watchdog:
+    """Interrupt whatever DuckDB runs on a connection once the deadline passes.
 
     Armed once for the whole statement, so constant evaluation for pushdown
     and loading the documents are covered as well as the statement itself.
+    It keeps interrupting until stopped: an interrupt that lands while the
+    connection is idle -- between two queries, during a fetch -- would
+    otherwise be lost, and the next query would run unbounded.
     """
-    fired = threading.Event()
-    if deadline.timeout_s is None:
-        return None, fired
-    remaining = deadline.remaining_ms()
 
-    def interrupt() -> None:
-        fired.set()
-        connection.interrupt()
+    _REPEAT_S = 0.05
 
-    timer = threading.Timer(remaining / 1000, interrupt)
-    timer.daemon = True
-    timer.start()
-    return timer, fired
+    def __init__(
+        self, connection: duckdb.DuckDBPyConnection, deadline: _Deadline
+    ) -> None:
+        self.fired = threading.Event()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        if deadline.timeout_s is None:
+            return
+        delay_s = deadline.remaining_ms() / 1000
+
+        def watch() -> None:
+            if self._stop.wait(delay_s):
+                return
+            self.fired.set()
+            while not self._stop.is_set():
+                connection.interrupt()
+                self._stop.wait(self._REPEAT_S)
+
+        self._thread = threading.Thread(
+            target=watch, name="mongodb-statement-watchdog", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+
+
+def _within(deadline: _Deadline, call: Callable[[], Any]) -> Any:
+    """Run *call* on a worker thread, and stop waiting for it at the deadline.
+
+    For servers that refuse maxTimeMS nothing else can end a call blocked on
+    a socket in time. The abandoned call finishes on its own -- a fetch at its
+    next document, since it checks the deadline, a stalled read at
+    ``socketTimeoutMS`` -- and its result is dropped.
+    """
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # noqa: BLE001 -- re-raised below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, name="mongodb-call", daemon=True)
+    worker.start()
+    worker.join(deadline.remaining_ms() / 1000)
+    if worker.is_alive():
+        raise StatementTimeout(deadline.timeout_s or 0.0)
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
 
 
 def _run(
