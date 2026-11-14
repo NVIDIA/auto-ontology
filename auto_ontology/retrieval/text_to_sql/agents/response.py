@@ -10,7 +10,7 @@ final response dict (with DB result, sql_code, custom analyses, etc.),
 and stores it in ``path_state["final_response"]``.
 
 Combines the responsibilities of the former SQLResponseFormattingAgent and
-ResponseAgent into a single graph node.
+ResponseAgent into a single pipeline node.
 """
 
 import logging

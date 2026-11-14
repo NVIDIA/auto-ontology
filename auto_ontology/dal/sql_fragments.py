@@ -87,6 +87,18 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     )
 
 
+def attribute_description_expr(column=s.catalog_column) -> ColumnElement:
+    """The description of the ``HAS_ATTRIBUTE`` attribute a column is, or ``NULL``.
+
+    Unlike :func:`column_description_expr` the column's own description is not
+    consulted: the two are written differently -- the column's short, the
+    attribute's from the Term, table, references and values around it -- and a
+    reader that wants the richer one has to ask for it. Takes the table or
+    alias, for the same reason as :func:`column_description_expr`.
+    """
+    return _attribute_description(column.c.id, s.column__has_attribute)
+
+
 def table_description_expr(table=s.catalog_table) -> ColumnElement:
     """A table's description, falling back to the Term it represents.
 

@@ -145,9 +145,9 @@ class BaseAgent(ABC):
 
 
 def record_thought(
-    path_state: Dict[str, Any], node_name: str, text: str
+    path_state: Dict[str, Any], step_name: str, text: str
 ) -> Dict[str, Any]:
-    """Append a human-readable thought entry for *node_name* to the run's trace.
+    """Append a human-readable thought entry for *step_name* to the run's trace.
 
     ``path_state["thoughts_log"]`` accumulates one entry per node that has
     something genuine to say (LLM reasoning it already computed for its own
@@ -160,7 +160,7 @@ def record_thought(
     if not text:
         return path_state
     log = list(path_state.get("thoughts_log") or [])
-    log.append({"node": node_name, "text": text})
+    log.append({"node": step_name, "text": text})
     path_state["thoughts_log"] = log
     return path_state
 
@@ -183,21 +183,21 @@ def agent_wrapper(agent: BaseAgent):
     - Logging
     - State management
 
-    Usage in orchestrator/graph.py:
-        graph.add_node("node_name", agent_wrapper(MyAgent("my_agent")))
+    Usage in a pipeline:
+        steps = {"step_name": agent_wrapper(MyAgent("my_agent"))}
 
     Args:
         agent: BaseAgent instance
 
     Returns:
-        Wrapped function compatible with LangGraph
+        A function from state to the node's output
     """
 
     def wrapped(state: AgentState) -> Dict[str, Any]:
         """
         Wrapped agent execution function.
 
-        This function is called by LangGraph for each agent node.
+        The pipeline calls this for each agent node.
         It provides error handling and logging around the agent's execute method.
         """
         # Validate input

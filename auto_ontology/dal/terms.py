@@ -1392,6 +1392,29 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def fetch_semantic_coverage(
+    column_ids: list[str], table_ids: list[str]
+) -> tuple[set[str], set[str]]:
+    """``(column ids with a ColumnAttribute, table ids a Term represents)``."""
+    columns: set[str] = set()
+    tables: set[str] = set()
+    if column_ids:
+        rows = store().query_read(
+            select(s.column__has_attribute.c.column_id)
+            .where(s.column__has_attribute.c.column_id.in_(column_ids))
+            .distinct()
+        )
+        columns = {str(r["column_id"]) for r in rows}
+    if table_ids:
+        rows = store().query_read(
+            select(s.table__term.c.table_id)
+            .where(s.table__term.c.table_id.in_(table_ids))
+            .distinct()
+        )
+        tables = {str(r["table_id"]) for r in rows}
+    return columns, tables
+
+
 def fetch_term_table_pairs(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,

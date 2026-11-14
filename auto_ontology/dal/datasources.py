@@ -40,6 +40,7 @@ from sqlalchemy import values as sa_values
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
+    attribute_description_expr,
     column_description_expr,
     table_description_expr,
 )
@@ -1029,16 +1030,21 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
     ``sample_values`` is what lets a SQL-generating model write a correct
     ``->``/``->>`` path into a JSONB column instead of guessing a plausible
-    sibling key — this is the only per-column field ``candidates_preparation``'s
-    "back-fill" step (§4a: any table whose columns arrived without
-    sample_values from the vector-index hit) exists to supply. It was
-    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
-    dropped it from this query's rewrite (the Neo4j Cypher version had it);
-    restored so the back-fill isn't a no-op again. ``is_nullable`` is included
-    alongside it so projection rules can tell when a requested item may be
-    missing; ``None`` means the connector could not determine it.
-    ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    sibling key. It was selected here from Aug 2026 until the
+    Neo4j-to-Postgres port silently dropped it from this query's rewrite (the
+    Neo4j Cypher version had it); restored so a table whose columns arrived
+    without sample_values from the vector-index hit can be back-filled.
+    ``is_nullable`` is included alongside it so projection rules can tell when
+    a requested item may be missing; ``None`` means the connector could not
+    determine it. ``semantic_fk`` resolves the referenced attribute back to its
+    owning column and returns that target as ``schema.table.column`` for SQL
+    prompts.
+
+    ``description`` is the column's own, short one (with the attribute
+    fallback of :func:`column_description_expr`) and ``attribute_description``
+    the longer one of the attribute the column is, ``None`` without one.
+    ``distinct_values`` is a suspected key's lowest distinct values in
+    ascending order, not the whole column.
     """
     if not table_ids:
         return []
@@ -1088,15 +1094,18 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
             select(
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
-                s.catalog_table.c.description,
+                table_description_expr().label("description"),
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
+                attribute_description_expr().label("attribute_description"),
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
+                s.catalog_column.c.distinct_values,
+                s.catalog_column.c.is_unique,
                 s.catalog_column.c.is_nullable,
                 semantic_fk_target.label("semantic_fk"),
             )
@@ -1140,13 +1149,124 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],
+                    "attribute_description": row["attribute_description"],
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
+                    "distinct_values": parse_sample_values(row["distinct_values"]),
+                    "is_unique": row["is_unique"],
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
                 }
             )
     return list(tables.values())
+
+
+def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
+    """Every table in *database_name* (all databases when ``None``) with its
+    column names: ``{id, name, schema_name, database_name, columns}``.
+
+    Names only, so a whole catalog is cheap to compare table against table.
+    Returns ``[]`` if the query fails, like :func:`fetch_tables_by_ids`.
+    """
+    query = select(
+        s.catalog_table.c.id,
+        s.catalog_table.c.name,
+        s.catalog_database.c.name.label("database_name"),
+        s.catalog_schema.c.name.label("schema_name"),
+        s.catalog_column.c.name.label("column_name"),
+    ).select_from(
+        _table_join().join(
+            s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
+        )
+    )
+    if database_name:
+        query = query.where(s.catalog_database.c.name == database_name)
+    try:
+        rows = store().query_read(
+            query.order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+        )
+    except Exception:
+        logger.warning("fetch_table_column_names: query failed", exc_info=True)
+        return []
+
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            str(row["id"]),
+            {
+                "id": str(row["id"]),
+                "name": row["name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "database_name": row["database_name"] or "",
+                "columns": [],
+            },
+        )
+        table["columns"].append(row["column_name"])
+    return list(tables.values())
+
+
+def fetch_semantic_fk_referrers(
+    table_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """``{table_id: [{schema_name, table_name, column_name}]}``: the columns
+    whose semantic FK lands on each of *table_ids*.
+
+    The incoming half of a table's one-hop semantic FKs; the outgoing half is
+    ``semantic_fk`` on each column of :func:`fetch_tables_by_ids`. Every FK is
+    listed, including the ones ``use_in_join_paths`` leaves out of join
+    routes: a table referenced by both an owner and an editor column needs
+    both named. Returns ``{}`` if the query fails, like
+    :func:`fetch_tables_by_ids`.
+    """
+    if not table_ids:
+        return {}
+    source = s.catalog_column.alias("referrer_column")
+    source_table = s.catalog_table.alias("referrer_table")
+    source_schema = s.catalog_schema.alias("referrer_schema")
+    target = s.catalog_column.alias("referenced_column")
+    try:
+        rows = store().query_read(
+            select(
+                target.c.table_id,
+                source_schema.c.name.label("schema_name"),
+                source_table.c.name.label("table_name"),
+                source.c.name.label("column_name"),
+            )
+            .select_from(
+                s.column__semantic_fk.join(
+                    source, source.c.id == s.column__semantic_fk.c.column_id
+                )
+                .join(source_table, source_table.c.id == source.c.table_id)
+                .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+                .join(
+                    s.column__has_attribute,
+                    s.column__has_attribute.c.attribute_id
+                    == s.column__semantic_fk.c.attribute_id,
+                )
+                .join(target, target.c.id == s.column__has_attribute.c.column_id)
+            )
+            .where(target.c.table_id.in_(list(table_ids)))
+            .distinct()
+            .order_by(
+                target.c.table_id,
+                source_schema.c.name,
+                source_table.c.name,
+                source.c.name,
+            )
+        )
+    except Exception:
+        logger.warning("fetch_semantic_fk_referrers: query failed", exc_info=True)
+        return {}
+    referrers: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        referrers.setdefault(str(row["table_id"]), []).append(
+            {
+                "schema_name": row["schema_name"] or "",
+                "table_name": row["table_name"],
+                "column_name": row["column_name"],
+            }
+        )
+    return referrers
 
 
 def fetch_table_context(table_id: str) -> dict[str, Any]:

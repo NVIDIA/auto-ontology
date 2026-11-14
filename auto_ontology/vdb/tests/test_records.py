@@ -158,7 +158,7 @@ def test_written_rows_come_back_from_a_search(
         "who buys", top_k=5, vdb_kwargs={"where": {"database_name": "shop"}}
     )
 
-    # The caller's _query_with_retry is the only retry on this path, and each
+    # Retriever.query's own retry is the only one on this path, and each
     # attempt is bounded, so a dead endpoint cannot hold a question for long.
     assert sent == [(["who buys"], "query", {"timeout": 60.0, "retries": 0})]
     assert [hit["metadata"]["id"] for hit in hits] == ["customers", "orders"]

@@ -22,8 +22,7 @@ _MAX_ENTITIES: int = int(
 def format_glossary_section(glossary: list[dict[str, str]] | None) -> str:
     """Render the user-curated Glossary, or "" when there is nothing to inject.
 
-    Entries are a flat list rather than ``rules_to_text``'s ``## name`` headings,
-    which would collide with surrounding ``##`` prompt sections.
+    Entries are a flat list rather than ``## name`` headings, which would collide with surrounding ``##`` prompt sections.
     """
     entries = [
         f"- {name}: {(entry.get('description') or '').strip()}"
