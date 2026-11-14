@@ -10,11 +10,11 @@ Agents can retrieve documents and query databases, but reliability gates agentic
 
 It enables developers to:
 
-- Discover: generate enterprise ontologies from metadata; connect existing ontologies and semantic models; build AI-ready knowledge graphs.
-- Ground: give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
-- Validate: check generated queries against certified definitions and lineage; return provenance with every answer.
-- Expose: serve context to any agent harness through MCP, CLI, and API.
-- Learn: fold certified corrections and usage back into the ontology, so shared context improves with every question.
+- **Discover:** generate enterprise ontologies from metadata; connect existing ontologies and semantic models; build AI-ready knowledge graphs.
+- **Ground:** give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
+- **Validate:** check generated queries against certified definitions and lineage; return provenance with every answer.
+- **Expose:** serve context to any agent harness through MCP, CLI, and API.
+- **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
 ## Benchmarks
 
@@ -23,7 +23,7 @@ To run a text-to-SQL benchmark such as BIRD, refer to
 scores the same model with and without the ontology on
 [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym).
 
-> **Licensing & contributions.** Auto Ontology is distributed under the
+> **Licensing and contributions:** Auto Ontology is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
 > bundled, linked, or otherwise used by this project are listed in
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
@@ -31,13 +31,13 @@ scores the same model with and without the ontology on
 
 ## Key Features
 
-- **Natural-language querying** of structured data — questions are translated to
-  SQL and executed against connected databases, powered by NVIDIA NIM.
-- **Semantic catalog / ontology layer** over relational sources, stored in
-  Postgres alongside the catalog it describes.
-- **Authentication & RBAC** —using [Better Auth](https://github.com/better-auth/better-auth).
-- **Web UI** for chat, analysis, data catalog, analytics, and settings.
-- **Flexible deployment** — Helm chart for Kubernetes or Docker Compose for a
+- **Natural-language querying:** questions about structured data are translated
+  to SQL and run against connected databases, powered by NVIDIA NIM.
+- **Semantic catalog and ontology layer:** built over relational sources and
+  stored in Postgres alongside the catalog it describes.
+- **Authentication and RBAC:** using [Better Auth](https://github.com/better-auth/better-auth).
+- **Web UI:** chat, analysis, data catalog, analytics, and settings.
+- **Flexible deployment:** a Helm chart for Kubernetes, or Docker Compose for a
   local stack.
 
 ## Software Components
@@ -57,8 +57,8 @@ Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted
 self-hosted NIMs. The defaults in `.env.example` are:
 
 - **LLM:** `nvidia/nemotron-3.5-lightning-30b-a3b`
-- **Embeddings:** `nvidia/nemotron-3-embed-1b`
-- **Reranking:** `nvidia/llama-nemotron-rerank-vl-1b-v2`
+- **Embeddings:** `nvidia/nemotron-3.5-embed-1b`
+- **Reranking:** `nvidia/nemotron-3.5-rerank-8b`
 
 The endpoints and models are configured via the `DEFAULT_MODELS_ENDPOINT`, `DEFAULT_MODELS_MODEL`,
 `EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
@@ -236,15 +236,15 @@ certify, and the agent answers questions from it.
 
 The ontology holds three kinds of definition:
 
-- **Terms.** Business concepts such as *Customer* or *Invoice Line*, each with a
+- **Terms:** business concepts such as *Customer* or *Invoice Line*, each with a
   description and synonyms, mapped to the columns that hold them.
-- **SQL attributes.** Reviewed SQL expressions under a term, such as a margin or
+- **SQL attributes:** reviewed SQL expressions under a term, such as a margin or
   a rolling total. The agent reuses them, so answers compute each measure the
   same way.
-- **Relationships.** How tables join, including bridge tables, inferred from
+- **Relationships:** how tables join, including bridge tables, inferred from
   keys and from the data.
 
-**Generate.** The ingestion service builds a first draft from the source
+**Generate:** The ingestion service builds a first draft from the source
 databases, and people refine it. Semantic compilation starts once you turn it
 on in **Settings → Semantic Compilation**.
 
@@ -277,7 +277,7 @@ its description, related terms, mapped columns, and SQL attributes:
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
 </p>
 
-**Answer.** The agent runs the same steps for every question:
+**Answer:** The agent runs the same steps for every question:
 
 - **Classify:** a model labels the intent and separates any evidence written
   into the question.
