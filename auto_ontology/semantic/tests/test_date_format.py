@@ -164,12 +164,43 @@ def test_a_narrow_component_does_not_hide_an_undecidable_order() -> None:
     assert infer_date_format(["4/04/20"]) is None
 
 
-def test_a_component_is_widened_to_the_widest_value_stored() -> None:
-    """``13`` cannot be held by ``D``, so the whole column is called ``DD``.
-    Same rule fractional seconds already follow: report the form a literal has
-    to be able to hold.
+def test_a_narrow_component_is_not_widened_by_a_two_digit_value() -> None:
+    """``13`` cannot be held by ``D``, but it does not make the column padded.
+    A column storing unpadded dates still holds days past the ninth, so the widest
+    value says nothing about padding and the narrowest decides it. Reading the
+    ``13`` as evidence of padding reported ``DD/M/YY`` for a column storing
+    ``M/D/YY`` -- the silent empty-result case this module exists to prevent.
     """
-    assert infer_date_format(["4/4/20", "13/6/20"]) == "DD/M/YY"
+    assert infer_date_format(["4/4/20", "13/6/20"]) == "D/M/YY"
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (["5/31/18", "6/1/18", "12/31/20", "1/5/19", "10/2/19"], "M/D/YY"),
+        (["5/31/18", "6/1/18", "1/5/19"], "M/D/YY"),
+        (["15.03.2024", "1.3.2024"], "D.M.YYYY"),
+        (["2024년 3월 15일", "2024년 12월 1일"], "YYYY년 M월 D일"),
+    ],
+)
+def test_a_column_holding_both_widths_stays_unpadded(
+    values: list[str], expected: str
+) -> None:
+    """A realistic unpadded column mixes one- and two-digit components.
+    Days run to 31 and months to 12, so every such column has a two-digit value and
+    the widest one always looks padded. Samples that hold only single-digit values,
+    which is what the dotted and East Asian tests used, could not catch it.
+    """
+    assert infer_date_format(values) == expected
+
+
+def test_a_lowercase_separator_keeps_the_widths_it_carries() -> None:
+    """``strptime`` matches the ``T`` separator whatever its case.
+    The alignment regex did not, so ``t`` left the sample unaligned, every measured
+    width was dropped and a column storing three fractional digits was reported as
+    ``.f`` -- a notation describing a different stored width.
+    """
+    assert infer_date_format(["2010-07-19t19:39:07.123"]) == "YYYY-MM-DDTHH:MM:SS.fff"
 
 
 def test_repeated_whitespace_keeps_the_widths_it_measures() -> None:

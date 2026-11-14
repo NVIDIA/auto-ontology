@@ -165,14 +165,27 @@ def _literal(text: str) -> str:
     return re.escape(text).replace(r"\ ", r"\s+").replace(" ", r"\s+")
 
 
-def _stored_widths(pattern: str, values: list[str]) -> dict[str, int]:
-    """The widest digit run each token holds across *values*.
+def _stored_widths(pattern: str, values: list[str]) -> dict[str, tuple[int, int]]:
+    """The narrowest and widest digit run each token holds across *values*.
 
     The pattern is turned into a regex with one bounded group per token, which
     aligns the sample on the format without assuming which character separates two
     components -- a separator can be a space, a dot-and-space, or a Korean ``월``. A
     token missing from the result was absent from a sample the regex could not
     align, and keeps its padded spelling.
+
+    Both ends of the range are kept because the two kinds of width answer
+    different questions. A fraction is reported at its widest, since a literal has
+    to be able to hold every value it will be compared against. Padding is decided
+    by the narrowest: one single-digit month already proves the column is not
+    zero-padded, whereas a column of unpadded dates still holds days up to 31, and
+    treating that ``31`` as evidence of padding reports ``MM/DD/YY`` for a column
+    that stores ``M/D/YY``.
+
+    The alignment ignores case for the same reason ``strptime`` does: ``T`` is
+    matched case-insensitively, so ``2010-07-19t19:39:07.123`` is still the same
+    reading and its widths must not be dropped on the strength of the separator's
+    case.
     """
     parts: list[str] = []
     tokens: list[str] = []
@@ -184,16 +197,18 @@ def _stored_widths(pattern: str, values: list[str]) -> dict[str, int]:
         parts.append(rf"({_COMPONENT_RE[token]})")
         index = match.end()
     parts.append(_literal(pattern[index:]))
-    aligned = re.compile("".join(parts))
+    aligned = re.compile("".join(parts), re.IGNORECASE)
 
-    widths = dict.fromkeys(tokens, 0)
+    runs: dict[str, list[int]] = {token: [] for token in tokens}
     for value in values:
         matched = aligned.fullmatch(value)
         if matched is None:
             continue
         for token, digits in zip(tokens, matched.groups()):
-            widths[token] = max(widths[token], len(digits))
-    return {token: width for token, width in widths.items() if width}
+            runs[token].append(len(digits))
+    return {
+        token: (min(widths), max(widths)) for token, widths in runs.items() if widths
+    }
 
 
 def _notation(pattern: str, values: list[str] | None = None) -> str:
@@ -203,8 +218,13 @@ def _notation(pattern: str, values: list[str] | None = None) -> str:
     day, so one pattern covers several stored widths. Both are restated at the
     width actually stored: an equality predicate has to reproduce the string the
     column holds, and ``04/04/20`` never matches a column storing ``4/4/20``.
-    Where the width varies the widest is reported, since that is the form a
-    literal has to be able to hold.
+
+    A month or a day is narrowed on the narrowest value, not the widest: a single
+    one-digit month already shows the column is not zero-padded, while a column
+    storing unpadded dates still holds days up to 31, and reading that ``31`` as
+    evidence of padding reports ``MM/DD/YY`` for a column that stores ``M/D/YY``.
+    A fraction keeps the widest, because its literal has to be able to hold every
+    value.
 
     Without *values* every token takes its widest spelling, which is the
     canonical form of the pattern -- padding is not a different reading, so two
@@ -217,10 +237,10 @@ def _notation(pattern: str, values: list[str] | None = None) -> str:
     for match in _TOKEN_RE.finditer(pattern):
         token = match.group()
         text = _NOTATION[token]
-        width = widths.get(token, 0)
-        if token == "%f" and width:
-            text = text * width
-        elif token in _NARROWABLE and width == 1:
+        narrowest, widest = widths.get(token, (0, 0))
+        if token == "%f" and widest:
+            text = text * widest
+        elif token in _NARROWABLE and narrowest == 1:
             text = text[:1]
         out.append(pattern[index : match.start()])
         out.append(text)
