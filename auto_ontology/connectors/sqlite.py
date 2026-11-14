@@ -41,8 +41,6 @@ def _sqlite_path_from_connection_string(connection_string: str) -> Path:
         path = unquote(parsed.path)
         if not path:
             raise ValueError(f"Invalid SQLite connection string: {connection_string!r}")
-        if len(path) > 2 and path[0] == "/" and path[1].isalpha() and path[2] == ":":
-            path = path[1:]
         return Path(path)
     return Path(connection_string)
 
@@ -169,6 +167,23 @@ class SQLiteDatabase(SQLDatabase):
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
             info = self._conn.execute(f'PRAGMA table_xinfo("{table_name}")').fetchall()
+            if not info:
+                info = self._conn.execute(
+                    f'PRAGMA table_info("{table_name}")'
+                ).fetchall()
+                for cid, name, data_type, notnull, _default, _pk in info:
+                    rows.append(
+                        {
+                            "table_schema": "main",
+                            "table_name": table_name,
+                            "column_name": name,
+                            "data_type": data_type or "TEXT",
+                            "is_nullable": not notnull,
+                            "ordinal_position": cid + 1,
+                        }
+                    )
+                continue
+
             position = 1
             for _cid, name, data_type, notnull, _default, _pk, hidden in info:
                 if hidden == 1:
@@ -238,7 +253,12 @@ class SQLiteDatabase(SQLDatabase):
                 info = self._conn.execute(
                     f'PRAGMA table_xinfo("{table_name}")'
                 ).fetchall()
-                table_info[table_name] = [c for c in info if c[6] != 1]
+                if not info:
+                    table_info[table_name] = self._conn.execute(
+                        f'PRAGMA table_info("{table_name}")'
+                    ).fetchall()
+                else:
+                    table_info[table_name] = [c for c in info if c[6] != 1]
             return table_info[table_name]
 
         def declared_column(table_name: str, column_name: str) -> str:
