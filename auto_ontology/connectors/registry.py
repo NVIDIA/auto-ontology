@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from auto_ontology.catalog.table_filter import TableFilter, from_connection
 from auto_ontology.connectors.base import SQLDatabase
@@ -20,6 +20,7 @@ from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.kyuubi import KyuubiDatabase
+from auto_ontology.connectors.mongodb import MongoDBDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
 from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.snowflake import SnowflakeDatabase
@@ -40,7 +41,9 @@ logger = logging.getLogger(__name__)
 # ``test_registry_dialects.py`` enforces this.
 #
 # Note the keys below are connection-string schemes, NOT dialects: ``postgresql``,
-# ``heavydb`` and ``kyuubi`` are valid keys but none is a sqlglot dialect name.
+# ``heavydb``, ``kyuubi`` and ``mongodb`` are valid keys but none is a sqlglot
+# dialect name. ``mongodb+srv://`` resolves to ``mongodb`` like any ``+driver``
+# suffix.
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
@@ -51,19 +54,36 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "clickhouse": ClickHouseDatabase,
     "heavydb": HeavyDBDatabase,
     "kyuubi": KyuubiDatabase,
+    "mongodb": MongoDBDatabase,
     "sqlite": SQLiteDatabase,
     "trino": TrinoDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
 
+# A newline always ends a connection string; a comma only where another
+# connection string starts after it: a registered scheme, an optional
+# ``+driver``, and a colon not followed by a digit. MongoDB URLs carry commas of
+# their own -- in a replica set's host list (``mongodb://a:27017,b:27017/db``,
+# where a host may itself be called ``mongodb``) and in option values such as
+# ``readPreferenceTags=dc:ny,rack:1`` -- and splitting on every comma cut them
+# into pieces that each failed to parse. The ``//`` stays optional, because
+# ``sqlite:relative/path.sqlite`` is a valid SQLite connection string.
+_CONNECTION_STRING_SEPARATOR = re.compile(
+    r"[\r\n]+|,(?=\s*(?i:"
+    + "|".join(
+        re.escape(scheme) for scheme in sorted(CONNECTOR_REGISTRY, key=len)[::-1]
+    )
+    + r")(?:\+[A-Za-z0-9.\-]+)?:(?!\d))"
+)
+
 
 def parse_connection_strings(raw: str) -> list[str]:
     """Return connection URLs separated by commas, newlines, or both."""
     return [
-        connection_string.strip()
-        for connection_string in re.split(r"[,\r\n]+", raw)
-        if connection_string.strip()
+        connection_string.strip().strip(",").strip()
+        for connection_string in _CONNECTION_STRING_SEPARATOR.split(raw)
+        if connection_string.strip().strip(",").strip()
     ]
 
 
@@ -75,15 +95,41 @@ def _redact(connection_string: str) -> str:
 
     An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
     and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
-    on every connector failure.
+    on every connector failure. A MongoDB ``tls_ca_data`` bundle is collapsed
+    for the same reason, and the MongoDB options that carry secrets are masked.
     """
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )
+    connection_string = re.sub(
+        r"(tls_ca_data=)[^&;]+", r"\1<certificates>", connection_string
+    )
+    connection_string = _mask_secret_options(connection_string)
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string
     return connection_string.replace(parsed.password, "***", 1)
+
+
+# MongoDB URL options whose values are secrets: the passphrase of a client
+# certificate's private key (and its legacy name), and the AWS session token
+# MONGODB-AWS authentication can carry.
+_SECRET_OPTIONS = frozenset(
+    {"tlscertificatekeyfilepassword", "sslpemkeypassword", "authmechanismproperties"}
+)
+
+
+def _mask_secret_options(connection_string: str) -> str:
+    """Mask the values of :data:`_SECRET_OPTIONS`, whatever the key's case or encoding."""
+    head, separator, query = connection_string.partition("?")
+    if not separator:
+        return connection_string
+    parts = re.split(r"([&;])", query)
+    for index, part in enumerate(parts):
+        key, equals, _ = part.partition("=")
+        if equals and unquote(key).strip().lower() in _SECRET_OPTIONS:
+            parts[index] = f"{key}=***"
+    return head + separator + "".join(parts)
 
 
 def _schema_filter(connection: dict) -> list[str] | None:

@@ -10,6 +10,7 @@ from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.kyuubi import KyuubiDatabase
+from auto_ontology.connectors.mongodb import MongoDBDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
 from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.registry import (
@@ -27,6 +28,7 @@ __all__ = [
     "DuckDBDatabase",
     "HeavyDBDatabase",
     "KyuubiDatabase",
+    "MongoDBDatabase",
     "MySQLDatabase",
     "PostgresDatabase",
     "SnowflakeDatabase",
