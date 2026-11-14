@@ -5,17 +5,35 @@
 """High-confidence, metadata-only PII classification rules."""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from auto_ontology.pii_detection.models import ColumnInput, PiiDecision, PiiStatus
 
 
 def normalize(value: str | None) -> str:
-    """Normalize SQL identifiers into words suitable for rule matching."""
+    """Normalize SQL identifiers into words suitable for rule matching.
+
+    The split is Unicode-aware: letters from any script survive, so a
+    non-Latin column name stays intact instead of collapsing to an empty
+    string. ASCII names normalize exactly as before.
+
+    Case-folded text is normalized to NFC first, and combining marks stay
+    attached to their base characters when splitting: a decomposed name
+    such as ``product_name`` plus a combining acute must normalize like
+    its composed form, not split on the mark and match an unrelated rule.
+    Only letters, numbers, and marks form tokens; everything else,
+    including underscores, is a separator.
+    """
 
     if not value:
         return ""
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+    folded = unicodedata.normalize("NFC", value.casefold())
+    kept = "".join(
+        char if unicodedata.category(char).startswith(("L", "N", "M")) else " "
+        for char in folded
+    )
+    return " ".join(kept.split())
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,13 +222,12 @@ def evaluate_rules(column: ColumnInput) -> PiiDecision | None:
     table_name = normalize(column.table_name)
 
     if not column_name:
-        return PiiDecision(
-            PiiStatus.REVIEW,
-            None,
-            0.0,
-            "Column name is empty.",
-            "rules",
-        )
+        # No signal for the rules to judge: a missing name, or one made only
+        # of separators. Stay silent so the detector falls through to the LLM
+        # classifier, or to the fallback review. A REVIEW decision from the
+        # rules would mark the column processed and hide it from the
+        # classifier and from later ingests.
+        return None
 
     if NON_PII_COLUMN_PATTERN.fullmatch(
         column_name
