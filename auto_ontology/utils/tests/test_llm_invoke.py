@@ -11,7 +11,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from auto_ontology.utils import llm_invoke
@@ -497,3 +497,82 @@ def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -
     monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
 
     assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
+
+
+_BEDROCK_SONNET = "bedrock/global.anthropic.claude-sonnet-5-5"
+
+
+def test_bedrock_models_get_a_converse_client(monkeypatch: Any, tmp_path: Any) -> None:
+    """The prefix only routes, and the endpoint/key never reach the client."""
+    from langchain_aws import ChatBedrockConverse
+
+    # The client resolves credentials when it is built: keep the developer's
+    # ~/.aws (and any AWS_PROFILE from .env) out of it.
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "credentials"))
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_REGION", "ap-northeast-2")
+
+    client = llm_invoke._build_client(
+        model=_BEDROCK_SONNET,
+        api_key="",
+        base_url="https://integrate.api.nvidia.com/v1",
+        temperature=0.0,
+        max_tokens=1024,
+    )
+
+    assert isinstance(client, ChatBedrockConverse)
+    assert client.model_id == "global.anthropic.claude-sonnet-5-5"
+    assert client.endpoint_url is None
+    assert client.temperature == 0.0
+    # Claude Sonnet 5.5 takes no sampling parameters and no forced tool use.
+    # langchain-aws knows both, so the temperature above never reaches Bedrock.
+    assert client.profile is not None and client.profile["temperature"] is False
+    assert client.supports_tool_choice_values == ("auto",)
+    assert llm_invoke._is_claude(client)
+
+
+def test_bedrock_models_need_no_api_key(monkeypatch: Any) -> None:
+    sentinel = object()
+    monkeypatch.setattr(llm_invoke, "_API_KEY", "")
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "")
+    monkeypatch.setattr(llm_invoke, "_build_client", lambda **_kwargs: sentinel)
+
+    assert llm_invoke.get_llm_client(model=_BEDROCK_SONNET) is sentinel
+    assert llm_invoke.get_non_reasoning_llm_client(model=_BEDROCK_SONNET) is sentinel
+    with pytest.raises(EnvironmentError):
+        llm_invoke.get_llm_client(model="nvidia/nemotron-3.5-lightning-30b-a3b")
+
+
+def test_text_calls_skip_the_reasoning_block_of_a_thinking_model() -> None:
+    """Claude on Bedrock answers after a reasoning block with an opaque signature."""
+    reply = AIMessage(
+        content=[
+            {
+                "type": "reasoning_content",
+                "reasoning_content": {"text": "", "signature": "opaque"},
+            },
+            {"type": "text", "text": "12"},
+        ]
+    )
+    llm = MagicMock()
+    llm.invoke.return_value = reply
+
+    assert llm_invoke.invoke_text(llm, "how many pallets?") == "12"
+    assert llm_invoke.safe_invoke_text(llm, "how many pallets?") == "12"
+
+
+def test_bedrock_throttling_and_timeouts_are_retryable() -> None:
+    from botocore.exceptions import ClientError, ReadTimeoutError
+
+    def bedrock_error(code: str) -> ClientError:
+        return ClientError({"Error": {"Code": code, "Message": "x"}}, "Converse")
+
+    assert llm_invoke._is_retryable(bedrock_error("ThrottlingException"))
+    assert llm_invoke._is_retryable(bedrock_error("ServiceUnavailableException"))
+    assert llm_invoke._is_retryable(bedrock_error("ModelTimeoutException"))
+    assert llm_invoke._is_retryable(ReadTimeoutError(endpoint_url="https://bedrock"))
+    assert not llm_invoke._is_retryable(bedrock_error("AccessDeniedException"))
+    assert not llm_invoke._is_retryable(bedrock_error("ValidationException"))

@@ -65,6 +65,7 @@ from auto_ontology.semantic.visit_enter import (
     execute_capped,
     probe_ascending_distinct_values,
 )
+from auto_ontology.utils import bedrock
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
@@ -428,8 +429,12 @@ def _resolve_connector(database_name: str) -> SQLDatabase | None:
 
 
 def _build_retriever(database_name: str) -> Retriever | None:
-    """Build a Retriever backed by the semantic VDB, or None when the API key is absent."""
-    if not _NVIDIA_API_KEY:
+    """Build a Retriever backed by the semantic VDB, or None when the API key is absent.
+
+    A ``bedrock/`` embedding model needs no key: it authenticates with the AWS
+    credential chain.
+    """
+    if not _NVIDIA_API_KEY and not bedrock.is_bedrock_model(_EMBED_MODEL):
         return None
 
     return Retriever(

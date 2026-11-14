@@ -751,3 +751,20 @@ def test_declared_fk_is_trusted_without_a_join() -> None:
 
     merge.assert_called_once_with("col-1", "attr")
     join.assert_not_called()
+
+
+def test_build_retriever_needs_no_api_key_for_a_bedrock_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bedrock/ embedding model authenticates with the AWS credential chain."""
+    monkeypatch.setattr(semantic_fk, "_NVIDIA_API_KEY", "")
+    monkeypatch.setattr(semantic_fk, "get_semantic_vdb", lambda **_kwargs: MagicMock())
+
+    monkeypatch.setattr(semantic_fk, "_EMBED_MODEL", "nvidia/nemotron-3.5-embed-1b")
+    assert semantic_fk._build_retriever("shop") is None
+
+    monkeypatch.setattr(semantic_fk, "_EMBED_MODEL", "bedrock/global.cohere.embed-v4:0")
+    retriever = semantic_fk._build_retriever("shop")
+
+    assert retriever is not None
+    assert retriever.embed_params.model_name == "bedrock/global.cohere.embed-v4:0"
