@@ -181,11 +181,12 @@ def test_foreign_key_sourced_on_generated_column_is_reported(
         CREATE TABLE child (
             a INTEGER,
             b INTEGER,
-            gen_id INTEGER GENERATED ALWAYS AS (a + b) STORED REFERENCES parent(id)
+            Gen_Id INTEGER GENERATED ALWAYS AS (a + b) STORED,
+            FOREIGN KEY (GEN_ID) REFERENCES parent(id)
         );
         """
     )
-    assert _references(db) == {("child", "gen_id", "parent", "id")}
+    assert _references(db) == {("child", "Gen_Id", "parent", "id")}
 
 
 def test_foreign_key_referencing_generated_column_resolves_declared_case(
@@ -218,12 +219,12 @@ def test_table_info_fallback_when_table_xinfo_returns_empty(
     real_conn = db._conn
 
     class ConnProxy:
-        def execute(self, sql: str, *args, **kwargs):
+        def execute(self, sql: str, *args: object, **kwargs: object) -> sqlite3.Cursor:
             if "PRAGMA table_xinfo" in sql:
                 return real_conn.execute("SELECT 1 WHERE 0")
             return real_conn.execute(sql, *args, **kwargs)
 
-        def __getattr__(self, name: str):
+        def __getattr__(self, name: str) -> object:
             return getattr(real_conn, name)
 
     monkeypatch.setattr(SQLiteDatabase, "_conn", property(lambda self: ConnProxy()))
