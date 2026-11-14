@@ -104,13 +104,17 @@ class SeedSelectionResult(BaseModel):
 
 
 class ColumnAttributeSpec(BaseModel):
-    """Column candidate for Term assignment; display_name set by extract_term."""
+    """Column candidate for Term assignment; display_name set by extract_term.
+
+    ``column_description`` is the column's own description, shown to the Term
+    prompt; it is never written onto the attribute.
+    """
 
     source_column: str
     name: str
     display_name: str = ""
     datatype: str = ""
-    description: str | None = None
+    column_description: str | None = None
 
 
 class ColumnDescription(BaseModel):
@@ -162,6 +166,10 @@ class PotentialFkResult(BaseModel):
     suggestions: list[PotentialFkSuggestion] = Field(
         default_factory=list,
         description="Suspected FK columns; empty when none apply.",
+    )
+    pk_column_names: list[str] = Field(
+        default_factory=list,
+        description="Columns inferred to be the table's own primary key.",
     )
     is_junction_table: bool = Field(
         default=False,

@@ -28,7 +28,7 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
         name="status",
         display_name="Status",
         datatype="string",
-        description="Order status",
+        column_description="Order status",
     )
     term = SimpleNamespace(
         name="Order", description="An order", synonyms=[], attributes=[]
@@ -42,7 +42,10 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         visit_enter,
         "suggest_potential_foreign_keys",
-        lambda *_a, **_k: SimpleNamespace(suggestions=[]),
+        lambda *_a, **_k: SimpleNamespace(suggestions=[], pk_column_names=[]),
+    )
+    monkeypatch.setattr(
+        visit_enter, "fill_missing_column_descriptions", lambda *_a, **_k: []
     )
     monkeypatch.setattr(visit_enter, "column_attribute_specs", lambda *_a, **_k: [spec])
     monkeypatch.setattr(
@@ -50,7 +53,7 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     )
     monkeypatch.setattr(visit_enter, "apply_display_names_to_specs", lambda *_a: None)
     monkeypatch.setattr(
-        visit_enter, "_terms_with_assignments", lambda *_a: [(term, [assignment])]
+        visit_enter, "terms_with_assignments", lambda *_a: [(term, [assignment])]
     )
     monkeypatch.setattr(
         visit_enter,
@@ -82,7 +85,8 @@ def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
     for expected in (
         "[orders] Sampling column values (2 columns)…",
         "[orders] Detecting foreign keys…",
-        "[orders] Generating terms and descriptions (1 columns)…",
+        "[orders] Describing 2 undocumented column(s)…",
+        "[orders] Generating terms (1 columns)…",
         "[orders] Writing 1 term(s) to the graph…",
         "[orders] Embedding 1 term(s)…",
     ):
@@ -106,7 +110,8 @@ def test_steps_are_logged_in_pipeline_order(
     order = [
         "Sampling column values (2 columns)",
         "Detecting foreign keys",
-        "Generating terms and descriptions (1 columns)",
+        "Describing 2 undocumented column(s)",
+        "Generating terms (1 columns)",
         "Writing 1 term(s) to the graph",
         "Embedding 1 term(s)",
     ]

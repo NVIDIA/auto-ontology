@@ -47,6 +47,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -267,6 +268,13 @@ catalog_column = Table(
     # A JSON string, read back as a string by callers. Promoting it to jsonb is
     # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
+    # The lowest distinct non-null values in the warehouse's own order, JSON
+    # like `sample_values` but never mixed with it: those are the most common
+    # values, these are a contiguous bottom of the value range. Written only
+    # for suspected key columns (`auto_ontology.semantic.visit_enter`), so semantic
+    # FK resolution can test whether one column's values sit inside another's
+    # (`auto_ontology.semantic.fk_values`).
+    Column("distinct_values", Text, nullable=True),
     # How the values are *written*, not what they are: 'YYMMDD', 'YYYY-MM-DD'.
     # Generic storage notation despite only date inference filling it today
     # (`auto_ontology.semantic.date_format`) -- an address or id profiler would write the
@@ -277,7 +285,14 @@ catalog_column = Table(
     # `950324` and `1995-03-24` are the same day and share no predicate, and a
     # wrong guess yields SQL that runs, returns nothing, and looks right.
     Column("format", Text, nullable=True),
+    # Profiling sets `is_unique` when at least 95% of the sampled non-null
+    # values are distinct, so a key with a few dirty duplicates still reads as
+    # a key. `distinct_ratio` is that measured share. Readers that need exact
+    # uniqueness -- the text-to-SQL validators, through `find_table_key_columns`
+    # -- require 1.0. NULL means no ratio was measured (a model import, or a
+    # column profiled before the ratio existed), and the flag is then exact.
     Column("is_unique", Boolean, nullable=True),
+    Column("distinct_ratio", Float, nullable=True),
     # A real Boolean. It used to hold the *strings* `information_schema`
     # reports, 'YES' and 'NO', which read back as truthy either way -- so
     # `bool(stored)` was True for every column and every export claimed the
@@ -482,6 +497,47 @@ table__term = Table(
     Column(
         "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
     ),
+)
+
+# A TermFamily is one version of a schema that a database keeps several copies
+# of, told apart by a table-name prefix: `OLD_ROOMS` and `NEW_ROOMS` are twins,
+# `OLD` and `NEW` are two families (`auto_ontology.semantic.term_families`).
+#
+# Derived, never edited: every compile replaces a database's families outright,
+# so nothing here may carry a user's change. Scoped by schema because twins are
+# only ever looked for within one, and so a data reset removes the family by
+# cascade along with the tables it was computed from.
+term_family = Table(
+    "term_family",
+    METADATA,
+    _id(),
+    Column(
+        "schema_id",
+        Text,
+        ForeignKey(catalog_schema.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("prefix", Text, nullable=False),
+    UniqueConstraint("schema_id", "prefix", name="uq_term_family_schema_prefix"),
+)
+
+# MEMBER_OF: Term -> TermFamily. `base_name` is the table name without the
+# family's prefix; two members of sibling families with the same `base_name`
+# are twins. `UNIQUE(term_id)`: a Term belongs to at most one family.
+term__term_family = Table(
+    "term__term_family",
+    METADATA,
+    Column(
+        "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
+    ),
+    Column(
+        "family_id",
+        Text,
+        ForeignKey(term_family.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("base_name", Text, nullable=False),
+    UniqueConstraint("term_id"),
 )
 
 column_attribute = Table(
@@ -1420,6 +1476,8 @@ __all__ = [
     "table__join",
     "table__term",
     "term",
+    "term__term_family",
+    "term_family",
     "text_attribute",
     "user_group",
     "user_group__member",

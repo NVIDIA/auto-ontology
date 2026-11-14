@@ -74,7 +74,7 @@ foreign key using its name, type, description, and samples. Non-uniqueness alone
 that a non-identifier attribute is a foreign key."""
 
 
-def _pk_column_names(table: dict[str, Any]) -> set[str]:
+def declared_pk_column_names(table: dict[str, Any]) -> set[str]:
     pk = table.get("pk") or []
     if isinstance(pk, str):
         return {pk} if pk else set()
@@ -128,7 +128,7 @@ def suggest_potential_foreign_keys(
     """
     columns = ctx.get("columns", [])
     fks = ctx.get("fks", [])
-    pk_names = _pk_column_names(table)
+    pk_names = declared_pk_column_names(table)
     known_fk_names = fk_source_columns(fks)
     excluded = pk_names | known_fk_names
     candidates = _candidate_columns(columns, excluded=excluded)
@@ -226,8 +226,12 @@ def suggest_potential_foreign_keys(
                 )
             )
 
+    column_names = {col.get("name") for col in columns}
     return PotentialFkResult(
         suggestions=filtered,
+        pk_column_names=sorted(
+            name for name in llm_pk_names if name in column_names and name not in seen
+        ),
         is_junction_table=result.is_junction_table,
         junction_table_rationale=result.junction_table_rationale.strip(),
     )
