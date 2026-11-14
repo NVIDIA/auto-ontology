@@ -14,8 +14,8 @@ from auto_ontology.utils.embedding import EmbedParams, batch_embed
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.vdb import get_semantic_vdb
-from auto_ontology.vdb.postgres import PostgresVDB
-from auto_ontology.vdb.records import write_embedded_rows
+from auto_ontology.vdb.base import VectorStore
+from auto_ontology.vdb.records import ready_to_write, write_embedded_rows
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class SemanticEmbedder:
 
     database_name: str
     embed_params: EmbedParams
-    vdb: PostgresVDB
+    vdb: VectorStore
 
     def embed_term(
         self,
@@ -80,9 +80,7 @@ class SemanticEmbedder:
             return []
 
         with_embeddings = [
-            row
-            for row in embedded_df.to_dict(orient="records")
-            if (row.get("metadata") or {}).get("embedding")
+            row for row in embedded_df.to_dict(orient="records") if ready_to_write(row)
         ]
         if not with_embeddings:
             logger.warning(
@@ -177,9 +175,7 @@ def embed_all_semantic_nodes(
         return 0
 
     with_embeddings = [
-        row
-        for row in embedded_df.to_dict(orient="records")
-        if (row.get("metadata") or {}).get("embedding")
+        row for row in embedded_df.to_dict(orient="records") if ready_to_write(row)
     ]
     if not with_embeddings:
         logger.warning(

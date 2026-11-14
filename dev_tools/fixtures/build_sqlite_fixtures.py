@@ -7,7 +7,7 @@
 Chinook is the second fixture database. It exists to make the fixture set
 multi-*database* and multi-*dialect*, which is what several behaviours need in
 order to be testable at all: cross-database rejection in ``find_join_path``,
-``delete_by_database`` scoping, per-database pgvector collection resets, and
+``delete_by_database`` scoping, per-database vector-store resets, and
 zones spanning databases. It also carries a self-referencing foreign key
 (``Employee.ReportsTo``), which Pagila has nowhere.
 

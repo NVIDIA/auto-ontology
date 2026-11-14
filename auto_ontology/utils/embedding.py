@@ -16,6 +16,11 @@ prefix, the instruction the model was trained with.
 
 Ingest and query MUST use the same model; a mismatch produces garbage results
 or a dimension error from pgvector.
+
+None of this runs when the configured store embeds server-side
+(:func:`~auto_ontology.vdb.backend.embeds_server_side`): the row helpers below
+then pass rows through untouched, and the store's inference endpoint does the
+embedding -- with the same passage/query split -- as it writes and searches.
 """
 
 from __future__ import annotations
@@ -33,12 +38,13 @@ import httpx
 from openai import APIStatusError, Omit, OpenAI
 
 from auto_ontology.utils.model_config import resolve
+from auto_ontology.vdb.backend import embeds_server_side
 from auto_ontology.vdb.records import write_embedded_rows
 
 if TYPE_CHECKING:
     import pandas as pd
 
-    from auto_ontology.vdb.postgres import PostgresVDB
+    from auto_ontology.vdb.base import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +274,8 @@ def embed_chunk_size(params: EmbedParams) -> int:
     saturated while each chunk still finishes in seconds rather than minutes.
     That cadence is what the per-chunk log line, the streaming write and the
     retry all hang off: smaller chunks mean more frequent progress and less work
-    lost to — or redone by — a mid-run failure, larger ones mean less pgvector
-    round-tripping.
+    lost to — or redone by — a mid-run failure, larger ones mean fewer vector-store
+    round trips.
     """
     return max(1, params.inference_batch_size * params.nim_http_max_concurrent)
 
@@ -368,6 +374,19 @@ def batch_embed_chunks(
     size = chunk_size or embed_chunk_size(params)
     chunks = math.ceil(total / size)
     prefix = f"Embed{f' {label}' if label else ''}"
+
+    if embeds_server_side():
+        # Same chunking, so the caller still streams writes and logs progress;
+        # the store embeds each chunk as it writes it.
+        logger.info(
+            "%s: %d row(s) in %d chunk(s), embedded by the vector store on write",
+            prefix,
+            total,
+            chunks,
+        )
+        for index in range(chunks):
+            yield frame.iloc[index * size : (index + 1) * size]
+        return
     logger.info(
         "%s: %d row(s) in %d chunk(s) of %d via %s (model %s, batch %s, "
         "concurrency %s)",
@@ -476,6 +495,13 @@ def embed_rows(
     """
     if not rows:
         return []
+    if embeds_server_side():
+        # The store embeds on write, so a dead endpoint surfaces there --
+        # ElasticsearchVDB.write_to_index raises when nothing was written.
+        passthrough = [dict(row) for row in rows if (row.get("text") or "").strip()]
+        if not passthrough:
+            raise RuntimeError(f"No {what} rows with text to embed.")
+        return passthrough
     try:
         vectors = embed_texts(
             [row.get("text") or "" for row in rows],
@@ -505,7 +531,7 @@ def embed_rows(
 def embed_rows_into_vdb(
     rows: list[dict[str, Any]],
     params: EmbedParams,
-    vdb: "PostgresVDB",
+    vdb: "VectorStore",
     *,
     what: str,
 ) -> int:
@@ -532,7 +558,7 @@ def embed_rows_into_vdb(
 def embed_docs_into_vdb(
     docs: list[dict],
     embed_params: EmbedParams,
-    vdb: "PostgresVDB",
+    vdb: "VectorStore",
     database_name: str | None = None,
 ) -> int:
     """Embed *docs* and upsert them into *vdb*.

@@ -154,6 +154,9 @@ class PostgresVDB:
     # straight into ``PGVectorStore.similarity_search_with_score_by_vector``.
     metadata_filter_format = "dict"
 
+    #: The app embeds rows and queries; this store only keeps the vectors.
+    embeds_server_side = False
+
     def __init__(self, *, reset: bool = False, **kwargs: Any) -> None:
         connection_string = kwargs.get("connection_string")
         if not connection_string:
@@ -460,6 +463,17 @@ class PostgresVDB:
             self.collection_name,
         )
         return deleted
+
+    def replace_rows(self, node_ids: Iterable[str], records: list) -> int:
+        """Delete the rows for *node_ids*, then write *records*.
+
+        Delete-first is safe here: the app embedded *records* before calling,
+        so the only step left to fail is a local insert. Rows carry no
+        generation to tell new from old, so writing first would delete both.
+        """
+        for node_id in {str(node_id) for node_id in node_ids}:
+            self.delete_by_id(node_id)
+        return self.run(records) if records else 0
 
     def delete_by_id(self, node_id: str) -> int:
         """Delete every row whose metadata ``id`` matches ``node_id``.

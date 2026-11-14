@@ -18,7 +18,7 @@ otherwise be discovered by a user:
   database, so there is no scope to match it by -- and a scoped reset silently
   wiping every predictive analysis in the deployment would be worse.
 
-The pgvector side is stubbed. These tests are about which rows the store keeps,
+The vector-store side is stubbed. These tests are about which rows the store keeps,
 and a real embedding round trip would only add a way for them to fail for an
 unrelated reason.
 
@@ -381,7 +381,7 @@ def test_delete_all_data_removes_the_semantic_rows_too(world) -> None:
     assert result.database_name == shop.name
 
 
-def test_the_result_reports_pgvector_rows_from_both_layers(world, stub_vdbs) -> None:
+def test_the_result_reports_vector_rows_from_both_layers(world, stub_vdbs) -> None:
     _, make = world
     shop = make("shop")
 

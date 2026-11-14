@@ -16,13 +16,13 @@ from auto_ontology.dal.datasources import (
 from auto_ontology.utils.embedding import embed_rows, get_embed_params
 from auto_ontology.utils.embedding_rows import CatalogEmbeddingRowsOp
 from auto_ontology.vdb import get_data_vdb
-from auto_ontology.vdb.records import write_embedded_rows
+from auto_ontology.vdb.records import replace_embedded_rows
 
 logger = logging.getLogger(__name__)
 
 
 def refresh_catalog_embeddings(node_ids: list[str]) -> None:
-    """Delete stale VDB rows, re-embed, and append Table/Column rows."""
+    """Re-embed these Table/Column rows, replacing their previous VDB rows."""
     unique_ids = set(dict.fromkeys(node_ids))
 
     # CatalogEmbeddingRowsOp builds a column's row only under its table, so a
@@ -58,10 +58,17 @@ def refresh_catalog_embeddings(node_ids: list[str]) -> None:
     if not records:
         return
 
-    # Embedded before anything is deleted, so a failed embed leaves the old rows.
+    # A failed embed must leave the old rows. On pgvector that is embedding
+    # here, before replace_embedded_rows deletes anything; on Elasticsearch
+    # embed_rows passes the text through and the store writes before it
+    # deletes.
     rows = embed_rows(records, get_embed_params(), what="tabular")
-
-    vdb = get_data_vdb()
-    for nid in unique_ids:
-        vdb.delete_by_id(nid)
-    write_embedded_rows(vdb, rows)
+    written = replace_embedded_rows(get_data_vdb(), unique_ids, rows)
+    # Writing nothing already raises. A partial write returns, and on
+    # Elasticsearch an id with a rejected row keeps its old one, so the edit
+    # would look saved while search still finds the old text.
+    if written < len(rows):
+        raise RuntimeError(
+            f"Refreshed {written}/{len(rows)} catalog rows for {sorted(unique_ids)}; "
+            "the rest keep their previous embedding."
+        )

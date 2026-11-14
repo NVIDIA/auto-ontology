@@ -21,6 +21,34 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional: the Elasticsearch vector store (VDB_BACKEND=elasticsearch).
+  # dev_tools/setup_env.sh starts it when .env sets VDB_BACKEND=elasticsearch
+  # and ES_URL is unset or http://localhost:${ES_PORT:-9200}. By hand:
+  # `docker compose --profile elasticsearch up -d elasticsearch`. Security is
+  # off; local use only. The trial license is what enables the third-party
+  # (nvidia) inference service: on a basic license creating it returns 403.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.6
+    container_name: elasticsearch
+    profiles: ["elasticsearch"]
+    restart: unless-stopped
+    ports:
+      # Loopback only: security is off, so the port must not be reachable
+      # from the network. Containers use the service name.
+      - "127.0.0.1:${ES_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.license.self_generated.type: trial
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
@@ -52,6 +80,9 @@ services:
       # In-network port; POSTGRES_PORT in .env is the host-side mapping.
       POSTGRES_PORT: "5432"
       INGESTION_SERVICE_URL: http://ingestion-service:3002
+      # setup_env.sh sets ES_DOCKER_URL to the in-network address when it
+      # starts the bundled Elasticsearch; otherwise ES_URL from .env.
+      ES_URL: ${ES_DOCKER_URL:-${ES_URL:-}}
     depends_on:
       postgres:
         condition: service_started
@@ -93,6 +124,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
+      ES_URL: ${ES_DOCKER_URL:-${ES_URL:-}}
     depends_on:
       postgres:
         condition: service_started
@@ -175,3 +207,4 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  elasticsearch_data:

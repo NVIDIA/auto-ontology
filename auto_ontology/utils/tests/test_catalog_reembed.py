@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from auto_ontology.utils import catalog_reembed
 
@@ -44,11 +45,28 @@ def test_a_column_alone_is_refreshed_through_its_table() -> None:
         patch(f"{_MODULE}.get_embed_params"),
         patch(f"{_MODULE}.embed_rows", side_effect=lambda rows, *_, **__: rows),
         patch(f"{_MODULE}.get_data_vdb", return_value=vdb),
-        patch(f"{_MODULE}.write_embedded_rows") as write,
+        patch(f"{_MODULE}.replace_embedded_rows", return_value=1) as replace,
     ):
         catalog_reembed.refresh_catalog_embeddings(["c2"])
 
     fetch.assert_called_once_with(["c2", "t1"])
-    vdb.delete_by_id.assert_called_once_with("c2")
-    (written,) = write.call_args.args[1:]
+    store, ids, written = replace.call_args.args
+    assert store is vdb
+    assert ids == {"c2"}
     assert [row["metadata"]["id"] for row in written] == ["c2"]
+
+
+def test_a_partly_written_refresh_raises() -> None:
+    with (
+        patch(f"{_MODULE}.fetch_parent_table_id_for_column", return_value=None),
+        patch(
+            f"{_MODULE}.fetch_tables_and_columns_by_node_ids",
+            return_value=(_TABLES, _COLUMNS, "db"),
+        ),
+        patch(f"{_MODULE}.get_embed_params"),
+        patch(f"{_MODULE}.embed_rows", side_effect=lambda rows, *_, **__: rows),
+        patch(f"{_MODULE}.get_data_vdb"),
+        patch(f"{_MODULE}.replace_embedded_rows", return_value=1),
+        pytest.raises(RuntimeError, match="1/2 catalog rows"),
+    ):
+        catalog_reembed.refresh_catalog_embeddings(["c1", "c2"])
