@@ -122,3 +122,81 @@ def test_unresolvable_parent_is_passed_through(connector_factory) -> None:
     fks = db.get_fks()
     assert fks.referenced_table.tolist() == ["gone"]
     assert fks.referenced_column.isna().all()
+
+
+def test_generated_columns_are_reported_in_catalog(connector_factory) -> None:
+    """PRAGMA table_xinfo reports generated columns; table_info omits them."""
+    db = connector_factory(
+        """
+        CREATE TABLE sales (
+            sale_id    INTEGER PRIMARY KEY,
+            qty        INTEGER NOT NULL,
+            unit_price REAL    NOT NULL,
+            revenue    REAL    GENERATED ALWAYS AS (qty * unit_price)       STORED,
+            margin     REAL    GENERATED ALWAYS AS (qty * unit_price * 0.25) VIRTUAL
+        );
+        """
+    )
+    cols = db.get_columns()
+    sales_cols = cols[cols["table_name"] == "sales"]
+    assert sales_cols["column_name"].tolist() == [
+        "sale_id",
+        "qty",
+        "unit_price",
+        "revenue",
+        "margin",
+    ]
+    assert sales_cols["data_type"].tolist() == [
+        "INTEGER",
+        "INTEGER",
+        "REAL",
+        "REAL",
+        "REAL",
+    ]
+    assert sales_cols["is_nullable"].tolist() == [True, False, False, True, True]
+    assert sales_cols["ordinal_position"].tolist() == [1, 2, 3, 4, 5]
+
+
+def test_virtual_table_hidden_columns_are_excluded(connector_factory) -> None:
+    """Hidden shadow columns on virtual tables (hidden=1) must not enter the catalog."""
+    db = connector_factory("CREATE VIRTUAL TABLE documents USING fts5(title, body);")
+    cols = db.get_columns()
+    doc_cols = cols[cols["table_name"] == "documents"]
+    assert doc_cols["column_name"].tolist() == ["title", "body"]
+    assert doc_cols["ordinal_position"].tolist() == [1, 2]
+
+
+def test_foreign_key_sourced_on_generated_column_is_reported(connector_factory) -> None:
+    """Foreign keys sourced on a generated column are kept with their declared column name."""
+    db = connector_factory(
+        """
+        CREATE TABLE parent (id INTEGER PRIMARY KEY);
+        CREATE TABLE child (
+            a INTEGER,
+            b INTEGER,
+            gen_id INTEGER GENERATED ALWAYS AS (a + b) STORED REFERENCES parent(id)
+        );
+        """
+    )
+    assert _references(db) == {("child", "gen_id", "parent", "id")}
+
+
+def test_foreign_key_referencing_generated_column_resolves_declared_case(
+    connector_factory,
+) -> None:
+    """REFERENCES parent(GEN_KEY) resolves to the parent's declared column name."""
+    db = connector_factory(
+        """
+        CREATE TABLE parent (
+            id INTEGER PRIMARY KEY,
+            code TEXT,
+            gen_key TEXT GENERATED ALWAYS AS (code) STORED UNIQUE
+        );
+        CREATE TABLE child (
+            id INTEGER PRIMARY KEY,
+            ref_val TEXT,
+            FOREIGN KEY (ref_val) REFERENCES parent(GEN_KEY)
+        );
+        """
+    )
+    assert _references(db) == {("child", "ref_val", "parent", "gen_key")}
