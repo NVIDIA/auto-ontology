@@ -181,12 +181,12 @@ def test_foreign_key_sourced_on_generated_column_is_reported(
         CREATE TABLE child (
             a INTEGER,
             b INTEGER,
-            Gen_Id INTEGER GENERATED ALWAYS AS (a + b) STORED,
+            gen_id INTEGER GENERATED ALWAYS AS (a + b) STORED,
             FOREIGN KEY (GEN_ID) REFERENCES parent(id)
         );
         """
     )
-    assert _references(db) == {("child", "Gen_Id", "parent", "id")}
+    assert _references(db) == {("child", "gen_id", "parent", "id")}
 
 
 def test_foreign_key_referencing_generated_column_resolves_declared_case(
