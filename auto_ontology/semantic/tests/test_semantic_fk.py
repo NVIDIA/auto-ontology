@@ -221,6 +221,24 @@ def test_unconfirmed_pick_falls_to_next_hit_by_distance(
     assert selected == "near"
 
 
+def test_short_values_cannot_confirm_a_hit_the_llm_did_not_pick() -> None:
+    """`votes.VoteTypeId` in 1..16 is contained in `comments.Id` by coincidence."""
+    keys = _keys([_key_row("comments-id", "table-2", list(range(1, 21)))])
+    column = _fk_column([1, 2, 3, 5, 8], name="VoteTypeId")
+    hits = [_hit("comments-id", "table-2", score=0.1)]
+
+    assert (
+        semantic_fk._confirm_by_values(column, [1, 2, 3, 5, 8], hits, None, keys)
+        is None
+    )
+    assert (
+        semantic_fk._confirm_by_values(
+            column, [1, 2, 3, 5, 8], hits, "comments-id", keys
+        )
+        == "comments-id"
+    )
+
+
 def test_value_only_search_shortlists_containing_keys_for_the_llm() -> None:
     keys = _keys(
         [

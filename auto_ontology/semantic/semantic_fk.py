@@ -24,7 +24,9 @@ Algorithm
       table the column's own family has. A key on the column's own table is
       offered marked as a self-reference, and only the LLM's explicit pick of
       it is accepted — the distance-order fallback never lands there, since a
-      table's own dense ``id`` holds nearly any integer FK's values.
+      table's own dense ``id`` holds nearly any integer FK's values. For the
+      same reason the fallback is skipped altogether for a column whose values
+      are all very short (``1..16``): only the LLM's pick can stand.
    c. **Validated** — an inferred edge is stored only when joining the two
       columns returns a row.
 
@@ -659,9 +661,14 @@ def _confirm_by_values(
 ) -> str | None:
     """The first hit — the LLM's pick, then by distance — whose values hold *col*'s.
 
-    A hit on *col*'s own table is tried only as the LLM's pick.
+    A hit on *col*'s own table is tried only as the LLM's pick, and so is every
+    hit when *col*'s values are ones any surrogate key holds
+    (:func:`is_value_search_ambiguous`) — ``votes.VoteTypeId`` in ``1..16``
+    is contained in ``comments.Id`` without referring to it.
     """
     ordered = [selected] if selected else []
+    if is_value_search_ambiguous(str(col.get("name") or ""), fk_values):
+        hits = []
     for hit in sorted(hits, key=_hit_score):
         hit_id = (hit.get("metadata") or {}).get("id")
         if hit_id and hit_id not in ordered and not _on_own_table(col, hit):
