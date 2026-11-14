@@ -285,6 +285,88 @@ def test_export_carries_keys_joins_and_semantics(world) -> None:
     ] == [(world.customer_ref, world.attribute, True)]
 
 
+def test_relationships_export_in_a_stable_order(world) -> None:
+    """Keys, joins and semantic FKs come back sorted, not in heap order.
+
+    The relationship queries are ``SELECT DISTINCT``; without an ORDER BY
+    Postgres returns them in whatever order the hash aggregate happens to
+    produce, so two exports of an unchanged catalog could differ -- noise in
+    the YAML diff and a drifting SHA-256 for the rollback artifact. Several
+    rows are inserted in descending key order so that insertion order, the
+    most likely accidental order, is the wrong one.
+    """
+    extra_tables = [
+        _add(s.catalog_table, schema_id=world.schema, name=f"lookup_{i}")
+        for i in range(3)
+    ]
+    # A table with no columns is not part of the catalog export, and a join
+    # to a table outside the document is dropped -- so each gets an id.
+    extra_columns = [
+        _add(
+            s.catalog_column,
+            table_id=table,
+            name="id",
+            data_type="integer",
+            ordinal_position=1,
+            is_nullable=False,
+        )
+        for table in extra_tables
+    ]
+    extra_attributes = [
+        _add(
+            s.column_attribute,
+            name=f"{world.prefix}-lookup-{i}",
+            description="",
+            source_column="id",
+            term_name=f"{world.prefix}-Order",
+            table_id=table,
+        )
+        for i, table in enumerate(extra_tables)
+    ]
+    for attribute, column in zip(extra_attributes, extra_columns, strict=True):
+        _link(s.column_attribute__term, attribute_id=attribute, term_id=world.term)
+        _link(s.column__has_attribute, column_id=column, attribute_id=attribute)
+
+    for column in sorted(extra_columns, reverse=True):
+        _link(
+            s.column__foreign_key,
+            source_column_id=world.customer_ref,
+            target_column_id=column,
+        )
+    for table in sorted(extra_tables, reverse=True):
+        _link(
+            s.table__join,
+            source_table_id=world.orders,
+            target_table_id=table,
+            join_columns=[],
+        )
+    for attribute in sorted(extra_attributes, reverse=True):
+        _link(
+            s.column__semantic_fk,
+            column_id=world.order_id,
+            attribute_id=attribute,
+        )
+
+    document = _document(world)
+
+    fks = [
+        (fk.source_column_id, fk.target_column_id)
+        for fk in document.data_layer.foreign_keys
+    ]
+    assert fks == sorted(fks)
+    joins = [(j.source_table_id, j.target_table_id) for j in document.data_layer.joins]
+    assert joins == sorted(joins)
+    semantic = [
+        (fk.column_id, fk.column_attribute_id)
+        for fk in document.semantic_layer.semantic_fks
+    ]
+    assert semantic == sorted(semantic)
+    assert len(fks) == len(joins) == len(semantic) == 4
+
+    # And the same catalog exports the same document twice.
+    assert _document(world).model_dump() == document.model_dump()
+
+
 def test_an_empty_id_list_exports_everything_not_nothing(world) -> None:
     """
 

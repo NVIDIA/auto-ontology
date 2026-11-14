@@ -210,6 +210,10 @@ def _export_foreign_keys(database_ids: list[str]) -> list[dict[str, Any]]:
             )
             .where(_database_scope(database_ids))
             .distinct()
+            .order_by(
+                s.catalog_column.c.id,
+                target.c.id,
+            )
         )
     ]
 
@@ -249,6 +253,10 @@ def _export_joins(database_ids: list[str]) -> list[dict[str, Any]]:
     )
     if database_ids:
         statement = statement.where(target_database.c.id.in_(list(database_ids)))
+    statement = statement.order_by(
+        s.table__join.c.source_table_id,
+        s.table__join.c.target_table_id,
+    )
     return [dict(r) for r in store().query_read(statement)]
 
 
@@ -279,7 +287,7 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
     terms = store().query_read(
         select(s.term.c.id, s.term.c.name, s.term.c.description)
         .where(s.term.c.id.in_(in_scope), s.term.c.source == SEMANTIC_SOURCE)
-        .order_by(s.term.c.name)
+        .order_by(s.term.c.name, s.term.c.id)
     )
     term_ids = [row["id"] for row in terms]
     if not term_ids:
@@ -353,6 +361,10 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
             )
             .where(_database_scope(database_ids))
             .distinct()
+            .order_by(
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
+            )
         )
     ]
 
@@ -404,7 +416,7 @@ def _export_sql_attributes(database_ids: list[str]) -> list[dict[str, Any]]:
             s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
         )
         .join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
-        .order_by(s.sql_attribute.c.name)
+        .order_by(s.sql_attribute.c.name, s.sql_attribute.c.id)
     )
     return [
         {
@@ -423,7 +435,7 @@ def _export_custom_analyses(database_ids: list[str]) -> list[dict[str, Any]]:
         s.custom_analysis__sql,
         s.custom_analysis,
         s.custom_analysis__sql.c.analysis_id,
-    ).order_by(s.custom_analysis.c.name)
+    ).order_by(s.custom_analysis.c.name, s.custom_analysis.c.id)
     return [
         {**dict(row), "description": row["description"] or ""}
         for row in store().query_read(statement)
