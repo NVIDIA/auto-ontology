@@ -242,6 +242,49 @@ def test_non_reasoning_client_is_marked(monkeypatch: Any) -> None:
     assert not llm_invoke._is_non_reasoning_client(_Binding(object()))
 
 
+def test_non_reasoning_thinking_is_on_unless_turned_off(monkeypatch: Any) -> None:
+    built: list[dict] = []
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "nvapi-test")
+    monkeypatch.setattr(
+        llm_invoke, "_build_client", lambda **kwargs: built.append(kwargs) or object()
+    )
+
+    # The module reads the variable at import, so pin the unset default here
+    # rather than inherit whatever the test process was started with.
+    monkeypatch.setattr(llm_invoke, "NON_REASONING_THINKING", "")
+    llm_invoke.get_non_reasoning_llm_client()
+    monkeypatch.setattr(llm_invoke, "NON_REASONING_THINKING", "off")
+    llm_invoke.get_non_reasoning_llm_client()
+
+    assert [kwargs["thinking"] for kwargs in built] == [True, False]
+
+
+def test_thinking_off_is_sent_as_a_chat_template_kwarg() -> None:
+    """Hybrid Nemotron models read ``enable_thinking`` from the chat template
+    kwargs; ``ChatNVIDIA`` merges ``model_kwargs`` into every request body."""
+    client = llm_invoke._build_client(
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",
+        api_key="nvapi-test",
+        base_url="https://integrate.api.nvidia.com/v1",
+        temperature=0.0,
+        max_tokens=16,
+        thinking=False,
+    )
+    assert client.model_kwargs == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_thinking_on_sends_no_template_kwargs() -> None:
+    """Models without the switch must not receive the field."""
+    client = llm_invoke._build_client(
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",
+        api_key="nvapi-test",
+        base_url="https://integrate.api.nvidia.com/v1",
+        temperature=0.0,
+        max_tokens=16,
+    )
+    assert client.model_kwargs == {}
+
+
 def test_endless_bound_chain_is_not_followed_forever() -> None:
     """A ``MagicMock`` has a fresh ``bound`` on every access; the walk must stop."""
     assert not llm_invoke._is_non_reasoning_client(MagicMock())
