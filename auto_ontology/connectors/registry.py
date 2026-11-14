@@ -20,6 +20,7 @@ from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.kyuubi import KyuubiDatabase
+from auto_ontology.connectors.mongodb import MongoDBDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
 from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.snowflake import SnowflakeDatabase
@@ -40,7 +41,9 @@ logger = logging.getLogger(__name__)
 # ``test_registry_dialects.py`` enforces this.
 #
 # Note the keys below are connection-string schemes, NOT dialects: ``postgresql``,
-# ``heavydb`` and ``kyuubi`` are valid keys but none is a sqlglot dialect name.
+# ``heavydb``, ``kyuubi`` and ``mongodb`` are valid keys but none is a sqlglot
+# dialect name. ``mongodb+srv://`` resolves to ``mongodb`` like any ``+driver``
+# suffix.
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
@@ -51,6 +54,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "clickhouse": ClickHouseDatabase,
     "heavydb": HeavyDBDatabase,
     "kyuubi": KyuubiDatabase,
+    "mongodb": MongoDBDatabase,
     "sqlite": SQLiteDatabase,
     "trino": TrinoDatabase,
 }
@@ -75,10 +79,14 @@ def _redact(connection_string: str) -> str:
 
     An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
     and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
-    on every connector failure.
+    on every connector failure. A MongoDB ``tls_ca_data`` bundle is collapsed
+    for the same reason.
     """
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
+    )
+    connection_string = re.sub(
+        r"(tls_ca_data=)[^&;]+", r"\1<certificates>", connection_string
     )
     parsed = urlparse(connection_string)
     if not parsed.password:

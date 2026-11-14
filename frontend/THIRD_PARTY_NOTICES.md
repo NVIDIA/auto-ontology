@@ -48,6 +48,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | pyheavydb | >=8.0.1.post1 | Apache-2.0 | https://github.com/heavyai/pyheavydb |
 | PyHive (`pyhive[hive-pure-sasl]`) | >=0.7.0 | Apache-2.0 | https://github.com/dropbox/PyHive |
 | pyjks | >=20.0.0 | MIT | https://github.com/kurtbrose/pyjks |
+| PyMongo | >=4.20.0 | Apache-2.0 | https://github.com/mongodb/mongo-python-driver |
 | python-dotenv | >=1.2.3 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
 | python-multipart | >=0.0.32 | Apache-2.0 | https://github.com/Kludex/python-multipart |
 | PyYAML | >=6.0.3 | MIT | https://github.com/yaml/pyyaml |
