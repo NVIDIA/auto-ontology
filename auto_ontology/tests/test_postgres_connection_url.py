@@ -22,7 +22,7 @@ def test_postgres_connection_string_escapes_special_characters_in_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("POSTGRES_USER", "test_user")
-    monkeypatch.setenv("POSTGRES_PASSWORD", "abc@1234:pass/word%")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "abc@1234:pass word/secret%")
     monkeypatch.setenv("POSTGRES_HOST", "127.0.0.1")
     monkeypatch.setenv("POSTGRES_PORT", "5432")
     monkeypatch.setenv("POSTGRES_DATABASE", "test_db")
@@ -32,11 +32,14 @@ def test_postgres_connection_string_escapes_special_characters_in_password(
     # The raw '@' in the password must be encoded to avoid ambiguous host delimiters
     assert "abc@1234" not in conn_str
     assert "abc%401234" in conn_str
+    # Spaces must be percent-encoded as %20 (not form-encoded as +)
+    assert "pass%20word" in conn_str
+    assert "pass+word" not in conn_str
 
     # Verify SQLAlchemy make_url parses credentials back accurately
     sa_url = make_url(conn_str)
     assert sa_url.username == "test_user"
-    assert sa_url.password == "abc@1234:pass/word%"
+    assert sa_url.password == "abc@1234:pass word/secret%"
     assert sa_url.host == "127.0.0.1"
     assert sa_url.port == 5432
     assert sa_url.database == "test_db"
@@ -44,28 +47,29 @@ def test_postgres_connection_string_escapes_special_characters_in_password(
     # Verify psycopg connection info parser parses credentials back accurately
     conninfo = conninfo_to_dict(conn_str)
     assert conninfo["user"] == "test_user"
-    assert conninfo["password"] == "abc@1234:pass/word%"
+    assert conninfo["password"] == "abc@1234:pass word/secret%"
     assert conninfo["host"] == "127.0.0.1"
     assert conninfo["port"] == "5432"
     assert conninfo["dbname"] == "test_db"
 
 
-def test_postgres_connection_string_escapes_user_with_at_sign(
+def test_postgres_connection_string_escapes_user_with_at_sign_and_spaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("POSTGRES_USER", "user@domain")
-    monkeypatch.setenv("POSTGRES_PASSWORD", "secret")
+    monkeypatch.setenv("POSTGRES_USER", "user name@domain")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "secret pass")
     monkeypatch.setenv("POSTGRES_HOST", "localhost")
     monkeypatch.setenv("POSTGRES_PORT", "5432")
     monkeypatch.setenv("POSTGRES_DATABASE", "app_db")
 
     conn_str = get_postgres_connection_string()
 
-    assert "user%40domain" in conn_str
+    assert "user%20name%40domain" in conn_str
+    assert "secret%20pass" in conn_str
 
     sa_url = make_url(conn_str)
-    assert sa_url.username == "user@domain"
-    assert sa_url.password == "secret"
+    assert sa_url.username == "user name@domain"
+    assert sa_url.password == "secret pass"
     assert sa_url.database == "app_db"
 
 
