@@ -210,6 +210,7 @@ def _export_foreign_keys(database_ids: list[str]) -> list[dict[str, Any]]:
             )
             .where(_database_scope(database_ids))
             .distinct()
+            .order_by(s.catalog_column.c.id, target.c.id)
         )
     ]
 
@@ -249,6 +250,10 @@ def _export_joins(database_ids: list[str]) -> list[dict[str, Any]]:
     )
     if database_ids:
         statement = statement.where(target_database.c.id.in_(list(database_ids)))
+    statement = statement.order_by(
+        s.table__join.c.source_table_id,
+        s.table__join.c.target_table_id,
+    )
     return [dict(r) for r in store().query_read(statement)]
 
 
@@ -279,7 +284,7 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
     terms = store().query_read(
         select(s.term.c.id, s.term.c.name, s.term.c.description)
         .where(s.term.c.id.in_(in_scope), s.term.c.source == SEMANTIC_SOURCE)
-        .order_by(s.term.c.name)
+        .order_by(s.term.c.name, s.term.c.id)
     )
     term_ids = [row["id"] for row in terms]
     if not term_ids:
@@ -353,6 +358,10 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
             )
             .where(_database_scope(database_ids))
             .distinct()
+            .order_by(
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
+            )
         )
     ]
 
@@ -404,7 +413,7 @@ def _export_sql_attributes(database_ids: list[str]) -> list[dict[str, Any]]:
             s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
         )
         .join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
-        .order_by(s.sql_attribute.c.name)
+        .order_by(s.sql_attribute.c.name, s.sql_attribute.c.id)
     )
     return [
         {
@@ -423,7 +432,7 @@ def _export_custom_analyses(database_ids: list[str]) -> list[dict[str, Any]]:
         s.custom_analysis__sql,
         s.custom_analysis,
         s.custom_analysis__sql.c.analysis_id,
-    ).order_by(s.custom_analysis.c.name)
+    ).order_by(s.custom_analysis.c.name, s.custom_analysis.c.id)
     return [
         {**dict(row), "description": row["description"] or ""}
         for row in store().query_read(statement)
@@ -482,25 +491,31 @@ def assemble_export_document(
     databases = _assemble_databases(rows["catalog"], dialect_by_db_name)
     table_ids, column_ids = _catalog_ids(databases)
     live_to_catalog_column_id = _column_live_id_map(rows["catalog"])
-    foreign_keys = [
-        ModelForeignKey(
-            source_column_id=str(row["source_column_id"]),
-            target_column_id=str(row["target_column_id"]),
-        )
-        for row in rows["foreign_keys"]
-        if str(row.get("source_column_id") or "") in column_ids
-        and str(row.get("target_column_id") or "") in column_ids
-    ]
-    joins = [
-        ModelJoin(
-            source_table_id=str(row["source_table_id"]),
-            target_table_id=str(row["target_table_id"]),
-            join_columns=row.get("join_columns") or [],
-        )
-        for row in rows["joins"]
-        if str(row.get("source_table_id") or "") in table_ids
-        and str(row.get("target_table_id") or "") in table_ids
-    ]
+    foreign_keys = sorted(
+        (
+            ModelForeignKey(
+                source_column_id=str(row["source_column_id"]),
+                target_column_id=str(row["target_column_id"]),
+            )
+            for row in rows["foreign_keys"]
+            if str(row.get("source_column_id") or "") in column_ids
+            and str(row.get("target_column_id") or "") in column_ids
+        ),
+        key=lambda fk: (fk.source_column_id, fk.target_column_id),
+    )
+    joins = sorted(
+        (
+            ModelJoin(
+                source_table_id=str(row["source_table_id"]),
+                target_table_id=str(row["target_table_id"]),
+                join_columns=row.get("join_columns") or [],
+            )
+            for row in rows["joins"]
+            if str(row.get("source_table_id") or "") in table_ids
+            and str(row.get("target_table_id") or "") in table_ids
+        ),
+        key=lambda join: (join.source_table_id, join.target_table_id),
+    )
     terms = [
         ModelTerm(
             id=str(row["id"]),
@@ -523,16 +538,19 @@ def assemble_export_document(
     ]
     _term_ids = {term.id for term in terms}
     _attribute_ids = {attr.id for term in terms for attr in term.columns_attributes}
-    semantic_fks = [
-        ModelSemanticFk(
-            column_attribute_id=str(row["column_attribute_id"]),
-            column_id=str(row["column_id"]),
-            use_in_join_paths=bool(row.get("use_in_join_paths", True)),
-        )
-        for row in rows["semantic_fks"]
-        if str(row.get("column_attribute_id") or "") in _attribute_ids
-        and str(row.get("column_id") or "") in column_ids
-    ]
+    semantic_fks = sorted(
+        (
+            ModelSemanticFk(
+                column_attribute_id=str(row["column_attribute_id"]),
+                column_id=str(row["column_id"]),
+                use_in_join_paths=bool(row.get("use_in_join_paths", True)),
+            )
+            for row in rows["semantic_fks"]
+            if str(row.get("column_attribute_id") or "") in _attribute_ids
+            and str(row.get("column_id") or "") in column_ids
+        ),
+        key=lambda sfk: (sfk.column_id, sfk.column_attribute_id),
+    )
     sql_attributes = _assemble_sql_attributes(
         rows["sql_attributes"],
         sql_column_resolver,
