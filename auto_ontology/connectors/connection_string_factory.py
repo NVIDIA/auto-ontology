@@ -257,4 +257,13 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             f"?protocol={_enc(protocol)}"
         )
 
+    if conn_type == "bigquery":
+        project = _require(connection, "project")
+        dataset = _require(connection, "dataset")
+        location = str(connection.get("location") or "").strip()
+        url = f"bigquery://{_enc(project)}/{_enc(dataset)}"
+        if location:
+            url += f"?location={_enc(location)}"
+        return url
+
     raise ValueError(f"Unsupported connection type: {conn_type!r}")

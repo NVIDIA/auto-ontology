@@ -41,6 +41,7 @@ SECRET_FIELDS = frozenset(
         "private_key",
         "private_key_passphrase",
         "truststore_password",
+        "credentials_json",
     }
 )
 
