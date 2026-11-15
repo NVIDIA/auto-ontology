@@ -540,11 +540,14 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
-    """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
+    """Run the agent on one chat message and stream OpenAI-style SSE frames back.
 
-    Emits a ``sql`` event once the agent has a validated query, just before it
-    executes, so callers can show the SQL while it runs. Emits the final SQL
-    and formatted answer as a ``result`` event, then — if that
+    The agent answers data questions with SQL, and answers greetings and
+    questions about the catalog's tables, attributes and terms from the catalog
+    without SQL. Emits a ``sql`` event once the agent has a validated query,
+    just before it executes, so callers can show the SQL while it runs. Emits
+    the final answer (with its SQL, when there is one) as a ``result`` event,
+    then — if that
     answer has an executed result — generates and persists the chart/table
     bubble itself and streams it back as a ``charts`` event before the stream
     closes with ``[DONE]``. Callers that only care about the text/SQL answer

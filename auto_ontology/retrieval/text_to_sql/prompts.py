@@ -135,7 +135,7 @@ def create_follow_up_resolution_prompt(
     """Build the prompt that turns a contextual follow-up into a standalone query."""
 
     return f"""
-You resolve conversational follow-up questions for a text-to-SQL agent.
+You resolve conversational follow-up questions for a data assistant.
 
 Use only the completed conversation turns below. Never invent a table, filter,
 entity, metric, date range, or other constraint that is not present in the

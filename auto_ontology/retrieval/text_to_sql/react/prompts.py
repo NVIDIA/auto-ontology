@@ -25,28 +25,18 @@ _SQL_OPENING = """\
 You answer a question about a database by writing one {dialect} SQL query."""
 
 _INFORMATION_OPENING = """\
-You answer questions about this organization's data. Every answer has to come from \
-the database or its catalog, so it can be checked: by default, write one {dialect} \
-SQL query that computes the answer.
+You answer questions about this organization's data from the database or its \
+catalog. By default, write one {dialect} SQL query that computes the answer.
 
-An information question can be answered in words instead: submit with sql empty \
-and the answer in response. An information question asks about the catalog \
-itself: which tables or columns exist, what one means or contains, how tables \
-connect, or how an existing measure is defined. "How is revenue calculated?" is an \
-information question, because it asks for the stored definition. "Calculate \
-revenue for 2026" is not, because it asks for a result.
+An information question asks about the catalog itself: which tables or columns \
+exist, what one means, how tables connect, or how a measure is defined. Answer it, \
+a greeting, or a question about what you can do in words: look it up with retrieve \
+and purpose=information (an empty query lists every table, or every term with \
+kinds=["term"]), then submit with sql empty and the answer in response.
 
-A question that needs any value stored in the data is not an information \
-question: a count, a total, a list of values, or "which rows". "What values does \
-status take?" needs SQL, since retrieve shows only a few samples. Answer in words \
-only when a retrieve result in this conversation already shows everything you \
-will say. If unsure, write SQL.
-
-Look an information question up with retrieve and purpose=information: it shows \
-terms, attributes and definitions as themselves, and with an empty query lists \
-every table, or every term with kinds=["term"]. A greeting, thanks, or a question \
-about what you can do is answered the same way, from that list of what the data \
-covers.
+Anything that needs values stored in the data (a count, a total, a list of \
+values, which rows) needs SQL, since retrieve shows only samples. If unsure, write \
+SQL.
 
 In an information answer, use the exact table, column and definition names retrieve \
 showed, and say only what it showed. If retrieve did not find what was asked, say so."""
@@ -325,8 +315,8 @@ FINAL_RUN_SQL_TOOL = {
 }
 
 
-def _information_submit_tool() -> dict:
-    """``submit`` with sql optional, for an information question."""
+def _submit_with_optional_sql_tool() -> dict:
+    """``submit`` with sql optional, so an information question can be answered in words."""
     function = SUBMIT_TOOL["function"]
     parameters = function["parameters"]
     properties = dict(parameters["properties"])
@@ -350,11 +340,11 @@ def _information_submit_tool() -> dict:
     }
 
 
-INFORMATION_SUBMIT_TOOL = _information_submit_tool()
+SUBMIT_WITH_OPTIONAL_SQL_TOOL = _submit_with_optional_sql_tool()
 
 
-def _information_retrieve_tool() -> dict:
-    """``retrieve`` with ``purpose``, for looking up an information question."""
+def _retrieve_with_purpose_tool() -> dict:
+    """``retrieve`` with ``purpose``: each call picks the sql or information view."""
     function = RETRIEVE_TOOL["function"]
     parameters = function["parameters"]
     purpose = {
@@ -362,9 +352,10 @@ def _information_retrieve_tool() -> dict:
         "enum": list(PURPOSES),
         "description": (
             "sql (the default) shows what was found as the tables and columns to "
-            "query. information shows terms, attributes and definitions as "
-            "themselves, for an information question; with an empty query it "
-            'lists every table, or every term with kinds=["term"].'
+            "query. information describes what the catalog holds, for an "
+            "information question: tables, columns, terms, attributes and "
+            "definitions; with an empty query it lists every table, or every "
+            'term with kinds=["term"].'
         ),
     }
     return {
@@ -379,7 +370,7 @@ def _information_retrieve_tool() -> dict:
     }
 
 
-INFORMATION_RETRIEVE_TOOL = _information_retrieve_tool()
+RETRIEVE_WITH_PURPOSE_TOOL = _retrieve_with_purpose_tool()
 
 
 def information_answers_offered(information_answers: bool) -> bool:
@@ -394,8 +385,8 @@ def tools_for(
     if mode == EpisodeMode.PREDICT:
         return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
     if config.submit_tool_enabled():
-        submit = INFORMATION_SUBMIT_TOOL if information_answers else SUBMIT_TOOL
-        retrieve = INFORMATION_RETRIEVE_TOOL if information_answers else RETRIEVE_TOOL
+        submit = SUBMIT_WITH_OPTIONAL_SQL_TOOL if information_answers else SUBMIT_TOOL
+        retrieve = RETRIEVE_WITH_PURPOSE_TOOL if information_answers else RETRIEVE_TOOL
         answer, sql_tools = submit, [retrieve, RUN_SQL_TOOL, submit]
     else:
         answer, sql_tools = FINAL_RUN_SQL_TOOL, [RETRIEVE_TOOL, FINAL_RUN_SQL_TOOL]
