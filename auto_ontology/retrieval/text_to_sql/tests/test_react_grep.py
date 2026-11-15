@@ -49,10 +49,10 @@ def test_a_short_result_is_not_saved(ctx: ToolContext) -> None:
     assert ctx.pages == []
 
 
-def test_without_the_flag_nothing_is_saved(
+def test_with_grep_off_nothing_is_saved(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("TEXT_TO_SQL_REACT_GREP")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "false")
 
     text = run_sql_module.run_sql(ctx, ALL_ORDERS)
 
@@ -109,7 +109,7 @@ def test_grep_is_offered_with_sql_tools_only(monkeypatch: pytest.MonkeyPatch) ->
     assert "- grep:" not in prompts.system_prompt_for(EpisodeMode.PREDICT, None)
 
 
-def test_the_episode_offers_grep_only_with_the_flag(
+def test_the_episode_offers_grep_only_when_on(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     final = "SELECT SUM(amount) FROM orders"
@@ -130,7 +130,7 @@ def test_the_episode_offers_grep_only_with_the_flag(
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
     assert observations[1].startswith("1 of 4 rows match")
 
-    monkeypatch.delenv("TEXT_TO_SQL_REACT_GREP")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "false")
     model = ScriptedModel(list(script))
     result = loop.run_episode(model, ToolContext(None, ctx.connectors), "q")
 
