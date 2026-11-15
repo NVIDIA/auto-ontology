@@ -97,7 +97,7 @@ def submit(
         response = (response or "").strip()
         if not response:
             return "Error: sql and response are both empty.", None
-        if not ctx.retrieved:
+        if not ctx.information_retrieved:
             return (
                 "Not accepted. An answer without SQL has to come from the catalog: "
                 "retrieve what you will say first (purpose=information), or write "
@@ -140,10 +140,10 @@ def _retrieve(
     ctx: ToolContext, query: str, kinds: list[str] | None, purpose: str
 ) -> str:
     """The SQL view, or the information view when information answers are on."""
-    ctx.retrieved = True
     if purpose == "information" and prompts.information_answers_offered(
         ctx.information_answers
     ):
+        ctx.information_retrieved = True
         return information(ctx, query, kinds)
     return retrieve(ctx, query, kinds)
 

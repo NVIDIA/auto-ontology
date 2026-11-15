@@ -332,7 +332,14 @@ def test_an_information_question_is_answered_in_words(ctx: ToolContext) -> None:
     answer = "Table orders stores each order; amount is its total before discount."
     model = ScriptedModel(
         [
-            _reply(call("retrieve", "1", query="what does the orders table hold")),
+            _reply(
+                call(
+                    "retrieve",
+                    "1",
+                    query="what does the orders table hold",
+                    purpose="information",
+                )
+            ),
             _reply(call("submit", "2", sql="", response=answer)),
         ]
     )
@@ -372,7 +379,7 @@ def test_an_information_answer_in_prose_is_nudged_to_submit(ctx: ToolContext) ->
     answer = "Table orders stores each order."
     model = ScriptedModel(
         [
-            _reply(call("retrieve", "1", query="orders")),
+            _reply(call("retrieve", "1", query="orders", purpose="information")),
             AIMessage(content=answer),
             _reply(call("submit", "2", sql="", response=answer)),
         ]
@@ -400,6 +407,32 @@ def test_an_answer_without_sql_needs_a_retrieve_first(ctx: ToolContext) -> None:
     assert result.submission.response == answer
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
     assert observations[0].startswith(
+        "Not accepted. An answer without SQL has to come from the catalog"
+    )
+
+
+def test_a_sql_search_does_not_unlock_an_answer_without_sql(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loop, "retrieve", lambda _ctx, query, kinds=None: "TABLES")
+    monkeypatch.setattr(
+        loop, "information", lambda _ctx, query, kinds=None: f"TERM {query}"
+    )
+    answer = "Table orders stores each order."
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="orders")),
+            _reply(call("submit", "2", response=answer)),
+            _reply(call("retrieve", "3", query="orders", purpose="information")),
+            _reply(call("submit", "4", response=answer)),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is in orders?")
+
+    assert result.submission.response == answer
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[1].startswith(
         "Not accepted. An answer without SQL has to come from the catalog"
     )
 
