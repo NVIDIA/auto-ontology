@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 ## Description: <br>
 Query Auto Ontology and validate generated SQL, rows, and answers; use for MCP or REST access, readiness, authentication, conversations, and grounded questions. <br>
 
