@@ -82,7 +82,7 @@ Sequence (the server also advertises this so models do not jump straight to
 
 Everything on MCP **reads**. There is no MCP tool for raw databases, schemas,
 or columns on purpose. `describe_table` is the legitimate table view: the
-terms a table carries and the stored queries that read it.
+terms a table carries and the stored queries that reference it.
 
 Connect: `AUTO_ONTOLOGY_API_URL` is the **web app**. Run `auto-ontology-mcp`, point the client at
 `…/mcp`, user signs in. No token on the MCP server. Details:
