@@ -158,6 +158,46 @@ def test_an_attribute_of_a_term_shown_in_full_is_not_repeated(
     )
 
 
+def _column_hit(database_name: str) -> dict:
+    return {
+        "id": "col-customer-id",
+        "label": "Column",
+        "name": "customer_id",
+        "relevant_tables": [
+            {
+                "id": "tab-orders",
+                "name": "orders",
+                "schema_name": "shop",
+                "database_name": database_name,
+                "columns": [
+                    {"name": "amount", "data_type": "decimal", "description": None},
+                    {"name": "customer_id", "data_type": "int", "description": None},
+                ],
+            }
+        ],
+    }
+
+
+def test_an_undescribed_foreign_key_column_is_shown_with_its_table(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        info_module, "_uncovered_physical_hits", lambda *_: [_column_hit("shop")]
+    )
+    _found(monkeypatch, [])
+
+    assert information(ctx, "customer id") == "COLUMN shop.orders.customer_id (int)"
+
+
+def test_a_column_of_another_database_is_not_shown(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(info_module, "_name_hits", lambda *_: [_column_hit("other")])
+    _found(monkeypatch, [])
+
+    assert information(ctx, "customer_id").startswith("No matches for 'customer_id'.")
+
+
 def test_a_term_of_another_database_is_not_shown(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

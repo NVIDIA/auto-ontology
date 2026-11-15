@@ -166,6 +166,31 @@ def _attribute_line(context: dict[str, Any]) -> str:
     return line
 
 
+def _column_line(ctx: ToolContext, hit: dict[str, Any]) -> str | None:
+    """A column no attribute stands for, with its table; ``None`` off-database."""
+    table = next(
+        (t for t in hit.get("relevant_tables") or [] if isinstance(t, dict)), None
+    )
+    if table is None or (
+        ctx.database_name and table.get("database_name") != ctx.database_name
+    ):
+        return None
+    name = hit.get("name")
+    column = next((c for c in table.get("columns") or [] if c.get("name") == name), hit)
+    where = ".".join(
+        str(p) for p in (table.get("schema_name"), table.get("name"), name) if p
+    )
+    line = f"COLUMN {where}"
+    if column.get("data_type"):
+        line += f" ({column['data_type']})"
+    details = []
+    if column.get("description"):
+        details.append(_clip(column["description"], _DESCRIPTION_CHARS))
+    if column.get("sample_values"):
+        details.append(f"values: {_clip(column['sample_values'], _DESCRIPTION_CHARS)}")
+    return line + (f" — {'; '.join(details)}" if details else "")
+
+
 def _table_line(table: dict[str, Any]) -> str:
     line = f"TABLE {table.get('schema_name')}.{table.get('name')}"
     if table.get("description"):
@@ -237,6 +262,9 @@ def information(ctx: ToolContext, query: str, kinds: list[str] | None = None) ->
                 blocks.append(_attribute_line(attributes[hit_id]))
         elif label == Labels.TABLE and hit_id in tables:
             blocks.append(_table_line(tables[hit_id]))
+        elif label == Labels.COLUMN:
+            if (line := _column_line(ctx, hit)) is not None:
+                blocks.append(line)
         elif (block := _definition_block(hit)) is not None:
             blocks.append(block)
     blocks = list(dict.fromkeys(blocks))
