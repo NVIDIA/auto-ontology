@@ -37,6 +37,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
+from auto_ontology.retrieval.text_to_sql.react.information import information
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predict
 from auto_ontology.retrieval.text_to_sql.react.retrieve import retrieve
@@ -96,6 +97,13 @@ def submit(
         response = (response or "").strip()
         if not response:
             return "Error: sql and response are both empty.", None
+        if not ctx.retrieved:
+            return (
+                "Not accepted. An answer without SQL has to come from the catalog: "
+                "retrieve what you will say first (purpose=information), or write "
+                "a query.",
+                None,
+            )
         return "Accepted.", Submission("", response, assumptions, None)
     connector = connector_for(ctx)
     if connector is None:
@@ -128,11 +136,25 @@ def _call_key(name: str, args: dict) -> str:
     return f"{name}:{json.dumps(args, sort_keys=True, default=str)}"
 
 
+def _retrieve(
+    ctx: ToolContext, query: str, kinds: list[str] | None, purpose: str
+) -> str:
+    """The SQL view, or the information view when information answers are on."""
+    ctx.retrieved = True
+    if purpose == "information" and prompts.information_answers_offered(
+        ctx.information_answers
+    ):
+        return information(ctx, query, kinds)
+    return retrieve(ctx, query, kinds)
+
+
 def _dispatch(
     ctx: ToolContext, name: str, args: dict, offered: list[str]
 ) -> tuple[str, Submission | Prediction | None]:
     handlers: dict[str, Callable[..., str]] = {
-        ToolName.RETRIEVE: lambda query="", kinds=None: retrieve(ctx, query, kinds),
+        ToolName.RETRIEVE: lambda query="", kinds=None, purpose="sql": _retrieve(
+            ctx, query, kinds, purpose
+        ),
         ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
         ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
             ctx, page, pattern, offset

@@ -40,6 +40,8 @@ _NO_ASSUMPTIONS = "No assumptions were needed beyond what the question states."
 def _tool_thought(call: dict[str, Any]) -> str:
     args = call.get("args") or {}
     name = call.get("name")
+    if name == ToolName.RETRIEVE and args.get("purpose") == "information":
+        return f"Looking up the catalog: {args.get('query') or 'everything'}"
     if name == ToolName.RETRIEVE:
         return f"Searching for: {args.get('query', '')}"
     if name == ToolName.RUN_SQL and str(args.get("final")).lower() != "true":

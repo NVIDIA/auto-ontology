@@ -371,8 +371,9 @@ def test_an_information_answer_in_prose_is_nudged_to_submit(ctx: ToolContext) ->
     answer = "Table orders stores each order."
     model = ScriptedModel(
         [
+            _reply(call("retrieve", "1", query="orders")),
             AIMessage(content=answer),
-            _reply(call("submit", "1", sql="", response=answer)),
+            _reply(call("submit", "2", sql="", response=answer)),
         ]
     )
 
@@ -381,6 +382,75 @@ def test_an_information_answer_in_prose_is_nudged_to_submit(ctx: ToolContext) ->
     assert result.submission.response == answer
     human = [t["content"] for t in result.trajectory if t["role"] == "human"]
     assert human[-1] == prompts.INFORMATION_NUDGE
+
+
+def test_an_answer_without_sql_needs_a_retrieve_first(ctx: ToolContext) -> None:
+    answer = "Table orders stores each order."
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql="", response=answer)),
+            _reply(call("retrieve", "2", query="orders", purpose="information")),
+            _reply(call("submit", "3", sql="", response=answer)),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is in orders?")
+
+    assert result.submission.response == answer
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith(
+        "Not accepted. An answer without SQL has to come from the catalog"
+    )
+
+
+def test_retrieve_for_information_shows_the_information_view(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        loop, "information", lambda _ctx, query, kinds=None: f"TERM {query}"
+    )
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="Customer", purpose="information")),
+            _reply(call("submit", "2", sql="", response="A customer buys.")),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is a customer?")
+
+    assert result.submission.response == "A customer buys."
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0] == "TERM Customer"
+    retrieve = prompts.tools_for(EpisodeMode.SQL, information_answers=True)[0]
+    purpose = retrieve["function"]["parameters"]["properties"]["purpose"]
+    assert purpose["enum"] == ["sql", "information"]
+    assert "purpose=information" in model.seen[0][0].content
+
+
+def test_calculation_only_retrieve_has_no_purpose_and_ignores_one(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loop, "information", lambda *_a, **_k: "never")
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="orders", purpose="information")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0] == "TABLE orders (for orders)"
+    retrieve = prompts.tools_for(EpisodeMode.SQL)[0]
+    assert "purpose" not in retrieve["function"]["parameters"]["properties"]
+
+
+def test_calculation_only_keeps_the_original_prompt() -> None:
+    assert prompts.system_prompt_for(EpisodeMode.SQL, "mysql").startswith(
+        "You answer a question about a database by writing one mysql SQL query.\n\n"
+        "You start with no schema."
+    )
 
 
 def test_calculation_only_keeps_the_query_messages() -> None:

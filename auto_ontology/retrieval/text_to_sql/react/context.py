@@ -48,7 +48,8 @@ class ToolContext:
     tables and columns are embedded in, for what the semantic layer leaves out.
 
     ``information_answers`` lets ``submit`` take an information question's answer
-    with no SQL; it stays off wherever a grader scores the SQL.
+    with no SQL; it stays off wherever a grader scores the SQL. ``retrieved``
+    records that a ``retrieve`` call ran, which such an answer has to come from.
     """
 
     retriever: Any
@@ -57,6 +58,7 @@ class ToolContext:
     data_retriever: Any = None
     numeric_type_alignment: bool = False
     information_answers: bool = False
+    retrieved: bool = False
     question: str = ""
     prediction_llm: Any = None
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)

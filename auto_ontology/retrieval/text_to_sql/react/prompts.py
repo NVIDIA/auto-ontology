@@ -18,12 +18,11 @@ from auto_ontology.retrieval.text_to_sql.react.mode import (
     EpisodeMode,
     ToolName,
 )
+from auto_ontology.retrieval.text_to_sql.react.information import PURPOSES
 from auto_ontology.retrieval.text_to_sql.react.retrieve import KIND_LABELS
 
 _SQL_OPENING = """\
-You answer questions about this organization's data. Every answer has to come from \
-the database or its catalog, so it can be checked: write one {dialect} SQL query \
-that computes the answer."""
+You answer a question about a database by writing one {dialect} SQL query."""
 
 _INFORMATION_OPENING = """\
 You answer questions about this organization's data. Every answer has to come from \
@@ -42,6 +41,12 @@ question: a count, a total, a list of values, or "which rows". "What values does
 status take?" needs SQL, since retrieve shows only a few samples. Answer in words \
 only when a retrieve result in this conversation already shows everything you \
 will say. If unsure, write SQL.
+
+Look an information question up with retrieve and purpose=information: it shows \
+terms, attributes and definitions as themselves, and with an empty query lists \
+every table, or every term with kinds=["term"]. A greeting, thanks, or a question \
+about what you can do is answered the same way, from that list of what the data \
+covers.
 
 In an information answer, use the exact table, column and definition names retrieve \
 showed, and say only what it showed. If retrieve did not find what was asked, say so."""
@@ -348,6 +353,35 @@ def _information_submit_tool() -> dict:
 INFORMATION_SUBMIT_TOOL = _information_submit_tool()
 
 
+def _information_retrieve_tool() -> dict:
+    """``retrieve`` with ``purpose``, for looking up an information question."""
+    function = RETRIEVE_TOOL["function"]
+    parameters = function["parameters"]
+    purpose = {
+        "type": "string",
+        "enum": list(PURPOSES),
+        "description": (
+            "sql (the default) shows what was found as the tables and columns to "
+            "query. information shows terms, attributes and definitions as "
+            "themselves, for an information question; with an empty query it "
+            'lists every table, or every term with kinds=["term"].'
+        ),
+    }
+    return {
+        "type": "function",
+        "function": {
+            **function,
+            "parameters": {
+                **parameters,
+                "properties": {**parameters["properties"], "purpose": purpose},
+            },
+        },
+    }
+
+
+INFORMATION_RETRIEVE_TOOL = _information_retrieve_tool()
+
+
 def information_answers_offered(information_answers: bool) -> bool:
     """Whether information answers are offered: only through ``submit``."""
     return information_answers and config.submit_tool_enabled()
@@ -361,7 +395,8 @@ def tools_for(
         return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
     if config.submit_tool_enabled():
         submit = INFORMATION_SUBMIT_TOOL if information_answers else SUBMIT_TOOL
-        answer, sql_tools = submit, [RETRIEVE_TOOL, RUN_SQL_TOOL, submit]
+        retrieve = INFORMATION_RETRIEVE_TOOL if information_answers else RETRIEVE_TOOL
+        answer, sql_tools = submit, [retrieve, RUN_SQL_TOOL, submit]
     else:
         answer, sql_tools = FINAL_RUN_SQL_TOOL, [RETRIEVE_TOOL, FINAL_RUN_SQL_TOOL]
     if config.grep_enabled():
