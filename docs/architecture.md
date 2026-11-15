@@ -333,8 +333,8 @@ added to the agent's prompts.
 grades how well the ontology covers a question without writing SQL
 (`auto_ontology/retrieval/entity_coverage/`):
 
-1. `NON_REASONING` LLM: extract the entities the question names.
-2. `EMBED` + `NON_REASONING` LLM: retrieve candidates, as in
+1. `REASONING` LLM: extract the entities the question names.
+2. `EMBED` + `REASONING` LLM: retrieve candidates, as in
    `retrieve_candidates` above.
 3. Deterministic: grade coverage as the share of entities with a candidate
    within the distance threshold.
