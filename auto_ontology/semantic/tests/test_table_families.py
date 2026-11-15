@@ -146,7 +146,9 @@ def test_crossing_fk_whose_twin_is_its_own_table_is_dropped() -> None:
     delete.assert_called_once()
 
 
-def _keep_case(connector, attr="attr:twin", merged=True) -> tuple[int, MagicMock]:
+def _keep_case(
+    connector: MagicMock | None, attr: str | None = "attr:twin", merged: bool = True
+) -> tuple[int, MagicMock]:
     [pair] = tf.detect_family_pairs(_catalog())
     row = _fk_row("NEW_ROOMS", "NEW_BUILDING_KEY", "OLD_BUILDING", "OLD_BUILDING_KEY")
     with (

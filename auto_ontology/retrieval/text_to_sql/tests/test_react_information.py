@@ -2,6 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Any
+
 import pytest
 
 from auto_ontology.retrieval.text_to_sql.react import information as info_module
@@ -37,7 +39,7 @@ PAIRS = [
 
 @pytest.fixture
 def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
-    def setattr(name, value):
+    def setattr(name: str, value: Any) -> None:
         monkeypatch.setattr(info_module, name, value)
 
     setattr("fetch_schema_ids_for_database", lambda _: ["s1"])
