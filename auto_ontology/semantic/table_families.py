@@ -9,7 +9,7 @@ beside ``NEW_ROOMS``, ``OLD_BUILDING`` beside ``NEW_BUILDING``. Each prefix is
 a *family*. A semantic FK from ``NEW_ROOMS`` into ``OLD_BUILDING`` joins one
 copy's rows to the other's, so join paths mix the two.
 :func:`keep_semantic_fks_in_family` moves such an edge onto the twin table in
-the source's own family, or drops it.
+the source's own family, or drops it when the twin is missing or worse.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from auto_ontology.connectors.base import SQLDatabase
@@ -38,6 +39,12 @@ logger = logging.getLogger(__name__)
 _MIN_TWINS = 3
 _MIN_JACCARD = 0.5
 _HISTORY_RE = re.compile(r"_(HIST|HISTORY)(_\d+)?$", re.IGNORECASE)
+
+
+class _Outcome(Enum):
+    MOVED = "moved"
+    DROP = "drop"
+    KEEP = "keep"
 
 
 @dataclass
@@ -121,7 +128,8 @@ def keep_semantic_fks_in_family(
     An edge whose source and target sit in the two families of one pair is
     redirected to the same-named column of the target's twin in the source's
     family, when that column covers the source's values at least as well.
-    Otherwise it is dropped. Returns the number of crossing edges handled.
+    It is dropped when the twin is missing or covers less, and kept as it is
+    when the twin could not be checked. Returns the number moved or dropped.
     """
     family_of = {
         str(table["id"]): (index, prefix)
@@ -141,20 +149,24 @@ def keep_semantic_fks_in_family(
         index, target_prefix = target
         if prefix_index.get(source_prefix) != index or source_prefix == target_prefix:
             continue
-        moved = _move_to_twin(
+        outcome, detail = _move_to_twin(
             database_name, row, pairs[index], source_prefix, connector
         )
+        edge = (
+            f"{row['source_table_name']}.{row['source_column_name']} -> "
+            f"{row['target_table_name']}.{row['target_column_name']}"
+        )
+        if outcome == _Outcome.KEEP:
+            logger.warning(
+                "semantic FK %s crosses families, kept unchecked: %s", edge, detail
+            )
+            continue
         delete_semantic_fk(row["source_column_id"], row["target_attribute_id"])
         handled += 1
-        logger.info(
-            "semantic FK %s family: %s.%s -> %s.%s%s",
-            "kept in" if moved else "dropped, crosses",
-            row["source_table_name"],
-            row["source_column_name"],
-            row["target_table_name"],
-            row["target_column_name"],
-            f" now -> {moved}" if moved else "",
-        )
+        if outcome == _Outcome.MOVED:
+            logger.info("semantic FK kept in family: %s now -> %s", edge, detail)
+        else:
+            logger.info("semantic FK dropped, crosses family: %s (%s)", edge, detail)
     return handled
 
 
@@ -164,17 +176,21 @@ def _move_to_twin(
     pair: FamilyPair,
     source_prefix: str,
     connector: SQLDatabase | None,
-) -> str | None:
-    """Point *row*'s source column at the twin column; its name, or ``None``.
+) -> tuple[_Outcome, str]:
+    """Point *row*'s source column at the twin column, with why or where.
 
+    ``DROP`` when the twin was looked for and is missing or covers less;
+    ``KEEP`` when it could not be checked, so the edge is not lost to an error.
     A twin that is the source table itself is refused: semantic FK resolution
     never links a table to itself either.
     """
     target_name = row["target_table_name"]
     base = target_name.upper()[len(prefix_of(target_name) or "") :]
     twin_table = pair.twins.get(base, {}).get(source_prefix)
-    if twin_table is None or str(twin_table["id"]) == str(row["source_table_id"]):
-        return None
+    if twin_table is None:
+        return _Outcome.DROP, "no twin table"
+    if str(twin_table["id"]) == str(row["source_table_id"]):
+        return _Outcome.DROP, "the twin is the source table"
     wanted = strip_prefix(row["target_column_name"], pair.prefixes)
     twin_column = next(
         (
@@ -185,13 +201,15 @@ def _move_to_twin(
         None,
     )
     if twin_column is None:
-        return None
+        return _Outcome.DROP, "no twin column"
+    if connector is None:
+        return _Outcome.KEEP, "no connector to compare coverage"
     column_id = find_column_id_by_table_and_name(
         twin_table["name"], twin_column, database_name
     )
     attr_id = find_column_attribute_by_column_id(column_id) if column_id else None
-    if not attr_id or connector is None:
-        return None
+    if not attr_id:
+        return _Outcome.KEEP, "twin column has no attribute"
     source = (
         row.get("source_schema_name"),
         row["source_table_name"],
@@ -207,14 +225,16 @@ def _move_to_twin(
         source,
         (twin_table.get("schema_name"), twin_table["name"], twin_column),
     )
-    if not new or old is None or new < old:
-        return None
+    if old is None or new is None:
+        return _Outcome.KEEP, "coverage check failed"
+    if not new or new < old:
+        return _Outcome.DROP, f"twin covers {new} source values, the original {old}"
     if not merge_semantic_fk(row["source_column_id"], attr_id):
-        return None
+        return _Outcome.KEEP, "the moved edge could not be written"
     set_semantic_fk_join_default(
         row["source_table_id"], attr_id, row["source_column_id"]
     )
-    return f"{twin_table['name']}.{twin_column}"
+    return _Outcome.MOVED, f"{twin_table['name']}.{twin_column}"
 
 
 def _coverage(

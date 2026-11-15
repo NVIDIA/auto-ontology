@@ -146,6 +146,52 @@ def test_crossing_fk_whose_twin_is_its_own_table_is_dropped() -> None:
     delete.assert_called_once()
 
 
+def _keep_case(connector, attr="attr:twin", merged=True) -> tuple[int, MagicMock]:
+    [pair] = tf.detect_family_pairs(_catalog())
+    row = _fk_row("NEW_ROOMS", "NEW_BUILDING_KEY", "OLD_BUILDING", "OLD_BUILDING_KEY")
+    with (
+        patch.object(tf, "fetch_semantic_fk_join_groups", return_value=[row]),
+        patch.object(tf, "find_column_id_by_table_and_name", return_value="col:twin"),
+        patch.object(tf, "find_column_attribute_by_column_id", return_value=attr),
+        patch.object(tf, "merge_semantic_fk", return_value=merged),
+        patch.object(tf, "set_semantic_fk_join_default"),
+        patch.object(tf, "delete_semantic_fk") as delete,
+    ):
+        handled = tf.keep_semantic_fks_in_family("warehouse", [pair], connector)
+    return handled, delete
+
+
+def test_crossing_fk_is_kept_when_coverage_cannot_be_checked() -> None:
+    failing = _connector([])
+    failing.execute.side_effect = TimeoutError("statement timeout")
+
+    handled, delete = _keep_case(failing)
+
+    assert handled == 0
+    delete.assert_not_called()
+
+
+def test_crossing_fk_is_kept_without_a_connector() -> None:
+    handled, delete = _keep_case(None)
+
+    assert handled == 0
+    delete.assert_not_called()
+
+
+def test_crossing_fk_is_kept_when_the_twin_column_has_no_attribute() -> None:
+    handled, delete = _keep_case(_connector([8, 9]), attr=None)
+
+    assert handled == 0
+    delete.assert_not_called()
+
+
+def test_crossing_fk_is_kept_when_the_moved_edge_cannot_be_written() -> None:
+    handled, delete = _keep_case(_connector([8, 9]), merged=False)
+
+    assert handled == 0
+    delete.assert_not_called()
+
+
 def test_fks_inside_a_family_or_outside_any_are_left_alone() -> None:
     [pair] = tf.detect_family_pairs(_catalog())
     rows = [
