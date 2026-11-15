@@ -18,17 +18,17 @@ It enables developers to:
 
 ## When an ontology helps
 
-An ontology adds the most value when:
+An ontology matters most when:
 
-- **Questions vary:** users ask varied, ambiguous questions, not a fixed set of
-  reports.
-- **Sources overlap:** data spans many sources with overlapping or conflicting
-  definitions.
-- **Meaning is shared:** meanings must be reused and governed across runs,
-  teams, and agents.
+- questions are varied, open-ended, and ambiguous;
+- data spans many disparate sources with overlapping or conflicting
+  definitions and no golden source;
+- meanings must be reused and governed across runs, teams, and agents;
+- the model or its context budget can't hold the full documentation;
+- users ask in business terms and need routing to the right source and grain.
 
-With one well-modeled source and a fixed set of questions, direct SQL or an
-existing semantic model may be enough.
+With one well-modeled source and a fixed set of questions, direct SQL may be
+enough.
 
 ## Benchmarks
 

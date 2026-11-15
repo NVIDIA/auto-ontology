@@ -32,16 +32,16 @@ and handoffs are in [runtime-contract.yaml](assets/runtime-contract.yaml).
 
 ## When to use
 
-Route a question through Auto Ontology when the ontology adds the most value:
+Route a question through Auto Ontology when an ontology matters most:
 
-- questions are varied or ambiguous, so business words must be resolved to the
-  right columns, measures, and joins;
-- data spans many sources with overlapping or conflicting definitions;
-- meanings must be reused and governed across runs, teams, and agents.
+- questions are varied, open-ended, and ambiguous;
+- data spans many disparate sources with overlapping or conflicting
+  definitions and no golden source;
+- meanings must be reused and governed across runs, teams, and agents;
+- the model or its context budget can't hold the full documentation;
+- users ask in business terms and need routing to the right source and grain.
 
-For a fixed question on one well-modeled source, a direct query or an existing
-semantic model may be enough. When unsure, call `check_answerable` first: low
-coverage suggests the ontology does not model the question's concepts yet.
+For a fixed question on one well-modeled source, a direct query may be enough.
 
 ## Prerequisites
 
