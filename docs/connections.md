@@ -45,6 +45,7 @@ The URL scheme selects the connector:
 | ------------- | --------------------------- | :-----------: |
 | PostgreSQL    | `postgresql://`, `postgres://` | yes        |
 | MySQL         | `mysql://`                  | yes           |
+| Microsoft SQL Server | `mssql://`        | yes           |
 | Databricks    | `databricks://`             | yes           |
 | Snowflake     | `snowflake://`              | yes           |
 | ClickHouse    | `clickhouse://`             | yes           |
@@ -53,6 +54,8 @@ The URL scheme selects the connector:
 | HeavyDB       | `heavydb://`                | yes           |
 | DuckDB        | `duckdb://`                 | no            |
 | SQLite        | `sqlite://`                 | no            |
+
+Microsoft SQL Server connections use SQL authentication through `pymssql`/FreeTDS. The UI accepts the server, port (1433 by default), user, password, and database separately. URL-based `CONNECTION_STRINGS` should percent-encode reserved characters in credentials and database names. The connector requests read-only intent, requires TLS, validates the server certificate against the system CA store and configured server host, and uses SQL Server's `tsql` dialect. SQL Server must present a certificate trusted by the client and valid for the configured host; IP-based connections require a matching IP SAN or should use the certificate's DNS name.
 
 The registry lives in
 [`auto_ontology/connectors/registry.py`](../auto_ontology/connectors/registry.py).

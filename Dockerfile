@@ -93,6 +93,9 @@ WORKDIR /app
 
 COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
+COPY freetds.conf /etc/freetds/freetds.conf
+ENV FREETDS=/etc/freetds/freetds.conf \
+    FREETDSCONF=/etc/freetds/freetds.conf
 COPY --chown=auto_ontology:auto_ontology auto_ontology/ ./auto_ontology/
 COPY --chown=auto_ontology:auto_ontology pyproject.toml ./
 # Fail the image build if the generated permission resource is absent or invalid.

@@ -7,6 +7,7 @@ export enum ConnectionType {
 	DATABRICKS = 'databricks',
 	POSTGRESQL = 'postgresql',
 	MYSQL = 'mysql',
+	MSSQL = 'mssql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
 	KYUUBI = 'kyuubi',
@@ -18,6 +19,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.DATABRICKS]: 'Databricks',
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.MYSQL]: 'MySQL',
+	[ConnectionType.MSSQL]: 'Microsoft SQL Server',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
 	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
@@ -126,6 +128,13 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'host', label: 'Host', placeholder: 'localhost' },
 		{ key: 'port', label: 'Port', placeholder: '3306', optional: true },
 		{ key: 'user', label: 'User', placeholder: 'root' },
+		{ key: 'password', label: 'Password', secret: true },
+		{ key: 'database', label: 'Database', placeholder: 'my_database' },
+	],
+	[ConnectionType.MSSQL]: [
+		{ key: 'host', label: 'Host', placeholder: 'sqlserver.example.com' },
+		{ key: 'port', label: 'Port', placeholder: '1433', optional: true },
+		{ key: 'user', label: 'User' },
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'my_database' },
 	],
@@ -268,7 +277,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 /**
  * Fields offered for every connector, appended after the type-specific ones.
  *
- * Kept separate rather than copied into all eight lists: they are enforced
+ * Kept separate rather than copied into every type-specific list: they are enforced
  * centrally at catalog extraction (`auto_ontology/catalog/table_filter.py`), so
  * every connector honours them identically and none may drift.
  */
