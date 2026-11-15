@@ -115,9 +115,8 @@ CURATED: tuple[ToolSpec, ...] = (
         path="/api/exploration/tables/{table_id}/details",
         name="describe_table",
         description=(
-            "Describe what one table means: the glossary terms that reference "
-            "it, and stored queries from query history that read it. Use it to "
-            "see which business concepts a table carries."
+            "Describe what one table means: the glossary terms that map to it, "
+            "and the stored queries from query history that reference it."
         ),
     ),
     ToolSpec(

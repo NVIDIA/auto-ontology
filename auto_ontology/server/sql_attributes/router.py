@@ -29,7 +29,7 @@ router = APIRouter()
 _EXPRESSION_DESCRIPTION = (
     "A full SQL query over catalog tables: `SELECT <expression> FROM <tables>` "
     "for a calculation, or `SELECT * FROM <tables> WHERE <condition>` for a "
-    "filter. A bare expression is rejected."
+    "filter. SQL that references no catalog table is rejected."
 )
 
 
