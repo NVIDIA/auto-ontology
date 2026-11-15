@@ -30,6 +30,19 @@ Query the current Auto Ontology implementation from an agent without prescribing
 harness, SDK, or LangGraph template. Typed workflow artifacts, statuses, gates,
 and handoffs are in [runtime-contract.yaml](assets/runtime-contract.yaml).
 
+## When to use
+
+Route a question through Auto Ontology when the ontology adds the most value:
+
+- questions are varied or ambiguous, so business words must be resolved to the
+  right columns, measures, and joins;
+- data spans many sources with overlapping or conflicting definitions;
+- meanings must be reused and governed across runs, teams, and agents.
+
+For a fixed question on one well-modeled source, a direct query or an existing
+semantic model may be enough. When unsure, call `check_answerable` first: low
+coverage suggests the ontology does not model the question's concepts yet.
+
 ## Prerequisites
 
 Use a running Auto Ontology deployment and an authenticated MCP or REST client. If Auto Ontology is

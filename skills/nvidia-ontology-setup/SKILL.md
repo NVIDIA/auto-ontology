@@ -35,6 +35,12 @@ developer tool, not an installer. Typed setup, connection, ingestion,
 compilation, and readiness artifacts are in
 [runtime-contract.yaml](assets/runtime-contract.yaml).
 
+Before a first install, confirm an ontology fits. It adds the most value when
+questions are varied and ambiguous, data spans many sources with overlapping or
+conflicting definitions, and meanings must be reused and governed across runs,
+teams, and agents. With one well-modeled source and a fixed set of questions,
+direct SQL may be enough.
+
 On failure, read [troubleshooting.md](references/troubleshooting.md) instead of
 searching the web.
 

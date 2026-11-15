@@ -16,6 +16,20 @@ It enables developers to:
 - **Expose:** serve context to any agent harness through MCP, CLI, and API.
 - **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
+## When an ontology helps
+
+An ontology adds the most value when:
+
+- **Questions vary:** users ask varied, ambiguous questions, not a fixed set of
+  reports.
+- **Sources overlap:** data spans many sources with overlapping or conflicting
+  definitions.
+- **Meaning is shared:** meanings must be reused and governed across runs,
+  teams, and agents.
+
+With one well-modeled source and a fixed set of questions, direct SQL or an
+existing semantic model may be enough.
+
 ## Benchmarks
 
 To run a text-to-SQL benchmark such as BIRD, refer to
