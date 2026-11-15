@@ -20,7 +20,7 @@ An ontology matters most when:
 
 - questions are varied, open-ended, and ambiguous;
 - data spans many disparate sources with overlapping or conflicting
-  definitions and no golden source;
+  definitions;
 - meanings must be reused and governed across runs, teams, and agents;
 - the model or its context budget can't hold the full documentation;
 - users ask in business terms and need routing to the right source and grain.
