@@ -47,7 +47,7 @@ scores the same model with and without the ontology on
   to SQL and run against connected databases, powered by NVIDIA NIM.
 - **Semantic catalog and ontology layer:** built over relational sources and
   stored in Postgres alongside the catalog it describes.
-- **Authentication and RBAC:** using [Better Auth](https://github.com/better-auth/better-auth).
+- **Authentication and RBAC:** built on [Better Auth](https://github.com/better-auth/better-auth).
 - **Web UI:** chat, analysis, data catalog, analytics, and settings.
 - **Flexible deployment:** a Helm chart for Kubernetes, or Docker Compose for a
   local stack.
@@ -256,7 +256,7 @@ The ontology holds three kinds of definition:
 - **Relationships:** how tables join, including bridge tables, inferred from
   keys and from the data.
 
-**Generate:** The ingestion service builds a first draft from the source
+**Generate:** the ingestion service builds a first draft from the source
 databases, and people refine it. Semantic compilation starts once you turn it
 on in **Settings → Semantic Compilation**.
 
@@ -289,7 +289,7 @@ its description, related terms, mapped columns, and SQL attributes:
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
 </p>
 
-**Answer:** The agent runs the same steps for every question:
+**Answer:** the agent runs the same steps for every question:
 
 - **Classify:** a model labels the intent and separates any evidence written
   into the question.

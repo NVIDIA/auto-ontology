@@ -35,17 +35,8 @@ developer tool, not an installer. Typed setup, connection, ingestion,
 compilation, and readiness artifacts are in
 [runtime-contract.yaml](assets/runtime-contract.yaml).
 
-Before a first install, confirm an ontology fits. It matters most when:
-
-- questions are varied, open-ended, and ambiguous;
-- data spans many disparate sources with overlapping or conflicting
-  definitions;
-- meanings must be reused and governed across runs, teams, and agents;
-- the model or its context budget can't hold the full documentation;
-- users ask in business terms and need routing to the right source and grain.
-
-With one well-modeled source and a fixed set of questions, direct SQL may be
-enough.
+Before a first install, confirm an ontology fits the use case: see *When to
+use* in `nvidia-ontology-query`.
 
 On failure, read [troubleshooting.md](references/troubleshooting.md) instead of
 searching the web.
