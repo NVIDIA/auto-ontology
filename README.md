@@ -16,8 +16,6 @@ It enables developers to:
 - **Expose:** serve context to any agent harness through MCP, CLI, and API.
 - **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with every question.
 
-## When an ontology helps
-
 An ontology matters most when:
 
 - questions are varied, open-ended, and ambiguous;
