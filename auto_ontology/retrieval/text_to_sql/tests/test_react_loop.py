@@ -404,6 +404,31 @@ def test_an_answer_without_sql_needs_a_retrieve_first(ctx: ToolContext) -> None:
     )
 
 
+def test_an_answer_can_leave_sql_out(ctx: ToolContext) -> None:
+    answer = "Table orders stores each order."
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="orders", purpose="information")),
+            _reply(call("submit", "2", response=answer)),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is in orders?")
+
+    assert result.reason == "submitted"
+    assert result.submission.sql == ""
+    assert result.submission.response == answer
+
+
+def test_without_information_answers_a_submit_without_sql_is_an_error(
+    ctx: ToolContext,
+) -> None:
+    text, submission = loop.submit(ctx, response="Orders are stored.")
+
+    assert text == "Error: sql is empty."
+    assert submission is None
+
+
 def test_retrieve_for_information_shows_the_information_view(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

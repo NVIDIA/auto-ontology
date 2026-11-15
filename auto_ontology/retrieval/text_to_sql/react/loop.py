@@ -80,7 +80,7 @@ class EpisodeResult:
 
 def submit(
     ctx: ToolContext,
-    sql: str,
+    sql: str = "",
     response: str = "",
     assumptions: str = "",
     resubmit: str = "submit this version",
