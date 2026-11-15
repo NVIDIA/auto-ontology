@@ -55,6 +55,45 @@ def test_an_answer_is_handed_to_formatting(monkeypatch: pytest.MonkeyPatch) -> N
     assert pipeline.route_react(result) == "format_and_respond"
 
 
+def test_an_information_answer_is_the_final_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answer = "Table orders stores each order."
+    contexts = []
+
+    def episode(_llm: object, ctx: object, *a: object, **k: object) -> EpisodeResult:
+        contexts.append(ctx)
+        return _episode(Submission("", answer, "", None), "submitted")
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    result = agent_module.ReactSQLAgent().execute(_state())
+
+    assert contexts[0].information_answers is True
+    assert result["decision"] == "information_answer"
+    assert result["messages"][-1].content == answer
+    assert result["path_state"]["final_response"]["response"] == answer
+    assert result["path_state"]["final_response"]["sql_code"] == ""
+    assert "sql_code" not in result["path_state"]
+    assert pipeline.route_react(result) is None
+
+
+def test_calculation_only_turns_information_answers_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contexts = []
+
+    def episode(_llm: object, ctx: object, *a: object, **k: object) -> EpisodeResult:
+        contexts.append(ctx)
+        return _episode(None, "budget_exhausted")
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    agent_module.ReactSQLAgent().execute({**_state(), "calculation_only": True})
+
+    assert contexts[0].information_answers is False
+
+
 def test_no_answer_is_reported_as_unconstructable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -135,6 +135,6 @@ def test_the_episode_offers_grep_only_with_the_flag(
     result = loop.run_episode(model, ToolContext(None, ctx.connectors), "q")
 
     assert model.bound_tool_names[0] == ["retrieve", "run_sql", "submit"]
-    assert model.seen[0][0].content == prompts.SYSTEM_PROMPT.format(dialect="SQL")
+    assert model.seen[0][0].content == prompts.system_prompt_for(EpisodeMode.SQL, None)
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
     assert observations[1].startswith("Unknown tool 'grep'")

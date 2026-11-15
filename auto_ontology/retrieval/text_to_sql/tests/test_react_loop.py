@@ -211,7 +211,7 @@ def test_dialect_rules_reach_the_model(ctx: ToolContext, dialect: str) -> None:
 
     system = model.seen[0][0].content
     rules = format_dialect_rules(dialect).strip()
-    base = prompts.SYSTEM_PROMPT.format(dialect=dialect)
+    base = prompts.system_prompt_for(EpisodeMode.SQL, dialect)
     # A dialect with rules gets them after the base prompt; one without gets
     # the base prompt alone.
     assert system == (f"{base}\n\n{rules}" if rules else base)
@@ -317,9 +317,100 @@ def test_by_default_submit_is_offered() -> None:
         "run_sql",
         "submit",
     ]
-    assert prompts.system_prompt_for(EpisodeMode.SQL, None) == (
-        prompts.SYSTEM_PROMPT.format(dialect="SQL")
+    prompt = prompts.system_prompt_for(EpisodeMode.SQL, None)
+    assert prompt.startswith(prompts._SQL_OPENING.format(dialect="SQL"))
+    assert "sql empty" not in prompt
+
+
+def _information_ctx(ctx: ToolContext) -> ToolContext:
+    ctx.information_answers = True
+    return ctx
+
+
+def test_an_information_question_is_answered_in_words(ctx: ToolContext) -> None:
+    answer = "Table orders stores each order; amount is its total before discount."
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="what does the orders table hold")),
+            _reply(call("submit", "2", sql="", response=answer)),
+        ]
     )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is in orders?")
+
+    assert result.reason == "submitted"
+    assert result.submission.sql == ""
+    assert result.submission.response == answer
+    assert result.submission.db_response is None
+    submit = prompts.tools_for(EpisodeMode.SQL, information_answers=True)[-1][
+        "function"
+    ]
+    assert submit["parameters"]["required"] == ["response"]
+    assert "sql empty and the answer in response" in model.seen[0][0].content
+
+
+def test_information_answers_still_need_a_response(ctx: ToolContext) -> None:
+    observation, submission = loop.submit(_information_ctx(ctx), "", response="  ")
+
+    assert submission is None
+    assert observation == "Error: sql and response are both empty."
+
+
+def test_a_query_is_still_run_when_information_answers_are_allowed(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="r"))])
+
+    result = loop.run_episode(model, _information_ctx(ctx), "q")
+
+    assert result.submission.sql == FINAL_SQL
+    assert result.submission.db_response is not None
+
+
+def test_an_information_answer_in_prose_is_nudged_to_submit(ctx: ToolContext) -> None:
+    answer = "Table orders stores each order."
+    model = ScriptedModel(
+        [
+            AIMessage(content=answer),
+            _reply(call("submit", "1", sql="", response=answer)),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is in orders?")
+
+    assert result.submission.response == answer
+    human = [t["content"] for t in result.trajectory if t["role"] == "human"]
+    assert human[-1] == prompts.INFORMATION_NUDGE
+
+
+def test_calculation_only_keeps_the_query_messages() -> None:
+    assert prompts.nudge_for(EpisodeMode.SQL) == prompts.NUDGE
+    assert prompts.last_call_for(EpisodeMode.SQL) == prompts.LAST_CALL
+    assert (
+        prompts.last_call_for(EpisodeMode.SQL, information_answers=True)
+        == prompts.INFORMATION_LAST_CALL
+    )
+
+
+def test_calculation_only_rejects_an_answer_without_sql(ctx: ToolContext) -> None:
+    observation, submission = loop.submit(ctx, "", response="Orders holds orders.")
+
+    assert submission is None
+    assert observation == "Error: sql is empty."
+    submit = prompts.tools_for(EpisodeMode.SQL)[-1]["function"]
+    assert submit["parameters"]["required"] == ["sql", "response"]
+    assert "sql empty" not in prompts.system_prompt_for(EpisodeMode.SQL, None)
+
+
+def test_information_answers_need_the_submit_tool(
+    ctx: ToolContext, no_submit_tool: None
+) -> None:
+    observation, submission = loop.submit(_information_ctx(ctx), "", response="x")
+
+    assert submission is None
+    assert observation == "Error: sql is empty."
+    prompt = prompts.system_prompt_for(EpisodeMode.SQL, None, information_answers=True)
+    assert "sql empty" not in prompt
 
 
 class InternalServerError(Exception):

@@ -48,6 +48,8 @@ def _tool_thought(call: dict[str, Any]) -> str:
         return "Predicting with KumoRFM."
     if name == ToolName.GREP:
         return f"Searching a saved result for: {args.get('pattern', '')}"
+    if name == ToolName.SUBMIT and not str(args.get("sql") or "").strip():
+        return "Answering an information question."
     return "Submitting the final query."
 
 
@@ -68,6 +70,7 @@ class ReactSQLAgent(BaseAgent):
             connectors=list(state.get("connectors") or []),
             database_name=path_state.get("target_db"),
             numeric_type_alignment=bool(state.get("numeric_type_alignment")),
+            information_answers=not state.get("calculation_only"),
             question=get_standalone_question(state),
             prediction_llm=state.get("llm"),
         )
@@ -108,6 +111,22 @@ class ReactSQLAgent(BaseAgent):
                 ctx.prediction_refusal or _UNANSWERED
             )
             return {"decision": "unconstructable", "path_state": path_state}
+
+        if submission.db_response is None:
+            path_state["formatted_response"] = submission.response
+            path_state["final_response"] = {
+                "response": submission.response,
+                "sql_code": "",
+                "sql_columns": [],
+                "custom_analyses_used": [],
+                "sql_response_from_db": None,
+            }
+            return {
+                "decision": "information_answer",
+                "messages": list(state.get("messages") or [])
+                + [AIMessage(content=submission.response)],
+                "path_state": path_state,
+            }
 
         path_state["sql_code"] = submission.sql
         path_state["sql_generation_result"] = SQLGenerationModel(

@@ -111,6 +111,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "initial_question": submitted_question,
         "evidence": payload.get("evidence") or "",
         "numeric_type_alignment": payload.get("numeric_type_alignment", False),
+        "calculation_only": bool(payload.get("calculation_only")),
         "connectors": connectors,
         "messages": [HumanMessage(content=processing_question)],
         "path_state": initial_path_state,

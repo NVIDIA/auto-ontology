@@ -173,3 +173,12 @@ def test_build_state_has_no_section_without_either(
     main_module: ModuleType, extra: dict
 ) -> None:
     assert _state_with(main_module, **extra)["custom_prompts"] == ""
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"), [({}, False), ({"calculation_only": True}, True)]
+)
+def test_build_state_propagates_calculation_only(
+    main_module: ModuleType, extra: dict, expected: bool
+) -> None:
+    assert _state_with(main_module, **extra)["calculation_only"] is expected

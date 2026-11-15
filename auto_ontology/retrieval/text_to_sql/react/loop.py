@@ -55,12 +55,15 @@ _TRAJECTORY_TEXT_CHARS = 2000
 
 @dataclass
 class Submission:
-    """A query that passed the checks and ran."""
+    """A query that passed the checks and ran, or an answer to an information question.
+
+    An information answer has no ``sql`` and no ``db_response``.
+    """
 
     sql: str
     response: str
     assumptions: str
-    db_response: QueryResponse
+    db_response: QueryResponse | None
 
 
 @dataclass
@@ -88,7 +91,12 @@ def submit(
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
-        return "Error: sql is empty.", None
+        if not prompts.information_answers_offered(ctx.information_answers):
+            return "Error: sql is empty.", None
+        response = (response or "").strip()
+        if not response:
+            return "Error: sql and response are both empty.", None
+        return "Accepted.", Submission("", response, assumptions, None)
     connector = connector_for(ctx)
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first.", None
@@ -167,7 +175,9 @@ def run_episode(
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
     """
-    system_prompt = prompts.system_prompt_for(mode, dialect)
+    system_prompt = prompts.system_prompt_for(
+        mode, dialect, information_answers=ctx.information_answers
+    )
     if custom_prompts:
         system_prompt = f"{system_prompt}\n\n{custom_prompts}"
     # Dialect rules, e.g. for MySQL: do not CAST or ROUND computed values,
@@ -184,7 +194,7 @@ def run_episode(
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
     ]
-    tools = prompts.tools_for(mode)
+    tools = prompts.tools_for(mode, information_answers=ctx.information_answers)
     offered = [t["function"]["name"] for t in tools]
     bound = llm.bind_tools(tools)
     budget = config.max_tool_calls()
@@ -195,10 +205,14 @@ def run_episode(
     while True:
         last_turn = calls >= budget
         if last_turn:
-            last_call = prompts.last_call_for(mode)
+            last_call = prompts.last_call_for(
+                mode, information_answers=ctx.information_answers
+            )
             messages.append(HumanMessage(content=last_call))
             trajectory.append({"role": "human", "content": last_call})
-            tools = prompts.tools_for(mode, last_turn=True)
+            tools = prompts.tools_for(
+                mode, last_turn=True, information_answers=ctx.information_answers
+            )
             offered = [t["function"]["name"] for t in tools]
             bound = llm.bind_tools(tools)
         try:
@@ -226,7 +240,7 @@ def run_episode(
             nudges += 1
             if last_turn or nudges > _MAX_CONSECUTIVE_NUDGES:
                 return EpisodeResult(None, "no_submission", calls, trajectory)
-            nudge = prompts.nudge_for(mode)
+            nudge = prompts.nudge_for(mode, information_answers=ctx.information_answers)
             messages.append(HumanMessage(content=nudge))
             trajectory.append({"role": "human", "content": nudge})
             continue

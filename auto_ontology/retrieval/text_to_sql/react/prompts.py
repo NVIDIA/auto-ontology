@@ -20,8 +20,34 @@ from auto_ontology.retrieval.text_to_sql.react.mode import (
 )
 from auto_ontology.retrieval.text_to_sql.react.retrieve import KIND_LABELS
 
+_SQL_OPENING = """\
+You answer questions about this organization's data. Every answer has to come from \
+the database or its catalog, so it can be checked: write one {dialect} SQL query \
+that computes the answer."""
+
+_INFORMATION_OPENING = """\
+You answer questions about this organization's data. Every answer has to come from \
+the database or its catalog, so it can be checked: by default, write one {dialect} \
+SQL query that computes the answer.
+
+An information question can be answered in words instead: submit with sql empty \
+and the answer in response. An information question asks about the catalog \
+itself: which tables or columns exist, what one means or contains, how tables \
+connect, or how an existing measure is defined. "How is revenue calculated?" is an \
+information question, because it asks for the stored definition. "Calculate \
+revenue for 2026" is not, because it asks for a result.
+
+A question that needs any value stored in the data is not an information \
+question: a count, a total, a list of values, or "which rows". "What values does \
+status take?" needs SQL, since retrieve shows only a few samples. Answer in words \
+only when a retrieve result in this conversation already shows everything you \
+will say. If unsure, write SQL.
+
+In an information answer, use the exact table, column and definition names retrieve \
+showed, and say only what it showed. If retrieve did not find what was asked, say so."""
+
 SYSTEM_PROMPT = """\
-You answer a question about a database by writing one {dialect} SQL query.
+{opening}
 
 You start with no schema. Find what you need with the tools:
 - retrieve: search the semantic layer: the business concepts the tables store, \
@@ -114,7 +140,17 @@ QUESTION
 
 NUDGE = "Call a tool: retrieve, run_sql, or submit your final query."
 
+INFORMATION_NUDGE = (
+    "Call a tool: retrieve, run_sql, or submit your final query. If this is an "
+    "information question, submit with sql empty and the answer in response."
+)
+
 LAST_CALL = "No tool calls left. Call submit now with your best query."
+
+INFORMATION_LAST_CALL = (
+    "No tool calls left. Call submit now with your best query, or with sql empty "
+    "and the answer in response if this is an information question."
+)
 
 FINAL_RUN_NUDGE = (
     "Call a tool: retrieve, run_sql, or run_sql with final=true on your final query."
@@ -284,12 +320,48 @@ FINAL_RUN_SQL_TOOL = {
 }
 
 
-def tools_for(mode: EpisodeMode, *, last_turn: bool = False) -> list[dict]:
+def _information_submit_tool() -> dict:
+    """``submit`` with sql optional, for an information question."""
+    function = SUBMIT_TOOL["function"]
+    parameters = function["parameters"]
+    properties = dict(parameters["properties"])
+    properties["sql"] = {
+        "type": "string",
+        "description": (
+            "The final SELECT query. Empty only for an information question, "
+            "as the system prompt defines it."
+        ),
+    }
+    return {
+        "type": "function",
+        "function": {
+            **function,
+            "parameters": {
+                **parameters,
+                "properties": properties,
+                "required": ["response"],
+            },
+        },
+    }
+
+
+INFORMATION_SUBMIT_TOOL = _information_submit_tool()
+
+
+def information_answers_offered(information_answers: bool) -> bool:
+    """Whether information answers are offered: only through ``submit``."""
+    return information_answers and config.submit_tool_enabled()
+
+
+def tools_for(
+    mode: EpisodeMode, *, last_turn: bool = False, information_answers: bool = False
+) -> list[dict]:
     """The tools offered in *mode*; on the last turn, only the ones that answer."""
     if mode == EpisodeMode.PREDICT:
         return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
     if config.submit_tool_enabled():
-        answer, sql_tools = SUBMIT_TOOL, [RETRIEVE_TOOL, RUN_SQL_TOOL, SUBMIT_TOOL]
+        submit = INFORMATION_SUBMIT_TOOL if information_answers else SUBMIT_TOOL
+        answer, sql_tools = submit, [RETRIEVE_TOOL, RUN_SQL_TOOL, submit]
     else:
         answer, sql_tools = FINAL_RUN_SQL_TOOL, [RETRIEVE_TOOL, FINAL_RUN_SQL_TOOL]
     if config.grep_enabled():
@@ -299,14 +371,22 @@ def tools_for(mode: EpisodeMode, *, last_turn: bool = False) -> list[dict]:
     return [answer] if last_turn else sql_tools
 
 
-def system_prompt_for(mode: EpisodeMode, dialect: str | None) -> str:
+def system_prompt_for(
+    mode: EpisodeMode, dialect: str | None, *, information_answers: bool = False
+) -> str:
     if mode == EpisodeMode.PREDICT:
         return PREDICT_SYSTEM_PROMPT
     lines = _SUBMIT_LINES if config.submit_tool_enabled() else _FINAL_RUN_LINES
     if config.grep_enabled():
         lines += _GREP_LINE
+    opening = (
+        _INFORMATION_OPENING
+        if information_answers_offered(information_answers)
+        else _SQL_OPENING
+    )
+    dialect = dialect or "SQL"
     prompt = SYSTEM_PROMPT.replace(_SUBMIT_LINES, lines, 1).format(
-        dialect=dialect or "SQL"
+        opening=opening.format(dialect=dialect), dialect=dialect
     )
     return prompt + _PREDICT_WHEN if mode == EpisodeMode.AUTO else prompt
 
@@ -319,13 +399,15 @@ def is_answer(name: str, args: dict) -> bool:
     return name in ANSWERING_TOOLS
 
 
-def last_call_for(mode: EpisodeMode) -> str:
+def last_call_for(mode: EpisodeMode, *, information_answers: bool = False) -> str:
     if mode == EpisodeMode.PREDICT:
         return PREDICT_LAST_CALL
+    if information_answers_offered(information_answers):
+        return INFORMATION_LAST_CALL
     return LAST_CALL if config.submit_tool_enabled() else FINAL_RUN_LAST_CALL
 
 
-def nudge_for(mode: EpisodeMode) -> str:
+def nudge_for(mode: EpisodeMode, *, information_answers: bool = False) -> str:
     if mode == EpisodeMode.PREDICT:
         return "Call a tool: retrieve, or predict once the tables are in view."
     final = (
@@ -335,6 +417,8 @@ def nudge_for(mode: EpisodeMode) -> str:
     )
     if mode == EpisodeMode.AUTO:
         return f"Call a tool: retrieve, run_sql, {final}, or predict."
+    if information_answers_offered(information_answers):
+        return INFORMATION_NUDGE
     return NUDGE if config.submit_tool_enabled() else FINAL_RUN_NUDGE
 
 

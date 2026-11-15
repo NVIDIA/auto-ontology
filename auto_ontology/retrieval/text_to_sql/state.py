@@ -37,6 +37,9 @@ class TextToSQLPayload(TypedDict):
     # True forces a KumoRFM prediction, False forbids one, None lets the agent
     # choose when KumoRFM is configured.
     prediction: NotRequired[bool | None]
+    # True for graders that score the SQL: every answer must be a query, even
+    # to an information question.
+    calculation_only: NotRequired[bool]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
     # Accepted from callers but not read by the ReAct agent.
@@ -59,6 +62,7 @@ class AgentState(TypedDict):
     data_retriever: Retriever
     semantic_retriever: Retriever
     prediction_override: NotRequired[bool | None]
+    calculation_only: NotRequired[bool]
     # The payload's custom prompts and acronyms as one system-prompt section.
     custom_prompts: NotRequired[str]
     # Read by the entity-coverage pipeline, which shares this state type.

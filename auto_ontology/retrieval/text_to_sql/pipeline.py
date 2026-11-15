@@ -33,11 +33,11 @@ StepEvent = tuple[Literal["start", "end"], str, Dict[str, Any] | None]
 
 
 def route_react(state: AgentState) -> str | None:
-    """A query is formatted and a prediction is already the answer; anything
-    else is reported as unanswerable."""
+    """A query is formatted, and a prediction or an information answer is
+    already the answer; anything else is reported as unanswerable."""
     if state.get("decision") == "valid_sql":
         return "format_and_respond"
-    if state.get("decision") == "predicted":
+    if state.get("decision") in ("predicted", "information_answer"):
         return None
     return "unconstructable_sql_response"
 

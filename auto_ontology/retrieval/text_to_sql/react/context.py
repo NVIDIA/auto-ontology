@@ -46,6 +46,9 @@ class ToolContext:
 
     ``retriever`` searches the semantic collection; ``data_retriever`` the one
     tables and columns are embedded in, for what the semantic layer leaves out.
+
+    ``information_answers`` lets ``submit`` take an information question's answer
+    with no SQL; it stays off wherever a grader scores the SQL.
     """
 
     retriever: Any
@@ -53,6 +56,7 @@ class ToolContext:
     database_name: str | None = None
     data_retriever: Any = None
     numeric_type_alignment: bool = False
+    information_answers: bool = False
     question: str = ""
     prediction_llm: Any = None
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
