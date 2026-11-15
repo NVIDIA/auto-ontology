@@ -250,27 +250,28 @@ its description, related terms, mapped columns, and SQL attributes:
 <img src="./docs/assets/ontology-graph.png" alt="Semantic graph of the Wide World Importers ontology, with the Order term selected" width="800">
 </p>
 
-**Answer:** the agent runs the same steps for every question:
+**Answer:** the reasoning model answers each question in a loop, choosing one
+tool at a time:
 
-- **Classify:** a model labels the intent and separates any evidence written
-  into the question.
-- **Retrieve:** embedding search finds candidate terms, columns, and SQL
-  attributes, and a model keeps the relevant ones.
-- **Join:** join paths come from the ontology's semantic foreign keys, with no
-  model involved.
-- **Write:** the reasoning model writes SQL and a plain-language explanation.
-- **Check and repair:** static checks and a model judge review the SQL. A
-  rejected or failing query is repaired, and an empty result triggers a probe of
-  the filter values.
-- **Answer:** the answer comes back with its SQL and the steps it took, and a
+- **`retrieve`:** search the semantic layer by meaning and by name for business
+  concepts, column meanings, and named calculations. Results come back as
+  tables and columns with their descriptions and stored values, definitions
+  with their SQL, and join paths. The model searches again whenever something
+  is missing.
+- **`run_sql`:** look at stored values or test a draft. Table and column names
+  are checked against the catalog and against what `retrieve` showed before
+  the query runs.
+- **`submit`:** give the final query and an explanation. The query is checked
+  and run, and an error goes back to the model to fix.
+- **Result:** the answer comes back with its SQL and the steps it took, and a
   chart in Chat.
 
-If no valid query comes out, the agent reports that the question can't be
-answered from this data. Predictive questions go to KumoRFM when
-`KUMO_RFM_API_URL` is set (see [Predictions](#predictions)).
-
-The [Answer tool flow](./docs/architecture.md#answer-a-question) shows
-every step, with the model or SQL each one uses.
+No tool calls a language model except `predict`, which answers predictive
+questions when `KUMO_RFM_API_URL` is set; see [Predictions](#predictions). If
+the model reaches its tool-call limit without an accepted query, the agent
+reports that the question can't be answered from this data. The
+[Answer tool flow](./docs/architecture.md#answer-a-question) shows the loop,
+its tools, and its limits.
 
 In Chat, each answer shows its SQL, and you can view the rows, download them as
 CSV, or read them as a chart:
@@ -420,12 +421,12 @@ credential storage.
 Auto Ontology uses four model roles. With an `nvapi-` key, each defaults to an
 NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 
-| Role            | Default model                           | What it does                                                                                                                   |
-| --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Builds the ontology (terms, relationships, SQL attributes) and writes each answer's SQL and explanation                       |
-| `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the agent's faster steps: question intent, entity extraction, candidate selection, and SQL checks and repair              |
-| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                              |
-| `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Picks the term that owns each bridge-table SQL attribute during compilation; not used to answer questions                      |
+| Role            | Default model                           | What it does                                                                                              |
+| --------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the answering agent and `check_answerable`, builds the ontology, and detects PII                     |
+| `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Rewrites follow-up questions, plans charts, and writes PQL for predictions                                |
+| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them         |
+| `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Picks the term that owns each bridge-table SQL attribute during compilation; not used to answer questions |
 
 To use self-hosted NIM or any OpenAI-compatible endpoint, set
 `<ROLE>_ENDPOINT`, `<ROLE>_API_KEY`, and `<ROLE>_MODEL`. Any field you leave
