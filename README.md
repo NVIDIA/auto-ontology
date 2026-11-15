@@ -14,7 +14,7 @@ It enables developers to:
 - **Ground:** give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
 - **Validate:** check generated queries against certified definitions and lineage; return provenance with every answer.
 - **Expose:** serve context to any agent harness through MCP, CLI, and API.
-- **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with every question.
+- **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with use.
 
 An ontology matters most when:
 
@@ -41,63 +41,27 @@ scores the same model with and without the ontology on
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
 > is currently not accepting external contributions.**
 
-## Key Features
-
-- **Natural-language querying:** questions about structured data are translated
-  to SQL and run against connected databases, powered by NVIDIA NIM.
-- **Semantic catalog and ontology layer:** built over relational sources and
-  stored in Postgres alongside the catalog it describes.
-- **Authentication and RBAC:** built on [Better Auth](https://github.com/better-auth/better-auth).
-- **Web UI:** chat, analysis, data catalog, analytics, and settings.
-- **Flexible deployment:** a Helm chart for Kubernetes, or Docker Compose for a
-  local stack.
-
 ## Software Components
 
-| Component           | Technology                                                             | Role                                       | Default port |
-| ------------------- | ---------------------------------------------------------------------- | ------------------------------------------ | ------------ |
-| Frontend            | Next.js 16 (React 19, TypeScript, Tailwind CSS 4), Better Auth, Prisma | Web UI, authentication, API gateway        | 3000         |
-| Backend             | FastAPI (Python 3.12+), LangChain                                      | Chat / NL-to-SQL, catalog, datasource APIs | 3001         |
-| Ingestion worker    | FastAPI (Python 3.12+)                                                 | Ingests tabular data and writes embeddings | 3002         |
-| Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, vector store | 5432 |
-| HashiCorp Vault     | Optional                                                               | Secure storage of connection credentials   | —            |
+| Component           | Technology                        | Role                                                                                 | Port |
+| ------------------- | --------------------------------- | ------------------------------------------------------------------------------------ | ---- |
+| Frontend            | Next.js, Better Auth, Prisma      | Web UI for chat, catalog, analytics, and settings; auth and RBAC; public API gateway | 3000 |
+| Backend             | FastAPI (Python 3.12+), LangChain | Text-to-SQL agent, catalog, ontology APIs                                            | 3001 |
+| Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation                                                   | 3002 |
+| MCP server          | FastMCP                           | Read-only agent tools over the public API                                            | 3003 |
+| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store                                            | 5432 |
+| HashiCorp Vault     | Optional                          | Connection credential storage                                                        | n/a  |
 
-### NVIDIA NIM
-
-Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted
-[NVIDIA API catalog](https://build.nvidia.com) (`integrate.api.nvidia.com`) or
-self-hosted NIMs. The defaults in `.env.example` are:
-
-- **LLM:** `nvidia/nemotron-3.5-lightning-30b-a3b`
-- **Embeddings:** `nvidia/nemotron-3.5-embed-1b`
-- **Reranking:** `nvidia/nemotron-3.5-rerank-8b`
-
-The endpoints and models are configured via the `DEFAULT_MODELS_ENDPOINT`, `DEFAULT_MODELS_MODEL`,
-`EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
-`DEFAULT_MODELS_API_KEY`.
-
-#### Model triplets
-
-Each model role is configured by a **triplet** of environment variables —
-`<PREFIX>_ENDPOINT` (URL), `<PREFIX>_API_KEY`, and `<PREFIX>_MODEL`:
-
-| Prefix           | Role                                                        |
-| ---------------- | ----------------------------------------------------------- |
-| `DEFAULT_MODELS` | Shared default; every field below falls back to it.         |
-| `REASONING`      | Main chat / NL-to-SQL model.                                |
-| `NON_REASONING`  | Lighter model used for entity extraction.                   |
-| `EMBED`          | Text-embedding model (must match between ingest and query). |
-| `RERANK`         | Reranker used to build bridge-table SQL attributes.         |
-
-You can set a full triplet, only some of its fields, or none at all — any field
-left unset falls back to the matching `DEFAULT_MODELS_<FIELD>`. So the simplest
-setup is to fill in `DEFAULT_MODELS_*` and override per-triplet fields only where
-they differ (e.g. `EMBED_MODEL`, `NON_REASONING_MODEL`). `*_API_KEY` also falls
-back to the legacy `NVIDIA_API_KEY` for backward compatibility.
+Browser and API clients go through the web app on port 3000, and MCP clients
+through the MCP server on port 3003, which calls the same public API. Keep
+ports 3001 and 3002 on a private network: FastAPI trusts the user identity the
+frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
+service's endpoints (ingest, delete, reset, compile) have no authentication of
+their own.
 
 ## Quickstart
 
-This runs Auto-Ontology with Docker Compose against Wide World Importers,
+This runs Auto Ontology with Docker Compose against Wide World Importers,
 Microsoft's sample sales database. You need Docker with Compose v2,
 [uv](https://docs.astral.sh/uv/), and an NVIDIA API key (`nvapi-...`) from
 [build.nvidia.com](https://build.nvidia.com).
@@ -237,13 +201,10 @@ flowchart LR
   be -.-> kumo
 ```
 
-Browser and API clients reach Auto-Ontology through the web app on port 3000.
-MCP clients connect to the MCP server on port 3003, which calls that same
-public API. Full pipeline detail, with tool-flow diagrams
-for generating an ontology and answering a question:
-[docs/architecture.md](./docs/architecture.md).
+Full pipeline detail, with tool-flow diagrams for generating an ontology and
+answering a question: [docs/architecture.md](./docs/architecture.md).
 
-Auto-Ontology works in two stages: it generates an ontology that people
+Auto Ontology works in two stages: it generates an ontology that people
 certify, and the agent answers questions from it.
 
 The ontology holds three kinds of definition:
@@ -318,34 +279,19 @@ CSV, or read them as a chart:
 <img src="./docs/assets/qa-example.png" alt="Chat answering which products drive the most revenue and highest customer count, with the generated SQL and a revenue chart" width="550">
 </p>
 
-Auto-Ontology is compatible with [Apache Ossie](https://ossie.apache.org/), the
+Auto Ontology is compatible with [Apache Ossie](https://ossie.apache.org/), the
 open standard for exchanging semantic models. Ossie includes a
-[converter for Auto-Ontology](https://github.com/apache/ossie-converters/tree/main/nvidia),
-which Auto-Ontology uses to import and export model definitions as Ossie YAML.
+[converter for Auto Ontology](https://github.com/apache/ossie-converters/tree/main/nvidia),
+which Auto Ontology uses to import and export model definitions as Ossie YAML.
 Use **Settings → Import / Export**, or `POST /api/model/import` and
 `POST /api/model/export`.
-
-| Component           | Technology                        | Role                                       | Port |
-| ------------------- | --------------------------------- | ------------------------------------------ | ---- |
-| Frontend            | Next.js, Better Auth, Prisma      | Web UI, authentication, public API gateway | 3000 |
-| Backend             | FastAPI (Python 3.12+), LangChain | Text-to-SQL agent, catalog, ontology APIs  | 3001 |
-| Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation         | 3002 |
-| MCP server          | FastMCP                           | Read-only agent tools over the public API  | 3003 |
-| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store  | 5432 |
-| HashiCorp Vault     | Optional                          | Connection credential storage              | n/a  |
-
-Keep ports 3001 and 3002 on a private network. FastAPI trusts the user identity
-the frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
-service's endpoints (ingest, delete, reset, compile) have no authentication of
-their own. Browser and API clients go through the web app on port 3000, and
-MCP clients through the MCP server on port 3003.
 
 ## Use it from your agent
 
 ### MCP server
 
 The [MCP](https://modelcontextprotocol.io) server gives any MCP client read-only
-tools over the ontology. Each user signs in through Auto-Ontology, and every
+tools over the ontology. Each user signs in through Auto Ontology, and every
 call runs with that user's permissions.
 
 | Job           | Tools                                                         |
@@ -391,7 +337,7 @@ Sign-in, configuration, and troubleshooting are in [docs/mcp.md](./docs/mcp.md).
 
 ### Agent skills
 
-Three skills teach a coding agent to work with Auto-Ontology. Start at
+Three skills teach a coding agent to work with Auto Ontology. Start at
 [AGENTS.md](./AGENTS.md).
 
 | Skill                                                                | Covers                                               |
@@ -451,7 +397,7 @@ in the [OpenAPI spec](./docs/openapi/auto-ontology-api.json).
 
 ### Sources
 
-Auto-Ontology connects to ten engines:
+Auto Ontology connects to ten engines:
 
 - PostgreSQL
 - MySQL
@@ -471,7 +417,7 @@ credential storage.
 
 ### Models
 
-Auto-Ontology uses four model roles. With an `nvapi-` key, each defaults to an
+Auto Ontology uses four model roles. With an `nvapi-` key, each defaults to an
 NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 
 | Role            | Default model                           | What it does                                                                                                                   |
@@ -484,7 +430,8 @@ NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 To use self-hosted NIM or any OpenAI-compatible endpoint, set
 `<ROLE>_ENDPOINT`, `<ROLE>_API_KEY`, and `<ROLE>_MODEL`. Any field you leave
 unset falls back to `DEFAULT_MODELS_<FIELD>`, so the simplest setup fills in
-`DEFAULT_MODELS_*` and overrides only what differs. Use models
+`DEFAULT_MODELS_*` and overrides only what differs; `*_API_KEY` also falls back
+to the legacy `NVIDIA_API_KEY`. Use models
 that support structured output, and keep the embedding model the same for
 ingestion and queries. [`.env.example`](./.env.example) documents every
 variable.
@@ -501,10 +448,10 @@ complete your organization's data review, before you enable it.
 ## Integrate with us
 
 To integrate an agent platform, application, or storage provider with
-Auto-Ontology,
+Auto Ontology,
 [open an integration request](https://github.com/NVIDIA/auto-ontology/issues/new?template=integration.yml).
 
-The Auto-Ontology team maintains the code and doesn't accept external pull
+The Auto Ontology team maintains the code and doesn't accept external pull
 requests. Integration requests and bug reports are welcome as issues. Report
 security vulnerabilities through [SECURITY.md](./SECURITY.md). Maintainer
 workflow is in [CONTRIBUTING.md](./CONTRIBUTING.md).
@@ -523,7 +470,7 @@ workflow is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-Auto-Ontology is licensed under the [Apache License, Version 2.0](./LICENSE).
+Auto Ontology is licensed under the [Apache License, Version 2.0](./LICENSE).
 SPDX identifier: `Apache-2.0`.
 
 Each NVIDIA-authored source file in this repository carries an SPDX header
@@ -535,7 +482,7 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 ```
 
-Third-party open-source components used by Auto-Ontology are enumerated, with their
+Third-party open-source components used by Auto Ontology are enumerated, with their
 upstream licenses and project URLs, in
 [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). Components added by the
 container images are listed separately in
@@ -556,7 +503,7 @@ liabilities or legal consequences from your use or inability to use this
 software or any retrieved materials. Use this software and the retrieved
 materials at your own risk.
 
-External materials Auto-Ontology interacts with at run time:
+External materials Auto Ontology interacts with at run time:
 
 - Model endpoints you configure, by default the NVIDIA API catalog
   (`integrate.api.nvidia.com`, `ai.api.nvidia.com`), under each provider's and
