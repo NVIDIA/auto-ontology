@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import re
+import unicodedata
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from auto_ontology.semantic.deterministic import to_term_name
+from auto_ontology.semantic.deterministic import _is_word_char, to_term_name
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
@@ -28,7 +28,24 @@ from auto_ontology.semantic.models import (
 )
 
 _INVALID = {"unnamed", "unknown", "none", ""}
-_LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9]*(?: [A-Za-z][A-Za-z0-9]*)*$")
+
+
+def _is_display_label(label: str) -> bool:
+    """Words of letters, digits and marks in any script, single-spaced, each
+    starting with a letter, and the first not lowercase.
+
+    For ASCII this is the old ``^[A-Z][A-Za-z0-9]*( [A-Za-z][A-Za-z0-9]*)*$``.
+    It also accepts ``Numéro Client`` and ``受注``, which that pattern threw
+    away. Scripts without letter case pass the capitalisation rule because
+    their letters are never lowercase.
+    """
+    words = label.split(" ")
+    return (
+        all(word and word[0].isalpha() for word in words)
+        and all(_is_word_char(char) for word in words for char in word)
+        and not words[0][0].islower()
+    )
+
 
 _SYSTEM = """\
 You propose business Terms for a relational table and assign candidate columns \
@@ -79,8 +96,8 @@ Do NOT infer, guess, or add any name that is not directly written in the descrip
 
 
 def _normalize_label(name: str, *, fallback: str) -> str:
-    cleaned = name.strip()
-    if cleaned.lower() in _INVALID or not _LABEL_RE.match(cleaned):
+    cleaned = unicodedata.normalize("NFC", name.strip())
+    if cleaned.lower() in _INVALID or not _is_display_label(cleaned):
         return fallback
     return to_term_name(cleaned)
 

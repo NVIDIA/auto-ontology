@@ -356,6 +356,33 @@ def test_parse_result_populates_catalog_ids_and_qualified_names(
 
 
 @patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.parse_query_single"
+)
+def test_parse_result_with_no_columns_succeeds_for_valid_table(
+    mock_parse: MagicMock,
+) -> None:
+    mock_parse.return_value = SimpleNamespace(
+        get_tables_ids=lambda: ["table-id"],
+        get_column_ids=lambda: [],
+    )
+    schema = SimpleNamespace(
+        id_to_node={
+            "table-id": "mydb.customers",
+        }
+    )
+
+    result = SQLValidationAgent._sql_parse_validation(
+        {"mydb": schema}, "SELECT COUNT(*) AS n FROM mydb.customers", ["mysql"]
+    )
+
+    assert result["success"] is True
+    assert result["sql_tables"] == ["table-id"]
+    assert result["sql_columns"] == []
+    assert result["used_tables"] == ["mydb.customers"]
+    assert result["used_columns"] == []
+
+
+@patch(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.parse_query_single",
     return_value=None,
 )
