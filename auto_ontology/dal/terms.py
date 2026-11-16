@@ -29,6 +29,7 @@ import logging
 from typing import Any
 
 from sqlalchemy import (
+    Select,
     String,
     and_,
     bindparam,
@@ -1010,7 +1011,7 @@ def fetch_terms_with_sqls(
     return list(grouped.values())
 
 
-def _attribute_embedding_select():
+def _attribute_embedding_select() -> Select:
     """A ColumnAttribute with everything its embedding text is built from.
 
     The text repeats what the owning column's own embedding carries, so every
@@ -1062,7 +1063,7 @@ def _attribute_embedding_select():
     )
 
 
-def _embedding_attrs_for_table(table_id: str):
+def _embedding_attrs_for_table(table_id: str) -> Select:
     return _attribute_embedding_select().where(
         s.catalog_table.c.id == table_id,
         s.column_attribute.c.source == SEMANTIC_SOURCE,
