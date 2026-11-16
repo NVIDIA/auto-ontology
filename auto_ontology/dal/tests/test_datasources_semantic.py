@@ -596,9 +596,13 @@ def test_no_ids_yields_empty_frames_and_no_database() -> None:
     assert database == ""
 
 
-def test_node_ids_uses_the_fallback_for_tables_and_columns(world) -> None:
-    """These frames feed embeddings: a table or column with no description of
-    its own is embedded with its Term's or attribute's, not a bare name."""
+def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
+    """Asymmetric, deliberately.
+
+    These frames feed embeddings. Widening what gets embedded — by applying the
+    table fallback here too — would shift retrieval results with no test
+    anywhere failing.
+    """
     table__term = world.term("Order", "a purchase")
     _link(s.table__term, table_id=world.tables["orders"], term_id=table__term)
     attribute = world.attribute("order-total", "money, in cents")
@@ -611,7 +615,7 @@ def test_node_ids_uses_the_fallback_for_tables_and_columns(world) -> None:
     tables, columns, _ = d.fetch_tables_and_columns_by_node_ids(
         [world.tables["orders"]]
     )
-    assert tables.iloc[0]["description"] == "a purchase"
+    assert tables.iloc[0]["description"] is None
     by_name = columns.set_index("column_name")["description"].to_dict()
     assert by_name["total"] == "money, in cents"
 

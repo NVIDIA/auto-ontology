@@ -31,19 +31,16 @@ from sqlalchemy import (
     distinct,
     func,
     literal,
-    literal_column,
     or_,
     select,
     update,
 )
 from sqlalchemy import values as sa_values
-from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
     column_description_expr,
-    column_reference_expr,
     table_description_expr,
 )
 from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
@@ -1302,7 +1299,6 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_column.c.name.label("column_name"),
                     s.catalog_column.c.data_type,
                     column_description_expr().label("description"),
-                    column_reference_expr().label("references"),
                     s.catalog_column.c.sample_values,
                     s.catalog_database.c.name.label("database_name"),
                 )
@@ -1321,7 +1317,12 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_table.c.name.label("table_name"),
                     s.catalog_schema.c.name.label("table_schema"),
                     s.catalog_table.c.table_type,
-                    table_description_expr().label("description"),
+                    # The table's own description, not the fallback -- unlike
+                    # the columns three lines earlier. Asymmetric on purpose:
+                    # these frames feed embeddings, and widening what gets
+                    # embedded would shift retrieval results with no test
+                    # noticing.
+                    s.catalog_table.c.description,
                     s.catalog_database.c.name.label("database_name"),
                 )
                 .select_from(_table_join())
@@ -1336,97 +1337,6 @@ def fetch_tables_and_columns_by_node_ids(
             database_name = str(frame.iloc[0].get("database_name") or "")
             break
     return tables_df, columns_df, database_name
-
-
-def fetch_catalog_node_ids(database_name: str) -> list[str]:
-    """Every table and column id in *database_name*, tables first."""
-    tables = store().query_read(
-        select(s.catalog_table.c.id)
-        .select_from(_table_join())
-        .where(s.catalog_database.c.name == database_name)
-        .order_by(s.catalog_table.c.id)
-    )
-    columns = store().query_read(
-        select(s.catalog_column.c.id)
-        .select_from(_catalog_join())
-        .where(s.catalog_database.c.name == database_name)
-        .order_by(s.catalog_column.c.id)
-    )
-    return [str(r["id"]) for r in tables] + [str(r["id"]) for r in columns]
-
-
-def fetch_description_context(database_name: str) -> list[dict[str, Any]]:
-    """Every table in *database_name* with its columns, as descriptions resolve.
-
-    ``description`` is what a reader sees: the node's own, else the Term or
-    attribute behind it (see :mod:`auto_ontology.dal.sql_fragments`), and
-    ``own_description`` the node's own alone. A table also carries the
-    descriptions of the bridge SqlAttributes written over it, and a column the
-    ``schema.table.column`` its foreign key lands on.
-    """
-    bridge_descriptions = (
-        select(
-            func.string_agg(
-                s.sql_attribute.c.description,
-                aggregate_order_by(literal_column("' '"), s.sql_attribute.c.name),
-            )
-        )
-        .select_from(
-            s.sql_attribute.join(
-                s.sql_attribute__sql,
-                s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id,
-            ).join(
-                s.sql_query__table,
-                s.sql_query__table.c.sql_query_id
-                == s.sql_attribute__sql.c.sql_query_id,
-            )
-        )
-        .where(
-            s.sql_attribute.c.source == SQL_ATTR_SOURCE_BRIDGE,
-            s.sql_query__table.c.table_id == s.catalog_table.c.id,
-        )
-        .scalar_subquery()
-    )
-    tables = store().query_read(
-        select(
-            s.catalog_table.c.id,
-            s.catalog_table.c.name,
-            s.catalog_schema.c.name.label("schema_name"),
-            table_description_expr().label("description"),
-            s.catalog_table.c.description.label("own_description"),
-            bridge_descriptions.label("bridge_description"),
-        )
-        .select_from(_table_join())
-        .where(s.catalog_database.c.name == database_name)
-        .order_by(s.catalog_schema.c.name, s.catalog_table.c.name)
-    )
-    columns = store().query_read(
-        select(
-            s.catalog_column.c.id,
-            s.catalog_column.c.table_id,
-            s.catalog_column.c.name,
-            s.catalog_column.c.data_type,
-            s.catalog_column.c.sample_values,
-            column_description_expr().label("description"),
-            s.catalog_column.c.description.label("own_description"),
-            column_reference_expr().label("references"),
-        )
-        .select_from(_catalog_join())
-        .where(s.catalog_database.c.name == database_name)
-        .order_by(s.catalog_column.c.table_id, s.catalog_column.c.id)
-    )
-    by_table: dict[str, list[dict[str, Any]]] = {}
-    for row in columns:
-        by_table.setdefault(str(row["table_id"]), []).append(
-            {
-                **dict(row),
-                "sample_values": stringify_sample_values(row["sample_values"]) or [],
-            }
-        )
-    return [
-        {**dict(table), "columns": by_table.get(str(table["id"]), [])}
-        for table in tables
-    ]
 
 
 def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:

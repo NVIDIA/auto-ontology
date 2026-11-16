@@ -3938,7 +3938,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.description>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -3949,7 +3948,6 @@
           "database_name": "pagila",
           "description": "Primary key of film.",
           "id": "<col:pagila.public.film.film_id>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -3960,7 +3958,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.fulltext>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -3971,7 +3968,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.language_id>",
-          "references": "public.language.language_id",
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -3982,7 +3978,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.last_update>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -3993,7 +3988,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.length>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4004,7 +3998,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.original_language_id>",
-          "references": "public.language.language_id",
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4015,7 +4008,6 @@
           "database_name": "pagila",
           "description": "MPAA rating; an enum.",
           "id": "<col:pagila.public.film.rating>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4026,7 +4018,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.release_year>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4037,7 +4028,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.rental_duration>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4048,7 +4038,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.rental_rate>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4059,7 +4048,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.replacement_cost>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4070,7 +4058,6 @@
           "database_name": "pagila",
           "description": null,
           "id": "<col:pagila.public.film.special_features>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4081,7 +4068,6 @@
           "database_name": "pagila",
           "description": "The film's title.",
           "id": "<col:pagila.public.film.title>",
-          "references": null,
           "sample_values": null,
           "table_name": "film",
           "table_schema": "public"
@@ -4090,7 +4076,7 @@
       [
         {
           "database_name": "pagila",
-          "description": "A motion picture available for rental.",
+          "description": null,
           "id": "<table:pagila.public.film>",
           "table_name": "film",
           "table_schema": "public",
@@ -7456,29 +7442,18 @@
       [
         [
           {
-            "column_data_type": "integer",
             "column_description": null,
-            "column_name": "film_id",
-            "database_name": "pagila",
-            "datatype": "integer",
             "description": "Primary key of film.",
             "family_prefix": null,
-            "format": null,
             "id": "<attr:Film/film id/film_id>",
             "is_unique": null,
             "name": "film id",
             "sample_values": null,
             "schema_name": "public",
             "source_column": "film_id",
-            "table_description": null,
             "table_id": "<table:pagila.public.film>",
             "table_name": "film",
-            "term_name": "Film",
-            "term_synonyms": [
-              "movie",
-              "picture",
-              "title"
-            ]
+            "term_name": "Film"
           }
         ],
         {
@@ -7666,79 +7641,43 @@
     "terms.fetch_term_and_column_attributes_for_embedding": [
       [
         {
-          "column_data_type": "integer",
           "column_description": null,
-          "column_name": "film_id",
-          "database_name": "pagila",
-          "datatype": "integer",
-          "description": "Primary key of film.",
-          "family_prefix": null,
-          "format": null,
-          "id": "<attr:Film/film id/film_id>",
-          "is_unique": null,
-          "name": "film id",
-          "sample_values": null,
-          "schema_name": "public",
-          "source_column": "film_id",
-          "table_description": null,
-          "table_id": "<table:pagila.public.film>",
-          "table_name": "film",
-          "term_name": "Film",
-          "term_synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
-        },
-        {
-          "column_data_type": "mpaa_rating",
-          "column_description": null,
-          "column_name": "rating",
-          "database_name": "pagila",
-          "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
           "family_prefix": null,
-          "format": null,
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
           "name": "film rating",
           "sample_values": null,
-          "schema_name": "public",
           "source_column": "rating",
-          "table_description": null,
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film",
-          "term_synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
+          "term_name": "Film"
         },
         {
-          "column_data_type": "text",
           "column_description": null,
-          "column_name": "title",
-          "database_name": "pagila",
-          "datatype": "text",
+          "description": "Primary key of film.",
+          "family_prefix": null,
+          "id": "<attr:Film/film id/film_id>",
+          "is_unique": null,
+          "name": "film id",
+          "sample_values": null,
+          "source_column": "film_id",
+          "table_id": "<table:pagila.public.film>",
+          "table_name": "film",
+          "term_name": "Film"
+        },
+        {
+          "column_description": null,
           "description": "The film's title.",
           "family_prefix": null,
-          "format": null,
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
           "name": "film title",
           "sample_values": null,
-          "schema_name": "public",
           "source_column": "title",
-          "table_description": null,
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film",
-          "term_synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
+          "term_name": "Film"
         }
       ],
       {
@@ -7877,79 +7816,46 @@
     "terms.fetch_terms_and_attributes_for_table": [
       [
         {
-          "column_data_type": "integer",
           "column_description": null,
-          "column_name": "film_id",
-          "database_name": "pagila",
-          "datatype": "integer",
-          "description": "Primary key of film.",
-          "family_prefix": null,
-          "format": null,
-          "id": "<attr:Film/film id/film_id>",
-          "is_unique": null,
-          "name": "film id",
-          "sample_values": null,
-          "schema_name": "public",
-          "source_column": "film_id",
-          "table_description": null,
-          "table_id": "<table:pagila.public.film>",
-          "table_name": "film",
-          "term_name": "Film",
-          "term_synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
-        },
-        {
-          "column_data_type": "mpaa_rating",
-          "column_description": null,
-          "column_name": "rating",
-          "database_name": "pagila",
-          "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
           "family_prefix": null,
-          "format": null,
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
           "name": "film rating",
           "sample_values": null,
           "schema_name": "public",
           "source_column": "rating",
-          "table_description": null,
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film",
-          "term_synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
+          "term_name": "Film"
         },
         {
-          "column_data_type": "text",
           "column_description": null,
-          "column_name": "title",
-          "database_name": "pagila",
-          "datatype": "text",
+          "description": "Primary key of film.",
+          "family_prefix": null,
+          "id": "<attr:Film/film id/film_id>",
+          "is_unique": null,
+          "name": "film id",
+          "sample_values": null,
+          "schema_name": "public",
+          "source_column": "film_id",
+          "table_id": "<table:pagila.public.film>",
+          "table_name": "film",
+          "term_name": "Film"
+        },
+        {
+          "column_description": null,
           "description": "The film's title.",
           "family_prefix": null,
-          "format": null,
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
           "name": "film title",
           "sample_values": null,
           "schema_name": "public",
           "source_column": "title",
-          "table_description": null,
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film",
-          "term_synonyms": [
-            "movie",
-            "picture",
-            "title"
-          ]
+          "term_name": "Film"
         }
       ],
       [
