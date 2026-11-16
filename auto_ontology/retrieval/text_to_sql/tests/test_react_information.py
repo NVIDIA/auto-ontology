@@ -91,8 +91,20 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
                 "term_name": "Customer",
                 "schema_name": "shop",
                 "table_name": "customers",
+                "database_name": "shop",
                 "col_name": "status",
-            }
+            },
+            # What the real lookup returns for an attribute whose column is in
+            # another database: names filled in, ``database_name`` empty.
+            "a-other": {
+                "attr_name": "Patient Status",
+                "attr_description": "Elsewhere.",
+                "term_name": "",
+                "schema_name": "clinic",
+                "table_name": "patients",
+                "database_name": "",
+                "col_name": "status",
+            },
         },
     )
     for search in ("_uncovered_physical_hits", "_name_hits"):
@@ -143,6 +155,14 @@ def test_an_attribute_is_shown_with_its_column(
         "ATTRIBUTE Customer Status (of Customer) — column shop.customers.status: "
         "Active or not."
     )
+
+
+def test_an_attribute_of_another_database_is_not_shown(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _found(monkeypatch, [{"id": "a-other", "label": "ColumnAttribute"}])
+
+    assert information(ctx, "status").startswith("No matches for 'status'.")
 
 
 def test_an_attribute_of_a_term_shown_in_full_is_not_repeated(
@@ -204,6 +224,34 @@ def test_a_term_of_another_database_is_not_shown(
     _found(monkeypatch, [{"id": "t3", "label": "Term"}])
 
     assert information(ctx, "patient").startswith("No matches for 'patient'.")
+
+
+def test_a_term_too_long_for_the_limit_is_cut_not_dropped(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "200")
+    monkeypatch.setattr(
+        info_module,
+        "fetch_column_attributes_by_term_id",
+        lambda term_id: [
+            {
+                "name": f"Attribute {n:02}",
+                "description": "d" * 20,
+                "table_id": "tab-orders",
+                "source_column": "amount",
+                "primary_column": {"column_name": "amount", "table_name": "orders"},
+            }
+            for n in range(20)
+        ],
+    )
+    _found(monkeypatch, [{"id": "t1", "label": "Term"}])
+
+    out = information(ctx, "order")
+
+    assert out.startswith("TERM Order — A purchase.")
+    assert len(out) <= 200
+    assert out.endswith("…")
+    assert "not shown" not in out
 
 
 def test_a_long_list_is_cut_and_counted(

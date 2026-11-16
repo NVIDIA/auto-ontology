@@ -71,6 +71,51 @@ def test_non_queries_are_refused(sql: str, message: str) -> None:
     assert message in _problems(sql)[0]
 
 
+@pytest.mark.parametrize(
+    "sql, problem",
+    [
+        (
+            "WITH d AS (DELETE FROM orders RETURNING *) SELECT * FROM d",
+            "DELETE",
+        ),
+        (
+            "WITH i AS (INSERT INTO orders (amount) VALUES (1) RETURNING *) "
+            "SELECT * FROM i",
+            "INSERT",
+        ),
+        ("SELECT * INTO orders_copy FROM orders", "INTO"),
+        ("SELECT amount FROM orders FOR UPDATE", "LOCK"),
+        ("SELECT setval('orders_id_seq', 1)", "function setval()"),
+        ("SELECT nextval('orders_id_seq')", "function nextval()"),
+        ("SELECT pg_advisory_lock(1)", "function pg_advisory_lock()"),
+        (
+            "SELECT pg_catalog.pg_terminate_backend(42)",
+            "function pg_terminate_backend()",
+        ),
+        ("SELECT PG_CANCEL_BACKEND(42)", "function pg_cancel_backend()"),
+        ("SELECT set_config('search_path', 'x', false)", "function set_config()"),
+        ("SELECT * FROM dblink('db', 'SELECT 1') AS t(a INT)", "function dblink()"),
+        ("SELECT lo_export(1, '/tmp/x')", "function lo_export()"),
+        (
+            "SELECT query_to_xml('DELETE FROM orders', true, true, '')",
+            "function query_to_xml()",
+        ),
+    ],
+)
+def test_side_effects_are_refused(sql: str, problem: str) -> None:
+    problems = tool.check_sql(sql, "postgres", CATALOG).problems
+    assert problems == [f"Not allowed in a read query: {problem}"]
+
+
+def test_harmless_functions_still_pass() -> None:
+    sql = (
+        "SELECT pg_typeof(amount), COALESCE(discount, 0), UPPER(status), COUNT(*) "
+        "FROM orders o JOIN customers c ON c.customer_id = o.cust_ref "
+        "GROUP BY 1, 2, 3"
+    )
+    assert tool.check_sql(sql, "postgres", CATALOG).problems == []
+
+
 def test_render_rows_counts_and_caps(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_RESULT_ROWS", "2")
     text = tool.render_rows(pd.DataFrame({"x": [1, 2, 3], "y": [None, "b", "c"]}))

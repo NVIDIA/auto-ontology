@@ -181,13 +181,7 @@ def test_auto_mode_offers_both_answers() -> None:
 
     loop.run_episode(model, _ctx(), "q", mode=EpisodeMode.AUTO)
 
-    assert model.bound_tool_names[0] == [
-        "retrieve",
-        "run_sql",
-        "grep",
-        "submit",
-        "predict",
-    ]
+    assert model.bound_tool_names[0] == ["retrieve", "run_sql", "submit", "predict"]
 
 
 def _state(**extra: Any) -> dict:

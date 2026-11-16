@@ -109,16 +109,25 @@ def submit_tool_enabled() -> bool:
 def grep_enabled() -> bool:
     """Whether a ``run_sql`` result too long to show is kept for ``grep``.
 
-    On by default: such a result is saved as a page and the model gets a
-    ``grep`` tool to search it. ``TEXT_TO_SQL_REACT_GREP=false`` turns it off.
+    Off by default. ``TEXT_TO_SQL_REACT_GREP=true`` turns it on: such a result
+    is then saved as a page and the model gets a ``grep`` tool to search it.
     """
     value = os.environ.get("TEXT_TO_SQL_REACT_GREP", "").strip().lower()
-    return value in _TRUTHY or not value
+    return value in _TRUTHY
 
 
 def max_page_rows() -> int:
     """Rows of one result kept for ``grep``; the rest are dropped."""
     return _int_env("TEXT_TO_SQL_REACT_MAX_PAGE_ROWS", 100_000)
+
+
+def grep_timeout_s() -> float:
+    """Seconds one ``grep`` call may spend matching its pattern against a page.
+
+    The pattern is written by the model, and a backtracking one can run for
+    minutes on a long row, so the whole search shares one budget.
+    """
+    return float(_int_env("TEXT_TO_SQL_REACT_GREP_TIMEOUT_S", 5))
 
 
 def max_columns_per_table() -> int:

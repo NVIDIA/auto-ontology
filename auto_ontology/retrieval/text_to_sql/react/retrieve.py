@@ -543,7 +543,9 @@ def _cap(
     block with an entry in *names*, and every name in *also_found*, is listed
     on a last line, so nothing the search found goes unmentioned; a skipped
     block in *quiet* is left out without a mention. The last line counts
-    against the limit: blocks are dropped from the end to make room for it.
+    against the limit: blocks are dropped from the end to make room for it, and
+    when it alone is longer than the limit it is cut to fit, so the result
+    never exceeds the limit.
     """
     limit = config.max_observation_chars()
     shorter = shorter or {}
@@ -580,8 +582,18 @@ def _cap(
         shown, block = out.pop()
         used -= len(shown) + 2
         miss(block)
-    note = _missed_line(missed, unnamed)
+    note = _truncate_note(_missed_line(missed, unnamed), limit)
     return "\n\n".join([shown for shown, _ in out] + ([note] if note else []))
+
+
+def _truncate_note(note: str, limit: int) -> str:
+    """*note* cut to *limit* characters, at a name boundary when it can be."""
+    if len(note) <= limit:
+        return note
+    kept = note[: max(limit - 1, 0)]
+    if ", " in kept:
+        kept = kept[: kept.rindex(", ")]
+    return kept.rstrip() + "…"
 
 
 def _missed_line(missed: list[str], unnamed: int) -> str:
@@ -622,7 +634,14 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if tid in fetched and _in_database(ctx, fetched[tid])
     ]
     new_tables = found[: config.max_tables_per_retrieve()]
-    past_limit = [_qualified(t) for t in found[config.max_tables_per_retrieve() :]]
+    # A table the model was already shown, shortened or named on a join route, is
+    # not "also found": it is not in ``seen_tables`` (that holds tables shown in
+    # full), but listing it again would tell the model it has not met it.
+    past_limit = [
+        _qualified(t)
+        for t in found[config.max_tables_per_retrieve() :]
+        if not ctx.was_shown(t.get("schema_name"), str(t.get("name")))
+    ]
     revisited = [
         ctx.seen_tables[tid]
         for tid in table_ids

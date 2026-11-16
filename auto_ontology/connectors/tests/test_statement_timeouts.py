@@ -270,6 +270,36 @@ def test_postgres_without_timeout_sends_no_setting() -> None:
     assert conn.log == [("query", "SELECT 1")]
 
 
+def test_postgres_read_only_is_set_with_the_timeout_before_the_query() -> None:
+    database, conn = _fake_postgres()
+
+    database.execute("SELECT 1", timeout_s=1.5, read_only=True)
+
+    assert conn.log == [
+        "BEGIN",
+        (
+            "SELECT set_config('transaction_read_only', %s, true), "
+            "set_config('statement_timeout', %s, true)",
+            ("on", "1500ms"),
+        ),
+        ("query", "SELECT 1"),
+        "COMMIT",
+    ]
+
+
+def test_postgres_read_only_without_timeout_still_opens_a_transaction() -> None:
+    database, conn = _fake_postgres()
+
+    database.execute("SELECT 1", read_only=True)
+
+    assert conn.log == [
+        "BEGIN",
+        ("SELECT set_config('transaction_read_only', %s, true)", ("on",)),
+        ("query", "SELECT 1"),
+        "COMMIT",
+    ]
+
+
 def test_live_postgres_cancels_and_does_not_leak_the_cap() -> None:
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")

@@ -1683,6 +1683,22 @@ def find_column_id_by_table_and_name(
     return rows[0]["id"] if rows else None
 
 
+def find_column_id_in_table(table_id: str, column_name: str) -> str | None:
+    """The id of *column_name*, as the catalog stores it, in table *table_id*.
+
+    For a caller that already holds the table's id: a name lookup like
+    :func:`find_column_id_by_table_and_name` does not scope by schema, so a
+    same-named table in another schema of the database could answer instead.
+    """
+    rows = store().query_read(
+        select(s.catalog_column.c.id).where(
+            s.catalog_column.c.table_id == table_id,
+            s.catalog_column.c.name == column_name,
+        )
+    )
+    return str(rows[0]["id"]) if rows else None
+
+
 def find_table_id_by_name(
     table_name: str, database_name: str | None = None
 ) -> str | None:

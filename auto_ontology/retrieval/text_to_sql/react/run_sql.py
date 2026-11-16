@@ -49,6 +49,41 @@ logger = logging.getLogger(__name__)
 _MAX_PROBLEMS = 10
 _MAX_CELL_CHARS = 120
 
+# Nodes that write or lock even under a SELECT root: Postgres runs DML inside a
+# CTE, ``SELECT ... INTO`` creates a table, ``FOR UPDATE``/``FOR SHARE`` lock rows.
+_WRITING_NODES: tuple[type[exp.Expression], ...] = (
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Merge,
+    exp.Create,
+    exp.Drop,
+    exp.Command,
+    exp.Into,
+    exp.Lock,
+)
+
+# A read-only transaction does not stop these: session advisory locks outlive
+# the transaction and return to the pool, backend signalling and server file
+# access ignore it, dblink writes over a connection of its own, and
+# query_to_xml runs SQL from a string this check never sees.
+_FORBIDDEN_FUNCTIONS = frozenset(
+    {
+        "currval",
+        "lastval",
+        "nextval",
+        "setval",
+        "set_config",
+        "query_to_xml",
+        "query_to_xmlschema",
+        "query_to_xml_and_xmlschema",
+        "cursor_to_xml",
+        "cursor_to_xmlschema",
+    }
+)
+_FORBIDDEN_FUNCTION_PREFIXES = ("pg_", "dblink", "lo_")
+_ALLOWED_PG_FUNCTIONS = frozenset({"pg_typeof", "pg_column_size", "pg_size_pretty"})
+
 
 class CatalogNames(Protocol):
     """What the hallucination check needs to know about the catalog."""
@@ -159,8 +194,38 @@ def find_unknown_names(statement: exp.Expression, catalog: CatalogNames) -> list
     return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
 
 
+def _function_name(func: exp.Func) -> str:
+    name = func.name if isinstance(func, exp.Anonymous) else func.sql_name()
+    return (name or "").lower()
+
+
+def _is_forbidden_function(name: str) -> bool:
+    if name in _ALLOWED_PG_FUNCTIONS:
+        return False
+    return name in _FORBIDDEN_FUNCTIONS or name.startswith(_FORBIDDEN_FUNCTION_PREFIXES)
+
+
+def find_side_effects(statement: exp.Expression) -> list[str]:
+    """Writes, locks and side-effecting calls anywhere in *statement*.
+
+    A SELECT root is not enough to make a query read-only, so the whole tree is
+    walked. This is the first line only: the database also runs agent SQL in a
+    read-only transaction where it can (see ``execute_chat_sql``).
+    """
+    problems = [
+        f"Not allowed in a read query: {type(node).__name__.upper()}"
+        for node in statement.find_all(*_WRITING_NODES)
+    ]
+    problems += [
+        f"Not allowed in a read query: function {name}()"
+        for func in statement.find_all(exp.Func)
+        if _is_forbidden_function(name := _function_name(func))
+    ]
+    return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
+
+
 def check_sql(sql: str, dialect: str | None, catalog: CatalogNames) -> CheckResult:
-    """Parse *sql*, refuse anything but one read query, and find unknown names."""
+    """Parse *sql*, refuse anything but one side-effect-free read, find unknown names."""
     try:
         statements = [s for s in sqlglot.parse(sql, read=dialect or None) if s]
     except sqlglot.errors.ParseError as error:
@@ -170,6 +235,9 @@ def check_sql(sql: str, dialect: str | None, catalog: CatalogNames) -> CheckResu
     statement = statements[0]
     if not isinstance(statement, exp.Query):
         return CheckResult(["Only read queries (SELECT or WITH … SELECT) can run."])
+    side_effects = find_side_effects(statement)
+    if side_effects:
+        return CheckResult(side_effects)
     return CheckResult(find_unknown_names(statement, catalog), statement)
 
 

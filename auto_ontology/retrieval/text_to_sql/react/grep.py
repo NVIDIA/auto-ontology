@@ -12,7 +12,9 @@ rows it does not need.
 
 from __future__ import annotations
 
-import re
+import time
+
+import regex
 
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
@@ -25,6 +27,10 @@ def grep(ctx: ToolContext, page: int, pattern: str = "", offset: int = 0) -> str
     *pattern* is a case-insensitive regular expression, or plain text when it
     does not compile; an empty one matches every row, which pages through the
     result. Each row is shown with its 1-based number in the result.
+
+    The pattern comes from the model, so matching runs under a time budget
+    (:func:`config.grep_timeout_s`): a pattern that backtracks without end is
+    reported as too slow instead of stalling the episode.
     """
     if not ctx.pages:
         return (
@@ -44,10 +50,22 @@ def grep(ctx: ToolContext, page: int, pattern: str = "", offset: int = 0) -> str
     pattern = (pattern or "").strip()
     if pattern:
         try:
-            regex = re.compile(pattern, re.IGNORECASE)
-        except re.error:
-            regex = re.compile(re.escape(pattern), re.IGNORECASE)
-        hits = [(n, line) for n, line in enumerate(lines, 1) if regex.search(line)]
+            compiled = regex.compile(pattern, regex.IGNORECASE)
+        except regex.error:
+            compiled = regex.compile(regex.escape(pattern), regex.IGNORECASE)
+        deadline = time.monotonic() + config.grep_timeout_s()
+        hits: list[tuple[int, str]] = []
+        try:
+            for n, line in enumerate(lines, 1):
+                # The budget is shared by every row; ``timeout`` must be positive.
+                left = max(deadline - time.monotonic(), 0.001)
+                if compiled.search(line, timeout=left):
+                    hits.append((n, line))
+        except TimeoutError:
+            return (
+                f"Error: the pattern {pattern!r} took too long to match. Use a "
+                "simpler pattern or plain text."
+            )
         found = f"{len(hits)} of {len(lines)} rows match"
     else:
         hits = list(enumerate(lines, 1))
