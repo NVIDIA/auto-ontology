@@ -14,7 +14,7 @@ query must order by something unique.
 
 from __future__ import annotations
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, FromClause, func, select
 
 from auto_ontology.dal import schema as s
 
@@ -108,13 +108,13 @@ def table_description_expr(table=s.catalog_table) -> ColumnElement:
     return func.coalesce(_non_blank(table.c.description), from_term)
 
 
-def _qualified_column(target) -> ColumnElement:
+def _qualified_column(target: FromClause) -> ColumnElement:
     return func.concat_ws(
         ".", s.catalog_schema.c.name, s.catalog_table.c.name, target.c.name
     )
 
 
-def column_reference_expr(column=s.catalog_column) -> ColumnElement:
+def column_reference_expr(column: FromClause = s.catalog_column) -> ColumnElement:
     """``schema.table.column`` a column's foreign key lands on, or ``NULL``.
 
     A declared foreign key first, then a ``SEMANTIC_FK``, whose target is the
@@ -123,7 +123,7 @@ def column_reference_expr(column=s.catalog_column) -> ColumnElement:
     """
     target = s.catalog_column.alias("reference_target")
 
-    def _onto(link) -> ColumnElement:
+    def _onto(link: FromClause) -> ColumnElement:
         return (
             select(_qualified_column(target))
             .select_from(
