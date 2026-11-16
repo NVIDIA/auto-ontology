@@ -50,7 +50,14 @@ export const WORD_CHAR = '[\\p{L}\\p{N}\\p{M}]';
 /** Everything that is not a word character, for whole-word boundaries. */
 export const NOT_WORD_CHAR = '[^\\p{L}\\p{N}\\p{M}]';
 
-/** The whole words a synonym must contain, as `synonym_word_tokens` splits them. */
+/**
+ * The whole words a synonym must contain, as `synonym_word_tokens` splits them.
+ *
+ * The tokens keep the query's own casing: the matcher that consumes them is
+ * case-insensitive, and lowercasing first expands a character such as `İ` into
+ * `i` plus a combining dot, two code points the matcher can no longer find in a
+ * text holding the single original character.
+ */
 export const synonymWordTokens = (query: string): string[] => [
-	...new Set(query.toLowerCase().match(new RegExp(`${WORD_CHAR}+`, 'gu')) ?? []),
+	...new Set(query.match(new RegExp(`${WORD_CHAR}+`, 'gu')) ?? []),
 ];
