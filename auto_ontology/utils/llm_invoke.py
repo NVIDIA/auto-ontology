@@ -428,8 +428,8 @@ def _system_messages_first(
     """Move every system message ahead of the conversation for Claude models.
 
     Claude takes a single system prompt ahead of the conversation, but agents
-    interleave them: ``sql_from_semantic`` sends system, user, system, system,
-    user, and a validation retry appends a system message after the user turn.
+    can interleave them, e.g. system, user, system, system, user, or a retry
+    that appends a system message after the user turn.
     On the inference-api gateway, ``azure/anthropic/*`` rejects every request
     with a system message after a user message, because the gateway attaches
     prompt-cache markers in an order Anthropic refuses::
@@ -539,6 +539,42 @@ def _safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
                 continue
             raise
     raise RuntimeError("safe_invoke_text exhausted retries")
+
+
+def invoke_with_retry(
+    llm: BaseChatModel,
+    messages: list[BaseMessage],
+    *,
+    max_attempts: int = RETRY_MAX_ATTEMPTS,
+    base_wait: float = 2.0,
+    max_wait: float = 60.0,
+):
+    """``llm.invoke(messages)``, retried with exponential backoff on transient errors.
+
+    For a caller whose call sits in the middle of a longer conversation, where
+    giving up means losing everything said so far. The waits double from
+    *base_wait* up to *max_wait*, which is how long a saturated or
+    rate-limited endpoint needs; the shorter waits of the other helpers here
+    do not outlast it. An error that is not transient is raised at once, and
+    so is the last one once the attempts run out.
+    """
+    for attempt in range(max(max_attempts, 1)):
+        try:
+            with _inflight_guard():
+                return llm.invoke(messages)
+        except Exception as e:
+            if not _is_retryable(e) or attempt >= max_attempts - 1:
+                raise
+            wait = min(max_wait, base_wait * 2**attempt) + random.uniform(0, 1)
+            logger.warning(
+                "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                attempt + 1,
+                max_attempts,
+                wait,
+                str(e)[:120],
+            )
+            time.sleep(wait)
+    raise RuntimeError("invoke_with_retry exhausted its attempts")
 
 
 def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:

@@ -122,6 +122,10 @@ class InteractiveSessionState:
     # retry compares it with its own pre-stabilization values and flips the
     # numeric type only when they still match.
     first_submit_values_digest: Optional[str] = None
+    # The SQL `step` last returned to the grader. Numeric-type alignment and
+    # order stabilization rewrite it after generation, so it can differ from
+    # ``path_state["sql_code"]``.
+    last_submitted_sql: str = ""
     scalar_hint: bool = (
         False  # True when output type is detected as scalar (one-way: False→True only)
     )

@@ -100,8 +100,11 @@ class _Recorder:
 
     database_name = "kdc_ca1"
 
-    def __init__(self, supports_timeout: bool) -> None:
+    def __init__(
+        self, supports_timeout: bool, supports_read_only: bool = False
+    ) -> None:
         self.supports_statement_timeout = supports_timeout
+        self.supports_read_only = supports_read_only
         self.calls: list[tuple[str, dict]] = []
 
     def execute(self, sql: str, **kwargs: object) -> str:
@@ -177,3 +180,21 @@ def test_an_explicit_timeout_overrides_the_configured_one(
     execute_chat_sql(connector, "SELECT 1", timeout_s=7)
 
     assert connector.calls == [("SELECT 1", {"timeout_s": 7})]
+
+
+def test_chat_sql_runs_read_only_where_the_connector_supports_it(
+    configured_timeout: list[int],
+) -> None:
+    connector = _Recorder(supports_timeout=True, supports_read_only=True)
+
+    execute_chat_sql(connector, "SELECT 1", timeout_s=7)
+
+    assert connector.calls == [("SELECT 1", {"read_only": True, "timeout_s": 7})]
+
+
+def test_read_only_does_not_depend_on_timeout_support() -> None:
+    connector = _Recorder(supports_timeout=False, supports_read_only=True)
+
+    execute_chat_sql(connector, "SELECT 1")
+
+    assert connector.calls == [("SELECT 1", {"read_only": True})]

@@ -9,61 +9,20 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 
-from auto_ontology.retrieval.text_to_sql.agents import sql_execution
-from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
+from auto_ontology.retrieval.text_to_sql.agents.sql_execution import _run_sql
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
-    SQL_CORRECTION_ERROR,
     cast_jsonb_numeric_projections,
     dominant_kind,
     flip_numeric_output_types,
-    float_casts_to_numeric,
     float_json_arithmetic,
-    has_avg_expression,
     numeric_column_kinds,
     opposite_target,
     order_by_leading_aggregate,
     order_groups_by_identifier,
     order_periods_chronologically,
-    order_string_aggregates,
     result_values_digest,
     sum_decimal_casts_to_integer,
 )
-
-
-@pytest.mark.parametrize(
-    "sql",
-    [
-        "SELECT CAST(a AS REAL) FROM t",
-        "SELECT a::real FROM t",
-        "SELECT a::float4 FROM t",
-        "SELECT a::float8 FROM t",
-        "SELECT CAST(a AS FLOAT) FROM t",
-        "SELECT CAST(a AS DOUBLE PRECISION) FROM t",
-        "SELECT TRY_CAST(a AS REAL) FROM t",
-    ],
-)
-def test_every_spelling_of_a_float_cast_becomes_numeric(sql: str) -> None:
-    rewritten = float_casts_to_numeric(sql, "postgres")
-    assert "REAL" not in rewritten.upper()
-    assert "DOUBLE" not in rewritten.upper()
-    assert "DECIMAL" in rewritten.upper()
-
-
-def test_float_cast_inside_an_expression_is_rewritten() -> None:
-    rewritten = float_casts_to_numeric(
-        "SELECT SUM(CAST(x AS REAL)) / COUNT(y) AS ratio FROM t", "postgres"
-    )
-    assert "AS DECIMAL" in rewritten
-    assert "ratio" in rewritten
-
-
-def test_decimal_cast_combined_with_float_column_wraps_outer_projection() -> None:
-    rewritten = float_casts_to_numeric(
-        "SELECT AVG(CAST(cost_est AS NUMERIC) / NULLIF(qol_val * 8, 0)) AS avg_cer FROM t",
-        "postgres",
-    )
-    assert rewritten.startswith("SELECT CAST(AVG(")
-    assert rewritten.endswith("AS DECIMAL) AS avg_cer FROM t")
 
 
 def test_percent_rank_is_not_wrapped_when_flipping_to_numeric() -> None:
@@ -95,17 +54,6 @@ def test_percentile_cont_and_ntile_are_not_wrapped_when_flipping_to_numeric() ->
     )
 
 
-def test_is_distinct_from_keeps_null_safe_comparisons() -> None:
-    rewritten = float_casts_to_numeric(
-        "SELECT COUNT(CASE WHEN a IS DISTINCT FROM b THEN 1 END) FROM t "
-        "WHERE c IS NOT DISTINCT FROM d",
-        "postgres",
-    )
-    assert "DISTINCT" not in rewritten.upper()
-    assert "COALESCE((a <> b), (a IS NULL) <> (b IS NULL))" in rewritten
-    assert "COALESCE((c = d), (c IS NULL) = (d IS NULL))" in rewritten
-
-
 def test_nullable_integer_column_coerced_by_pandas_is_not_classified_as_float() -> None:
     frame = pd.DataFrame(
         {"quartile": [4, 3, 2, 1, None], "score": [1.25, 2.5, 3.75, 4.0, None]}
@@ -133,42 +81,6 @@ def test_cast_jsonb_numeric_projections_wraps_bare_jsonb_decimal_strings() -> No
         in rewritten
     )
     assert "CAST(meta" not in rewritten
-
-
-def test_has_avg_expression_detects_aggregate_and_window_avg() -> None:
-    assert has_avg_expression("SELECT AVG(x) FROM t") is True
-    assert (
-        has_avg_expression("SELECT f.a FROM (SELECT AVG(x) OVER () AS a FROM t) f")
-        is True
-    )
-    assert has_avg_expression("SELECT SUM(x) FROM t") is False
-
-
-def test_sql_without_a_float_cast_is_returned_untouched() -> None:
-    sql = "SELECT  a::numeric,   CAST(b AS INTEGER) FROM t  -- keep as written"
-    assert float_casts_to_numeric(sql, "postgres") is sql
-
-
-def test_native_float_columns_are_not_casts_and_are_left_alone() -> None:
-    sql = "SELECT AVG(tempcoeff) FROM panel_models"
-    assert float_casts_to_numeric(sql, "postgres") is sql
-
-
-@pytest.mark.parametrize("dialect", ["sqlite", "snowflake", "mysql", None, ""])
-def test_other_dialects_are_never_rewritten(dialect) -> None:
-    # SQLite's CAST(x AS NUMERIC) hands back an integer, which would reintroduce
-    # integer division; the REAL cast the prompt asks for there must survive.
-    sql = "SELECT CAST(a AS REAL) / b FROM t"
-    assert float_casts_to_numeric(sql, dialect) is sql
-
-
-def test_unparseable_sql_is_returned_untouched() -> None:
-    sql = "SELECT CAST(a AS REAL FROM"
-    assert float_casts_to_numeric(sql, "postgres") is sql
-
-
-def test_postgresql_alias_for_the_dialect_is_accepted() -> None:
-    assert "DECIMAL" in float_casts_to_numeric("SELECT a::real FROM t", "postgresql")
 
 
 # ── result column kinds ─────────────────────────────────────────────────────
@@ -271,7 +183,7 @@ def test_flip_is_postgres_only() -> None:
     )
 
 
-# ── the execution node records the kinds ────────────────────────────────────
+# ── running SQL records the kinds ───────────────────────────────────────────
 
 
 class _Connector:
@@ -287,94 +199,46 @@ class _Connector:
         return self._frame
 
 
-def test_execution_records_the_kinds_and_the_sql_they_belong_to(monkeypatch) -> None:
+def test_running_sql_records_the_kinds_and_the_values_digest() -> None:
     frame = pd.DataFrame({"v": [Decimal("0.01")]})
-    monkeypatch.setattr(
-        sql_execution,
-        "resolve_connector_from_tables",
-        lambda tables, connectors: connectors[0],
+
+    response = _run_sql(
+        "  SELECT v FROM t  ", _Connector(frame), record_numeric_kinds=True
     )
-    state = {
-        "path_state": {"sql_code": "  SELECT v FROM t  ", "relevant_tables": []},
-        "connectors": [_Connector(frame)],
-        "numeric_type_alignment": True,
-    }
-    update = SQLExecutionAgent().execute(state)
 
-    assert update["decision"] == "valid_sql"
-    path_state = update["path_state"]
-    assert path_state["result_numeric_kinds"] == ["decimal"]
-    assert path_state["result_numeric_kinds_sql"] == "SELECT v FROM t"
-    assert path_state["result_values_digest"] == result_values_digest(frame)
+    assert response.error is None
+    assert response.numeric_kinds == ["decimal"]
+    assert response.statement == "  SELECT v FROM t  "
+    assert response.values_digest == result_values_digest(frame)
 
 
-def test_execution_leaves_other_callers_untouched(monkeypatch) -> None:
-    # Every benchmark and the product itself except BIRD-Interact's coordinator:
-    # no extra work, no extra keys in the returned path_state.
-    monkeypatch.setattr(
-        sql_execution,
-        "resolve_connector_from_tables",
-        lambda tables, connectors: connectors[0],
-    )
-    state = {
-        "path_state": {"sql_code": "SELECT v FROM t", "relevant_tables": []},
-        "connectors": [_Connector(pd.DataFrame({"v": [Decimal("0.01")]}))],
-    }
-    update = SQLExecutionAgent().execute(state)
+def test_running_sql_records_nothing_unless_asked() -> None:
+    frame = pd.DataFrame({"v": [Decimal("0.01")]})
 
-    assert update["decision"] == "valid_sql"
-    assert "result_numeric_kinds" not in update["path_state"]
-    assert "result_numeric_kinds_sql" not in update["path_state"]
-    assert "result_values_digest" not in update["path_state"]
+    response = _run_sql("SELECT v FROM t", _Connector(frame))
+
+    assert response.numeric_kinds == []
+    assert response.values_digest is None
+    assert response.sql_correction is None
 
 
-def test_jsonb_numeric_text_is_reported_for_reconstruction(monkeypatch) -> None:
-    frame = pd.DataFrame({"buy_force": ["0.235", "0.574"]})
-    connector = _Connector(frame)
-    monkeypatch.setattr(
-        sql_execution,
-        "resolve_connector_from_tables",
-        lambda tables, connectors: connectors[0],
-    )
+def test_jsonb_numeric_text_is_reported_as_a_correction() -> None:
+    connector = _Connector(pd.DataFrame({"buy_force": ["0.235", "0.574"]}))
     sql = "SELECT indicator_bundle ->> 'buy_pressure' AS buy_force FROM t"
-    update = SQLExecutionAgent().execute(
-        {
-            "path_state": {"sql_code": sql, "relevant_tables": []},
-            "connectors": [connector],
-            "numeric_type_alignment": True,
-        }
-    )
 
-    assert update["decision"] == "invalid_sql"
-    path_state = update["path_state"]
-    assert path_state["error"] == SQL_CORRECTION_ERROR
-    assert "CAST(" in path_state["sql_correction"]
-    assert "buy_pressure" in path_state["sql_correction"]
-    assert "result_numeric_kinds" not in path_state
+    response = _run_sql(sql, connector, record_numeric_kinds=True)
+
+    assert "CAST(" in response.sql_correction
+    assert "buy_pressure" in response.sql_correction
     assert connector.executed == [sql]
 
 
-def test_sqlite_qualifier_strip_is_reported_for_reconstruction(monkeypatch) -> None:
+def test_sqlite_qualifier_strip_is_reported_as_a_correction() -> None:
     connector = _Connector(pd.DataFrame({"a": [1]}), dialect="sqlite")
-    monkeypatch.setattr(
-        sql_execution,
-        "resolve_connector_from_tables",
-        lambda tables, connectors: connectors[0],
-    )
-    update = SQLExecutionAgent().execute(
-        {
-            "path_state": {
-                "sql_code": "SELECT a FROM PUBLIC.t",
-                "relevant_tables": [],
-            },
-            "connectors": [connector],
-            "numeric_type_alignment": True,
-        }
-    )
 
-    assert update["decision"] == "invalid_sql"
-    assert update["path_state"]["error"] == SQL_CORRECTION_ERROR
-    assert update["path_state"]["sql_correction"] == "SELECT a FROM t"
+    response = _run_sql("SELECT a FROM PUBLIC.t", connector, record_numeric_kinds=True)
+
+    assert response.sql_correction == "SELECT a FROM t"
     assert connector.executed == ["SELECT a FROM t"]
 
 
@@ -408,69 +272,6 @@ def test_values_digest_separates_different_answers() -> None:
 def test_values_digest_of_nothing_is_none() -> None:
     assert result_values_digest(None) is None
     assert result_values_digest(pd.DataFrame({"v": []})) is None
-
-
-# ── the validation node applies the rewrite ─────────────────────────────────
-
-_VALIDATION = "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation"
-
-
-def _validate(
-    monkeypatch, sql: str, *, dialect: str = "postgres", **state_flags: bool
-) -> str:
-    """Run ``SQLValidationAgent.execute`` up to the parse check; return the SQL
-    it would have gone on to validate and execute."""
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
-        SQLValidationAgent,
-    )
-
-    connector = SimpleNamespace(dialect=dialect)
-    monkeypatch.setattr(f"{_VALIDATION}.fetch_all_schema_ids", lambda: [])
-    monkeypatch.setattr(f"{_VALIDATION}.get_schemas_by_ids", lambda ids: {})
-    monkeypatch.setattr(
-        f"{_VALIDATION}.resolve_connector_from_tables", lambda tables, conns: connector
-    )
-    agent = SQLValidationAgent()
-    agent._sql_parse_validation = MagicMock(return_value={"error": "stop here"})
-    response = SimpleNamespace(sql_code=sql)
-    agent.execute(
-        {
-            "connectors": [connector],
-            "path_state": {"sql_generation_result": response, "relevant_tables": []},
-            **state_flags,
-        }
-    )
-    return response.sql_code
-
-
-def test_unordered_string_agg_sorts_by_its_own_value() -> None:
-    rewritten = order_string_aggregates(
-        "SELECT STRING_AGG(q.tickersym, ', ') AS ticker_symbols FROM t GROUP BY a",
-        "postgres",
-    )
-    assert "ORDER BY q.tickersym" in rewritten
-
-
-def test_string_agg_keeps_an_existing_order() -> None:
-    sql = "SELECT STRING_AGG(reg_id, ', ' ORDER BY erf DESC, reg_id ASC) FROM t"
-    assert order_string_aggregates(sql, "postgres") == sql
-
-
-def test_string_agg_order_is_postgres_only() -> None:
-    sql = "SELECT STRING_AGG(t, ', ') FROM u"
-    assert order_string_aggregates(sql, "sqlite") == sql
-    assert order_string_aggregates("SELECT a FROM t", "postgres") == "SELECT a FROM t"
-
-
-def test_distinct_string_agg_orders_by_the_distinct_expression() -> None:
-    rewritten = order_string_aggregates(
-        "SELECT STRING_AGG(DISTINCT t, ', ') FROM u", "postgres"
-    )
-    assert "DISTINCT" in rewritten.upper()
-    assert "ORDER BY t" in rewritten
 
 
 def test_grouped_metric_breaks_ties_by_the_identifier() -> None:
@@ -588,47 +389,3 @@ def test_float_json_arithmetic_leaves_sql_alone_without_a_native_real() -> None:
     assert float_json_arithmetic(json_only, "postgres", ["reliab_idx"]) == json_only
     assert float_json_arithmetic(mixed, "postgres", []) == mixed
     assert float_json_arithmetic(mixed, "sqlite", ["hist_sign"]) == mixed
-
-
-def test_validation_orders_string_agg_when_alignment_is_requested(monkeypatch) -> None:
-    sql = _validate(
-        monkeypatch,
-        "SELECT STRING_AGG(tickersym, ', ') FROM funds GROUP BY parentgroup",
-        numeric_type_alignment=True,
-    )
-    assert "ORDER BY tickersym" in sql
-
-
-def test_validation_leaves_string_agg_alone_without_the_flag(monkeypatch) -> None:
-    original = "SELECT STRING_AGG(tickersym, ', ') FROM funds GROUP BY parentgroup"
-    assert _validate(monkeypatch, original) == original
-
-
-def test_validation_rewrites_float_casts_when_alignment_is_requested(
-    monkeypatch,
-) -> None:
-    sql = _validate(
-        monkeypatch,
-        "SELECT CAST(SUM(x) AS REAL) / COUNT(y) FROM t",
-        numeric_type_alignment=True,
-    )
-    assert "REAL" not in sql.upper()
-    assert "DECIMAL" in sql.upper()
-
-
-def test_validation_leaves_ordinary_chat_sql_alone(monkeypatch) -> None:
-    original = "SELECT CAST(SUM(x) AS REAL) / COUNT(y) FROM t"
-    assert _validate(monkeypatch, original) == original
-
-
-def test_validation_ignores_an_explicitly_disabled_flag(monkeypatch) -> None:
-    original = "SELECT CAST(SUM(x) AS REAL) / COUNT(y) FROM t"
-    assert _validate(monkeypatch, original, numeric_type_alignment=False) == original
-
-
-def test_validation_does_not_rewrite_sqlite(monkeypatch) -> None:
-    original = "SELECT CAST(SUM(x) AS REAL) / COUNT(y) FROM t"
-    assert (
-        _validate(monkeypatch, original, dialect="sqlite", numeric_type_alignment=True)
-        == original
-    )
