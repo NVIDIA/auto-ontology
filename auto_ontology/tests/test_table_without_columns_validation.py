@@ -17,9 +17,6 @@ from unittest.mock import MagicMock
 import pandas as pd
 
 from auto_ontology.catalog.sql_parse import parse_query_single
-from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
-    SQLValidationAgent,
-)
 
 
 def _mock_schema(table_name: str, table_id: str = "tbl-1") -> MagicMock:
@@ -53,34 +50,3 @@ def test_count_star_resolves_known_table_in_parse_query_single() -> None:
     assert query_obj is not None
     assert query_obj.get_tables_ids() == ["cust-id"]
     assert query_obj.get_column_ids() == []
-
-
-def test_count_star_passes_sql_parse_validation() -> None:
-    """validate_sql_query must accept COUNT(*) when the table exists in catalog."""
-    schemas = {"mydb": _mock_schema("customers", table_id="cust-id")}
-
-    result = SQLValidationAgent._sql_parse_validation(
-        schemas,
-        "SELECT COUNT(*) AS n FROM mydb.customers",
-        ["mysql"],
-    )
-
-    assert result["success"] is True
-    assert result["sql_tables"] == ["cust-id"]
-    assert result["sql_columns"] == []
-    assert result["used_tables"] == ["mydb.customers"]
-    assert result["used_columns"] == []
-
-
-def test_count_star_over_unknown_table_still_fails_validation() -> None:
-    """COUNT(*) over an uncatalogued table must still fail validation cleanly."""
-    schemas = {"mydb": _mock_schema("customers", table_id="cust-id")}
-
-    result = SQLValidationAgent._sql_parse_validation(
-        schemas,
-        "SELECT COUNT(*) AS n FROM mydb.unknown_table",
-        ["mysql"],
-    )
-
-    assert "error" in result
-    assert "known to the catalog" in result["error"]

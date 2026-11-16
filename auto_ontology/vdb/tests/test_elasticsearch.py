@@ -28,7 +28,7 @@ from auto_ontology.infra.elasticsearch import (
     ensure_embed_endpoint,
     get_embed_endpoint,
 )
-from auto_ontology.retrieval.data_access.semantic_search import _is_retryable
+from auto_ontology.utils.retriever import _is_transient
 from auto_ontology.utils.embedding_rows import build_embed_row
 from auto_ontology.vdb.backend import vdb_search_mode
 from auto_ontology.vdb.elasticsearch import ElasticsearchVDB, score_to_distance
@@ -490,7 +490,7 @@ def test_searching_before_anything_was_ingested_finds_nothing() -> None:
 def test_cluster_errors_are_classified_for_the_query_retry(
     exc: Exception, retryable: bool
 ) -> None:
-    assert _is_retryable(exc) is retryable
+    assert _is_transient(exc) is retryable
 
 
 # ---------------------------------------------------------------------------

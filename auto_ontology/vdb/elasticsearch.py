@@ -608,7 +608,7 @@ class ElasticsearchVDB:
         an empty result). That differs from :class:`PostgresVDB`, which logs
         and returns nothing: here a search error is usually the inference
         endpoint failing to embed the query, and
-        ``semantic_search._query_with_retry`` needs to see it to retry.
+        ``Retriever.query`` needs to see it to retry.
         """
         search = (
             self._hybrid_search

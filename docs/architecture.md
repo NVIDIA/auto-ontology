@@ -194,138 +194,112 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 
 ## Answer a question
 
-This is the current agent, a LangGraph graph built in
-`auto_ontology/retrieval/text_to_sql/text_to_sql_graph.py` (`create_graph`).
-Every question runs the same steps in the same order; the routing between them
-is fixed in code.
-
-**Overview.**
+**ReAct, model-chosen tools.** The answering agent is a loop: the
+`REASONING` model starts with no schema and decides which tool to call next
+(`auto_ontology/retrieval/text_to_sql/react/`). Its system prompt carries the
+glossary definitions and custom prompts from **Settings → Semantic Input**.
+Before the loop, Chat rewrites a follow-up as a standalone question with the
+`NON_REASONING` model; after it, `format_and_respond` assembles the answer and
+Chat draws a chart.
 
 ```mermaid
 flowchart TD
   q["Question: chat, REST, MCP ask_question, or eval"]
-  intent["LLM: classify intent, separate evidence"]
-  ret["EMBED + LLM: extract entities, search the ontology, keep relevant candidates"]
-  meta["LLM: answer from metadata"]
-  join["Find join paths: shortest route over semantic foreign keys"]
-  gen["Reasoning LLM: write SQL and its explanation"]
-  judge{"SQL checks + LLM: judge the query against the question"}
-  fix["LLM: repair SQL"]
-  run["Execute SQL"]
-  check["LLM + SQL: if the result is empty, probe filter values"]
-  ans["Answer + SQL + chart"]
-  ref["Refusal: no valid query from this data"]
-  kumo["LLM: write PQL; KumoRFM: forecast or score"]
-  q --> intent --> ret
-  ret -- "metadata question" --> meta
-  ret --> join --> gen --> judge
-  judge -- "accept" --> run --> check --> ans
-  judge -- "reject" --> fix --> judge
-  run -- "error" --> fix
-  check -- "near-miss value" --> fix
-  gen -- "cannot be built" --> ref
-  judge -- "still failing after 7 repairs" --> ref
-  join -. "predictive question, KUMO_RFM_API_URL set" .-> kumo
+  agent{"Reasoning model: choose the next tool"}
+  subgraph tools["Tools"]
+    direction LR
+    retrieve["retrieve: search the semantic layer by meaning and name; show tables, columns, values, definitions, join paths"]
+    runsql["run_sql: check names against the catalog and what retrieve showed, run the query, return rows"]
+    grep["grep: search a saved result too long to show"]
+  end
+  submit{"submit: same checks, run the final query, or answer an information question in words"}
+  ans["Answer + SQL + chart, or a worded answer"]
+  ref["Refusal: no accepted query"]
+  predict["predict: LLM writes PQL; KumoRFM forecast or score"]
+  q --> agent
+  agent -- "tool call" --> tools
+  tools -- "result" --> agent
+  agent -- "final answer" --> submit
+  submit -- "accepted" --> ans
+  submit -- "error, back to the model" --> agent
+  agent -- "out of tool calls, or stops calling tools" --> ref
+  agent -. "predictive question, KUMO_RFM_API_URL set" .-> predict
   classDef model fill:#eaf5d6,stroke:#76b900,color:#111
   classDef det fill:#f2f2f2,stroke:#777,color:#111
+  classDef react fill:#efe6f7,stroke:#7b3fa0,color:#111
   classDef optional stroke-dasharray:5 5
-  class intent,ret,meta,gen,judge,fix,check,kumo model
-  class join,run det
-  class kumo optional
+  class agent react
+  class retrieve,predict model
+  class runsql,grep,submit det
+  class grep,predict optional
 ```
 
-Green: model call. Gray: deterministic (SQL or rules). Dashed: off by default or optional.
+Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool (ReAct). Dashed: off by default or optional.
 
-**Full detail.**
+### Tools
 
-```mermaid
-flowchart TD
-  q["Question"]
-  fu["LLM: rewrite a follow-up as a standalone question"]
-  intent["question_intent. LLM: classify intent, separate evidence"]
-  ext["question_extraction. LLM: extract entities and subject"]
-  ret["retrieve_candidates. EMBED: search pgvector; LLM: keep relevant hits"]
-  meta["information_agent. LLM: answer from metadata with catalog tools"]
-  prep["prepare_candidates. LLM: anchor column and relevant tables; SQL: find join paths"]
-  pred["prepare_prediction_graph, kumo_predict. LLM: write PQL; KumoRFM: predict"]
-  ev["refine_evidence. LLM: map evidence onto the schema"]
-  gen["construct_sql_from_candidates. Reasoning LLM: SQL and explanation"]
-  vals["validate_sql_values. LLM + SQL: check filter literals"]
-  judge{"validate_sql_query. Parse and static checks; LLM: judge intent"}
-  fix["reconstruct_sql. LLM: repair SQL"]
-  pre["precheck_combined. SQL: probe literals, joins, JSONB paths"]
-  run["execute_sql_query. SQL: run the query"]
-  like["check_empty_like_result. LLM: loosen LIKE filters on an empty result"]
-  repair["check_value_repair. SQL: probe filter values on an empty result"]
-  fmt["format_and_respond: answer, SQL, rows"]
-  chart["LLM: chart (Chat)"]
-  ref["unconstructable_sql_response: refusal"]
-  q -. "chat history" .-> fu
-  q --> intent
-  fu -.-> intent
-  intent --> ext --> ret
-  ret -- "metadata question" --> meta
-  ret --> prep
-  prep -. "prediction, KUMO_RFM_API_URL set" .-> pred
-  prep -. "evidence supplied" .-> ev
-  prep --> gen
-  ev -.-> gen
-  gen -. "validate_sql_values" .-> vals
-  gen --> judge
-  vals -.-> judge
-  gen -- "cannot be built" --> ref
-  judge -- "reject" --> fix
-  fix --> judge
-  judge -- "7 repairs failed" --> ref
-  judge -. "DB_PROBE flags" .-> pre
-  pre -.-> run
-  judge -- "accept" --> run
-  run -- "error" --> fix
-  run --> like --> repair --> fmt
-  like -- "fix" --> fix
-  repair -- "near-miss or empty" --> fix
-  fmt -.-> chart
-  classDef model fill:#eaf5d6,stroke:#76b900,color:#111
-  classDef det fill:#f2f2f2,stroke:#777,color:#111
-  classDef optional stroke-dasharray:5 5
-  class fu,intent,ext,ret,meta,prep,pred,ev,gen,vals,judge,fix,like,chart model
-  class pre,run,repair,fmt det
-  class fu,pred,ev,vals,pre optional
-```
+| Tool | What it does | Kind | Offered |
+| --- | --- | --- | --- |
+| `retrieve` | Searches the semantic layer by meaning (pgvector) and by name (substring search): terms stand for tables, attributes for columns, plus definitions (SQL attributes) and analyses. Tables and columns the semantic layer doesn't describe, such as foreign keys and link tables, are searched in the catalog directly. Every hit comes back as tables and columns with their descriptions, stored values, and references; definitions with their SQL; join paths from new tables to tables already shown (`find_join_path`); and near-copies of each table. Optional `kinds` narrows to terms, attributes, definitions, or analyses. With `purpose=information`, it shows each term with its description, synonyms, attributes, and definitions instead, and an empty query lists every table, or every term with `kinds=["term"]`. | `EMBED` + SQL, no LLM | Always |
+| `run_sql` | Checks the query's table and column names against the catalog of the database it runs on, suggesting the closest real names for unknown ones, and rejects tables no `retrieve` result named. Then runs it under the SQL query timeout and returns up to 100 rows | SQL, no model | Always |
+| `submit` | Applies the same checks and runs the final query. A clean run is the answer; an error or a rewrite goes back to the model. For an information question, `sql` is left empty and `response` is the answer | SQL, no model | Always (with `TEXT_TO_SQL_REACT_SUBMIT_TOOL=false`, `run_sql(final=true)` answers instead) |
+| `grep` | Searches all rows of a `run_sql` result too long to show | Deterministic | Off; `TEXT_TO_SQL_REACT_GREP=true` |
+| `predict` | Builds a KumoRFM graph over the tables `retrieve` showed, writes PQL with the `NON_REASONING` model, and predicts. Ends the episode | `NON_REASONING` LLM + KumoRFM | Only when `KUMO_RFM_API_URL` is set |
 
-Green: model call. Gray: deterministic (SQL or rules). Dashed: off by default or optional.
+Only the loop itself and `predict` call a language model. There's no separate
+intent classifier, SQL judge, or repair model: the reasoning model reads each
+tool result and decides what to do next, and the deterministic checks in
+`run_sql` and `submit` reject unknown names and failing queries.
 
-| Step (graph node) | What it does | Kind | Default | Controlled by |
-| --- | --- | --- | --- | --- |
-| Follow-up resolution (Chat worker, before the graph) | Rewrites a follow-up as a standalone question from the conversation | `NON_REASONING` LLM | When the conversation has history | `conversation_id` |
-| `question_intent` | Classifies the question as calculation, information, or prediction, and separates inline evidence | `NON_REASONING` LLM | On | `calculation_only` (library payload) forces calculation |
-| `question_extraction` | Extracts the entities and subject the question names | `NON_REASONING` LLM | On | — |
-| `retrieve_candidates` | Searches pgvector for column attributes, SQL attributes, custom analyses, and the subject term, then keeps the hits a model judges relevant | `EMBED` + `NON_REASONING` LLM | On | — |
-| `information_agent` | Answers questions about the metadata itself with read-only catalog tools (up to 6 tool calls) | `NON_REASONING` LLM | Information questions only | — |
-| `prepare_candidates` | Picks an anchor column, finds join paths from it (shortest route over semantic foreign keys, `dal/attributes.py` `find_join_path`), adds tables by embedding search, and filters tables by relevance | `NON_REASONING` LLM + `EMBED` + SQL | On | — |
-| `prepare_prediction_graph`, `kumo_predict` | Builds a KumoRFM graph over the candidate tables, writes PQL, and predicts | `NON_REASONING` LLM + KumoRFM | Off | `KUMO_RFM_API_URL` (and `KUMO_RFM_API_KEY` if needed); `prediction` request field |
-| `refine_evidence` | Maps user-supplied evidence onto the schema | `NON_REASONING` LLM | Only when evidence is supplied | `evidence` request field |
-| `construct_sql_from_candidates` | Writes the SQL and its plain-language explanation, or declares the question unanswerable | `REASONING` LLM | On | — |
-| `validate_sql_values` | Checks filter literals against the database before running | `NON_REASONING` LLM + SQL | Off in Chat and REST | `validate_sql_values` (library payload; the eval turns it on) |
-| `validate_sql_query` | Parses the SQL, runs static checks, and judges whether it answers the question | Rules + `NON_REASONING` LLM | On | — |
-| `reconstruct_sql` | Repairs the SQL from the error or rejection | `NON_REASONING` LLM | On a failed check | Up to 7 repairs per attempt |
-| `precheck_combined` | Probes literals, join paths, and JSONB key paths before running | SQL | Off | `DB_PROBE_PROACTIVE`, `DB_PROBE_JOIN_PATH_CHECK`, `DB_PROBE_JSONB_PATH_CHECK` |
-| `execute_sql_query` | Runs the query under the SQL query timeout | SQL | On | **Settings → Agent Settings → SQL Query Timeout** (30 s) |
-| `check_empty_like_result` | On an empty result, asks a model which `LIKE` filters to loosen; also catches all-NULL JSONB columns | `NON_REASONING` LLM | On an empty result | Skipped when `shorten_answer` is set |
-| `check_value_repair` | On an empty result, compares filter literals with the column's real values; a near-miss, or an undiagnosed empty result, goes back to repair once | SQL | On an empty result | — |
-| `format_and_respond` | Assembles the answer, SQL, and rows | Deterministic | On | — |
-| `unconstructable_sql_response` | Returns the refusal | Deterministic | When no valid query | — |
-| Chart (Chat router, after the graph) | Decides whether and how to chart the rows | `NON_REASONING` LLM | On, in conversations | **Settings → Agent Settings → Visualize SQL Results** |
+Questions about the data itself (which tables or columns exist, what a term
+means, how tables connect, how a measure is defined) are answered without SQL:
+the model calls `retrieve` with `purpose=information` and submits the answer in
+words. Interactive analysis turns this off and always asks for SQL
+(`calculation_only`).
 
-After 5 repairs, the post-execution checks stop blocking and let the SQL
-through; the intent judge keeps running. If the graph ends in a refusal, the
-whole chain reruns once from `question_intent`. If the second run also
-refuses, the response carries the refusal text together with the last query
-that passed the static checks but not the intent judge, unexecuted
-(`main.py`, `_apply_last_deterministic_sql_fallback`).
+### Stop conditions
 
-Glossary definitions and custom prompts from **Settings → Semantic Input** are
-added to the agent's prompts.
+| End | Result |
+| --- | --- |
+| `submit` runs cleanly | Answer, SQL, rows (and a chart in Chat) |
+| `submit` with no SQL, for an information question | Answer in words |
+| `predict` runs | Forecast or score with an explanation |
+| Tool budget used up | Refusal. On the last turn only the answering tool is offered |
+| No tool call after two nudges | Refusal |
+| The model endpoint keeps failing | Refusal |
+
+The ReAct agent doesn't ask clarifying questions.
+
+### Limits
+
+| Variable | Default | Bounds |
+| --- | --- | --- |
+| `TEXT_TO_SQL_REACT_MAX_TOOL_CALLS` | 24 | Tool calls per question |
+| `TEXT_TO_SQL_REACT_MAX_SQL_RUNS` | 10 | `run_sql` calls per question |
+| `TEXT_TO_SQL_REACT_MAX_PREDICT_CALLS` | 2 | `predict` calls per question |
+| `TEXT_TO_SQL_REACT_MODEL_RETRIES` | 6 | Attempts per model call |
+| `TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS` | 8000 | Characters of one tool result |
+| `TEXT_TO_SQL_REACT_MAX_RESULT_ROWS` | 100 | Rows `run_sql` shows |
+| `TEXT_TO_SQL_REACT_MAX_TABLES_PER_RETRIEVE` | 6 | Tables one `retrieve` introduces |
+| `TEXT_TO_SQL_REACT_MAX_COLUMNS_PER_TABLE` | 25 | Columns shown for a wide table |
+| `TEXT_TO_SQL_REACT_MAX_SIBLING_COUNTS` | 4 | Row counts one `retrieve` runs for near-copy tables |
+| `TEXT_TO_SQL_REACT_SIBLING_COUNT_TIMEOUT_S` | 5 | Seconds one of those row counts may run |
+| `TEXT_TO_SQL_REACT_SIBLINGS` | on | `false` stops `retrieve` from showing near-copy tables and their row counts |
+| `TEXT_TO_SQL_REACT_MAX_PAGE_ROWS` | 100000 | Rows `grep` saves from one result |
+
+A repeated identical tool call isn't run again; the model is pointed to the
+earlier result, and the repeat still counts against the tool budget.
+
+### Relation to the MCP tools
+
+None of the ReAct tools are MCP tools. The MCP server's tools
+(`check_readiness`, `search_terms`, `get_term`, `get_term_columns`,
+`get_term_sql_attributes`, `get_sql_attribute`, `describe_table`,
+`check_answerable`, `ask_question`) call the public REST API from outside.
+The ReAct tools run inside the backend and read the same catalog and ontology
+directly. `retrieve` covers what the term and table tools expose, and an MCP
+client reaches the ReAct agent through `ask_question`, which calls
+`POST /api/chat/completions`.
 
 ## Check answerability
 
@@ -333,9 +307,10 @@ added to the agent's prompts.
 grades how well the ontology covers a question without writing SQL
 (`auto_ontology/retrieval/entity_coverage/`):
 
-1. `NON_REASONING` LLM: extract the entities the question names.
-2. `EMBED` + `NON_REASONING` LLM: retrieve candidates, as in
-   `retrieve_candidates` above.
+1. `REASONING` LLM: extract the entities the question names.
+2. `EMBED` + `REASONING` LLM: search pgvector for candidate column
+   attributes, SQL attributes, custom analyses, and the subject term, and keep
+   the ones a model judges relevant (`CandidateRetrievalAgent`).
 3. Deterministic: grade coverage as the share of entities with a candidate
    within the distance threshold.
 
@@ -356,6 +331,7 @@ user to clarify.
 | **Settings → Single Sign-On** | SSO | Access |
 | Environment (`.env`, Helm values) | `REASONING_*`, `NON_REASONING_*`, `EMBED_*`, `RERANK_*`, `DEFAULT_MODELS_*` | Every model call |
 | Environment | `KUMO_RFM_API_URL`, `KUMO_RFM_API_KEY`, `KUMO_MAX_*` | Predictions |
-| Environment | `DB_PROBE_*`, `SEMANTIC_LLM_MAX_INFLIGHT`, `PREVENT_SEMANTIC_FK_DB_QUERIES` | Answer-time probes, compilation concurrency, and whether foreign key inference queries the source |
+| Environment | `TEXT_TO_SQL_REACT_*` | ReAct limits (see [Limits](#limits)) |
+| Environment | `SEMANTIC_LLM_MAX_INFLIGHT`, `PREVENT_SEMANTIC_FK_DB_QUERIES` | Compilation concurrency, and whether foreign key inference queries the source |
 
 [`.env.example`](../.env.example) documents every environment variable.

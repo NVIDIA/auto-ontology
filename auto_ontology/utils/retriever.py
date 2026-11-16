@@ -7,20 +7,52 @@
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import Any
+
+from elasticsearch import ApiError, TransportError
+from openai import APIConnectionError, APIStatusError
 
 from auto_ontology.utils.embedding import EmbedParams, embed_texts, get_embed_params
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
 from auto_ontology.vdb.base import VectorStore
+from auto_ontology.vdb.elasticsearch import is_retryable_failure
 
 logger = logging.getLogger(__name__)
 
 # A search embeds one short string, so it should answer in seconds; the
 # ingest-sized default would let one stalled request hold a question for ten
-# minutes before ``_query_with_retry`` ever got to see the failure. That loop
-# is the only retry on this path -- the client's own are off -- so a dead
-# endpoint costs three 60s attempts, not three times six.
+# minutes before the retry in ``Retriever.query`` ever got to see the failure.
+# That loop is the only retry on this path -- the client's own are off -- so a
+# dead endpoint costs three 60s attempts, not three times six.
 _QUERY_TIMEOUT_S = 60.0
+_QUERY_ATTEMPTS = 3
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Whether *exc* is an endpoint blip rather than a problem with the query.
+
+    The client's errors are classified by type, never by message text:
+    ``APIConnectionError`` covers timeouts too, whose message ("Request timed
+    out.") names no status. Any other error -- a bad configuration, an invalid
+    response -- fails at once, whatever its message happens to contain.
+
+    The Elasticsearch store embeds the query itself, so an endpoint blip
+    reaches here as the cluster's error -- often a 400 that quotes the
+    endpoint's real status in its body; see ``is_retryable_failure``.
+    """
+    if isinstance(exc, APIConnectionError):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in (408, 429) or exc.status_code >= 500
+    if isinstance(exc, TransportError):
+        return True
+    if isinstance(exc, ApiError):
+        return exc.status_code != 409 and is_retryable_failure(
+            exc.status_code, (str(exc), exc.body)
+        )
+    return False
 
 
 class Retriever:
@@ -50,29 +82,21 @@ class Retriever:
 
         Each hit is ``{"text", "metadata", "_distance"}``, with ``metadata``
         the row's full stored metadata, plus any other ``_``-prefixed scores
-        the store returns (a hybrid search's ``_fused_score`` and per-branch scores). ``vdb_kwargs["where"]``, when given,
-        is the store's metadata filter. Raises when the query cannot be
-        embedded, with the endpoint's HTTP status in the message, so callers
-        can tell a transient failure from an empty result.
+        the store returns (a hybrid search's ``_fused_score`` and per-branch
+        scores). ``vdb_kwargs["where"]``, when given, is the store's metadata
+        filter. A timeout, a dropped connection or a 5xx/408/429 from the
+        embedding endpoint is retried with backoff; when the query still
+        cannot be embedded this raises, with the endpoint's HTTP status in the
+        message, so callers can tell a failure from an empty result.
 
         A store that embeds server-side is handed the text itself, and the
         query is embedded -- as a ``query``, not a ``passage`` -- by its
-        inference endpoint.
+        inference endpoint, so the search itself is what gets retried.
         """
         if not text.strip():
             raise ValueError("Cannot search for a blank query.")
-        if self.vdb.embeds_server_side:
-            query: Any = text.strip()
-        else:
-            query = embed_texts(
-                [text],
-                self.embed_params,
-                "query",
-                timeout=_QUERY_TIMEOUT_S,
-                retries=0,
-            )[0]
         where = (vdb_kwargs or {}).get("where")
-        hits = self.vdb.retrieval([query], top_k=top_k, where=where)[0]
+        hits = self._search(text, top_k, where)
         return [
             {
                 # Store-specific scores (a hybrid hit's ``_fused_score`` and per-branch
@@ -84,6 +108,37 @@ class Retriever:
             }
             for hit in hits[:top_k]
         ]
+
+    def _search(self, text: str, top_k: int, where: Any) -> list[dict[str, Any]]:
+        for attempt in range(1, _QUERY_ATTEMPTS + 1):
+            try:
+                query = self._query_input(text)
+                return self.vdb.retrieval([query], top_k=top_k, where=where)[0]
+            except Exception as exc:
+                if attempt == _QUERY_ATTEMPTS or not _is_transient(exc):
+                    raise
+                wait = 2**attempt + random.uniform(0, 1)
+                logger.warning(
+                    "Embedding the query failed on attempt %d/%d, retrying in %.1fs: %s",
+                    attempt,
+                    _QUERY_ATTEMPTS,
+                    wait,
+                    str(exc)[:200],
+                )
+                time.sleep(wait)
+        raise AssertionError("unreachable")
+
+    def _query_input(self, text: str) -> Any:
+        """The query text for a store that embeds it, or else its vector."""
+        if self.vdb.embeds_server_side:
+            return text.strip()
+        return embed_texts(
+            [text],
+            self.embed_params,
+            "query",
+            timeout=_QUERY_TIMEOUT_S,
+            retries=0,
+        )[0]
 
 
 _data_retriever: Retriever | None = None
