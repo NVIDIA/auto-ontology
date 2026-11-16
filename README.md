@@ -15,7 +15,7 @@ It enables developers to:
 
 - **Discover:** generate enterprise ontologies from metadata; connect existing ontologies and semantic models; build AI-ready knowledge graphs.
 - **Ground:** give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
-- **Validate:** test a draft with real questions before experts certify it; check generated queries against certified definitions and lineage; return provenance with every answer.
+- **Validate:** test a draft with real questions before experts certify it; check generated queries against the catalog and the definitions retrieval surfaced; return the SQL and steps with every answer.
 - **Expose:** serve context to any agent harness through MCP, CLI, and API.
 - **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with use.
 
