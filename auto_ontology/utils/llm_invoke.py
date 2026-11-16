@@ -493,6 +493,70 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     return {}
 
 
+def _innermost_client(llm: object) -> object:
+    """The chat model under any ``.bind()`` wrappers of *llm*."""
+    current = llm
+    for _ in range(_MAX_BINDING_DEPTH):
+        bound = getattr(current, "bound", None)
+        if bound is None or isinstance(bound, (str, bytes, int, float, bool)):
+            break
+        current = bound
+    return current
+
+
+def _structured_output_runnable(
+    llm: BaseChatModel, schema: Type[T], structured_kwargs: dict
+):
+    """*llm* set up to return *schema*.
+
+    For ``ChatNVIDIA`` and a Pydantic schema, sends only the OpenAI
+    ``response_format`` request, which is what ``ChatNVIDIA`` itself tries first
+    on NVIDIA's API catalog, parsed the same way. Its ``with_structured_output``
+    instead:
+
+    - lists the endpoint's models first (``GET {base_url}/models``), which fails
+      behind OpenAI-compatible proxies that don't serve that path, such as NeMo
+      Gym's model servers;
+    - tries up to three request formats and raises only the last error
+      (langchain-ai/langchain-nvidia#412). On NVIDIA's API catalog that error is
+      "[400] unknown field guided_json" whatever went wrong first, so a 429 or
+      a timeout isn't retried;
+    - everywhere else, sends both ``guided_json`` forms first. Some
+      OpenAI-compatible gateways accept them and ignore them, so each call pays
+      for two generations that fail to parse.
+    """
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+    if not (
+        isinstance(_innermost_client(llm), ChatNVIDIA)
+        and isinstance(schema, type)
+        and issubclass(schema, BaseModel)
+    ):
+        return llm.with_structured_output(schema, **structured_kwargs)
+
+    from langchain_core.exceptions import OutputParserException
+    from langchain_core.output_parsers import PydanticOutputParser
+
+    class _ForgivingPydanticOutputParser(PydanticOutputParser):
+        # As ChatNVIDIA's own parser: output that doesn't match the schema
+        # parses to None, which the caller retries.
+        def parse_result(self, result, *, partial: bool = False):
+            try:
+                return super().parse_result(result, partial=partial)
+            except OutputParserException:
+                return None
+
+    json_schema = schema.model_json_schema()
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": schema.__name__, "schema": json_schema, "strict": True},
+    }
+    return llm.bind(
+        response_format=response_format,
+        ls_structured_output_format={"schema": json_schema},
+    ) | _ForgivingPydanticOutputParser(pydantic_object=schema)
+
+
 def _invoke_text_once(llm: BaseChatModel, prompt: str) -> str:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
@@ -617,7 +681,7 @@ def safe_invoke_with_structured_output(
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            model_llm = llm.with_structured_output(schema, **structured_kwargs)
+            model_llm = _structured_output_runnable(llm, schema, structured_kwargs)
             with _inflight_guard():
                 result = model_llm.invoke(_system_messages_first(llm, current_messages))
         except _requests.exceptions.ReadTimeout:

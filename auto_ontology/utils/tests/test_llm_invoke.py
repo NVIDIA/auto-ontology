@@ -554,3 +554,112 @@ def test_bound_caps_use_the_same_floor(monkeypatch: Any) -> None:
 
     assert llm_invoke.max_tokens_with_floor(1024) == 16000
     assert llm_invoke.max_tokens_with_floor(32000) == 32000
+
+
+class _Keys(BaseModel):
+    primary_key: list[str]
+
+
+class _FakeResponse:
+    def __init__(self, content: str) -> None:
+        self._body = {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    def json(self) -> dict:
+        return self._body
+
+
+def _nvidia_client_with_fake_transport(
+    monkeypatch: Any, replies: list[Any]
+) -> tuple[Any, list[dict]]:
+    """A real ChatNVIDIA whose HTTP layer returns *replies* in order and records payloads.
+
+    Listing the endpoint's models fails the test: proxies such as NeMo Gym's model
+    servers don't serve that path.
+    """
+    client = llm_invoke._build_client(
+        model="nvidia/some-model",
+        api_key="nvapi-test",
+        base_url="http://localhost:9/v1",
+        temperature=0.0,
+        max_tokens=16,
+    )
+    payloads: list[dict] = []
+
+    def get_req(_self: Any, payload: dict = {}, extra_headers: dict = {}) -> Any:  # noqa: B006
+        payloads.append(payload)
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return _FakeResponse(reply)
+
+    def no_listing(_self: Any) -> Any:
+        raise AssertionError("listed the endpoint's models")
+
+    client_type = type(client._client)
+    monkeypatch.setattr(client_type, "get_req", get_req)
+    monkeypatch.setattr(client_type, "available_models", property(no_listing))
+    return client, payloads
+
+
+@pytest.mark.parametrize("bind", [False, True])
+def test_chatnvidia_structured_call_sends_one_response_format_request(
+    monkeypatch: Any, bind: bool
+) -> None:
+    client, payloads = _nvidia_client_with_fake_transport(
+        monkeypatch, ['{"primary_key": ["order_id"]}']
+    )
+    llm = client.bind(max_tokens=32) if bind else client
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        llm, [HumanMessage(content="keys?")], _Keys
+    )
+
+    assert result == _Keys(primary_key=["order_id"])
+    assert len(payloads) == 1
+    assert payloads[0]["response_format"]["type"] == "json_schema"
+    assert payloads[0]["response_format"]["json_schema"]["name"] == "_Keys"
+    assert "guided_json" not in payloads[0]
+    assert "nvext" not in payloads[0]
+
+
+def test_a_rate_limit_on_a_chatnvidia_structured_call_is_retried(
+    monkeypatch: Any,
+) -> None:
+    client, payloads = _nvidia_client_with_fake_transport(
+        monkeypatch,
+        [Exception("[429] Too Many Requests"), '{"primary_key": ["id"]}'],
+    )
+    monkeypatch.setattr(llm_invoke.time, "sleep", lambda _seconds: None)
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="keys?")], _Keys
+    )
+
+    assert result == _Keys(primary_key=["id"])
+    assert len(payloads) == 2
+
+
+def test_other_clients_still_use_with_structured_output() -> None:
+    calls: list[tuple[Any, dict]] = []
+
+    class _Other:
+        def with_structured_output(self, schema: Any, **kwargs: Any) -> str:
+            calls.append((schema, kwargs))
+            return "structured"
+
+    assert (
+        llm_invoke._structured_output_runnable(_Other(), _Keys, {"method": "x"})
+        == "structured"
+    )
+    assert calls == [(_Keys, {"method": "x"})]
