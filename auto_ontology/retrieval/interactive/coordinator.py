@@ -124,10 +124,15 @@ def _apply_debug_seed(
         logger.info("Debug seed: wrong results — injecting targeted hints")
 
 
+def _submitted_sql(session: InteractiveSessionState) -> str:
+    """The SQL the grader evaluated, falling back to the generated SQL."""
+    return session.last_submitted_sql or session.path_state.get("sql_code") or ""
+
+
 def _previous_attempt_note(session: InteractiveSessionState) -> str:
     """The rejected SQL and the feedback `_apply_debug_seed` recorded, or ""."""
     feedback = session.path_state.get("error")
-    sql = (session.path_state.get("sql_code") or "").strip()
+    sql = _submitted_sql(session).strip()
     if not isinstance(feedback, str) or not feedback.strip() or not sql:
         return ""
     return (
@@ -159,6 +164,7 @@ def _apply_follow_up_seed(
         "sql_response_from_db",
     ):
         session.path_state.pop(key, None)
+    session.last_submitted_sql = ""
 
     # Carry the full Phase 1 KB union into Phase 2 Evidence generation,
     # then reset so Phase 2 accumulates its own entries fresh.
@@ -809,6 +815,7 @@ def step(
                 order_by_leading_aggregate(sql, _postgres_dialect(session)),
                 "debug order by the leading aggregate",
             )
+    session.last_submitted_sql = sql
     return SubmitSQLAction(sql=sql)
 
 
@@ -1049,4 +1056,4 @@ def apply_submit_result(session: InteractiveSessionState, result: dict) -> None:
     # contaminate round-1 debug turns with follow-up instruction / cross-round logic.
     if session.prior_round_question is None and result.get("phase_completed") == 1:
         session.prior_round_question = session.working_question
-        session.prior_round_sql = session.path_state.get("sql_code", "")
+        session.prior_round_sql = _submitted_sql(session)

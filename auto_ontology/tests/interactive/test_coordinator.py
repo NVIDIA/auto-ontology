@@ -104,8 +104,10 @@ def test_follow_up_seed_clears_sql_keys():
     sess = _make_session()
     sess.path_state["sql_code"] = "SELECT 1"
     sess.path_state["normalized_question"] = "old"
+    sess.last_submitted_sql = "SELECT 1"
     _apply_follow_up_seed(sess, follow_up_question="Show totals.")
     assert "sql_code" not in sess.path_state
+    assert sess.last_submitted_sql == ""
     assert "normalized_question" not in sess.path_state
 
 
@@ -295,6 +297,7 @@ def test_wrong_answer_debug_resubmits_the_opposite_numeric_type():
 
     assert action.sql == "SELECT CAST(AVG(x) AS DECIMAL) AS v FROM aliens"
     assert connector.executed == [action.sql]  # verified before it is submitted
+    assert sess.last_submitted_sql == action.sql
 
 
 def test_decimal_first_submit_retries_as_double_precision():

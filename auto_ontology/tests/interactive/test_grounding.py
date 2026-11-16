@@ -259,6 +259,20 @@ def test_a_debug_turn_sends_the_rejected_sql_and_its_feedback(
     assert sess.path_state["error"] in evidence
 
 
+def test_a_debug_turn_sends_the_submitted_sql_not_the_generated_one() -> None:
+    from auto_ontology.retrieval.interactive.coordinator import _apply_debug_seed
+
+    sess = _session()
+    sess.path_state["sql_code"] = "SELECT AVG(price) FROM orders"
+    sess.last_submitted_sql = "SELECT CAST(AVG(price) AS DECIMAL) FROM orders"
+    _apply_debug_seed(sess, debug_error=None)
+
+    evidence = _evidence_sent(sess)
+
+    assert "SELECT CAST(AVG(price) AS DECIMAL) FROM orders" in evidence
+    assert "SELECT AVG(price) FROM orders" not in evidence
+
+
 def test_a_first_turn_sends_no_previous_attempt() -> None:
     sess = _session()
     sess.path_state["error"] = {"type": "ValueError", "message": "boom"}
