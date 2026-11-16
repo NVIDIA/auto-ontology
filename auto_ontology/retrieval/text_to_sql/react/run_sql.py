@@ -91,6 +91,9 @@ class CatalogNames(Protocol):
     def columns(self, table: str, schema: str | None) -> list[str] | None:
         """Column names of *table*, or ``None`` when the catalog has no such table."""
 
+    def schemas_with(self, table: str) -> list[str]:
+        """The schemas that have a table named *table*."""
+
 
 class SchemaCatalog:
     """:class:`CatalogNames` over the catalog's in-memory :class:`Schema` objects."""
@@ -98,26 +101,47 @@ class SchemaCatalog:
     def __init__(self, schemas: dict[str, Any]):
         self._schemas = schemas
 
-    def _schema_for(self, table: str, schema: str | None) -> Any | None:
-        if schema:
-            for key, candidate in self._schemas.items():
-                if key.lower() == schema.lower() and candidate.table_exists(table):
-                    return candidate
-            return None
-        for candidate in self._schemas.values():
-            if candidate.table_exists(table):
-                return candidate
-        return None
+    def _owners(self, table: str, schema: str | None) -> list[Any]:
+        return [
+            candidate
+            for key, candidate in self._schemas.items()
+            if (not schema or (key or "").lower() == schema.lower())
+            and candidate.table_exists(table)
+        ]
 
     def columns(self, table: str, schema: str | None) -> list[str] | None:
-        owner = self._schema_for(table, schema)
-        if owner is None:
+        """Column names of *table*; of every copy when no *schema* picks one.
+
+        Which copy an unqualified name reads is the database's search path to
+        decide, so none is guessed here: a column any copy has is known, and
+        :func:`tables_not_shown` asks for the schema where it matters.
+        """
+        owners = self._owners(table, schema)
+        if not owners:
             return None
-        columns_map = getattr(owner, "columns_map", None)
-        if columns_map is not None:
-            return list(columns_map.get(table.lower(), {}))
-        node = owner.get_table_node(table)
-        return list(owner.tables_to_columns.get(node, []))
+        return list(dict.fromkeys(c for o in owners for c in _table_columns(o, table)))
+
+    def schemas_with(self, table: str) -> list[str]:
+        return [
+            key
+            for key, candidate in self._schemas.items()
+            if key and candidate.table_exists(table)
+        ]
+
+
+def _table_columns(owner: Any, table: str) -> list[str]:
+    columns_map = getattr(owner, "columns_map", None)
+    if columns_map is not None:
+        return list(columns_map.get(table.lower(), {}))
+    node = owner.get_table_node(table)
+    return list(owner.tables_to_columns.get(node, []))
+
+    def schemas_with(self, table: str) -> list[str]:
+        return [
+            key
+            for key, candidate in self._schemas.items()
+            if key and candidate.table_exists(table)
+        ]
 
 
 @dataclass
@@ -262,34 +286,45 @@ def catalog_for(ctx: ToolContext, connector: SQLDatabase) -> CatalogNames:
     return SchemaCatalog(ctx.schemas[database_name])
 
 
-def tables_not_shown(statement: exp.Expression, ctx: ToolContext) -> list[str]:
+def tables_not_shown(
+    statement: exp.Expression, ctx: ToolContext, catalog: CatalogNames
+) -> list[str]:
     """Catalog tables *statement* reads that no ``retrieve`` result named.
 
     The prompt tells the model to use only what ``retrieve`` showed, and this
     is what holds it to that: a real table it never retrieved comes without
     its description, its term or the SIMILAR line that says it is one of two
-    copies.
+    copies. A name is matched as the table it resolves to, so neither side can
+    stand in for a same-named table in another schema.
     """
     derived = _derived_names(statement)
-    problems = [
-        f"Not in view: {'.'.join(p for p in (table.db, table.name) if p)}. "
-        "Retrieve it (its exact name works) before using it."
-        for table in statement.find_all(exp.Table)
-        if table.name
-        and table.name.lower() not in derived
-        and not ctx.was_shown(table.db or None, table.name)
-    ]
+    problems = []
+    for table in statement.find_all(exp.Table):
+        if not table.name or table.name.lower() in derived:
+            continue
+        owners = catalog.schemas_with(table.name)
+        if ctx.was_shown(table.db or None, table.name, owners):
+            continue
+        if not table.db and len(owners) > 1:
+            problems.append(
+                f"Ambiguous: {table.name} is in {', '.join(sorted(owners))}. "
+                "Name its schema."
+            )
+            continue
+        problems.append(
+            f"Not in view: {'.'.join(p for p in (table.db, table.name) if p)}. "
+            "Retrieve it (its exact name works) before using it."
+        )
     return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
 
 
 def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResult:
     """:func:`check_sql` against *connector*'s catalog, then against what is in view."""
-    check = check_sql(
-        sql, getattr(connector, "dialect", None), catalog_for(ctx, connector)
-    )
+    catalog = catalog_for(ctx, connector)
+    check = check_sql(sql, getattr(connector, "dialect", None), catalog)
     if check.problems or check.statement is None:
         return check
-    return CheckResult(tables_not_shown(check.statement, ctx), check.statement)
+    return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
 
 
 def connector_for(ctx: ToolContext) -> SQLDatabase | None:

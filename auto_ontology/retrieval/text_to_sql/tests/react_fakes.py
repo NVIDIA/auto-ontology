@@ -14,13 +14,25 @@ from langchain_core.messages import AIMessage
 
 
 class FakeCatalog:
-    """Table name → columns, standing in for the catalog's Schema objects."""
+    """Table name → columns, standing in for the catalog's Schema objects.
 
-    def __init__(self, tables: dict[str, list[str]]):
+    *owners* maps a table name to the schemas that have it; a table not in it
+    belongs to no named schema.
+    """
+
+    def __init__(
+        self,
+        tables: dict[str, list[str]],
+        owners: dict[str, list[str]] | None = None,
+    ):
         self._tables = {name.lower(): cols for name, cols in tables.items()}
+        self._owners = {name.lower(): s for name, s in (owners or {}).items()}
 
     def columns(self, table: str, schema: str | None) -> list[str] | None:
         return self._tables.get(table.lower())
+
+    def schemas_with(self, table: str) -> list[str]:
+        return self._owners.get(table.lower(), [])
 
 
 class SQLiteConnector:

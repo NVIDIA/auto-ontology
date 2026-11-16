@@ -166,17 +166,87 @@ def test_run_sql_refuses_a_table_retrieve_never_named(
     assert ctx.sql_runs == 0
 
 
+class _StubSchema:
+    def __init__(self, tables: dict[str, list[str]]):
+        self.columns_map = {t: dict.fromkeys(cols) for t, cols in tables.items()}
+
+    def table_exists(self, table: str) -> bool:
+        return table.lower() in self.columns_map
+
+
+def test_schema_catalog_guesses_no_copy_for_an_unqualified_name() -> None:
+    catalog = tool.SchemaCatalog(
+        {
+            "sales": _StubSchema({"orders": ["order_id", "amount"]}),
+            "archive": _StubSchema({"orders": ["order_id", "archived_at"]}),
+            "crm": _StubSchema({"customers": ["customer_id"]}),
+        }
+    )
+
+    assert catalog.columns("orders", "archive") == ["order_id", "archived_at"]
+    assert catalog.columns("orders", None) == ["order_id", "amount", "archived_at"]
+    assert catalog.columns("customers", None) == ["customer_id"]
+    assert catalog.columns("customers", "sales") is None
+    assert sorted(catalog.schemas_with("orders")) == ["archive", "sales"]
+
+
 @pytest.mark.parametrize(
-    "schema, expected",
-    [(None, True), ("sales", True), ("SALES", True), ("archive", False)],
+    "shown, schema, owners, expected",
+    [
+        ("sales", "sales", ["archive", "sales"], True),
+        ("sales", "SALES", ["archive", "sales"], True),
+        ("sales", "archive", ["archive", "sales"], False),
+        ("sales", None, ["sales"], True),
+        ("sales", None, ["archive", "sales"], False),
+        ("sales", None, [], False),
+        (None, "sales", ["sales"], True),
+        (None, "archive", ["archive", "sales"], False),
+        (None, "archive", [], False),
+        (None, None, ["archive", "sales"], True),
+        (None, None, [], True),
+    ],
 )
-def test_was_shown_matches_the_schema_only_when_both_name_one(
-    schema: str | None, expected: bool
+def test_was_shown_matches_the_table_each_name_resolves_to(
+    shown: str | None, schema: str | None, owners: list[str], expected: bool
 ) -> None:
     ctx = ToolContext(retriever=None, connectors=[])
-    ctx.show_table("sales", "Orders")
+    ctx.show_table(shown, "Orders")
 
-    assert ctx.was_shown(schema, "orders") is expected
+    assert ctx.was_shown(schema, "orders", owners) is expected
+
+
+@pytest.mark.parametrize(
+    "shown, sql, problem",
+    [
+        (
+            (None, "orders"),
+            "SELECT amount FROM archive.orders",
+            "Not in view: archive.orders. "
+            "Retrieve it (its exact name works) before using it.",
+        ),
+        (
+            ("archive", "orders"),
+            "SELECT amount FROM orders",
+            "Ambiguous: orders is in archive, sales. Name its schema.",
+        ),
+    ],
+)
+def test_run_sql_refuses_a_same_named_table_in_another_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    shown: tuple[str | None, str],
+    sql: str,
+    problem: str,
+) -> None:
+    connector = SQLiteConnector(SHOP_SCRIPT)
+    catalog = FakeCatalog(SHOP_CATALOG, {"orders": ["sales", "archive"]})
+    monkeypatch.setattr(tool, "catalog_for", lambda *_: catalog)
+    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx.show_table(*shown)
+
+    text = tool.run_sql(ctx, sql)
+
+    assert text.splitlines() == ["Not run. Fix these first:", f"- {problem}"]
+    assert connector.executed == []
 
 
 def test_run_sql_returns_rows(monkeypatch: pytest.MonkeyPatch) -> None:

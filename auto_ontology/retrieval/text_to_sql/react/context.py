@@ -11,6 +11,7 @@ the same calls — which is what an RL environment needs from them.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -81,10 +82,20 @@ class ToolContext:
         if name:
             self.shown_tables.add(((schema or "").lower(), name.lower()))
 
-    def was_shown(self, schema: str | None, name: str) -> bool:
-        """Whether a ``retrieve`` result named *name*; *schema* only when both have one."""
-        wanted_schema, wanted = (schema or "").lower(), name.lower()
+    def was_shown(
+        self, schema: str | None, name: str, owners: Collection[str] = ()
+    ) -> bool:
+        """Whether a ``retrieve`` result named the table *schema*.*name* is.
+
+        *owners* are the schemas the catalog has a table *name* in. A name
+        without a schema, on either side, stands for its one owner. With more
+        than one owner it matches only another name without a schema: the
+        database's search path picks between them, not this check.
+        """
+        wanted = name.lower()
+        owner_set = {o.lower() for o in owners}
+        only = next(iter(owner_set)) if len(owner_set) == 1 else ""
+        target = (schema or "").lower() or only
         return any(
-            shown == wanted and (not wanted_schema or not s or s == wanted_schema)
-            for s, shown in self.shown_tables
+            shown == wanted and (s or only) == target for s, shown in self.shown_tables
         )
