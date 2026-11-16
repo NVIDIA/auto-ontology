@@ -91,7 +91,7 @@ def test_crossing_fk_moves_to_the_twin_in_its_own_family() -> None:
     row = _fk_row("NEW_ROOMS", "NEW_BUILDING_KEY", "OLD_BUILDING", "OLD_BUILDING_KEY")
     with (
         patch.object(tf, "fetch_semantic_fk_join_groups", return_value=[row]),
-        patch.object(tf, "find_column_id_by_table_and_name", return_value="col:twin"),
+        patch.object(tf, "find_column_id_in_table", return_value="col:twin"),
         patch.object(
             tf, "find_column_attribute_by_column_id", return_value="attr:twin"
         ),
@@ -112,12 +112,36 @@ def test_crossing_fk_moves_to_the_twin_in_its_own_family() -> None:
     )
 
 
+def test_twin_column_is_looked_up_in_the_twin_table_not_by_name() -> None:
+    """A same-named table in another schema must not answer for the twin."""
+    tables = _catalog()
+    for table in tables:
+        table["id"] = f"warehouse.{table['name']}"
+    [pair] = tf.detect_family_pairs(tables)
+    row = _fk_row("NEW_ROOMS", "NEW_BUILDING_KEY", "OLD_BUILDING", "OLD_BUILDING_KEY")
+    row["source_table_id"] = "warehouse.NEW_ROOMS"
+    row["target_table_id"] = "warehouse.OLD_BUILDING"
+    with (
+        patch.object(tf, "fetch_semantic_fk_join_groups", return_value=[row]),
+        patch.object(tf, "find_column_id_in_table", return_value="col:twin") as find,
+        patch.object(
+            tf, "find_column_attribute_by_column_id", return_value="attr:twin"
+        ),
+        patch.object(tf, "merge_semantic_fk", return_value=True),
+        patch.object(tf, "set_semantic_fk_join_default"),
+        patch.object(tf, "delete_semantic_fk"),
+    ):
+        tf.keep_semantic_fks_in_family("warehouse", [pair], _connector([8, 9]))
+
+    find.assert_called_once_with("warehouse.NEW_BUILDING", "NEW_BUILDING_KEY")
+
+
 def test_crossing_fk_is_dropped_when_the_twin_covers_less() -> None:
     [pair] = tf.detect_family_pairs(_catalog())
     row = _fk_row("NEW_ROOMS", "NEW_BUILDING_KEY", "OLD_BUILDING", "OLD_BUILDING_KEY")
     with (
         patch.object(tf, "fetch_semantic_fk_join_groups", return_value=[row]),
-        patch.object(tf, "find_column_id_by_table_and_name", return_value="col:twin"),
+        patch.object(tf, "find_column_id_in_table", return_value="col:twin"),
         patch.object(
             tf, "find_column_attribute_by_column_id", return_value="attr:twin"
         ),
@@ -153,7 +177,7 @@ def _keep_case(
     row = _fk_row("NEW_ROOMS", "NEW_BUILDING_KEY", "OLD_BUILDING", "OLD_BUILDING_KEY")
     with (
         patch.object(tf, "fetch_semantic_fk_join_groups", return_value=[row]),
-        patch.object(tf, "find_column_id_by_table_and_name", return_value="col:twin"),
+        patch.object(tf, "find_column_id_in_table", return_value="col:twin"),
         patch.object(tf, "find_column_attribute_by_column_id", return_value=attr),
         patch.object(tf, "merge_semantic_fk", return_value=merged),
         patch.object(tf, "set_semantic_fk_join_default"),

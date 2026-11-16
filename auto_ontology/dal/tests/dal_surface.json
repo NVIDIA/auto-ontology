@@ -75,6 +75,7 @@
     "fetch_tables_for_schema": "(schema_id: 'str', *, database_name: 'str | None' = None, zone_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
     "fill_empty_descriptions": "(table_descriptions: 'dict[str, str]', column_descriptions: 'dict[str, str]') -> 'list[str]'",
     "find_column_id_by_table_and_name": "(table_name: 'str', column_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
+    "find_column_id_in_table": "(table_id: 'str', column_name: 'str') -> 'str | None'",
     "find_table_id_by_name": "(table_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
     "find_table_key_columns": "(table_name: 'str', database_name: 'str | None' = None) -> 'dict[str, list[str]]'",
     "mark_table_as_junction": "(table_id: 'str') -> 'None'",

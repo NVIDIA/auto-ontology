@@ -30,7 +30,7 @@ from auto_ontology.dal.attributes import (
 )
 from auto_ontology.dal.datasources import (
     fetch_table_column_names,
-    find_column_id_by_table_and_name,
+    find_column_id_in_table,
 )
 from auto_ontology.utils.sql_identifiers import quoted_identifier
 
@@ -149,9 +149,7 @@ def keep_semantic_fks_in_family(
         index, target_prefix = target
         if prefix_index.get(source_prefix) != index or source_prefix == target_prefix:
             continue
-        outcome, detail = _move_to_twin(
-            database_name, row, pairs[index], source_prefix, connector
-        )
+        outcome, detail = _move_to_twin(row, pairs[index], source_prefix, connector)
         edge = (
             f"{row['source_table_name']}.{row['source_column_name']} -> "
             f"{row['target_table_name']}.{row['target_column_name']}"
@@ -171,7 +169,6 @@ def keep_semantic_fks_in_family(
 
 
 def _move_to_twin(
-    database_name: str,
     row: dict[str, Any],
     pair: FamilyPair,
     source_prefix: str,
@@ -204,9 +201,7 @@ def _move_to_twin(
         return _Outcome.DROP, "no twin column"
     if connector is None:
         return _Outcome.KEEP, "no connector to compare coverage"
-    column_id = find_column_id_by_table_and_name(
-        twin_table["name"], twin_column, database_name
-    )
+    column_id = find_column_id_in_table(str(twin_table["id"]), twin_column)
     attr_id = find_column_attribute_by_column_id(column_id) if column_id else None
     if not attr_id:
         return _Outcome.KEEP, "twin column has no attribute"
