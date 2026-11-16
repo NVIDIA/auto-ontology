@@ -362,6 +362,34 @@ def test_a_shortened_table_tags_its_matched_column() -> None:
     assert "  c1 INT" not in text
 
 
+def test_a_shortened_wide_table_respects_the_column_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_short_table_block must cap like _shown_columns, not render every match.
+
+    Regression test: the fallback used when the full table block does not
+    fit the observation budget was selecting matched/key/semantic-FK columns
+    with no cap at all, so a wide table with many matches could make the
+    "shortened" block bigger than the full, capped one it is meant to
+    shrink -- and, past the observation limit, get dropped from the
+    response entirely instead of showing an abbreviated version.
+    """
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_COLUMNS_PER_TABLE", "3")
+    wide_table = {
+        "schema_name": "crm",
+        "name": "wide",
+        "pk": ["c1"],
+        "columns": [{"name": f"c{i}", "data_type": "TEXT"} for i in range(10)],
+    }
+    matched = {f"c{i}" for i in range(10)}
+
+    text = tool._short_table_block(wide_table, matched)
+    kept = [line for line in text.splitlines() if line.strip().startswith("c")]
+
+    assert len(kept) == 3
+    assert "… 7 more columns not shown" in text
+
+
 def test_wide_tables_show_matched_key_and_reference_columns(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
