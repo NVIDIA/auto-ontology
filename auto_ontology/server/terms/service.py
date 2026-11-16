@@ -200,7 +200,7 @@ def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> N
             if attr_id:
                 vdb.delete_by_id(attr_id)
 
-    embedder.embed_term(term, column_attrs, embed_attrs=refresh_dependent_attrs)
+    embedder.embed_term(term, column_attrs if refresh_dependent_attrs else [])
 
     if refresh_dependent_attrs:
         embed_params = get_embed_params()
