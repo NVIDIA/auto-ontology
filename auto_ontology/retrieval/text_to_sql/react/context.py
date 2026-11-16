@@ -29,9 +29,10 @@ class ToolContext:
     question that never drafts SQL should not pay for it.
 
     ``join_paths`` keeps the catalog joins ``retrieve`` found between tables in
-    view, in the shape KumoRFM links its graph with. ``question`` and
-    ``prediction_llm`` are what ``predict`` hands KumoRFM: the question as the
-    user asked it, not as the model rephrased it.
+    view, in the shape KumoRFM links its graph with. ``question``,
+    ``prediction_llm`` and ``custom_prompts`` are what ``predict`` hands
+    KumoRFM: the question as the user asked it, not as the model rephrased it,
+    and the organization's instructions and glossary the episode's model sees.
 
     ``row_counts`` caches the SIMILAR-line counts for the episode;
     ``counts_left`` is how many more the current ``retrieve`` call may run.
@@ -63,6 +64,7 @@ class ToolContext:
     information_retrieved: bool = False
     question: str = ""
     prediction_llm: Any = None
+    custom_prompts: str = ""
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
     join_paths: list[dict[str, Any]] = field(default_factory=list)

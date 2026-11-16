@@ -75,6 +75,7 @@ class ReactSQLAgent(BaseAgent):
             information_answers=not state.get("calculation_only"),
             question=get_standalone_question(state),
             prediction_llm=state.get("llm"),
+            custom_prompts=state.get("custom_prompts") or "",
         )
         connector = connector_for(ctx)
         result = run_episode(

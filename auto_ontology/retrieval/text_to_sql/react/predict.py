@@ -123,7 +123,12 @@ def predict(ctx: ToolContext) -> tuple[str, Prediction | None]:
         return _refused(ctx, str(context.get("response") or "the graph was refused"))
 
     try:
-        response = run_prediction(ctx.question, ctx.prediction_llm, context)
+        response = run_prediction(
+            ctx.question,
+            ctx.prediction_llm,
+            context,
+            organization=ctx.custom_prompts,
+        )
     except Exception as error:  # noqa: BLE001
         logger.exception("KumoRFM prediction failed")
         response = {

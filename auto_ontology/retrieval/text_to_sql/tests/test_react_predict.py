@@ -44,8 +44,9 @@ def kumo_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["build"] = {"tables": tables, "join_paths": join_paths}
         return seen["result"]
 
-    def run(question, llm, context):
+    def run(question, llm, context, *, organization=""):
         seen["run"] = question
+        seen["organization"] = organization
         return PREDICTED
 
     monkeypatch.setattr(kumo, "PredictionContext", _Built)
@@ -111,6 +112,17 @@ def test_predict_builds_over_the_tables_in_view(kumo_calls: dict[str, Any]) -> N
     assert kumo_calls["build"]["tables"] == [CUSTOMERS]
     assert kumo_calls["build"]["join_paths"] == ctx.join_paths
     assert kumo_calls["run"] == "Which customers will churn next month?"
+
+
+def test_predict_hands_kumo_the_organization_context(
+    kumo_calls: dict[str, Any],
+) -> None:
+    glossary = "GLOSSARY\n- MRR: monthly recurring revenue"
+    ctx = _ctx(seen_tables={"t1": CUSTOMERS}, custom_prompts=glossary)
+
+    predict(ctx)
+
+    assert kumo_calls["organization"] == glossary
 
 
 def test_a_refused_build_is_an_observation(kumo_calls: dict[str, Any]) -> None:

@@ -1533,6 +1533,7 @@ def generate_pql(
     table_names: dict[str, str] | None = None,
     available_entity_ids: dict[str, list[Any]] | None = None,
     examples: list[dict[str, str]] | None = None,
+    organization: str = "",
 ) -> PqlGenerationResult:
     """Generate a PQL, validate it cheaply against the graph, scope entities, and predict (with repair).
 
@@ -1541,6 +1542,7 @@ def generate_pql(
 
     ``examples`` are verified ``{question, query}`` PQL few-shots (retrieved from the
     ``PqlAnalysis`` corpus); they populate the prompt's "Verified examples" section.
+    ``organization`` is the deployment's instructions and glossary, for every attempt.
     """
     examples = examples or []
     docs: list[str] = []
@@ -1575,6 +1577,7 @@ def generate_pql(
             prev_pql=prev_pql,
             prev_error=prev_error,
             dialect=dialect,
+            organization=organization,
         )
         result.attempts = attempt
         try:
