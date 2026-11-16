@@ -35,7 +35,7 @@ switched on, this is the module with nowhere to pass it.
 
 from __future__ import annotations
 
-import re
+import unicodedata
 from typing import Any
 
 from sqlalchemy import (
@@ -225,7 +225,39 @@ _SEPARATORS = (
 #: would also match ``orderXid``.
 _LIKE_ESCAPE = "\\"
 
-_WORD_RE = re.compile(r"[^\W_]+")
+_MARK_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
+
+
+def _word_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    current: list[str] = []
+
+    for char in text:
+        if _is_word_char(char):
+            current.append(char)
+            continue
+        if current:
+            tokens.append("".join(current))
+            current = []
+
+    if current:
+        tokens.append("".join(current))
+
+    return tokens
+
+
+def _is_word_char(char: str) -> bool:
+    """True for a letter, a digit, or a mark that sits inside a word.
+
+    ``str.isalnum`` covers the first two in every script but not the
+    dependent vowel signs and other marks Devanagari, Thai or Arabic write
+    inside a word: ``कला`` would otherwise tokenize as ``कल``, and ``कल``
+    would then match the longer synonym.
+    """
+    if not char:
+        return False
+
+    return char.isalnum() or unicodedata.category(char) in _MARK_CATEGORIES
 
 # Typed NULLs, so every arm of the UNION agrees on a column's type. Postgres
 # rejects a bare NULL in a union branch it cannot infer a type for, and these
@@ -280,7 +312,7 @@ def synonym_word_tokens(search_term: str) -> list[str]:
     name and description match, synonyms are never matched on a substring.
     """
     cleaned = filter_special_characters(search_term).lower()
-    return _WORD_RE.findall(cleaned)
+    return _word_tokens(cleaned)
 
 
 def synonym_matches_tokens(synonym: str, tokens: list[str]) -> bool:
@@ -294,10 +326,25 @@ def synonym_matches_tokens(synonym: str, tokens: list[str]) -> bool:
     if not tokens:
         return False
     text = synonym.lower()
-    return all(
-        re.search(rf"(^|[\W_]){re.escape(tok)}([\W_]|$)", text) is not None
-        for tok in tokens
-    )
+    return all(_whole_word(text, token) for token in tokens)
+
+
+def _whole_word(text: str, token: str) -> bool:
+    """True when *token* appears in *text* and both neighbours are separators."""
+    start = 0
+
+    while True:
+        index = text.find(token, start)
+        if index < 0:
+            return False
+
+        end = index + len(token)
+        before = text[index - 1] if index else ""
+        after = text[end] if end < len(text) else ""
+        if not _is_word_char(before) and not _is_word_char(after):
+            return True
+
+        start = index + 1
 
 
 def _like_pattern(token: str) -> str:

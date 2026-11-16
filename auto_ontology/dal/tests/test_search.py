@@ -1320,6 +1320,7 @@ def test_a_query_that_matches_nothing_builds_no_statements() -> None:
         ("顧客", ["顧客"]),
         ("お客様", ["お客様"]),
         ("клиент", ["клиент"]),
+        ("कला", ["कला"]),
         ("Société", ["société"]),
         ("São Paulo", ["são", "paulo"]),
         ("Business Unit", ["business", "unit"]),
@@ -1345,6 +1346,8 @@ def test_synonym_tokens_survive_non_latin_scripts(
         ("Business Unit", ["uni"], False),
         ("Générale", ["néral"], False),
         ("Générale", ["générale"], True),
+        ("कला", ["कल"], False),
+        ("कला", ["कला"], True),
     ],
 )
 def test_synonyms_in_any_script_match_whole_words(
