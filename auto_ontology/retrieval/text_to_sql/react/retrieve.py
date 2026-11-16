@@ -323,8 +323,16 @@ def _sample_values(values: Any) -> str:
     return ", ".join(shown)
 
 
-def _column_line(column: dict) -> str:
+#: Tags a column the search matched, so a table that shows every column still
+#: says which of them the question is about -- opaque names give no other hint.
+_MATCH_MARK = " ← matches the query"
+
+
+def _column_line(column: dict, matched: set[str] | frozenset[str] = frozenset()) -> str:
+    """One column; *matched* is the lowercase names the search matched."""
     parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
+    if str(column.get("name") or "").lower() in matched:
+        parts.append(_MATCH_MARK)
     details = []
     if column.get("description"):
         details.append(_clip(column["description"], _MAX_DESCRIPTION_CHARS))
@@ -381,7 +389,8 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
         lines = [header + " (shown earlier; matched columns only)"]
         return "\n".join(lines + [_column_line(c) for c in columns])
     columns, hidden = _shown_columns(table, matched)
-    lines = [header] + [_column_line(c) for c in columns]
+    lowered = {m.lower() for m in matched}
+    lines = [header] + [_column_line(c, lowered) for c in columns]
     if hidden:
         lines.append(
             f"  … {hidden} more columns not shown; retrieve with a narrower query "
@@ -413,6 +422,8 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     lines = [header + " (shortened to fit)"]
     for column in kept:
         line = f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()
+        if str(column.get("name") or "").lower() in lowered:
+            line += _MATCH_MARK
         if column.get("semantic_fk"):
             line += f" — references {column['semantic_fk']}"
         lines.append(line)

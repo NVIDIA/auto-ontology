@@ -183,7 +183,10 @@ def test_second_search_joins_new_tables_to_ones_already_shown(calls: dict) -> No
     text = tool.retrieve(ctx, "customer status")
 
     assert "TABLE crm.customers" in text
-    assert "status TEXT — values: 'ACTIVE', 'CHURNED', 'PENDING'" in text
+    assert (
+        "status TEXT ← matches the query — values: 'ACTIVE', 'CHURNED', 'PENDING'"
+        in text
+    )
     assert (
         "JOIN crm.customers ↔ sales.orders: "
         "sales.orders.cust_ref = crm.customers.customer_id"
@@ -226,7 +229,10 @@ def test_an_attribute_brings_back_its_columns_table(calls: dict) -> None:
     text = tool.retrieve(_ctx(), "customer status")
 
     assert "TABLE crm.customers" in text
-    assert "status TEXT — values: 'ACTIVE', 'CHURNED', 'PENDING'" in text
+    assert (
+        "status TEXT ← matches the query — values: 'ACTIVE', 'CHURNED', 'PENDING'"
+        in text
+    )
     assert "ATTRIBUTE" not in text
 
 
@@ -312,6 +318,41 @@ def test_kinds_narrow_the_search(calls: dict) -> None:
 
 def test_unknown_kinds_search_everything() -> None:
     assert len(tool.resolve_kinds(["nonsense"])) == len(tool.resolve_kinds(None))
+
+
+_OPAQUE_TABLE = {
+    "schema_name": "crm",
+    "name": "customers",
+    "columns": [
+        {"name": "c1", "data_type": "INT"},
+        {"name": "c_nm", "data_type": "TEXT"},
+        {"name": "fld_07", "data_type": "TEXT"},
+    ],
+}
+
+
+def test_a_matched_column_is_tagged_and_the_others_are_not() -> None:
+    text = tool._table_block(_OPAQUE_TABLE, {"C_NM"}, False)
+
+    assert text.splitlines() == [
+        "TABLE crm.customers",
+        "  c1 INT",
+        "  c_nm TEXT ← matches the query",
+        "  fld_07 TEXT",
+    ]
+
+
+def test_no_column_is_tagged_when_the_search_matched_none() -> None:
+    text = tool._table_block(_OPAQUE_TABLE, set(), False)
+
+    assert "matches the query" not in text
+
+
+def test_a_shortened_table_tags_its_matched_column() -> None:
+    text = tool._short_table_block(_OPAQUE_TABLE, {"c_nm"})
+
+    assert "  c_nm TEXT ← matches the query" in text.splitlines()
+    assert "  c1 INT" not in text
 
 
 def test_wide_tables_show_matched_key_and_reference_columns(
@@ -531,7 +572,10 @@ def test_a_table_the_limit_cut_comes_back_in_full(
 
     assert "TABLE crm.customers" not in cut
     assert "shown earlier" not in again
-    assert "status TEXT — values: 'ACTIVE', 'CHURNED', 'PENDING'" in again
+    assert (
+        "status TEXT ← matches the query — values: 'ACTIVE', 'CHURNED', 'PENDING'"
+        in again
+    )
 
 
 def test_a_table_too_long_for_the_limit_is_shown_short(
