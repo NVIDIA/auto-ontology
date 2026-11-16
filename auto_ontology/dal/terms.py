@@ -1069,20 +1069,6 @@ def _embedding_attrs_for_table(table_id: str):
     )
 
 
-def fetch_column_attributes_for_embedding(
-    attribute_ids: list[str],
-) -> list[dict[str, Any]]:
-    """ColumnAttributes by id, with the fields their embedding text needs."""
-    if not attribute_ids:
-        return []
-    rows = store().query_read(
-        _attribute_embedding_select()
-        .where(s.column_attribute.c.id.in_(attribute_ids))
-        .order_by(s.column_attribute.c.id)
-    )
-    return [dict(r) for r in rows]
-
-
 def fetch_terms_and_attributes_for_table(
     table_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
