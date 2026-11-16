@@ -231,6 +231,25 @@ def test_catalog_for_loads_only_the_connectors_database(
     }
 
 
+def test_a_database_with_no_schemas_gets_an_empty_catalog_not_every_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*_args: object) -> None:
+        raise AssertionError("must not load schemas for a database that has none")
+
+    monkeypatch.setattr(tool, "fetch_schema_ids_for_database", lambda _db: [])
+    monkeypatch.setattr(tool, "fetch_all_schema_ids", lambda: ["schema-other"])
+    monkeypatch.setattr(tool, "get_schemas_by_ids", fail)
+    connector = SQLiteConnector(SHOP_SCRIPT)
+    connector.database_name = "empty_db"
+    ctx = ToolContext(None, [connector])
+
+    catalog = tool.catalog_for(ctx, connector)
+
+    assert ctx.schemas == {"empty_db": {}}
+    assert catalog.columns("orders", None) is None
+
+
 def test_catalog_for_falls_back_to_every_schema_without_a_database_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

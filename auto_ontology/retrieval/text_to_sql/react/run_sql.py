@@ -250,12 +250,15 @@ def catalog_for(ctx: ToolContext, connector: SQLDatabase) -> CatalogNames:
     """
     database_name = getattr(connector, "database_name", None)
     if database_name not in ctx.schemas:
-        schema_ids = (
-            fetch_schema_ids_for_database(database_name) if database_name else None
-        )
-        ctx.schemas[database_name] = get_schemas_by_ids(
-            schema_ids or fetch_all_schema_ids()
-        )
+        if not database_name:
+            schemas = get_schemas_by_ids(fetch_all_schema_ids())
+        elif schema_ids := fetch_schema_ids_for_database(database_name):
+            schemas = get_schemas_by_ids(schema_ids)
+        else:
+            # A named database with no schemas has no tables. It must not borrow
+            # every other database's: the loader reads an empty id list as "all".
+            schemas = {}
+        ctx.schemas[database_name] = schemas
     return SchemaCatalog(ctx.schemas[database_name])
 
 
