@@ -13,7 +13,6 @@ import time
 from auto_ontology.semantic.attribute_descriptions import describe_column_attributes
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
-from auto_ontology.semantic.catalog_descriptions import describe_catalog
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
@@ -132,11 +131,6 @@ def _run_semantic_compilation(
     described_count = describe_column_attributes(database_name)
     logger.info("ColumnAttributes described: %d", described_count)
 
-    logger.info("=" * 60)
-    logger.info("Describing tables and columns, re-embedding the catalog…")
-    logger.info("=" * 60)
-    catalog_described_count = describe_catalog(database_name)
-
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
@@ -148,8 +142,7 @@ def _run_semantic_compilation(
         "%d table(s), %d term family(ies), %d semantic FK edge(s), "
         "%d unmatched FK column(s) attached, "
         "%d SqlAttribute(s), %d bridge table(s), "
-        "%d ColumnAttribute(s) described, "
-        "%d catalog description(s) written in %.1fs",
+        "%d ColumnAttribute(s) described in %.1fs",
         database_name,
         count,
         family_count,
@@ -158,7 +151,6 @@ def _run_semantic_compilation(
         attr_count,
         bridge_table_count,
         described_count,
-        catalog_described_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)
