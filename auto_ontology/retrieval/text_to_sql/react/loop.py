@@ -271,6 +271,7 @@ def run_episode(
             trajectory.append({"role": "human", "content": nudge})
             continue
         nudges = 0
+        answered_over_budget = False
 
         for call in tool_calls:
             name = call.get("name") or ""
@@ -278,7 +279,9 @@ def run_episode(
             key = _call_key(name, args)
             answer: Submission | Prediction | None
             answers = prompts.is_answer(name, args)
-            if calls >= budget and not answers:
+            if calls >= budget and (not answers or answered_over_budget):
+                # Past the budget a reply gets one answer attempt; each attempt
+                # can run SQL, so further ones in the same reply are refused.
                 observation, answer = (prompts.out_of_calls_for(mode), None)
             elif key in made and not answers:
                 # Counted though not run: otherwise a model that repeats one
@@ -289,6 +292,8 @@ def run_episode(
                     None,
                 )
             else:
+                if calls >= budget:
+                    answered_over_budget = True
                 made.add(key)
                 calls += 1
                 observation, answer = _dispatch(ctx, name, args, offered)

@@ -164,6 +164,33 @@ def test_budget_exhausted_without_submit(
     assert result.reason == "budget_exhausted"
 
 
+def test_one_answer_attempt_per_reply_after_the_budget(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="a")),
+            _reply(
+                call("submit", "2", sql="SELECT nope FROM orders", response="x"),
+                call("submit", "3", sql="SELECT nope2 FROM orders", response="x"),
+                call("submit", "4", sql=FINAL_SQL, response="x"),
+            ),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.submission is None
+    assert result.reason == "budget_exhausted"
+    assert result.tool_calls == 2
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[1].startswith("Not accepted.")
+    assert (
+        observations[2] == observations[3] == prompts.out_of_calls_for(EpisodeMode.SQL)
+    )
+
+
 def test_model_that_never_calls_a_tool_gives_up(ctx: ToolContext) -> None:
     model = ScriptedModel([AIMessage(content="hmm")] * 3)
 
