@@ -497,3 +497,19 @@ def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -
     monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
 
     assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
+
+
+def test_chatnvidia_client_gets_the_configured_timeout(monkeypatch: Any) -> None:
+    # ChatNVIDIA sends its own timeout (default 60 s) with every request, so
+    # LLM_INVOKE_TIMEOUT_S only takes effect if it is passed to the client.
+    monkeypatch.setattr(llm_invoke, "LLM_INVOKE_TIMEOUT_S", 321)
+
+    client = llm_invoke._build_client(
+        model="nvidia/some-model",
+        api_key="nvapi-test",
+        base_url="http://localhost:9/v1",
+        temperature=0.0,
+        max_tokens=16,
+    )
+
+    assert client._client.timeout == 321

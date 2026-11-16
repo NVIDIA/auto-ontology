@@ -249,6 +249,9 @@ def _build_client(
         base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        # ChatNVIDIA's client passes its own timeout (default 60 s) on every
+        # request, which takes precedence over _TimeoutSession's default below.
+        timeout=LLM_INVOKE_TIMEOUT_S,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
