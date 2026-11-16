@@ -366,6 +366,25 @@ def test_tables_past_the_table_limit_are_named(
     assert text.endswith("retrieve one by name to see it: crm.customers")
 
 
+def test_a_table_shown_shortened_is_not_named_again_past_the_limit(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TABLES_PER_RETRIEVE", "1")
+    monkeypatch.setattr(
+        tool, "_resolve_tables", lambda ctx, hits: (["t-orders", "t-customers"], {})
+    )
+    ctx = _ctx()
+    # What an earlier, cramped result leaves behind: the table was named in a
+    # shortened block, so it is shown but not in ``seen_tables``.
+    ctx.show_table("crm", "customers")
+
+    text = tool.retrieve(ctx, "customers")
+
+    assert "TABLE sales.orders" in text
+    assert "TABLE crm.customers" not in text
+    assert "ALSO FOUND" not in text
+
+
 def test_empty_query_is_refused(calls: dict) -> None:
     assert tool.retrieve(_ctx(), "  ").startswith("Error: query is empty")
 

@@ -622,7 +622,14 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if tid in fetched and _in_database(ctx, fetched[tid])
     ]
     new_tables = found[: config.max_tables_per_retrieve()]
-    past_limit = [_qualified(t) for t in found[config.max_tables_per_retrieve() :]]
+    # A table the model was already shown, shortened or named on a join route, is
+    # not "also found": it is not in ``seen_tables`` (that holds tables shown in
+    # full), but listing it again would tell the model it has not met it.
+    past_limit = [
+        _qualified(t)
+        for t in found[config.max_tables_per_retrieve() :]
+        if not ctx.was_shown(t.get("schema_name"), str(t.get("name")))
+    ]
     revisited = [
         ctx.seen_tables[tid]
         for tid in table_ids
