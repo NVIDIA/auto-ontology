@@ -37,6 +37,11 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
         "retrieve",
         lambda _ctx, query, kinds=None: f"TABLE orders (for {query})",
     )
+    # The real lookup needs a retriever; one that raised would also leave the
+    # information flag unset, which the answer-without-SQL tests depend on.
+    monkeypatch.setattr(
+        loop, "information", lambda _ctx, query, kinds=None: f"TERM {query}"
+    )
     return show_shop_tables(
         ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
     )
@@ -434,6 +439,62 @@ def test_a_sql_search_does_not_unlock_an_answer_without_sql(
     assert observations[1].startswith(
         "Not accepted. An answer without SQL has to come from the catalog"
     )
+
+
+def test_a_failed_information_lookup_does_not_unlock_an_answer_without_sql(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = iter([RuntimeError("catalog unavailable"), "TERM order"])
+
+    def information(
+        _ctx: ToolContext, query: str, kinds: list[str] | None = None
+    ) -> str:
+        outcome = next(lookups)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(loop, "information", information)
+    answer = "Table orders stores each order."
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="orders", purpose="information")),
+            _reply(call("submit", "2", sql="", response=answer)),
+            _reply(call("retrieve", "3", query="order", purpose="information")),
+            _reply(call("submit", "4", sql="", response=answer)),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "What is in orders?")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith("retrieve failed: catalog unavailable")
+    assert observations[1].startswith(
+        "Not accepted. An answer without SQL has to come from the catalog"
+    )
+    assert observations[2] == "TERM order"
+    assert result.submission.response == answer
+
+
+def test_an_information_lookup_that_finds_nothing_still_counts(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        loop,
+        "information",
+        lambda _ctx, query, kinds=None: f"No matches for {query!r}.",
+    )
+    answer = "The catalog has nothing about shipments."
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="shipments", purpose="information")),
+            _reply(call("submit", "2", sql="", response=answer)),
+        ]
+    )
+
+    result = loop.run_episode(model, _information_ctx(ctx), "Are there shipments?")
+
+    assert result.submission.response == answer
 
 
 def test_an_answer_can_leave_sql_out(ctx: ToolContext) -> None:

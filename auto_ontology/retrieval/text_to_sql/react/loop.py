@@ -143,8 +143,12 @@ def _retrieve(
     if purpose == "information" and prompts.information_answers_offered(
         ctx.information_answers
     ):
+        answer = information(ctx, query, kinds)
+        # Only once the lookup has returned: a lookup that raised must not let a
+        # later answer without SQL pass as one that came from the catalog. One
+        # that found nothing did return, and still counts.
         ctx.information_retrieved = True
-        return information(ctx, query, kinds)
+        return answer
     return retrieve(ctx, query, kinds)
 
 
