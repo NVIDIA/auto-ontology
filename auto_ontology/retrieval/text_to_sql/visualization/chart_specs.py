@@ -150,6 +150,7 @@ def _aggregate(
     x_col: str,
     y_col: str,
     hue_col: str | None,
+    ordered: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Aggregate the result set down to the (rows, series) a chart draws.
 
@@ -168,9 +169,13 @@ def _aggregate(
     work[y_col] = y_numeric
 
     if hue_col:
-        x_order = list(dict.fromkeys(work[x_col].tolist()))
+        x_order = (
+            sorted(work[x_col].unique())
+            if ordered
+            else list(dict.fromkeys(work[x_col].tolist()))
+        )
         pivot = (
-            work.groupby([x_col, hue_col], dropna=False, sort=False)[y_col]
+            work.groupby([x_col, hue_col], dropna=False, sort=ordered)[y_col]
             .sum()
             .unstack(fill_value=0)
         )
@@ -207,7 +212,7 @@ def _aggregate(
         ]
         return data, series
 
-    grouped = work.groupby(x_col, dropna=False, sort=False)[y_col].sum()
+    grouped = work.groupby(x_col, dropna=False, sort=ordered)[y_col].sum()
     data = [
         {x_col: _to_cell(idx), y_col: _to_cell(val)} for idx, val in grouped.items()
     ]
@@ -264,7 +269,9 @@ def build_chart_spec(
         # delta only supports one series
         hue_col = None
 
-    rows, series = _aggregate(df, x_col, y_col, hue_col)
+    rows, series = _aggregate(
+        df, x_col, y_col, hue_col, ordered=plot_type in ORDERED_TYPES
+    )
     if not rows or not series:
         logger.info("build_chart_spec: empty aggregation for %s — skip", plot.title)
         return None

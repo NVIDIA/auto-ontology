@@ -78,6 +78,25 @@ def test_grouped_bar_aggregation_with_hue_preserves_x_order() -> None:
     assert [d["Quarter"] for d in spec["data"]] == ["Q3", "Q1"]
 
 
+def test_time_series_line_aggregation_preserves_ascending_order_for_ordered_types() -> (
+    None
+):
+    """Ordered types (line, area) sort x ascending so truncation and plotting work chronologically."""
+    df = pd.DataFrame(
+        {
+            "Date": ["2026-03-01", "2026-01-01", "2026-02-01"],
+            "Revenue": [300, 100, 200],
+        }
+    )
+    spec = build_chart_spec(df, _plot(x="Date", y="Revenue", plot_type="line"))
+    assert spec is not None
+    assert [d["Date"] for d in spec["data"]] == [
+        "2026-01-01",
+        "2026-02-01",
+        "2026-03-01",
+    ]
+
+
 # --- results with no numeric measure are listings, not charts ----------------
 
 
