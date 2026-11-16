@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import time
+import types
 
 import pandas as pd
 import pytest
@@ -10,6 +11,7 @@ from langchain_core.messages import AIMessage
 
 from auto_ontology.retrieval.text_to_sql.react import config, loop, prompts
 from auto_ontology.retrieval.text_to_sql.react import run_sql as run_sql_module
+from auto_ontology.retrieval.text_to_sql.react import grep as grep_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode
@@ -102,6 +104,27 @@ def test_grep_stops_a_pattern_that_backtracks_without_end(
     assert text == (
         "Error: the pattern '(a|aa)+$' took too long to match. Use a simpler "
         "pattern or plain text."
+    )
+
+
+def test_grep_stops_when_the_shared_budget_is_spent_between_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A fake clock: the deadline is set at 0 + 5s, row 1 is checked at 1s, and
+    # row 2 at 6s, past it. A cheap pattern must not carry on through the rest.
+    ticks = iter([0.0, 1.0, 6.0, 6.0, 6.0])
+    monkeypatch.setattr(config, "grep_timeout_s", lambda: 5.0)
+    monkeypatch.setattr(
+        grep_module, "time", types.SimpleNamespace(monotonic=lambda: next(ticks))
+    )
+    ctx = ToolContext(retriever=None, connectors=[])
+    ctx.pages.append(pd.DataFrame({"name": ["a", "a", "a", "a"]}))
+
+    text = grep(ctx, 1, "a")
+
+    assert text == (
+        "Error: the pattern 'a' took too long to match. Use a simpler pattern "
+        "or plain text."
     )
 
 

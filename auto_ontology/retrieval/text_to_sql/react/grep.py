@@ -60,8 +60,11 @@ def grep(ctx: ToolContext, page: int, pattern: str = "", offset: int = 0) -> str
         hits: list[tuple[int, str]] = []
         try:
             for n, (text, line) in enumerate(zip(full, lines), 1):
-                # The budget is shared by every row; ``timeout`` must be positive.
-                left = max(deadline - time.monotonic(), 0.001)
+                # The budget is shared by every row: once it is spent the search
+                # stops, rather than giving each later row a fresh sliver.
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError
                 if compiled.search(text, timeout=left):
                     hits.append((n, line))
         except TimeoutError:
