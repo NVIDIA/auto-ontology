@@ -663,3 +663,36 @@ def test_other_clients_still_use_with_structured_output() -> None:
         == "structured"
     )
     assert calls == [(_Keys, {"method": "x"})]
+
+
+class _NoneSchema(BaseModel):
+    answer: str
+
+
+def test_all_none_attempts_are_logged_as_an_error(
+    monkeypatch: Any, caplog: Any
+) -> None:
+    class _AlwaysNone:
+        model_name = "nvidia/some-model"
+
+        def with_structured_output(self, _schema: Any, **_kwargs: Any) -> Any:
+            class _Runnable:
+                def invoke(self, _messages: Any) -> None:
+                    return None
+
+            return _Runnable()
+
+    monkeypatch.setattr(llm_invoke.time, "sleep", lambda _seconds: None)
+    caplog.set_level("WARNING", logger=llm_invoke.logger.name)
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        _AlwaysNone(), [HumanMessage(content="q")], _NoneSchema
+    )
+
+    assert result is None
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(warnings) == llm_invoke.RETRY_MAX_ATTEMPTS - 1
+    assert all("retrying" in r.getMessage() for r in warnings)
+    assert len(errors) == 1
+    assert "_NoneSchema" in errors[0].getMessage()

@@ -750,19 +750,30 @@ def safe_invoke_with_structured_output(
             raise
 
         if result is None:
-            logger.warning(
-                "LLM returned None for %s on attempt %d/%d — retrying.",
-                schema_name,
-                attempt + 1,
-                RETRY_MAX_ATTEMPTS,
-            )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
+                logger.warning(
+                    "LLM returned None for %s on attempt %d/%d — retrying.",
+                    schema_name,
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                )
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 time.sleep(wait)
             continue
         if isinstance(result, schema):
             return result
         return schema.model_validate(result)
+
+    # Every attempt parsed to None. Callers fall back to an empty result, so say
+    # so here: otherwise a lost result leaves no trace above warning level.
+    logger.error(
+        "LLM returned None for %s on all %d attempts; giving up. A reply cut off "
+        "at max_tokens (finish_reason=length) or one that doesn't match the schema "
+        "parses to None.",
+        schema_name,
+        RETRY_MAX_ATTEMPTS,
+    )
+    return None
 
 
 def invoke_with_structured_output(
