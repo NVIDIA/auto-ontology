@@ -238,7 +238,7 @@ def test_without_submit_a_final_run_is_the_answer(
     assert result.reason == "submitted"
     assert result.submission.sql == FINAL_SQL
     assert result.submission.response == "r"
-    assert model.bound_tool_names[0] == ["retrieve", "run_sql", "grep"]
+    assert model.bound_tool_names[0] == ["retrieve", "run_sql"]
     assert "final=true" in model.seen[0][0].content
     assert "submit:" not in model.seen[0][0].content
 
@@ -311,11 +311,10 @@ def test_without_submit_auto_mode_answers_with_run_sql_or_predict(
     assert "- grep:" in prompt and "submit" not in prompt
 
 
-def test_by_default_submit_and_grep_are_offered() -> None:
+def test_by_default_submit_is_offered_and_grep_is_not() -> None:
     assert [t["function"]["name"] for t in prompts.tools_for(EpisodeMode.SQL)] == [
         "retrieve",
         "run_sql",
-        "grep",
         "submit",
     ]
     prompt = prompts.system_prompt_for(EpisodeMode.SQL, None)

@@ -109,11 +109,11 @@ def submit_tool_enabled() -> bool:
 def grep_enabled() -> bool:
     """Whether a ``run_sql`` result too long to show is kept for ``grep``.
 
-    On by default: such a result is saved as a page and the model gets a
-    ``grep`` tool to search it. ``TEXT_TO_SQL_REACT_GREP=false`` turns it off.
+    Off by default. ``TEXT_TO_SQL_REACT_GREP=true`` turns it on: such a result
+    is then saved as a page and the model gets a ``grep`` tool to search it.
     """
     value = os.environ.get("TEXT_TO_SQL_REACT_GREP", "").strip().lower()
-    return value in _TRUTHY or not value
+    return value in _TRUTHY
 
 
 def max_page_rows() -> int:
