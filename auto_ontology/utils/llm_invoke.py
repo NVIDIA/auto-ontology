@@ -47,6 +47,19 @@ class StrictLLMOutputModel(BaseModel):
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 
+# The lowest max_tokens any call gets. Callers size their caps (300 to 8,192) for
+# the answer, but a reasoning model such as Nemotron 3.5 Lightning spends most of
+# a reply thinking: a reply cut off at the cap never reaches its JSON, parses to
+# None, and at temperature 0 every retry is cut off the same way. 0 turns the
+# floor off. Caps above the floor are left alone.
+LLM_MAX_TOKENS_FLOOR = int(os.environ.get("LLM_MAX_TOKENS_FLOOR", "16000"))
+
+
+def max_tokens_with_floor(max_tokens: int) -> int:
+    """*max_tokens*, raised to ``LLM_MAX_TOKENS_FLOOR`` when that is higher."""
+    return max(max_tokens, LLM_MAX_TOKENS_FLOOR)
+
+
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
 # to live at this call site, defaulting to 6, to stop semantic compilation's
 # nested fan-out (tables x terms) from saturating the endpoint's per-worker
@@ -278,7 +291,7 @@ def get_llm_client(
         api_key=_API_KEY,
         base_url=_BASE_URL,
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens_with_floor(max_tokens),
     )
 
 
@@ -307,7 +320,7 @@ def get_non_reasoning_llm_client(
         api_key=_NON_REASONING_API_KEY,
         base_url=_NON_REASONING_BASE_URL,
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens_with_floor(max_tokens),
     )
     _remember_non_reasoning(client)
     return client

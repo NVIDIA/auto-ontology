@@ -513,3 +513,44 @@ def test_chatnvidia_client_gets_the_configured_timeout(monkeypatch: Any) -> None
     )
 
     assert client._client.timeout == 321
+
+
+def _capture_build_client(monkeypatch: Any) -> list[int]:
+    seen: list[int] = []
+
+    def build(**kwargs: Any) -> object:
+        seen.append(kwargs["max_tokens"])
+        return object()
+
+    monkeypatch.setattr(llm_invoke, "_API_KEY", "nvapi-test")
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "nvapi-test")
+    monkeypatch.setattr(llm_invoke, "_build_client", build)
+    return seen
+
+
+def test_client_getters_raise_low_caps_to_the_floor(monkeypatch: Any) -> None:
+    seen = _capture_build_client(monkeypatch)
+    monkeypatch.setattr(llm_invoke, "LLM_MAX_TOKENS_FLOOR", 16000)
+
+    llm_invoke.get_llm_client(max_tokens=300)
+    llm_invoke.get_non_reasoning_llm_client(max_tokens=4096)
+    llm_invoke.get_llm_client(max_tokens=20000)
+
+    assert seen == [16000, 16000, 20000]
+
+
+def test_a_zero_floor_leaves_caps_alone(monkeypatch: Any) -> None:
+    seen = _capture_build_client(monkeypatch)
+    monkeypatch.setattr(llm_invoke, "LLM_MAX_TOKENS_FLOOR", 0)
+
+    llm_invoke.get_llm_client(max_tokens=300)
+    llm_invoke.get_non_reasoning_llm_client()
+
+    assert seen == [300, 8192]
+
+
+def test_bound_caps_use_the_same_floor(monkeypatch: Any) -> None:
+    monkeypatch.setattr(llm_invoke, "LLM_MAX_TOKENS_FLOOR", 16000)
+
+    assert llm_invoke.max_tokens_with_floor(1024) == 16000
+    assert llm_invoke.max_tokens_with_floor(32000) == 32000
