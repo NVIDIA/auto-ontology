@@ -105,8 +105,9 @@ def update_column_attribute(
     that Column (same path as catalog column edit), re-embeds the Column in
     the data VDB, then re-embeds this ColumnAttribute in the semantic VDB.
 
-    The certification flag carries no embedding content, so a
-    certification-only update skips the VDB refresh entirely.
+    Neither the certification flag nor the description is embedding content —
+    the attribute embeds its column's description — so an update touching only
+    those skips the VDB refresh entirely.
 
     Raises ``ValueError`` when the owning Column's declared SQL type does not
     accept hand-written samples.
@@ -134,10 +135,7 @@ def update_column_attribute(
     if row is None:
         return None
 
-    content_changed = (
-        name is not None or description is not None or sample_values is not None
-    )
-    if not content_changed:
+    if name is None and sample_values is None:
         row["sample_values"] = stringify_sample_values(row.get("sample_values"))
         return row
 
@@ -162,12 +160,22 @@ def update_column_attribute(
     embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
     if embedder is not None:
         embedder.vdb.delete_by_id(attr_id)
-        embedder.embed_column_attributes(
-            terms_dal.fetch_column_attributes_for_embedding([attr_id])
-        )
-    if name is not None or description is not None:
-        # The Term's own text lists its attributes' names and descriptions.
-        refresh_term_embeddings(term_id, refresh_dependent_attrs=False)
+        attr = {
+            "id": row["id"],
+            "name": row["name"],
+            "column_description": row.get("column_description"),
+            "family_prefix": row.get("family_prefix"),
+            "term_name": row.get("term_name"),
+            "source_column": row.get("source_column"),
+            "sample_values": row.get("sample_values"),
+            "is_unique": row.get("is_unique"),
+            "table_id": row.get("table_id"),
+            "table_name": row.get("table_name"),
+            "schema_name": row.get("schema_name"),
+        }
+        # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
+        term_ctx = {"synonyms": row.get("term_synonyms") or []}
+        embedder.embed_term(term_ctx, [attr])
 
     return row
 

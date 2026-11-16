@@ -64,7 +64,7 @@ def test_claude_is_matched_on_either_vendor_or_family_name() -> None:
 
 def test_other_models_keep_the_langchain_default() -> None:
     """json_schema is preferred where supported, so nothing is forced for them."""
-    for name in ("nvidia/nemotron-3-nano-30b-a3b", "gpt-4o", ""):
+    for name in ("nvidia/nemotron-3.5-lightning-30b-a3b", "gpt-4o", ""):
         assert _structured_output_kwargs(_Model(name)) == {}
 
 
@@ -107,7 +107,9 @@ def test_other_models_keep_their_message_order() -> None:
     messages = _interleaved()
 
     assert (
-        _system_messages_first(_Model("nvidia/nemotron-3-nano-30b-a3b"), messages)
+        _system_messages_first(
+            _Model("nvidia/nemotron-3.5-lightning-30b-a3b"), messages
+        )
         == messages
     )
 

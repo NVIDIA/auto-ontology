@@ -54,25 +54,39 @@ class SemanticEmbedder:
 
         ``term`` entries: ``{"name", "description", "id"}``.
         ``attrs`` entries include ``name``, ``term_name``, ``source_column``,
-        ``description``, ``id``, and the owning table metadata.
+        ``column_description``, ``family_prefix``, ``id``, and the owning table
+        metadata.
         ``id`` is the catalog ``id`` (UUID) and, when present, lands
         in the embedded row's metadata.
         The Term's text lists every attribute in *attrs*; with ``embed_attrs``
         false only the Term row is written.
         Returns the number of rows actually written to the VDB.
         """
+        with_embeddings = self.embed_term_rows(term, attrs, embed_attrs=embed_attrs)
+        if with_embeddings:
+            write_embedded_rows(self.vdb, with_embeddings)
+        return len(with_embeddings)
+
+    def embed_term_rows(
+        self,
+        term: dict[str, Any],
+        attrs: list[dict[str, Any]],
+        *,
+        embed_attrs: bool = True,
+    ) -> list[dict[str, Any]]:
+        """The rows :meth:`embed_term` would write, embedded but not written."""
         rows = _build_rows(self.database_name, term, attrs)
         if not embed_attrs:
             rows = [r for r in rows if r["metadata"]["label"] == "Term"]
         if not rows:
-            return 0
+            return []
 
         embedded_df = batch_embed(rows, self.embed_params)
         if embedded_df is None or embedded_df.empty:
             logger.warning(
                 "Inline embed produced no rows for Term %s", term.get("name")
             )
-            return 0
+            return []
 
         with_embeddings = [
             row
@@ -85,10 +99,7 @@ class SemanticEmbedder:
                 len(rows),
                 term.get("name"),
             )
-            return 0
-
-        write_embedded_rows(self.vdb, with_embeddings)
-        return len(with_embeddings)
+        return with_embeddings
 
     def embed_column_attributes(self, attrs: list[dict[str, Any]]) -> int:
         """Embed only ColumnAttribute rows, without rewriting the parent Term row."""
@@ -190,8 +201,8 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _sample_values(raw: Any, data_type: str | None = None) -> list[str]:
-    """The sample values short enough to embed.
+def _format_sample_values(raw: Any, data_type: str | None = None) -> str:
+    """Return a ' Sample values: ...' suffix string, or empty string if unavailable.
 
     *data_type* is the owning column's declared type. JSON-typed columns get a
     higher per-entry length cutoff (see ``_MAX_EMBEDDED_JSON_SAMPLE_LEN``)
@@ -204,7 +215,10 @@ def _sample_values(raw: Any, data_type: str | None = None) -> list[str]:
         if "json" in (data_type or "").lower()
         else _MAX_EMBEDDED_SAMPLE_LEN
     )
-    return stringify_sample_values(raw, max_len=max_len) or []
+    values = stringify_sample_values(raw, max_len=max_len)
+    if not values:
+        return ""
+    return " Sample values: " + ", ".join(values) + "."
 
 
 # Ingestion appends the column's samples and storage notation to an attribute's
@@ -229,15 +243,6 @@ def _same_text(a: str, b: str) -> bool:
         return re.sub(r"\W+", " ", t).strip().lower()
 
     return norm(a) == norm(b)
-
-
-def _sentence(text: str) -> str:
-    text = text.strip()
-    return text if not text or text[-1] in ".!?" else f"{text}."
-
-
-def _yes_no(value: Any) -> str | None:
-    return None if value is None else ("yes" if value else "no")
 
 
 def _term_text(
@@ -322,49 +327,6 @@ def _braces(fields: dict[str, Any]) -> str:
     return "{" + ", ".join(f"{k}: {v}" for k, v in fields.items() if v) + "}"
 
 
-def _attribute_text(
-    a: dict[str, Any], owner: str, synonyms: list[str], database_name: str
-) -> str:
-    """An attribute in words, then everything the owning column's own text has.
-
-    ``Order Date is an attribute of Purchase Order (also: PO). It represents
-    column ord_dt of table sales.orders in database shop. Description: … data
-    type: date, format: YYYY-MM-DD, unique: no, sample values: …``
-    """
-    text = f"{a['name']} is an attribute of {owner}" if owner else a["name"]
-    if synonyms:
-        text += f" (also: {', '.join(synonyms)})"
-    text += "."
-
-    column = a.get("column_name") or a.get("source_column")
-    if column:
-        table = ".".join(p for p in (a.get("schema_name"), a.get("table_name")) if p)
-        where = f" of table {table}" if table else ""
-        database = a.get("database_name") or database_name
-        where += f" in database {database}" if database else ""
-        text += f" It represents column {column}{where}."
-
-    description, notation = _split_description(a.get("description"))
-    column_description, _ = _split_description(a.get("column_description"))
-    if description:
-        text += f" Description: {_sentence(description)}"
-    if column_description and not _same_text(column_description, description):
-        text += f" Column description: {_sentence(column_description)}"
-
-    data_type = a.get("column_data_type") or a.get("datatype")
-    samples = _sample_values(a.get("sample_values"), data_type)
-    pk = {str(c).lower() for c in a.get("table_pk") or []}
-    facts = {
-        "data type": data_type,
-        "format": a.get("format") or notation,
-        "primary key": "yes" if column and column.lower() in pk else None,
-        "unique": _yes_no(a.get("is_unique")),
-        "sample values": ", ".join(samples),
-    }
-    details = ", ".join(f"{k}: {v}" for k, v in facts.items() if v)
-    return f"{text} {_sentence(details)}" if details else text
-
-
 def _build_rows(
     database_name: str,
     term: dict[str, Any],
@@ -397,14 +359,25 @@ def _build_rows(
         )
 
     term_synonyms: list[str] = term.get("synonyms") or []
+    synonym_suffix = f" ({', '.join(term_synonyms)})" if term_synonyms else ""
 
     for a in attrs:
         attr_name = a.get("name")
         if not attr_name:
             continue
         owner = a.get("term_name") or term_name or ""
-        synonyms = [s for s in (a.get("term_synonyms") or term_synonyms) if s]
-        text = _attribute_text(a, owner, synonyms, database_name)
+        family = a.get("family_prefix")
+        family_suffix = f", family {family}" if family else ""
+        sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
+        # The column's description, never the attribute's: the attribute's is
+        # written after FK resolution from its links, and editing it must not
+        # move the vector.
+        text = (
+            f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}"
+            f"{family_suffix}. "
+            f"{a.get('column_description') or ''}"
+            f"{sample_block}"
+        ).strip()
         path = (
             f"semantic:attr:{a['id']}"
             if a.get("id")

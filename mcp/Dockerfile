@@ -15,8 +15,11 @@
 # not pull the backend's database drivers or model stack.
 # ---------------------------------------------------------------------------
 
-ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.11.29
+# The image ships uv's managed CPython, and each uv release only knows the
+# patch releases that existed when it was cut, so bump both together. 3.12.16
+# needs uv >= 0.13; the build fails if uv cannot install the pinned version.
+ARG PYTHON_VERSION=3.12.16
+ARG UV_VERSION=0.13.7
 ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
 ARG BASE_IMG_TAG=jammy-20250619
 

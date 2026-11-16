@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from auto_ontology.semantic.models import (
     ColumnAttributeSpec,
     RawTableTermsResult,
     RawTermProposal,
     TermColumnRef,
 )
+from auto_ontology.semantic import term_extractor
 from auto_ontology.semantic.term_extractor import _sanitize_result
 
 
@@ -94,3 +97,21 @@ def test_sanitize_assigns_orphan_specs_to_primary_term() -> None:
     }
     assert specs[0].display_name == "Total Amount"
     assert specs[1].display_name == "Order Status"
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("Customer Order", "Customer Order"),
+        ("Numéro Client", "Numéro Client"),
+        ("受注", "受注"),
+        ("주문 내역", "주문 내역"),
+        # Still rejected, as before: lowercase start, double space, leading digit.
+        ("purchase order", "Fallback"),
+        ("Order  Date", "Fallback"),
+        ("2nd Order", "Fallback"),
+        ("unknown", "Fallback"),
+    ],
+)
+def test_llm_labels_are_accepted_in_any_script(label: str, expected: str) -> None:
+    assert term_extractor._normalize_label(label, fallback="Fallback") == expected

@@ -126,6 +126,22 @@ def test_a_model_that_ignores_input_type_gets_it_as_a_text_prefix(
     assert body["input_type"] == input_type
 
 
+def test_the_hosted_nemotron_3_5_model_gets_input_type_without_a_prefix(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
+    seen = endpoint(_ok)
+
+    embed_texts(
+        ["  orders  "],
+        _params(model_name="nvidia/nemotron-3.5-embed-1b"),
+        "query",
+    )
+
+    body = json.loads(seen[0].content)
+    assert body["input"] == ["orders"]
+    assert body["input_type"] == "query"
+
+
 @pytest.mark.parametrize(
     "configured",
     [

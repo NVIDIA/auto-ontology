@@ -24,7 +24,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select, update  # noqa: E402
 
 from auto_ontology.dal import datasources as d  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
@@ -492,6 +492,80 @@ def test_table_context_of_a_missing_table_is_empty_not_an_error() -> None:
     assert d.fetch_table_context("no-such-table") == {"columns": [], "fks": []}
 
 
+def test_table_context_keeps_the_columns_own_description_apart(world) -> None:
+    world.table("notes")
+    world.column("notes", "body")
+    attr = world.attribute("body", description="Borrowed")
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["notes.body"],
+        attribute_id=attr,
+    )
+
+    (column,) = d.fetch_table_context(world.tables["notes"])["columns"]
+
+    assert column["description"] == "Borrowed"
+    assert column["own_description"] is None
+
+
+# --------------------------------------------------------------------------
+# store_column_descriptions
+# --------------------------------------------------------------------------
+
+
+def test_column_descriptions_fill_only_missing_or_name_only_ones(world) -> None:
+    world.table("ledger")
+    world.column("ledger", "blank", 1)
+    world.column("ledger", "echo", 2, description="ECHO")
+    world.column("ledger", "real", 3, description="Curated")
+
+    written = d.store_column_descriptions(
+        world.tables["ledger"],
+        {"blank": "Filled", "echo": "Replaced", "real": "Overwritten"},
+    )
+
+    assert sorted(written) == sorted(
+        [world.columns["ledger.blank"], world.columns["ledger.echo"]]
+    )
+    rows = store().query_read(
+        select(s.catalog_column.c.name, s.catalog_column.c.description).where(
+            s.catalog_column.c.table_id == world.tables["ledger"]
+        )
+    )
+    assert {r["name"]: r["description"] for r in rows} == {
+        "blank": "Filled",
+        "echo": "Replaced",
+        "real": "Curated",
+    }
+
+
+def test_column_descriptions_never_replace_a_certified_one(world: World) -> None:
+    world.table("ledger")
+    world.column("ledger", "blank", 1)
+    world.column("ledger", "echo", 2, description="ECHO")
+    store().query_write(
+        update(s.catalog_column)
+        .where(s.catalog_column.c.table_id == world.tables["ledger"])
+        .values(description_certified=True)
+    )
+
+    written = d.store_column_descriptions(
+        world.tables["ledger"], {"blank": "Filled", "echo": "Replaced"}
+    )
+
+    assert written == []
+    rows = store().query_read(
+        select(
+            s.catalog_column.c.name,
+            s.catalog_column.c.description,
+            s.catalog_column.c.description_certified,
+        ).where(s.catalog_column.c.table_id == world.tables["ledger"])
+    )
+    assert {
+        r["name"]: (r["description"], r["description_certified"]) for r in rows
+    } == {"blank": (None, True), "echo": ("ECHO", True)}
+
+
 # --------------------------------------------------------------------------
 # fetch_tables_and_columns_by_node_ids
 # --------------------------------------------------------------------------
@@ -522,13 +596,9 @@ def test_no_ids_yields_empty_frames_and_no_database() -> None:
     assert database == ""
 
 
-def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
-    """Asymmetric, deliberately.
-
-    These frames feed embeddings. Widening what gets embedded — by applying the
-    table fallback here too — would shift retrieval results with no test
-    anywhere failing.
-    """
+def test_node_ids_uses_the_fallback_for_tables_and_columns(world) -> None:
+    """These frames feed embeddings: a table or column with no description of
+    its own is embedded with its Term's or attribute's, not a bare name."""
     table__term = world.term("Order", "a purchase")
     _link(s.table__term, table_id=world.tables["orders"], term_id=table__term)
     attribute = world.attribute("order-total", "money, in cents")
@@ -541,7 +611,7 @@ def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
     tables, columns, _ = d.fetch_tables_and_columns_by_node_ids(
         [world.tables["orders"]]
     )
-    assert tables.iloc[0]["description"] is None
+    assert tables.iloc[0]["description"] == "a purchase"
     by_name = columns.set_index("column_name")["description"].to_dict()
     assert by_name["total"] == "money, in cents"
 

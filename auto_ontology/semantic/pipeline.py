@@ -15,7 +15,10 @@ from auto_ontology.dal.datasources import (
     fetch_all_tables_without_term,
     fetch_table_context,
 )
-from auto_ontology.infra.feature_flags import is_distinct_value_probing_enabled
+from auto_ontology.infra.feature_flags import (
+    is_distinct_value_probing_enabled,
+    is_semantic_fk_db_query_prevented,
+)
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import SemanticEmbedder
@@ -154,6 +157,12 @@ def compile_semantic_layer(
             "Distinct value probing is disabled in settings — sampling rows as "
             "usual, but skipping the per-column DISTINCT probes"
         )
+    is_probe_key_values = not is_semantic_fk_db_query_prevented()
+    if not is_probe_key_values:
+        logger.info(
+            "PREVENT_SEMANTIC_FK_DB_QUERIES is set — skipping the key-value "
+            "probes semantic FK resolution would compare"
+        )
 
     # Set the first time a table is dropped, so the "we are cancelling" line is
     # logged once rather than once per table.
@@ -200,6 +209,7 @@ def compile_semantic_layer(
                 embedder=embedder,
                 database_name=database_name,
                 probe_distinct_values=is_probe_distinct_values,
+                probe_key_values=is_probe_key_values,
                 commit_slot=commit_slot,
             )
         except Exception:

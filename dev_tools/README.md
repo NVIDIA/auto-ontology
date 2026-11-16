@@ -74,7 +74,7 @@ Open **http://localhost:3000**.
 
 ## `setup_env.sh`
 
-Brings up the Auto Ontology environment via `docker compose`.
+Brings up the Auto-Ontology environment via `docker compose`.
 
 | Command | What it starts |
 |---|---|
@@ -88,9 +88,9 @@ Brings up the Auto Ontology environment via `docker compose`.
 |---|---|
 | Postgres | `localhost:5432` |
 | pgAdmin | <http://localhost:5050> |
-| Auto Ontology ingestion service | <http://localhost:3002> |
-| Auto Ontology frontend (full stack only) | <http://localhost:3000> |
-| Auto Ontology backend (full stack only) | <http://localhost:3001> |
+| Auto-Ontology ingestion service | <http://localhost:3002> |
+| Auto-Ontology frontend (full stack only) | <http://localhost:3000> |
+| Auto-Ontology backend (full stack only) | <http://localhost:3001> |
 
 ### `--dev` workflow
 

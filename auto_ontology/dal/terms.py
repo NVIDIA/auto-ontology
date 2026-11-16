@@ -46,6 +46,7 @@ from auto_ontology.dal.attributes import fetch_column_attribute_columns_map
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.tags import TARGET_COLUMN_ATTRIBUTE, TARGET_TERM, fetch_tags_map
+from auto_ontology.dal.term_families import attribute_family_prefix
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.dal.zones import fetch_table_zones_map, zone_covers_table
 from auto_ontology.semantic.constants import (
@@ -463,6 +464,10 @@ def upsert_table_term(
             return None
 
         table = tables[0]
+        # An empty proposal would be stored as "" (never embedded, so never
+        # retrieved), and the next one as " (db.schema.table)". Use the
+        # physical table name instead.
+        name = name.strip() or table["table_name"]
         qualified_table = ".".join(
             part
             for part in (
@@ -666,9 +671,38 @@ def fetch_all_terms_and_attributes(
     """
     terms = fetch_all_terms(zone_ids=zone_ids)
 
-    statement = _attribute_embedding_select().where(
-        s.column_attribute.c.source == SEMANTIC_SOURCE,
-        s.catalog_column.c.id.is_not(None),
+    statement = (
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.description.label("column_description"),
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+            s.catalog_schema.c.name.label("schema_name"),
+            s.column_attribute.c.datatype,
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(s.column_attribute.c.source == SEMANTIC_SOURCE)
     )
     table_ids = _scope_table_ids(zone_ids)
     if table_ids is not None:
@@ -995,6 +1029,7 @@ def _attribute_embedding_select():
         s.catalog_column.c.description.label("column_description"),
         s.catalog_column.c.data_type.label("column_data_type"),
         s.catalog_column.c.format,
+        attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
         s.catalog_column.c.sample_values,
         s.catalog_column.c.is_unique,
         s.catalog_table.c.id.label("table_id"),

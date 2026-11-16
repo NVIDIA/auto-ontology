@@ -884,6 +884,171 @@ def test_unlinked_scopes_to_one_database(world) -> None:
     assert "y" in {r["name"] for r in a.find_unlinked_fk_columns()}
 
 
+def test_unlinked_carries_the_columns_stored_distinct_values(world) -> None:
+    world.table("orders")
+    world.column("orders", "customer_ref")
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.customer_ref"])
+        .values(distinct_values="[1001, 1002]", data_type="integer")
+    )
+
+    (row,) = a.find_unlinked_fk_columns(f"{world.prefix}-shopdb")
+    assert row["distinct_values"] == "[1001, 1002]"
+    assert row["data_type"] == "integer"
+    assert row["schema_name"] == "public"
+
+
+# --------------------------------------------------------------------------
+# fetch_value_key_candidates
+# --------------------------------------------------------------------------
+
+
+def _mark_unique(column: str, world: World, distinct_values: str | None) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns[column])
+        .values(is_unique=True, distinct_values=distinct_values)
+    )
+
+
+def test_value_key_candidates_are_unique_attribute_owners(world) -> None:
+    world.table("customers")
+    world.column("customers", "id", 1)
+    world.column("customers", "email", 2)
+    world.column("customers", "status", 3)
+    world.attribute("customer-id", owner="customers.id")
+    world.attribute("customer-email", owner="customers.email")
+    _mark_unique("customers.id", world, "[1, 2]")
+    _mark_unique("customers.status", world, '["a"]')
+
+    (row,) = a.fetch_value_key_candidates(f"{world.prefix}-shopdb")
+
+    assert row == {
+        "attribute_id": world.attributes["customer-id"],
+        "column_id": world.columns["customers.id"],
+        "column_name": "id",
+        "data_type": None,
+        "distinct_values": "[1, 2]",
+        "table_id": world.tables["customers"],
+        "table_name": "customers",
+        "schema_name": "public",
+    }
+
+
+def test_value_key_candidates_scope_to_one_database(world) -> None:
+    world.database("otherdb")
+    world.table("there", database="otherdb")
+    world.column("there", "id")
+    world.attribute("there-id", owner="there.id")
+    _mark_unique("there.id", world, None)
+
+    assert a.fetch_value_key_candidates(f"{world.prefix}-shopdb") == []
+    assert len(a.fetch_value_key_candidates(f"{world.prefix}-otherdb")) == 1
+
+
+# --------------------------------------------------------------------------
+# Attribute descriptions
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def describable(world):
+    """``orders.customer_id`` -> ``customers.id``; the Customer Term in family NEW_."""
+    world.table("customers")
+    world.column("customers", "id", 1)
+    world.column("customers", "name", 2)
+    world.table("orders")
+    world.column("orders", "customer_id")
+    term = world.term("Customer", description="A buyer")
+    for key, owner in (("customer-id", "customers.id"), ("name", "customers.name")):
+        _link(
+            s.column_attribute__term,
+            attribute_id=world.attribute(key, owner=owner),
+            term_id=term,
+        )
+    world.references("orders.customer_id", "customer-id")
+    family = _add(s.term_family, schema_id=world.schemas["shopdb"], prefix="NEW_")
+    _link(s.term__term_family, term_id=term, family_id=family, base_name="customers")
+    return world
+
+
+def _describe(world, key: str, text: str | None) -> None:
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attributes[key])
+        .values(description=text)
+    )
+
+
+def test_attributes_to_describe_skip_described_ones(describable) -> None:
+    _describe(describable, "name", "Curated")
+    _describe(describable, "customer-id", "  ")
+
+    (row,) = a.fetch_attributes_to_describe(f"{describable.prefix}-shopdb")
+
+    assert row["attribute_id"] == describable.attributes["customer-id"]
+    assert row["column_id"] == describable.columns["customers.id"]
+    assert row["term_description"] == "A buyer"
+    assert row["table_name"] == "customers"
+    assert row["family_prefix"] == "NEW_"
+
+
+def test_semantic_fk_ends_name_the_owning_column(describable) -> None:
+    (end,) = a.fetch_semantic_fk_ends(f"{describable.prefix}-shopdb")
+
+    assert end == {
+        "source_column_id": describable.columns["orders.customer_id"],
+        "source_table_name": "orders",
+        "source_column_name": "customer_id",
+        "target_attribute_id": describable.attributes["customer-id"],
+        "target_table_name": "customers",
+        "target_column_name": "id",
+    }
+
+
+def test_storing_attribute_descriptions_keeps_a_curated_one(describable) -> None:
+    _describe(describable, "name", "Curated")
+
+    written = a.store_attribute_descriptions(
+        {
+            describable.attributes["customer-id"]: "Identifies the customer.",
+            describable.attributes["name"]: "Generated",
+        }
+    )
+
+    assert written == 1
+    rows = store().query_read(
+        select(s.column_attribute.c.id, s.column_attribute.c.description).where(
+            s.column_attribute.c.id.in_(list(describable.attributes.values()))
+        )
+    )
+    assert {r["id"]: r["description"] for r in rows} == {
+        describable.attributes["customer-id"]: "Identifies the customer.",
+        describable.attributes["name"]: "Curated",
+    }
+
+
+def test_update_context_carries_the_column_description_and_family(
+    describable,
+) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == describable.columns["customers.name"])
+        .values(description="Full name")
+    )
+    term_id = store().query_read(
+        select(s.column_attribute__term.c.term_id).where(
+            s.column_attribute__term.c.attribute_id == describable.attributes["name"]
+        )
+    )[0]["term_id"]
+
+    row = a.update_column_attribute(describable.attributes["name"], term_id)
+
+    assert row["column_description"] == "Full name"
+    assert row["family_prefix"] == "NEW_"
+
+
 # --------------------------------------------------------------------------
 # fetch_column_attribute_columns_map
 # --------------------------------------------------------------------------

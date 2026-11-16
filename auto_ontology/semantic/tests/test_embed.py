@@ -6,23 +6,68 @@
 
 from __future__ import annotations
 
-from auto_ontology.semantic.embed import _build_rows, _sample_values
+from auto_ontology.semantic.embed import _build_rows, _format_sample_values
 
 
-def test_sample_values_handles_legacy_json_string_and_native_list() -> None:
+def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
     # Legacy Column nodes still store sample_values as a JSON string.
-    assert _sample_values('["a", "b"]') == ["a", "b"]
+    assert _format_sample_values('["a", "b"]') == " Sample values: a, b."
     # Current writers store a native list.
-    assert _sample_values(["a", "b"]) == ["a", "b"]
+    assert _format_sample_values(["a", "b"]) == " Sample values: a, b."
 
 
-def test_sample_values_filters_long_values_and_handles_empty() -> None:
+def test_format_sample_values_filters_long_values_and_handles_empty() -> None:
     long_value = "x" * 31
-    assert _sample_values([long_value, "ok"]) == ["ok"]
-    assert _sample_values(None) == []
-    assert _sample_values([]) == []
-    assert _sample_values(["a", None, "b"]) == ["a", "b"]
-    assert _sample_values('["a", null, "b"]') == ["a", "b"]
+    assert _format_sample_values([long_value, "ok"]) == " Sample values: ok."
+    assert _format_sample_values(None) == ""
+    assert _format_sample_values([]) == ""
+    assert _format_sample_values(["a", None, "b"]) == " Sample values: a, b."
+    assert _format_sample_values('["a", null, "b"]') == " Sample values: a, b."
+
+
+def _attr_text(**attr: object) -> str:
+    base = {"id": "a1", "name": "Total", "term_name": "Order", "source_column": "t"}
+    (row,) = _build_rows("shop", {}, [{**base, **attr}])
+    return row["text"]
+
+
+def test_the_columns_description_is_embedded_not_the_attributes() -> None:
+    text = _attr_text(
+        description="The long attribute description",
+        column_description="Order total",
+        sample_values="[10, 20]",
+    )
+
+    assert (
+        text
+        == "ColumnAttribute: Total of Term Order. Order total Sample values: 10, 20."
+    )
+
+
+def test_the_family_is_named_after_the_term() -> None:
+    (row,) = _build_rows(
+        "shop",
+        {"synonyms": ["Purchase"]},
+        [
+            {
+                "id": "a1",
+                "name": "Total",
+                "term_name": "Order",
+                "column_description": "Order total",
+                "family_prefix": "NEW_",
+            }
+        ],
+    )
+
+    assert row["text"] == (
+        "ColumnAttribute: Total of Term Order (Purchase), family NEW_. Order total"
+    )
+
+
+def test_an_undocumented_column_embeds_its_name_and_samples() -> None:
+    assert _attr_text(sample_values='["a"]') == (
+        "ColumnAttribute: Total of Term Order.  Sample values: a."
+    )
 
 
 TERM = {"name": "Purchase Order", "description": "An order placed", "synonyms": ["PO"]}
@@ -80,43 +125,4 @@ def test_a_term_without_attributes_still_has_its_own_fields() -> None:
     assert _texts(TERM, [])[0] == (
         "term: Purchase Order, synonyms: PO, term_description: An order placed, "
         "database_name: shop"
-    )
-
-
-def test_attribute_text_says_what_column_it_represents() -> None:
-    text = _texts(TERM, [STATUS])[1]
-
-    assert text == (
-        "Order Status is an attribute of Purchase Order (also: PO). It represents "
-        "column ord_st of table sales.orders in database shop. Description: Where "
-        "the order is. data type: varchar, unique: no, sample values: OPEN, SHIPPED."
-    )
-
-
-def test_samples_and_format_appear_once() -> None:
-    dated = {
-        **STATUS,
-        "description": "Day the order was placed — format: YYMMDD",
-        "column_description": None,
-        "sample_values": None,
-        "column_data_type": "text",
-    }
-    text = _texts(TERM, [STATUS, dated])
-
-    assert text[1].count("OPEN") == 1
-    assert text[2].count("YYMMDD") == 1
-    assert "Description: Day the order was placed." in text[2]
-
-
-def test_a_different_column_description_is_kept_too() -> None:
-    attr = {**STATUS, "column_description": "Lifecycle code"}
-
-    assert "Column description: Lifecycle code." in _texts({}, [attr])[0]
-
-
-def test_synonyms_come_from_the_attribute_when_no_term_is_passed() -> None:
-    attr = {**STATUS, "term_synonyms": ["PO"]}
-
-    assert _texts({}, [attr])[0].startswith(
-        "Order Status is an attribute of Purchase Order (also: PO)."
     )
