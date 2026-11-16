@@ -46,7 +46,10 @@ def grep(ctx: ToolContext, page: int, pattern: str = "", offset: int = 0) -> str
         return f"Error: no page {page}; pages 1 to {len(ctx.pages)} exist."
 
     frame = ctx.pages[page - 1]
-    lines = [" | ".join(_cell(v) for v in row) for row in frame.itertuples(index=False)]
+    rows = list(frame.itertuples(index=False))
+    lines = [" | ".join(_cell(v) for v in row) for row in rows]
+    # Shown cut short, but matched whole: a value past the cut is still there.
+    full = [" | ".join("NULL" if v is None else str(v) for v in row) for row in rows]
     pattern = (pattern or "").strip()
     if pattern:
         try:
@@ -56,10 +59,10 @@ def grep(ctx: ToolContext, page: int, pattern: str = "", offset: int = 0) -> str
         deadline = time.monotonic() + config.grep_timeout_s()
         hits: list[tuple[int, str]] = []
         try:
-            for n, line in enumerate(lines, 1):
+            for n, (text, line) in enumerate(zip(full, lines), 1):
                 # The budget is shared by every row; ``timeout`` must be positive.
                 left = max(deadline - time.monotonic(), 0.001)
-                if compiled.search(line, timeout=left):
+                if compiled.search(text, timeout=left):
                     hits.append((n, line))
         except TimeoutError:
             return (

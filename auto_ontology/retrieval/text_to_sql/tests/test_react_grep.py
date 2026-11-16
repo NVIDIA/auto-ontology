@@ -112,6 +112,17 @@ def test_grep_still_matches_case_insensitively_under_the_time_budget() -> None:
     assert grep(ctx, 1, "^ali").splitlines()[0] == "2 of 3 rows match"
 
 
+def test_grep_finds_a_value_past_the_cut_of_a_long_cell() -> None:
+    ctx = ToolContext(retriever=None, connectors=[])
+    ctx.pages.append(pd.DataFrame({"note": ["x" * 200 + "NEEDLE", "short"]}))
+
+    text = grep(ctx, 1, "NEEDLE")
+
+    assert text.splitlines()[0] == "1 of 2 rows match"
+    assert "NEEDLE" not in text  # still shown cut short
+    assert "…" in text
+
+
 def test_grep_explains_a_missing_page() -> None:
     ctx = ToolContext(retriever=None, connectors=[])
     assert grep(ctx, 1, "x").startswith("Error: no saved results.")
