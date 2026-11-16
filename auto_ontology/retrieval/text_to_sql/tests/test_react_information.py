@@ -91,8 +91,20 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
                 "term_name": "Customer",
                 "schema_name": "shop",
                 "table_name": "customers",
+                "database_name": "shop",
                 "col_name": "status",
-            }
+            },
+            # What the real lookup returns for an attribute whose column is in
+            # another database: names filled in, ``database_name`` empty.
+            "a-other": {
+                "attr_name": "Patient Status",
+                "attr_description": "Elsewhere.",
+                "term_name": "",
+                "schema_name": "clinic",
+                "table_name": "patients",
+                "database_name": "",
+                "col_name": "status",
+            },
         },
     )
     for search in ("_uncovered_physical_hits", "_name_hits"):
@@ -143,6 +155,14 @@ def test_an_attribute_is_shown_with_its_column(
         "ATTRIBUTE Customer Status (of Customer) — column shop.customers.status: "
         "Active or not."
     )
+
+
+def test_an_attribute_of_another_database_is_not_shown(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _found(monkeypatch, [{"id": "a-other", "label": "ColumnAttribute"}])
+
+    assert information(ctx, "status").startswith("No matches for 'status'.")
 
 
 def test_an_attribute_of_a_term_shown_in_full_is_not_repeated(

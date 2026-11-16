@@ -234,11 +234,17 @@ def information(ctx: ToolContext, query: str, kinds: list[str] | None = None) ->
         _database_terms(ctx) if any(h.get("label") == LABEL_TERM for h in hits) else {}
     )
     attr_ids = [str(h["id"]) for h in hits if h.get("label") == LABEL_COLUMN_ATTRIBUTE]
-    attributes = (
-        fetch_attr_column_contexts(attr_ids, database_name=ctx.database_name)
-        if attr_ids
-        else {}
-    )
+    # The lookup keeps an attribute whose column is in another database, with an
+    # empty ``database_name``, so the database has to be checked here.
+    attributes = {
+        attr_id: context
+        for attr_id, context in (
+            fetch_attr_column_contexts(attr_ids, database_name=ctx.database_name)
+            if attr_ids
+            else {}
+        ).items()
+        if not ctx.database_name or context.get("database_name") == ctx.database_name
+    }
     table_ids = [str(h["id"]) for h in hits if h.get("label") == Labels.TABLE]
     tables = {
         str(t["id"]): t
