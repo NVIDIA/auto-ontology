@@ -337,13 +337,35 @@ def test_output_is_capped(calls: dict, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_what_does_not_fit_is_still_named(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "60")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "120")
     text = tool.retrieve(_ctx(), "how is revenue calculated")
 
+    assert len(text) <= 120
     assert text.endswith(
         "ALSO FOUND, not shown for space — retrieve one by name to see it: "
         "sales.orders, ATTRIBUTE Revenue (of Order)"
     )
+
+
+def test_a_notice_longer_than_the_limit_is_cut_to_it(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "60")
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert len(text) <= 60
+    assert text.startswith("ALSO FOUND")
+    assert text.endswith("…")
+
+
+def test_a_notice_is_cut_between_names(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "90")
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert len(text) <= 90
+    assert text.endswith("see it: sales.orders…")
 
 
 def test_the_also_found_line_fits_inside_the_limit(
