@@ -162,12 +162,14 @@ def test_a_narrow_component_does_not_hide_an_undecidable_order() -> None:
     assert infer_date_format(["4/04/20"]) is None
 
 
-def test_a_component_is_widened_to_the_widest_value_stored() -> None:
-    """``13`` cannot be held by ``D``, so the whole column is called ``DD``.
-    Same rule fractional seconds already follow: report the form a literal has
-    to be able to hold.
+def test_a_narrow_component_is_not_widened_by_a_two_digit_value() -> None:
+    """``13`` cannot be held by ``D``, but it does not make the column padded.
+    A column storing unpadded dates still holds days past the ninth, so the widest
+    value says nothing about padding and the narrowest decides it. Reading the
+    ``13`` as evidence of padding reported ``DD/M/YY`` for a column storing
+    ``D/M/YY``, and a model writing ``04/04/20`` for it matches nothing.
     """
-    assert infer_date_format(["4/4/20", "13/6/20"]) == "DD/M/YY"
+    assert infer_date_format(["4/4/20", "13/6/20"]) == "D/M/YY"
 
 
 def test_repeated_whitespace_keeps_the_widths_it_measures() -> None:
