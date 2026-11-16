@@ -1395,7 +1395,7 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
 def fetch_semantic_coverage(
     column_ids: list[str], table_ids: list[str]
 ) -> tuple[set[str], set[str]]:
-    """``(column ids with a ColumnAttribute, table ids a Term represents)``."""
+    """``(column ids with a ColumnAttribute, table ids a semantic Term represents)``."""
     columns: set[str] = set()
     tables: set[str] = set()
     if column_ids:
@@ -1408,7 +1408,11 @@ def fetch_semantic_coverage(
     if table_ids:
         rows = store().query_read(
             select(s.table__term.c.table_id)
-            .where(s.table__term.c.table_id.in_(table_ids))
+            .join(s.term, s.term.c.id == s.table__term.c.term_id)
+            .where(
+                s.table__term.c.table_id.in_(table_ids),
+                s.term.c.source == SEMANTIC_SOURCE,
+            )
             .distinct()
         )
         tables = {str(r["table_id"]) for r in rows}
