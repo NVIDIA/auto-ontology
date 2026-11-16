@@ -1437,14 +1437,50 @@ _GENERIC_ENTITY_FILTER_RE = re.compile(
     re.IGNORECASE,
 )
 _GENERIC_ENTITY_TYPE_COLUMNS = {"customer_type", "account_type", "entity_type", "type"}
+_GLOSSARY_ENTRY_RE = re.compile(r"^-\s+(?P<name>[^:\n]+):(?P<description>.*)$")
 
 
-def _strip_unasked_generic_entity_filter(pql: str, question: str) -> str:
+def _glossary_entries(organization: str) -> list[tuple[str, str]]:
+    """``(name, description)`` pairs from the ``GLOSSARY`` section of *organization*.
+
+    The section is rendered as one ``- name: description`` line per entry.
+    """
+    entries: list[tuple[str, str]] = []
+    in_glossary = False
+    for line in organization.splitlines():
+        stripped = line.strip()
+        if stripped == "GLOSSARY":
+            in_glossary = True
+        elif in_glossary and (entry := _GLOSSARY_ENTRY_RE.match(stripped)):
+            entries.append((entry["name"].strip(), entry["description"].strip()))
+        elif in_glossary and not stripped and entries:
+            in_glossary = False
+    return entries
+
+
+def _glossary_scopes_filter(
+    question_l: str, column: str, value_l: str, organization: str
+) -> bool:
+    """Whether a glossary term the question uses is defined by this column or value."""
+    for name, description in _glossary_entries(organization):
+        description_l = description.lower()
+        if (column in description_l or value_l in description_l) and re.search(
+            rf"(?<!\w){re.escape(name.lower())}(?!\w)", question_l
+        ):
+            return True
+    return False
+
+
+def _strip_unasked_generic_entity_filter(
+    pql: str, question: str, organization: str = ""
+) -> str:
     """Remove inferred entity-type filters when the user asked for the whole population.
 
     LLM repair sometimes turns generic words like "accounts" into a type filter, e.g.
     ``customers.customer_type = 'enterprise'``. That silently narrows top-N predictions. Keep explicit
-    user scopes: if the column or value is named in the question, leave the filter intact.
+    user scopes: if the column or value is named in the question, or a glossary term in *organization*
+    that the question uses is defined by it, leave the filter intact. A glossary that merely mentions
+    the column does not count: that would keep the filter for every question.
     """
     match = _GENERIC_ENTITY_FILTER_RE.search(pql)
     if not match:
@@ -1455,6 +1491,8 @@ def _strip_unasked_generic_entity_filter(pql: str, question: str) -> str:
     question_l = (question or "").lower()
     value_l = match.group("value").lower()
     if column in question_l or value_l in question_l:
+        return pql
+    if _glossary_scopes_filter(question_l, column, value_l, organization):
         return pql
     return (
         pql[: match.start()]
@@ -1613,7 +1651,7 @@ def generate_pql(
             col_stypes=graph_col_stypes,
             schema_text="\n".join([graph_ddl, column_reference, *docs]),
         )
-        pql = _strip_unasked_generic_entity_filter(pql, question)
+        pql = _strip_unasked_generic_entity_filter(pql, question, organization)
         entity_sql = extract_entity_sql(raw)
         if explain and explain_entity:
             pql = _scope_explain_entity(pql, explain_entity)
