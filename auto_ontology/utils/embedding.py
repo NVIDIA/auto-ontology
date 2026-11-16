@@ -78,6 +78,17 @@ _RETRY_ATTEMPTS = 4
 _RETRY_BASE_SECONDS = 15.0
 _RETRY_MAX_SECONDS = 120.0
 
+# Statuses an endpoint may give a single text it refuses -- a content screen's
+# 422, an input it cannot take -- which fail the whole request carrying it. A
+# chunk refused with one of these is split down to the texts at fault, so only
+# their rows go unembedded. Past _MAX_REJECTED_PER_CHUNK such texts the chunk
+# is failed whole: the endpoint is refusing the chunk, not a few texts.
+_INPUT_REJECTED_STATUSES = (400, 413, 422)
+_MAX_REJECTED_PER_CHUNK = 16
+# Sent once before splitting, to tell a refused text from a request that is
+# wrong whatever it carries (a bad field, say), which fails at once as before.
+_PROBE_TEXT = "probe"
+
 # Why a chunk came back unembedded, kept on the frame rather than on every row.
 _ERROR_ATTR = "embed_error"
 # Set when retrying cannot help: the request is wrong (bad key, unknown model,
@@ -235,12 +246,67 @@ def _is_fatal(exc: Exception) -> bool:
     )
 
 
+def _rejects_input(exc: Exception) -> bool:
+    """Whether *exc* may be the endpoint refusing one of the texts sent."""
+    return (
+        isinstance(exc, APIStatusError) and exc.status_code in _INPUT_REJECTED_STATUSES
+    )
+
+
+def _embed_around_rejected(
+    texts: list[str], params: EmbedParams, refusal: Exception
+) -> tuple[list[list[float] | None], dict[int, str]]:
+    """Embed *texts*, whose request was refused with *refusal*, skipping the texts at fault.
+
+    Splits the texts in halves, and refused halves again, down to the single
+    texts the endpoint refuses. Returns the vectors (``None`` for a refused
+    text) and why each refused text was refused, by index. Raises *refusal*
+    when the endpoint refuses a one-word probe too, or more than
+    ``_MAX_REJECTED_PER_CHUNK`` texts: then the request is wrong, not a text.
+    Any other error is raised as is, for the caller's retry.
+    """
+    try:
+        embed_texts([_PROBE_TEXT], params, "passage")
+    except Exception as exc:
+        if _rejects_input(exc):
+            raise refusal from exc
+        raise
+
+    vectors: list[list[float] | None] = [None] * len(texts)
+    refused: dict[int, str] = {}
+
+    def _embed(indices: range) -> None:
+        try:
+            got = embed_texts([texts[i] for i in indices], params, "passage")
+        except Exception as exc:
+            if not _rejects_input(exc):
+                raise
+            if len(indices) == 1:
+                refused[indices[0]] = f"{type(exc).__name__}: {exc}"
+                if len(refused) > _MAX_REJECTED_PER_CHUNK:
+                    raise refusal from exc
+                return
+            middle = len(indices) // 2
+            _embed(indices[:middle])
+            _embed(indices[middle:])
+            return
+        for index, vector in zip(indices, got):
+            vectors[index] = vector
+
+    middle = len(texts) // 2
+    _embed(range(middle))
+    _embed(range(middle, len(texts)))
+    return vectors, refused
+
+
 def _embed_frame(frame: "pd.DataFrame", params: EmbedParams) -> "pd.DataFrame":
     """Embed *frame*'s ``text`` column as passages into ``metadata["embedding"]``.
 
     Never raises. A failure leaves every row without an embedding and the
     reason in ``frame.attrs``, which is what lets the caller retry the chunk,
-    log why it failed, and still write the chunks that worked.
+    log why it failed, and still write the chunks that worked. A text the
+    endpoint refuses on its own loses only its own row, with a warning naming
+    the row; the rest of the chunk is embedded.
     """
     out = frame.copy()
     # A fresh dict per row: the caller's row dicts are not ours to mutate.
@@ -248,8 +314,15 @@ def _embed_frame(frame: "pd.DataFrame", params: EmbedParams) -> "pd.DataFrame":
         dict(m) if isinstance(m, dict) else {}
         for m in out.get("metadata", [None] * len(out))
     ]
+    texts = list(out.get("text", [""] * len(out)))
+    refused: dict[int, str] = {}
     try:
-        vectors = embed_texts(list(out.get("text", [""] * len(out))), params, "passage")
+        try:
+            vectors = embed_texts(texts, params, "passage")
+        except Exception as exc:
+            if len(texts) < 2 or not _rejects_input(exc):
+                raise
+            vectors, refused = _embed_around_rejected(texts, params, exc)
     except Exception as exc:
         out.attrs[_ERROR_ATTR] = f"{type(exc).__name__}: {exc}"
         out.attrs[_FATAL_ATTR] = _is_fatal(exc)
@@ -257,6 +330,12 @@ def _embed_frame(frame: "pd.DataFrame", params: EmbedParams) -> "pd.DataFrame":
     for metadata, vector in zip(out["metadata"], vectors):
         if vector is not None:
             metadata["embedding"] = vector
+    for index, reason in refused.items():
+        logger.warning(
+            "Embedding endpoint refused row %s; leaving it unembedded: %s",
+            out["metadata"].iloc[index].get("id", f"#{index}"),
+            reason,
+        )
     return out
 
 
