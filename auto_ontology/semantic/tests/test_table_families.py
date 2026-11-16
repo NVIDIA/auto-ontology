@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from auto_ontology.connectors.base import StatementTimeout
 from auto_ontology.semantic import table_families as tf
 
 
@@ -230,6 +231,40 @@ def test_crossing_fk_is_kept_when_coverage_cannot_be_checked() -> None:
 
     assert handled == 0
     delete.assert_not_called()
+
+
+def test_crossing_fk_is_kept_when_coverage_times_out() -> None:
+    capped = _connector([])
+    capped.supports_statement_timeout = True
+    capped.execute.side_effect = StatementTimeout(60)
+
+    handled, delete = _keep_case(capped)
+
+    assert handled == 0
+    delete.assert_not_called()
+
+
+def _execute_kwargs(connector: MagicMock) -> list[dict]:
+    return [call.kwargs for call in connector.execute.call_args_list]
+
+
+def test_coverage_queries_are_capped_where_the_connector_supports_it() -> None:
+    capped = _connector([8, 9])
+    capped.supports_statement_timeout = True
+
+    _keep_case(capped)
+
+    cap = {"timeout_s": tf._COVERAGE_TIMEOUT_SECONDS}
+    assert _execute_kwargs(capped) == [cap, cap]
+
+
+def test_coverage_queries_are_uncapped_on_a_connector_without_a_cap() -> None:
+    uncapped = _connector([8, 9])
+    uncapped.supports_statement_timeout = False
+
+    _keep_case(uncapped)
+
+    assert _execute_kwargs(uncapped) == [{}, {}]
 
 
 def test_crossing_fk_is_kept_without_a_connector() -> None:

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 from auto_ontology.dal.attributes import (
     delete_semantic_fk,
     fetch_semantic_fk_join_groups,
@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 _MIN_TWINS = 3
 _MIN_JACCARD = 0.5
+# How long one coverage query may run, on connectors that support a cap. The
+# same as the profiling cap in visit_enter.py. Each crossing FK costs two full
+# scans and the rest of compilation waits on them; a check that does not finish
+# keeps the edge as it is.
+_COVERAGE_TIMEOUT_SECONDS = 120
 _HISTORY_RE = re.compile(r"_(HIST|HISTORY)(_\d+)?$", re.IGNORECASE)
 
 
@@ -254,7 +259,13 @@ def _coverage(
     source: tuple[str | None, str, str],
     target: tuple[str | None, str, str],
 ) -> int | None:
-    """Distinct source values found in the target column; ``None`` on error."""
+    """Distinct source values found in the target column; ``None`` on error.
+
+    Capped at :data:`_COVERAGE_TIMEOUT_SECONDS` where the connector supports
+    it. ``is True`` because a test double answers every attribute with
+    something truthy, and passing ``timeout_s`` to a connector that does not
+    take it would be a TypeError.
+    """
     dialect = getattr(connector, "dialect", None)
     sc = quoted_identifier(source[2], dialect)
     tc = quoted_identifier(target[2], dialect)
@@ -263,8 +274,16 @@ def _coverage(
         f"FROM {connector.qualify(source[0], source[1])} "
         f"WHERE {sc} IN (SELECT {tc} FROM {connector.qualify(target[0], target[1])})"
     )
+    kwargs: dict[str, Any] = {}
+    if getattr(connector, "supports_statement_timeout", False) is True:
+        kwargs["timeout_s"] = _COVERAGE_TIMEOUT_SECONDS
     try:
-        return int(connector.execute(sql).iloc[0, 0])
+        return int(connector.execute(sql, **kwargs).iloc[0, 0])
+    except StatementTimeout as exc:
+        logger.warning(
+            "coverage check for %s.%s timed out: %s", source[1], source[2], exc
+        )
+        return None
     except Exception:
         logger.info(
             "coverage check skipped for %s.%s", source[1], source[2], exc_info=True
