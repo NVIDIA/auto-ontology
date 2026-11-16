@@ -23,6 +23,20 @@ import { KpiTiles } from './ChartKpi';
 import type { Truncation } from './normalize';
 import type { ChartSpec } from './types';
 
+type TextVariant = Extract<Mark, { kind: 'text' }>['variant'];
+
+/**
+ * CSS class per text-mark variant. Typed as a full record so a new variant
+ * fails to compile until it has a styled class: an unstyled SVG label falls
+ * back to a black fill and disappears in dark mode.
+ */
+const TEXT_CLASS: Record<TextVariant, string> = {
+	tick: 'result-chart-tick',
+	cat: 'result-chart-catlabel',
+	value: 'result-chart-vallabel',
+	unit: 'result-chart-unit',
+};
+
 interface Tooltip {
 	text: string;
 	x: number;
@@ -226,7 +240,7 @@ function renderMark(
 					x={mark.x}
 					y={mark.y}
 					textAnchor={mark.anchor}
-					className={`result-chart-${mark.variant === 'value' ? 'vallabel' : mark.variant}`}
+					className={TEXT_CLASS[mark.variant]}
 				>
 					{mark.text}
 				</text>
