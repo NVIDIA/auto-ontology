@@ -44,6 +44,7 @@ class PostgresDatabase(SQLDatabase):
     """
 
     supports_statement_timeout = True
+    supports_read_only = True
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
@@ -93,30 +94,43 @@ class PostgresDatabase(SQLDatabase):
         parameters: Optional[list] = None,
         *,
         timeout_s: float | None = None,
+        read_only: bool = False,
     ) -> pd.DataFrame:
         """Run *sql*; with *timeout_s*, the server cancels it after that long.
 
         The cap is ``SET LOCAL statement_timeout`` inside a transaction, so it
         ends with the statement and never leaks onto the pooled connection.
+        *read_only* makes that transaction ``READ ONLY`` the same way, so the
+        server refuses writes from DML in a CTE, ``SELECT INTO``, ``FOR
+        UPDATE``, ``nextval`` or a function that writes. It is set before
+        *sql* runs, so *sql* cannot turn it back off.
 
         Raises:
             StatementTimeout: the server cancelled the statement at the cap.
         """
+        settings: list[tuple[str, str]] = []
+        if read_only:
+            settings.append(("transaction_read_only", "on"))
+        if timeout_s is not None:
+            settings.append(("statement_timeout", f"{max(1, int(timeout_s * 1000))}ms"))
         with self._pool.connection() as conn:
-            if timeout_s is None:
+            if not settings:
                 return _fetch_frame(conn, sql, parameters)
             started = time.monotonic()
             try:
                 with conn.transaction():
                     conn.execute(
-                        "SELECT set_config('statement_timeout', %s, true)",
-                        (f"{max(1, int(timeout_s * 1000))}ms",),
+                        "SELECT "
+                        + ", ".join(
+                            f"set_config('{name}', %s, true)" for name, _ in settings
+                        ),
+                        tuple(value for _, value in settings),
                     )
                     return _fetch_frame(conn, sql, parameters)
             except psycopg.errors.QueryCanceled as exc:
                 # QueryCanceled also covers pg_cancel_backend(); only the
                 # timeout we set is ours to relabel.
-                if "statement timeout" not in str(exc):
+                if timeout_s is None or "statement timeout" not in str(exc):
                     raise
                 raise StatementTimeout.since(timeout_s, started) from exc
 

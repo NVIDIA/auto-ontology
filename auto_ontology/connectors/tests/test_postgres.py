@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 
+import psycopg
 import pytest
 
 from auto_ontology.catalog.constants import TableTypes
@@ -144,3 +145,30 @@ def test_nullability_is_a_real_boolean(pagila) -> None:
     # The real assertion: a mix, not a column of all-True. The bug's signature
     # was every column agreeing.
     assert 0 < int(columns.is_nullable.sum()) < len(columns)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH d AS (DELETE FROM actor WHERE false RETURNING *) SELECT * FROM d",
+        "SELECT * INTO actor_copy FROM actor LIMIT 0",
+        "SELECT actor_id FROM actor LIMIT 1 FOR UPDATE",
+        "SELECT nextval('actor_actor_id_seq')",
+    ],
+)
+def test_read_only_refuses_writes_under_a_select(pagila, sql: str) -> None:
+    with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+        pagila.execute(sql, read_only=True, timeout_s=10)
+
+
+def test_read_only_cannot_be_turned_off_by_the_statement(pagila) -> None:
+    with pytest.raises(psycopg.errors.ActiveSqlTransaction):
+        pagila.execute(
+            "SELECT set_config('transaction_read_only', 'off', true)", read_only=True
+        )
+
+
+def test_read_only_reads_and_does_not_leak_onto_the_pool(pagila) -> None:
+    rows = pagila.execute("SELECT count(*) AS n FROM actor", read_only=True)
+    assert int(rows.n.iloc[0]) > 0
+    assert pagila.execute("SHOW transaction_read_only").iloc[0, 0] == "off"
