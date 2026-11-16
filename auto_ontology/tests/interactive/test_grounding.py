@@ -4,11 +4,15 @@
 
 import sys
 import types
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from auto_ontology.retrieval.interactive.grounding import ground_external_knowledge
+
+if TYPE_CHECKING:
+    from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
 
 def _make_llm(response: str) -> MagicMock:
@@ -188,12 +192,12 @@ def test_run_sql_generation_empty_kg_grounds_nothing():
     mock_llm.invoke.assert_not_called()
 
 
-def _evidence_sent(sess) -> str:
+def _evidence_sent(sess: "InteractiveSessionState") -> str:
     from auto_ontology.retrieval.interactive.coordinator import _run_sql_generation
 
-    captured_payload = {}
+    captured_payload: dict[str, Any] = {}
 
-    def fake_get_agent_response(payload):
+    def fake_get_agent_response(payload: dict[str, Any]) -> dict[str, Any]:
         captured_payload.update(payload)
         return {"sql_code": "SELECT 2", "path_state": {}}
 
@@ -221,7 +225,7 @@ def _evidence_sent(sess) -> str:
     return captured_payload["evidence"]
 
 
-def _session():
+def _session() -> "InteractiveSessionState":
     from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
     return InteractiveSessionState(
@@ -238,7 +242,9 @@ def _session():
 @pytest.mark.parametrize(
     "debug_error", ["no such column: price", None], ids=["error", "wrong_results"]
 )
-def test_a_debug_turn_sends_the_rejected_sql_and_its_feedback(debug_error):
+def test_a_debug_turn_sends_the_rejected_sql_and_its_feedback(
+    debug_error: str | None,
+) -> None:
     from auto_ontology.retrieval.interactive.coordinator import _apply_debug_seed
 
     sess = _session()
@@ -253,7 +259,7 @@ def test_a_debug_turn_sends_the_rejected_sql_and_its_feedback(debug_error):
     assert sess.path_state["error"] in evidence
 
 
-def test_a_first_turn_sends_no_previous_attempt():
+def test_a_first_turn_sends_no_previous_attempt() -> None:
     sess = _session()
     sess.path_state["error"] = {"type": "ValueError", "message": "boom"}
 
