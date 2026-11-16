@@ -524,7 +524,7 @@ def _tables_in_view(sql: str | None) -> set[tuple[str | None, str | None]]:
     return {
         (schema, name)
         for schema, name in _sql_tables(sql)
-        if name and re.search(rf"\b{re.escape(name.lower())}\b", shown)
+        if name and re.search(rf"(?<![\w$]){re.escape(name.lower())}(?![\w$])", shown)
     }
 
 

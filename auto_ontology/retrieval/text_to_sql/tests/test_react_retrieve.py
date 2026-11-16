@@ -652,6 +652,20 @@ def test_a_table_only_a_definition_names_is_in_view(
     assert ctx.was_shown("sales", "orders")
 
 
+def test_a_quoted_table_name_ending_in_punctuation_is_in_view(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quoted = {**REVENUE, "sql": 'SELECT * FROM finance."refunds$"'}
+    monkeypatch.setattr(
+        tool, "_get_candidates_information", lambda *a, **k: [dict(quoted)]
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "refunds")
+
+    assert ctx.was_shown("finance", "refunds$")
+    assert not ctx.was_shown("finance", "refunds")
+
+
 def test_a_table_named_only_past_the_clipped_sql_is_not_in_view(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
