@@ -82,18 +82,33 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         "customers": [CUSTOMER_TERM],
     }
 
-    def meaning(_retriever, query, list_of_semantic, database_name, per_label_k):
+    def meaning(
+        _retriever: object,
+        query: str,
+        list_of_semantic: list[str],
+        database_name: str | None,
+        per_label_k: dict[str, int],
+    ) -> list[dict]:
         seen["meaning"].append((query, list_of_semantic, database_name))
         return [dict(h) for h in meaning_hits.get(query, [])]
 
-    def names(tokens, object_types, *, include_description, data_ids, limit):
+    def names(
+        tokens: list[str],
+        object_types: set[str],
+        *,
+        include_description: bool,
+        data_ids: list[str] | None,
+        limit: int,
+    ) -> list[dict]:
         seen["names"].append((tokens, include_description, object_types))
         seen["name_scopes"].append((set(object_types), data_ids))
         if tokens == ["cust_ref"] and "Column" in object_types:
             return [{"id": "c-cust-ref", "label": "Column", "name": "cust_ref"}]
         return []
 
-    def term_tables(*, term_ids, database_name):
+    def term_tables(
+        *, term_ids: list[str] | None, database_name: str | None
+    ) -> list[dict]:
         return [
             {"term_id": "term-customer", "table_id": "t-orders", "path": "SEMANTIC_FK"},
             {
@@ -103,12 +118,12 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
             },
         ]
 
-    def expand(ids_and_labels):
+    def expand(ids_and_labels: list[dict] | None) -> dict[str, dict]:
         return {
             "c-cust-ref": {"name": "cust_ref", "relevant_tables": [{"id": "t-orders"}]}
         }
 
-    def join_path(anchor, dest):
+    def join_path(anchor: str, dest: str) -> list[dict]:
         seen["join"].append((anchor, dest))
         return [
             {
@@ -396,7 +411,13 @@ def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     data_retriever = object()
     seen: dict[str, list] = {"coverage": []}
 
-    def meaning(retriever, query, list_of_semantic, database_name, per_label_k):
+    def meaning(
+        retriever: object,
+        query: str,
+        list_of_semantic: list[str],
+        database_name: str | None,
+        per_label_k: dict[str, int],
+    ) -> list[dict]:
         if retriever is not data_retriever:
             return []
         seen["labels"] = list_of_semantic
@@ -415,7 +436,9 @@ def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
             {"id": "t-customers", "label": "Table"},
         ]
 
-    def coverage(column_ids, table_ids):
+    def coverage(
+        column_ids: list[str], table_ids: list[str]
+    ) -> tuple[set[str], set[str]]:
         seen["coverage"].append((column_ids, table_ids))
         return {"c-status"}, {"t-customers"}
 
@@ -570,7 +593,7 @@ class CountingConnector:
     dialect = "mysql"
     supports_statement_timeout = True
 
-    def __init__(self, counts: dict[str, int]):
+    def __init__(self, counts: dict[str, int]) -> None:
         self.counts = counts
         self.sql: list[str] = []
         self.timeouts: list[float | None] = []
