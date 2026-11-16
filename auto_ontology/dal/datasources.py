@@ -1017,36 +1017,17 @@ def fetch_columns_for_table(
     return table
 
 
-def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
-    """Tables with a name/type/description/sample_values summary of each column.
+def _semantic_fk_target_expr() -> ColumnElement:
+    """``schema.table.column`` a catalog column's semantic FK lands on.
 
-    Returns ``[]`` rather than raising if the query fails: this decorates
-    retrieval results, and losing the decoration beats losing the results.
-
-    A table with no columns does not appear at all — the column join is inner.
-    Left that way deliberately: a column-less table in the catalog is a symptom
-    worth seeing where it originates, not something to paper over here.
-
-    ``sample_values`` is what lets a SQL-generating model write a correct
-    ``->``/``->>`` path into a JSONB column instead of guessing a plausible
-    sibling key — this is the only per-column field ``candidates_preparation``'s
-    "back-fill" step (§4a: any table whose columns arrived without
-    sample_values from the vector-index hit) exists to supply. It was
-    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
-    dropped it from this query's rewrite (the Neo4j Cypher version had it);
-    restored so the back-fill isn't a no-op again. ``is_nullable`` is included
-    alongside it so projection rules can tell when a requested item may be
-    missing; ``None`` means the connector could not determine it.
-    ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    The FK points at an attribute; the column that owns the attribute is the
+    target. Correlated on ``catalog_column``.
     """
-    if not table_ids:
-        return []
     semantic_owner = s.column__has_attribute.alias("semantic_fk_owner")
     semantic_target = s.catalog_column.alias("semantic_fk_target")
     semantic_table = s.catalog_table.alias("semantic_fk_table")
     semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
-    semantic_fk_target = (
+    return (
         select(
             func.concat_ws(
                 ".",
@@ -1083,12 +1064,38 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         .limit(1)
         .scalar_subquery()
     )
+
+
+def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
+    """Tables with a name/type/description/sample_values summary of each column.
+
+    Returns ``[]`` rather than raising if the query fails: this decorates
+    retrieval results, and losing the decoration beats losing the results.
+
+    A table with no columns does not appear at all — the column join is inner.
+    Left that way deliberately: a column-less table in the catalog is a symptom
+    worth seeing where it originates, not something to paper over here.
+
+    ``sample_values`` is what lets a SQL-generating model write a correct
+    ``->``/``->>`` path into a JSONB column instead of guessing a plausible
+    sibling key. It was selected here from Aug 2026 until the
+    Neo4j-to-Postgres port silently dropped it from this query's rewrite (the
+    Neo4j Cypher version had it); restored so a table whose columns arrived
+    without sample_values from the vector-index hit can be back-filled. ``is_nullable`` is included
+    alongside it so projection rules can tell when a requested item may be
+    missing; ``None`` means the connector could not determine it.
+    ``semantic_fk`` resolves the referenced attribute back to its owning column
+    and returns that target as ``schema.table.column`` for SQL prompts.
+    """
+    if not table_ids:
+        return []
+    semantic_fk_target = _semantic_fk_target_expr()
     try:
         rows = store().query_read(
             select(
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
-                s.catalog_table.c.description,
+                table_description_expr().label("description"),
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
@@ -1146,6 +1153,45 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "semantic_fk": row["semantic_fk"],
                 }
             )
+    return list(tables.values())
+
+
+def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
+    """Every table in *database_name* (all databases when ``None``) with its
+    column names: ``{id, name, schema_name, database_name, columns}``.
+
+    Names only, so a whole catalog is cheap to compare table against table.
+    """
+    query = select(
+        s.catalog_table.c.id,
+        s.catalog_table.c.name,
+        s.catalog_database.c.name.label("database_name"),
+        s.catalog_schema.c.name.label("schema_name"),
+        s.catalog_column.c.name.label("column_name"),
+    ).select_from(
+        _table_join().join(
+            s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
+        )
+    )
+    if database_name:
+        query = query.where(s.catalog_database.c.name == database_name)
+    rows = store().query_read(
+        query.order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+    )
+
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            str(row["id"]),
+            {
+                "id": str(row["id"]),
+                "name": row["name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "database_name": row["database_name"] or "",
+                "columns": [],
+            },
+        )
+        table["columns"].append(row["column_name"])
     return list(tables.values())
 
 

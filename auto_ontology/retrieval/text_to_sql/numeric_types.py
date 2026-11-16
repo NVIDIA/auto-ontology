@@ -14,16 +14,9 @@ and the other a numeric.
 The grader cannot be changed from here and the reference is never visible, so
 this module offers deterministic, SQL-level levers:
 
-* :func:`float_casts_to_numeric` rewrites our own explicit
-  ``CAST(.. AS REAL / FLOAT / DOUBLE PRECISION)`` to ``NUMERIC``. Reference
-  SQL that rounds must cast to ``numeric`` (Postgres has no ``round(float, n)``),
-  so this is the right default.
 * :func:`flip_numeric_output_types` moves the numeric output columns of a
   top-level ``SELECT`` to the *other* type, for the one retry a benchmark
   allows after a wrong answer.
-* :func:`order_string_aggregates` adds ``ORDER BY`` to a ``STRING_AGG`` that
-  has none. The grader compares the concatenated text exactly, and an
-  unordered aggregate is not a stable string.
 * :func:`order_groups_by_identifier` and :func:`order_periods_chronologically`
   settle two row-order shapes the grader compares exactly: a grouped metric
   tied on its value, and a per-period ranking displayed by the period.
@@ -62,19 +55,7 @@ NumericKind = Literal["float", "decimal"]
 TargetType = Literal["numeric", "double"]
 
 _POSTGRES_DIALECTS = frozenset({"postgres", "postgresql"})
-_FLOAT_TYPES = frozenset({exp.DataType.Type.FLOAT, exp.DataType.Type.DOUBLE})
-_DECIMAL_TYPES = frozenset({exp.DataType.Type.DECIMAL})
-_ARITHMETIC_OR_AVG = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Avg)
 _DECIMAL_STRING_RE = re.compile(r"^-?\d+\.\d+$")
-
-
-def _has_decimal_cast(node: exp.Expression) -> bool:
-    """Whether *node* contains an explicit ``CAST(.. AS NUMERIC/DECIMAL)``."""
-    for cast in node.find_all(exp.Cast, exp.TryCast):
-        target = cast.args.get("to")
-        if isinstance(target, exp.DataType) and target.this in _DECIMAL_TYPES:
-            return True
-    return False
 
 
 def _is_intrinsic_float_projection(node: exp.Expression) -> bool:
@@ -123,92 +104,6 @@ def _parse(sql: str) -> Optional[exp.Expression]:
         return None
 
 
-def _null_safe_comparison(node: exp.Expression, op: type[exp.Binary]) -> exp.Expression:
-    """``IS [NOT] DISTINCT FROM`` without the word ``DISTINCT``.
-
-    ``COALESCE(a op b, (a IS NULL) op (b IS NULL))`` is NULL exactly where the
-    plain comparison is, and the second term then says whether both sides are
-    null. That matches the null-safe operators.
-    """
-    left, right = node.this, node.expression
-    return exp.Coalesce(
-        this=exp.Paren(this=op(this=left.copy(), expression=right.copy())),
-        expressions=[
-            op(
-                this=exp.Paren(this=exp.Is(this=left.copy(), expression=exp.Null())),
-                expression=exp.Paren(
-                    this=exp.Is(this=right.copy(), expression=exp.Null())
-                ),
-            )
-        ],
-    )
-
-
-def float_casts_to_numeric(sql: str, dialect: Optional[str]) -> str:
-    """Rewrite explicit float casts (``REAL``, ``FLOAT``, ``DOUBLE PRECISION``,
-    ``::real``, ``::float8`` ...) to ``NUMERIC``; Postgres only.
-
-    Returns *sql* byte-for-byte when nothing needs to change, so SQL that never
-    casts to a float is not re-serialised. Only explicit casts are touched:
-    columns that are natively ``float`` stay as they are, because a reference
-    that reads the same column returns the same type.
-    """
-    if not _is_postgres(dialect) or not sql.strip():
-        return sql
-    tree = _parse(sql)
-    if tree is None:
-        return sql
-
-    changed = False
-    for cast in list(tree.find_all(exp.Cast, exp.TryCast)):
-        target = cast.args.get("to")
-        if isinstance(target, exp.DataType) and target.this in _FLOAT_TYPES:
-            cast.set("to", exp.DataType.build("numeric"))
-            changed = True
-
-    # BIRD-Interact's evaluator runs a naive token filter (remove_distinct)
-    # that deletes every space-delimited word "DISTINCT", corrupting
-    # ``a IS DISTINCT FROM b`` into ``a IS FROM b`` (a syntax error).
-    # ``<>`` / ``=`` avoid that token but drop rows that involve NULL, so the
-    # replacement keeps the null-safe result without writing DISTINCT.
-    for null_neq in list(tree.find_all(exp.NullSafeNEQ)):
-        null_neq.replace(_null_safe_comparison(null_neq, exp.NEQ))
-        changed = True
-    for null_eq in list(tree.find_all(exp.NullSafeEQ)):
-        null_eq.replace(_null_safe_comparison(null_eq, exp.EQ))
-        changed = True
-
-    # In PostgreSQL, combining a NUMERIC operand with a native real/float8
-    # column (e.g. ``AVG(CAST(x AS NUMERIC) / float_col)`` or
-    # ``CAST(x AS DECIMAL) * float_col``) silently promotes the expression to
-    # double precision. When a top-level arithmetic or AVG projection already
-    # contains an explicit NUMERIC/DECIMAL cast inside it, wrap the outer
-    # expression in ``CAST(.. AS NUMERIC)`` so the intended numeric type is
-    # preserved.
-    if isinstance(tree, exp.Select):
-        for projection in tree.expressions:
-            inner = projection.this if isinstance(projection, exp.Alias) else projection
-            unwrapped = inner
-            while isinstance(unwrapped, exp.Paren):
-                unwrapped = unwrapped.this
-            if isinstance(unwrapped, _ARITHMETIC_OR_AVG) and _has_decimal_cast(
-                unwrapped
-            ):
-                numeric_type = exp.DataType.build("numeric")
-                if isinstance(projection, exp.Alias):
-                    projection.set(
-                        "this",
-                        exp.Cast(this=projection.this.copy(), to=numeric_type),
-                    )
-                else:
-                    projection.replace(
-                        exp.Cast(this=projection.copy(), to=numeric_type)
-                    )
-                changed = True
-
-    return tree.sql(dialect="postgres") if changed else sql
-
-
 def numeric_column_kinds(frame: Any) -> list[Optional[NumericKind]]:
     """Per output column: ``"float"``, ``"decimal"`` or ``None`` (anything else).
 
@@ -241,18 +136,6 @@ def numeric_column_kinds(frame: Any) -> list[Optional[NumericKind]]:
         else:
             kinds.append(None)
     return kinds
-
-
-def has_avg_expression(sql: str) -> bool:
-    """Whether *sql* contains an ``AVG(...)`` aggregate or window expression."""
-    tree = _parse(sql)
-    return tree is not None and tree.find(exp.Avg) is not None
-
-
-# Execution reports this in ``path_state["error"]`` instead of rewriting SQL
-# itself. The corrected statement is ``path_state["sql_correction"]``.
-# Reconstruction is what installs it and sends it back through validation.
-SQL_CORRECTION_ERROR = "sql_correction"
 
 
 def cast_jsonb_numeric_projections(
@@ -430,47 +313,6 @@ def flip_numeric_output_types(
             projection.replace(exp.Cast(this=projection.copy(), to=target_type.copy()))
         converted += 1
     return tree.sql(dialect="postgres") if converted else None
-
-
-def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
-    """Give every unordered ``STRING_AGG`` an ``ORDER BY`` on its own value.
-
-    Postgres leaves the order of ``STRING_AGG(expr, delim)`` unspecified, and
-    the grader compares the resulting text exactly. Reference answers that
-    list the aggregated values sort them by that same expression. An aggregate
-    that already has an ``ORDER BY`` is left alone — a caller-chosen key
-    (rank, score) must win over alphabetical order.
-
-    Returns *sql* unchanged when there is nothing to add, so a query with no
-    ``STRING_AGG`` is never re-serialised.
-    """
-    if not _is_postgres(dialect) or not sql.strip():
-        return sql
-    if "string_agg" not in sql.lower():
-        return sql
-    tree = _parse(sql)
-    if tree is None:
-        return sql
-
-    changed = False
-    for aggregate in tree.find_all(exp.GroupConcat):
-        inner = aggregate.this
-        if isinstance(inner, exp.Order):
-            continue
-        sort_key = (
-            inner.expressions[0].copy()
-            if isinstance(inner, exp.Distinct) and inner.expressions
-            else inner.copy()
-        )
-        aggregate.set(
-            "this",
-            exp.Order(
-                this=inner.copy(),
-                expressions=[exp.Ordered(this=sort_key, nulls_first=False)],
-            ),
-        )
-        changed = True
-    return tree.sql(dialect="postgres") if changed else sql
 
 
 _IDENTIFIER_SUFFIX = re.compile(r"(id|key|code)$", re.IGNORECASE)
@@ -796,19 +638,15 @@ def sum_decimal_casts_to_integer(sql: str, dialect: Optional[str]) -> str:
 
 
 __all__ = [
-    "SQL_CORRECTION_ERROR",
     "cast_jsonb_numeric_projections",
     "dominant_kind",
     "flip_numeric_output_types",
     "float_json_arithmetic",
-    "float_casts_to_numeric",
-    "has_avg_expression",
     "numeric_column_kinds",
     "opposite_target",
     "order_by_leading_aggregate",
     "order_groups_by_identifier",
     "order_periods_chronologically",
-    "order_string_aggregates",
     "result_values_digest",
     "sum_decimal_casts_to_integer",
 ]
