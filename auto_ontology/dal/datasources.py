@@ -1161,7 +1161,6 @@ def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
     column names: ``{id, name, schema_name, database_name, columns}``.
 
     Names only, so a whole catalog is cheap to compare table against table.
-    Returns ``[]`` if the query fails, like :func:`fetch_tables_by_ids`.
     """
     query = select(
         s.catalog_table.c.id,
@@ -1176,13 +1175,9 @@ def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
     )
     if database_name:
         query = query.where(s.catalog_database.c.name == database_name)
-    try:
-        rows = store().query_read(
-            query.order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
-        )
-    except Exception:
-        logger.warning("fetch_table_column_names: query failed", exc_info=True)
-        return []
+    rows = store().query_read(
+        query.order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+    )
 
     tables: dict[str, dict[str, Any]] = {}
     for row in rows:
