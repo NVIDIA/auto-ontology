@@ -225,7 +225,7 @@ _SEPARATORS = (
 #: would also match ``orderXid``.
 _LIKE_ESCAPE = "\\"
 
-_WORD_RE = re.compile(r"[a-z0-9]+")
+_WORD_RE = re.compile(r"[^\W_]+")
 
 # Typed NULLs, so every arm of the UNION agrees on a column's type. Postgres
 # rejects a bare NULL in a union branch it cannot infer a type for, and these
@@ -295,7 +295,7 @@ def synonym_matches_tokens(synonym: str, tokens: list[str]) -> bool:
         return False
     text = synonym.lower()
     return all(
-        re.search(rf"(^|[^a-z0-9]){re.escape(tok)}([^a-z0-9]|$)", text) is not None
+        re.search(rf"(^|[\W_]){re.escape(tok)}([\W_]|$)", text) is not None
         for tok in tokens
     )
 
@@ -643,7 +643,7 @@ def _synonym_exists(synonym_tokens: list[str]):
             and_(
                 *(
                     func.lower(synonym.c.synonym).op("~")(
-                        f"(^|[^a-z0-9]){token}([^a-z0-9]|$)"
+                        f"(^|[^[:alnum:]]){token}([^[:alnum:]]|$)"
                     )
                     for token in synonym_tokens
                 )

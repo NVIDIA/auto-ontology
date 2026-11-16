@@ -1312,3 +1312,44 @@ def test_a_query_that_matches_nothing_builds_no_statements() -> None:
     a legitimate state for a standing rule."""
     assert search.matching_id_selects([], ALL_TYPES, include_description=False) == {}
     assert search.matching_id_selects(["x"], set(), include_description=False) == {}
+
+
+@pytest.mark.parametrize(
+    ("search_term", "expected"),
+    [
+        ("顧客", ["顧客"]),
+        ("お客様", ["お客様"]),
+        ("клиент", ["клиент"]),
+        ("Société", ["société"]),
+        ("São Paulo", ["são", "paulo"]),
+        ("Business Unit", ["business", "unit"]),
+    ],
+)
+def test_synonym_tokens_survive_non_latin_scripts(
+    search_term: str, expected: list[str]
+) -> None:
+    """A tokenizer pinned to ``[a-z0-9]`` returns nothing for a query written in
+    a non-Latin script, so a synonym in that script could never be matched."""
+    assert search.synonym_word_tokens(search_term) == expected
+
+
+@pytest.mark.parametrize(
+    ("synonym", "tokens", "expected"),
+    [
+        ("顧客", ["顧客"], True),
+        ("顧客 お客様", ["顧客"], True),
+        ("клиент", ["клиент"], True),
+        ("Société Générale", ["société"], True),
+        ("São Paulo", ["são", "paulo"], True),
+        ("顧客", ["お客様"], False),
+        ("Business Unit", ["uni"], False),
+        ("Générale", ["néral"], False),
+        ("Générale", ["générale"], True),
+    ],
+)
+def test_synonyms_in_any_script_match_whole_words(
+    synonym: str, tokens: list[str], expected: bool
+) -> None:
+    """The Python twin has to agree with the regex Postgres runs, or a Term is
+    returned for a reason its own synonym list cannot explain."""
+    assert search.synonym_matches_tokens(synonym, tokens) is expected
