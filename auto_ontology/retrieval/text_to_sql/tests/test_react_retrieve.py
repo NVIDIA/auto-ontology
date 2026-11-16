@@ -213,6 +213,13 @@ def test_identifier_words_are_also_searched_by_physical_name(calls: dict) -> Non
     assert "TABLE sales.orders" in text
 
 
+def test_a_one_word_query_is_also_searched_by_physical_name(calls: dict) -> None:
+    tool.retrieve(_ctx(), "custref")
+
+    by_name = [types for tokens, _, types in calls["names"] if tokens == ["custref"]]
+    assert any({"Table", "Column"} <= types for types in by_name)
+
+
 def test_a_sentence_searches_only_the_semantic_layer_by_name(calls: dict) -> None:
     tool.retrieve(_ctx(), "customer status")
 

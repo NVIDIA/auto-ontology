@@ -120,8 +120,16 @@ def resolve_kinds(kinds: list[str] | None) -> list[str]:
 
 
 def _identifier_words(query: str) -> list[str]:
-    words = [w.strip("\"'`.,;:()[]?") for w in query.split()]
-    return list(dict.fromkeys(w for w in words if w and _IDENTIFIER_RE.match(w)))
+    """Words to search as names: those that look copied from a schema.
+
+    A query of one word is that word alone, with no sentence around it to tell
+    it from English, so it is searched as a name too: ``custref`` has no
+    underscore, digit or capital, and would otherwise never reach a column.
+    """
+    words = [w for w in (w.strip("\"'`.,;:()[]?") for w in query.split()) if w]
+    if len(words) > 1:
+        words = [w for w in words if _IDENTIFIER_RE.match(w)]
+    return list(dict.fromkeys(words))
 
 
 def _meaning_hits(ctx: ToolContext, query: str, labels: list[str]) -> list[dict]:
