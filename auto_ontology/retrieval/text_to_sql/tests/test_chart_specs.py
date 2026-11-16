@@ -42,9 +42,40 @@ def test_numeric_y_is_summed_per_category() -> None:
     assert "subtitle" not in spec
     assert spec["series"][0]["key"] == "AverageOrderValue"
     assert spec["data"] == [
-        {"OrderType": "Non-Promotional", "AverageOrderValue": 2432.75},
         {"OrderType": "Promotional", "AverageOrderValue": 3100.5},
+        {"OrderType": "Non-Promotional", "AverageOrderValue": 2432.75},
     ]
+
+
+def test_bar_aggregation_preserves_row_order_without_alphabetical_resort() -> None:
+    """A query returning ranked rows (e.g. ORDER BY revenue DESC) must not be re-sorted A-Z."""
+    df = pd.DataFrame(
+        {
+            "Customer": ["Zulu Corp", "Alpha Inc", "Bravo LLC"],
+            "Revenue": [1000, 800, 600],
+        }
+    )
+    spec = build_chart_spec(df, _plot(x="Customer", y="Revenue"))
+    assert spec is not None
+    assert [d["Customer"] for d in spec["data"]] == [
+        "Zulu Corp",
+        "Alpha Inc",
+        "Bravo LLC",
+    ]
+
+
+def test_grouped_bar_aggregation_with_hue_preserves_x_order() -> None:
+    """When a hue dimension is present, the primary category order must match input order."""
+    df = pd.DataFrame(
+        {
+            "Quarter": ["Q3", "Q1", "Q3", "Q1"],
+            "Region": ["East", "East", "West", "West"],
+            "Sales": [50, 20, 60, 30],
+        }
+    )
+    spec = build_chart_spec(df, _plot(x="Quarter", y="Sales", hue="Region"))
+    assert spec is not None
+    assert [d["Quarter"] for d in spec["data"]] == ["Q3", "Q1"]
 
 
 # --- results with no numeric measure are listings, not charts ----------------

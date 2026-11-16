@@ -168,12 +168,13 @@ def _aggregate(
     work[y_col] = y_numeric
 
     if hue_col:
+        x_order = list(dict.fromkeys(work[x_col].tolist()))
         pivot = (
-            work.groupby([x_col, hue_col], dropna=False)[y_col]
+            work.groupby([x_col, hue_col], dropna=False, sort=False)[y_col]
             .sum()
             .unstack(fill_value=0)
         )
-        pivot = pivot.fillna(0)
+        pivot = pivot.reindex(x_order).fillna(0)
         # Cap series count
         if pivot.shape[1] > MAX_SERIES:
             totals = pivot.abs().sum().sort_values(ascending=False)
@@ -206,7 +207,7 @@ def _aggregate(
         ]
         return data, series
 
-    grouped = work.groupby(x_col, dropna=False)[y_col].sum()
+    grouped = work.groupby(x_col, dropna=False, sort=False)[y_col].sum()
     data = [
         {x_col: _to_cell(idx), y_col: _to_cell(val)} for idx, val in grouped.items()
     ]
