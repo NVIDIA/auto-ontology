@@ -31,6 +31,7 @@ from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
 from auto_ontology.dal.sql_fragments import column_description_expr
+from auto_ontology.dal.tags import column_is_pii
 from auto_ontology.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
     ``sample_values`` is rendered to display text here, since what this feeds
     is a prompt. It is emitted only when non-empty, and that matters: an empty
     list rendered into a prompt reads as "this column has no values", which is
-    a different claim from "we did not profile it".
+    a different claim from "we did not profile it". A PII-tagged column's
+    values are withheld, as in ``fetch_tables_by_ids``.
     """
     if not table_ids:
         return {}
@@ -92,6 +94,7 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
             s.catalog_column.c.sample_values,
             s.catalog_column.c.format,
             column_description_expr().label("description"),
+            column_is_pii().label("is_pii"),
         )
         .where(s.catalog_column.c.table_id.in_(table_ids))
         .order_by(s.catalog_column.c.table_id, s.catalog_column.c.ordinal_position)
@@ -99,7 +102,9 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
         table = tables.get(row["table_id"])
         if table is None:
             continue
-        sample_values = stringify_sample_values(row["sample_values"])
+        sample_values = (
+            None if row["is_pii"] else stringify_sample_values(row["sample_values"])
+        )
         table["columns"].append(
             {
                 "name": row["name"],
@@ -241,6 +246,7 @@ def _expand_columns(ids: list[str]) -> dict[str, dict[str, Any]]:
             s.catalog_table.c.name.label("table_name"),
             s.catalog_table.c.table_type,
             s.catalog_table.c.id.label("parent_id"),
+            column_is_pii().label("is_pii"),
         )
         .select_from(
             s.catalog_column.join(
@@ -253,11 +259,13 @@ def _expand_columns(ids: list[str]) -> dict[str, dict[str, Any]]:
 
     result: dict[str, dict[str, Any]] = {}
     for row in rows:
-        payload = {k: v for k, v in row.items() if k != "parent_id"}
+        payload = {k: v for k, v in row.items() if k not in ("parent_id", "is_pii")}
         payload["parent_id"] = row["parent_id"]
         # The whole column row is copied through, so the stored JSON text has
         # to be rendered here too -- not just in the parent's `columns`.
-        payload["sample_values"] = stringify_sample_values(row["sample_values"])
+        payload["sample_values"] = (
+            None if row["is_pii"] else stringify_sample_values(row["sample_values"])
+        )
         parent = tables.get(row["parent_id"])
         result[row["id"]] = {
             **payload,

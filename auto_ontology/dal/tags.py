@@ -67,6 +67,7 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.sql.expression import Exists
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
@@ -79,6 +80,20 @@ _FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
 #: may be neither deleted nor renamed: either would silently fork PII labels
 #: across two tags. Mirrored by ``PII_TAG_NAME`` in ``frontend/constants/tags.ts``.
 PII_TAG_NAME = "PII"
+
+
+def column_is_pii() -> Exists:
+    """Whether the ``catalog_column`` row in the enclosing query is tagged PII."""
+    return (
+        select(literal(1))
+        .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
+        .where(
+            s.tag_target.c.column_id == s.catalog_column.c.id,
+            _FOLDED_NAME == PII_TAG_NAME.lower(),
+        )
+        .correlate(s.catalog_column)
+        .exists()
+    )
 
 
 def is_protected_tag(tag: dict[str, Any]) -> bool:

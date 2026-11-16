@@ -32,6 +32,7 @@ from auto_ontology.catalog.constants import Labels  # noqa: E402
 from auto_ontology.dal import candidates as c  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tags import PII_TAG_NAME, get_or_create_tag  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -195,6 +196,40 @@ def test_typed_sample_values_are_rendered_as_text(world) -> None:
 
     assert entry["sample_values"] == ["10", "1.5", "True"]
     assert columns["id"]["sample_values"] == ["10", "1.5", "True"]
+
+
+def test_sample_values_of_a_pii_column_are_withheld(world) -> None:
+    """Both copies go to a prompt, so neither may carry a PII column's values.
+
+    Uses the real ``PII`` tag, as the read matches that name. The tag is shared
+    and protected, so only the link is removed, with the column.
+    """
+    for column_id in world.columns.values():
+        store().query_write(
+            s.catalog_column.update()
+            .where(s.catalog_column.c.id == column_id)
+            .values(sample_values='["Ada Lovelace", "Alan Turing"]')
+        )
+    pii = get_or_create_tag(name=PII_TAG_NAME)
+    _link(s.tag_target, tag_id=pii["id"], column_id=world.columns["total"])
+
+    result = c.expand_info(
+        [
+            {"id": column_id, "label": Labels.COLUMN}
+            for column_id in world.columns.values()
+        ]
+    )
+    tagged = result[world.columns["total"]]
+    columns = {col["name"]: col for col in tagged["relevant_tables"][0]["columns"]}
+
+    assert tagged["sample_values"] is None
+    assert "is_pii" not in tagged
+    assert columns["total"]["sample_values"] is None
+    assert columns["id"]["sample_values"] == ["Ada Lovelace", "Alan Turing"]
+    assert result[world.columns["id"]]["sample_values"] == [
+        "Ada Lovelace",
+        "Alan Turing",
+    ]
 
 
 def test_two_columns_of_one_table_are_both_expanded(world) -> None:

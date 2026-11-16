@@ -224,6 +224,7 @@
     "apply_labels_now_matched": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'dict[str, Select]') -> 'int'",
     "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str', tagged_by: 'str | None' = None) -> 'list[dict[str, Any]] | None'",
     "attach_tags_by_rule": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'list[tuple[str, str]]') -> 'int'",
+    "column_is_pii": "() -> 'Exists'",
     "count_tag_targets": "(tag_id: 'str') -> 'int'",
     "count_tags": "(*, search: 'str | None' = None) -> 'int'",
     "create_tag": "(*, name: 'str', created_by: 'str | None' = None) -> 'dict[str, Any]'",
