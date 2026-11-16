@@ -121,6 +121,15 @@ def max_page_rows() -> int:
     return _int_env("TEXT_TO_SQL_REACT_MAX_PAGE_ROWS", 100_000)
 
 
+def grep_timeout_s() -> float:
+    """Seconds one ``grep`` call may spend matching its pattern against a page.
+
+    The pattern is written by the model, and a backtracking one can run for
+    minutes on a long row, so the whole search shares one budget.
+    """
+    return float(_int_env("TEXT_TO_SQL_REACT_GREP_TIMEOUT_S", 5))
+
+
 def max_columns_per_table() -> int:
     """Columns shown per table when the table is wider than this.
 

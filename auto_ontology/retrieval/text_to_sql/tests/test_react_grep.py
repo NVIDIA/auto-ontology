@@ -2,11 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import time
+
 import pandas as pd
 import pytest
 from langchain_core.messages import AIMessage
 
-from auto_ontology.retrieval.text_to_sql.react import loop, prompts
+from auto_ontology.retrieval.text_to_sql.react import config, loop, prompts
 from auto_ontology.retrieval.text_to_sql.react import run_sql as run_sql_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
@@ -84,6 +86,30 @@ def test_grep_reads_a_bad_pattern_as_plain_text() -> None:
     ctx.pages.append(pd.DataFrame({"name": ["a(b", "c"]}))
 
     assert grep(ctx, 1, "a(b").splitlines()[0] == "1 of 2 rows match"
+
+
+def test_grep_stops_a_pattern_that_backtracks_without_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "grep_timeout_s", lambda: 0.2)
+    ctx = ToolContext(retriever=None, connectors=[])
+    ctx.pages.append(pd.DataFrame({"name": ["a" * 60 + "b"]}))
+
+    started = time.monotonic()
+    text = grep(ctx, 1, "(a|aa)+$")
+
+    assert time.monotonic() - started < 5
+    assert text == (
+        "Error: the pattern '(a|aa)+$' took too long to match. Use a simpler "
+        "pattern or plain text."
+    )
+
+
+def test_grep_still_matches_case_insensitively_under_the_time_budget() -> None:
+    ctx = ToolContext(retriever=None, connectors=[])
+    ctx.pages.append(pd.DataFrame({"name": ["Alice", "bob", "ALICIA"]}))
+
+    assert grep(ctx, 1, "^ali").splitlines()[0] == "2 of 3 rows match"
 
 
 def test_grep_explains_a_missing_page() -> None:
