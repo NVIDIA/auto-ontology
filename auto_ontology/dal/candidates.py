@@ -260,6 +260,10 @@ def _expand_columns(ids: list[str]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for row in rows:
         payload = {k: v for k, v in row.items() if k not in ("parent_id", "is_pii")}
+        if row["is_pii"]:
+            # The whole row is copied, so every stored value list has to be
+            # cleared here, not just the one the renderers read today.
+            payload["distinct_values"] = None
         payload["parent_id"] = row["parent_id"]
         # The whole column row is copied through, so the stored JSON text has
         # to be rendered here too -- not just in the parent's `columns`.

@@ -201,6 +201,9 @@ def test_typed_sample_values_are_rendered_as_text(world) -> None:
 def test_sample_values_of_a_pii_column_are_withheld(world) -> None:
     """Both copies go to a prompt, so neither may carry a PII column's values.
 
+    The column hit copies the whole stored row, so its ``distinct_values`` must
+    be cleared too, even though no renderer reads it yet.
+
     Uses the real ``PII`` tag, as the read matches that name. The tag is shared
     and protected, so only the link is removed, with the column.
     """
@@ -208,7 +211,10 @@ def test_sample_values_of_a_pii_column_are_withheld(world) -> None:
         store().query_write(
             s.catalog_column.update()
             .where(s.catalog_column.c.id == column_id)
-            .values(sample_values='["Ada Lovelace", "Alan Turing"]')
+            .values(
+                sample_values='["Ada Lovelace", "Alan Turing"]',
+                distinct_values='["Ada Lovelace", "Alan Turing"]',
+            )
         )
     pii = get_or_create_tag(name=PII_TAG_NAME)
     _link(s.tag_target, tag_id=pii["id"], column_id=world.columns["total"])
@@ -223,6 +229,7 @@ def test_sample_values_of_a_pii_column_are_withheld(world) -> None:
     columns = {col["name"]: col for col in tagged["relevant_tables"][0]["columns"]}
 
     assert tagged["sample_values"] is None
+    assert tagged["distinct_values"] is None
     assert "is_pii" not in tagged
     assert columns["total"]["sample_values"] is None
     assert columns["id"]["sample_values"] == ["Ada Lovelace", "Alan Turing"]
@@ -230,6 +237,9 @@ def test_sample_values_of_a_pii_column_are_withheld(world) -> None:
         "Ada Lovelace",
         "Alan Turing",
     ]
+    assert result[world.columns["id"]]["distinct_values"] == (
+        '["Ada Lovelace", "Alan Turing"]'
+    )
 
 
 def test_two_columns_of_one_table_are_both_expanded(world) -> None:
