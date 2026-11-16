@@ -58,7 +58,7 @@ Use a dedicated container on its own port: the fixture seed resets every
 catalog and semantic row in the database it connects to.
 
 ```bash
-docker run -d --name auto-ontology-test -p 5433:5432 \
+docker run -d --name auto-ontology-test -p 127.0.0.1:5433:5432 \
   -e POSTGRES_USER=auto_ontology -e POSTGRES_PASSWORD=auto_ontology \
   -e POSTGRES_DB=auto_ontology pgvector/pgvector:pg17 &&
 until docker exec auto-ontology-test pg_isready -U auto_ontology >/dev/null 2>&1; do sleep 1; done &&
