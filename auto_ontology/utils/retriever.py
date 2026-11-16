@@ -26,29 +26,21 @@ logger = logging.getLogger(__name__)
 # dead endpoint costs three 60s attempts, not three times six.
 _QUERY_TIMEOUT_S = 60.0
 _QUERY_ATTEMPTS = 3
-_TRANSIENT_TOKENS = (
-    "502",
-    "Bad Gateway",
-    "503",
-    "Service Unavailable",
-    "504",
-    "Gateway Timeout",
-    "Timeout",
-    "Connection",
-)
 
 
 def _is_transient(exc: Exception) -> bool:
     """Whether *exc* is an endpoint blip rather than a problem with the query.
 
-    The client's errors are classified by type: ``APIConnectionError`` covers
-    timeouts too, whose message ("Request timed out.") names no status.
+    The client's errors are classified by type, never by message text:
+    ``APIConnectionError`` covers timeouts too, whose message ("Request timed
+    out.") names no status. Any other error -- a bad configuration, an invalid
+    response -- fails at once, whatever its message happens to contain.
     """
     if isinstance(exc, APIConnectionError):
         return True
     if isinstance(exc, APIStatusError):
         return exc.status_code in (408, 429) or exc.status_code >= 500
-    return any(token in str(exc) for token in _TRANSIENT_TOKENS)
+    return False
 
 
 class Retriever:

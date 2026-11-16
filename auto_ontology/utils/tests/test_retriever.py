@@ -30,9 +30,10 @@ def _status(cls: type, code: int) -> Exception:
         (_status(openai.RateLimitError, 429), True),
         (_status(openai.AuthenticationError, 401), False),
         (ValueError("Cannot search for a blank query."), False),
-        (RuntimeError("upstream said 503 Service Unavailable"), True),
+        (RuntimeError("upstream said 503 Service Unavailable"), False),
+        (ValueError("Connection string is not set: Timeout"), False),
     ],
-    ids=["timeout", "502", "429", "401", "blank", "untyped-text"],
+    ids=["timeout", "502", "429", "401", "blank", "503-text", "timeout-text"],
 )
 def test_classification(exc: Exception, transient: bool) -> None:
     assert retriever_mod._is_transient(exc) is transient
