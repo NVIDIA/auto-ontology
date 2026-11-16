@@ -21,7 +21,6 @@ from sqlalchemy import (
     any_,
     bindparam,
     case,
-    delete,
     func,
     literal,
     or_,
@@ -732,16 +731,6 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
         .on_conflict_do_nothing()
     )
     return True
-
-
-def delete_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
-    """Remove one ``SEMANTIC_FK`` edge; a no-op when it is not there."""
-    store().query_write(
-        delete(s.column__semantic_fk).where(
-            s.column__semantic_fk.c.column_id == src_column_id,
-            s.column__semantic_fk.c.attribute_id == tgt_attr_id,
-        )
-    )
 
 
 def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:

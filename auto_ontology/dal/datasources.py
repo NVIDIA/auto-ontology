@@ -1429,38 +1429,6 @@ def fetch_description_context(database_name: str) -> list[dict[str, Any]]:
     ]
 
 
-def fill_empty_descriptions(
-    table_descriptions: dict[str, str],
-    column_descriptions: dict[str, str],
-) -> list[str]:
-    """Write each description onto its table or column only where none is set.
-
-    A description that came with the source metadata, or that a user wrote, is
-    never replaced. Returns the ids actually written.
-    """
-    written: list[str] = []
-    with write_transaction():
-        for table, descriptions in (
-            (s.catalog_table, table_descriptions),
-            (s.catalog_column, column_descriptions),
-        ):
-            for node_id, description in descriptions.items():
-                text = (description or "").strip()
-                if not text:
-                    continue
-                rows = store().query_write(
-                    update(table)
-                    .where(
-                        table.c.id == node_id,
-                        func.trim(func.coalesce(table.c.description, "")) == "",
-                    )
-                    .values(description=text)
-                    .returning(table.c.id)
-                )
-                written.extend(str(row["id"]) for row in rows)
-    return written
-
-
 def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     """Pure-FK junction tables eligible for a bridge SqlAttribute.
 
