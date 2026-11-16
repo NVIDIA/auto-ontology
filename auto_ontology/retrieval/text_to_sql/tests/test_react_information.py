@@ -226,6 +226,34 @@ def test_a_term_of_another_database_is_not_shown(
     assert information(ctx, "patient").startswith("No matches for 'patient'.")
 
 
+def test_a_term_too_long_for_the_limit_is_cut_not_dropped(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "200")
+    monkeypatch.setattr(
+        info_module,
+        "fetch_column_attributes_by_term_id",
+        lambda term_id: [
+            {
+                "name": f"Attribute {n:02}",
+                "description": "d" * 20,
+                "table_id": "tab-orders",
+                "source_column": "amount",
+                "primary_column": {"column_name": "amount", "table_name": "orders"},
+            }
+            for n in range(20)
+        ],
+    )
+    _found(monkeypatch, [{"id": "t1", "label": "Term"}])
+
+    out = information(ctx, "order")
+
+    assert out.startswith("TERM Order — A purchase.")
+    assert len(out) <= 200
+    assert out.endswith("…")
+    assert "not shown" not in out
+
+
 def test_a_long_list_is_cut_and_counted(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

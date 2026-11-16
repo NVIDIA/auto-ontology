@@ -56,16 +56,32 @@ def _clip(text: Any, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _cut(block: str, budget: int) -> str:
+    """*block* shortened to *budget* characters, at a line end when it can be."""
+    kept = block[: max(budget - 1, 0)]
+    if "\n" in kept:
+        kept = kept[: kept.rindex("\n")]
+    return kept.rstrip() + "…"
+
+
 def _fit(blocks: list[str], noun: str, hint: str, sep: str) -> str:
-    """*blocks* up to the observation limit, with a count of the rest."""
+    """*blocks* up to the observation limit, with a count of the rest.
+
+    The first block is always shown, cut to the room there is when it alone is
+    too long. Narrowing the query cannot shrink a block that matches again, so
+    dropping it would leave the model with nothing it could act on.
+    """
     limit = config.max_observation_chars()
+    budget = max(limit - 120, 1)
     shown: list[str] = []
     used = 0
     for block in blocks:
-        if used + len(block) + len(sep) > limit - 120:
+        if used + len(block) + len(sep) > budget:
             break
         shown.append(block)
         used += len(block) + len(sep)
+    if not shown and blocks:
+        shown.append(_cut(blocks[0], budget))
     rest = len(blocks) - len(shown)
     if rest:
         shown.append(f"… {rest} more {noun} not shown; {hint}.")
