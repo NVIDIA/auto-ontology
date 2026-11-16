@@ -49,8 +49,9 @@ class _Outcome(Enum):
 
 @dataclass
 class FamilyPair:
-    """Two prefixes whose tables mirror each other."""
+    """Two prefixes whose tables mirror each other within one schema."""
 
+    schema: str
     prefixes: tuple[str, str]
     # base name -> {prefix: table}
     twins: dict[str, dict[str, dict[str, Any]]]
@@ -87,10 +88,24 @@ def detect_family_pairs(tables: list[dict[str, Any]]) -> list[FamilyPair]:
     """Prefix pairs sharing at least :data:`_MIN_TWINS` twin tables.
 
     *tables* are ``{id, name, schema_name, columns}`` rows. Two tables are twins
-    when their names match after the prefix and their columns, compared the
-    same way, overlap by Jaccard :data:`_MIN_JACCARD` or more. History tables
-    (``*_HIST``) are never twins.
+    when they sit in the same schema, their names match after the prefix and
+    their columns, compared the same way, overlap by Jaccard
+    :data:`_MIN_JACCARD` or more. History tables (``*_HIST``) are never twins.
+
+    Families never span schemas: ``live.NEW_X`` and ``archive.OLD_X`` belong to
+    independent schemas, and ``NEW_X`` in two schemas are two tables, not one.
     """
+    by_schema: dict[str, list[dict[str, Any]]] = {}
+    for table in tables:
+        by_schema.setdefault((table.get("schema_name") or "").lower(), []).append(table)
+    return [
+        pair
+        for schema, schema_tables in sorted(by_schema.items())
+        for pair in _pairs_in_schema(schema, schema_tables)
+    ]
+
+
+def _pairs_in_schema(schema: str, tables: list[dict[str, Any]]) -> list[FamilyPair]:
     by_prefix: dict[str, dict[str, dict[str, Any]]] = {}
     for table in tables:
         prefix = prefix_of(table["name"])
@@ -114,7 +129,7 @@ def detect_family_pairs(tables: list[dict[str, Any]]) -> list[FamilyPair]:
                 ):
                     twins[base] = {a: ta, b: tb}
             if len(twins) >= _MIN_TWINS:
-                pairs.append(FamilyPair(prefixes=(a, b), twins=twins))
+                pairs.append(FamilyPair(schema=schema, prefixes=(a, b), twins=twins))
     return pairs
 
 
@@ -125,8 +140,8 @@ def keep_semantic_fks_in_family(
 ) -> int:
     """Move semantic FKs that cross into the other family onto the twin.
 
-    An edge whose source and target sit in the two families of one pair is
-    redirected to the same-named column of the target's twin in the source's
+    An edge whose source and target sit in the two families of one pair, in
+    that pair's schema, is redirected to the same-named column of the target's twin in the source's
     family, when that column covers the source's values at least as well.
     It is dropped when the twin is missing or covers less, and kept as it is
     when the twin could not be checked. Returns the number moved or dropped.
@@ -137,9 +152,6 @@ def keep_semantic_fks_in_family(
         for twin in pair.twins.values()
         for prefix, table in twin.items()
     }
-    prefix_index = {
-        prefix: index for index, pair in enumerate(pairs) for prefix in pair.prefixes
-    }
     handled = 0
     for row in fetch_semantic_fk_join_groups(database_name):
         source_prefix = prefix_of(row["source_table_name"])
@@ -147,9 +159,14 @@ def keep_semantic_fks_in_family(
         if target is None or source_prefix is None:
             continue
         index, target_prefix = target
-        if prefix_index.get(source_prefix) != index or source_prefix == target_prefix:
+        pair = pairs[index]
+        if (
+            source_prefix not in pair.prefixes
+            or source_prefix == target_prefix
+            or (row.get("source_schema_name") or "").lower() != pair.schema
+        ):
             continue
-        outcome, detail = _move_to_twin(row, pairs[index], source_prefix, connector)
+        outcome, detail = _move_to_twin(row, pair, source_prefix, connector)
         edge = (
             f"{row['source_table_name']}.{row['source_column_name']} -> "
             f"{row['target_table_name']}.{row['target_column_name']}"
@@ -259,7 +276,12 @@ def resolve_table_families(database_name: str, connector: SQLDatabase | None) ->
     """Keep semantic FKs inside their table family. Returns pairs found."""
     pairs = detect_family_pairs(fetch_table_column_names(database_name))
     for pair in pairs:
-        logger.info("table family %s / %s: %d twins", *pair.prefixes, len(pair.twins))
+        logger.info(
+            "table family %s: %s / %s, %d twins",
+            pair.schema,
+            *pair.prefixes,
+            len(pair.twins),
+        )
     if pairs:
         keep_semantic_fks_in_family(database_name, pairs, connector)
     return len(pairs)
