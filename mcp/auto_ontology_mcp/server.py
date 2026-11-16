@@ -17,7 +17,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from mcp.types import Icon
 
-from auto_ontology_mcp import chat, readiness
+from auto_ontology_mcp import chat, readiness, search
 from auto_ontology_mcp.config import ConfigError, Settings
 from auto_ontology_mcp.auto_ontology_auth import (
     build_auto_ontology_auth,
@@ -211,6 +211,7 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
 
     chat.register(mcp, settings, client)
     readiness.register(mcp, settings, client)
+    search.register(mcp, settings, client)
 
     logger.info(
         "Auto Ontology MCP server built against %s (spec: %s). Callers sign in against "

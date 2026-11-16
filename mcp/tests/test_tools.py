@@ -98,13 +98,14 @@ def test_route_maps_end_with_a_catch_all_exclude() -> None:
     assert len(maps) == len(CURATED) + 1
 
 
-def test_collection_pattern_does_not_match_its_item_route() -> None:
-    # '/api/terms' unanchored also matches '/api/terms/{term_id}', which would
-    # give both routes the same tool identity.
-    collection = next(m for m in route_maps() if m.pattern.endswith(r"terms$"))
+def test_a_route_pattern_does_not_match_its_sub_routes() -> None:
+    # '/api/terms/{term_id}' unanchored also matches
+    # '/api/terms/{term_id}/column-attributes', which would give both routes
+    # the same tool identity.
+    item = next(m for m in route_maps() if m.pattern.endswith(r"term_id\}$"))
 
-    assert re.match(collection.pattern, "/api/terms")
-    assert not re.match(collection.pattern, "/api/terms/{term_id}")
+    assert re.match(item.pattern, "/api/terms/{term_id}")
+    assert not re.match(item.pattern, "/api/terms/{term_id}/column-attributes")
 
 
 def test_operation_ids_map_to_curated_names() -> None:
@@ -118,16 +119,17 @@ def test_operation_ids_are_read_from_the_spec_not_guessed() -> None:
 
     # Confirms the lookup is keyed on the spec's real ids; these are the
     # generated shapes the overrides exist to hide.
-    assert names["get_api_terms"] == "search_terms"
     assert names["get_api_terms_term_id_"] == "get_term"
 
 
 def test_apply_description_overrides_the_generated_text() -> None:
-    component = SimpleNamespace(description="termsApi.list — one page of Terms.")
+    component = SimpleNamespace(description="termsApi.get — one Term.")
 
-    apply_description(SimpleNamespace(method="GET", path="/api/terms"), component)
+    apply_description(
+        SimpleNamespace(method="GET", path="/api/terms/{term_id}"), component
+    )
 
-    assert component.description.startswith("Search the business glossary")
+    assert component.description.startswith("Fetch one glossary term")
 
 
 def test_apply_description_leaves_uncurated_routes_alone() -> None:

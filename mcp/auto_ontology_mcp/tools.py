@@ -51,26 +51,14 @@ class ToolSpec:
 
 
 # Ordered roughly as an agent would work: understand the vocabulary, then ask.
-# Two tools are not here because neither maps to a single request/response
-# operation: ``ask_question`` streams (``chat.py``), and ``check_readiness``
-# folds three endpoints into one verdict (``readiness.py``). The latter is why
+# Three tools are not here because none is a spec operation exposed as-is:
+# ``ask_question`` streams (``chat.py``), ``check_readiness`` folds three
+# endpoints into one verdict (``readiness.py``), and ``search_terms`` pins the
+# global search to Terms (``search.py``). The middle one is why
 # no ``get_semantic_layer_status`` entry remains: it reported one of those three
 # facts, and a compiled layer on its own never meant a question could be
 # answered.
 CURATED: tuple[ToolSpec, ...] = (
-    ToolSpec(
-        method="GET",
-        path="/api/terms",
-        name="search_terms",
-        description=(
-            "Search the business glossary. Terms are the human-meaningful "
-            "concepts Auto Ontology has compiled over the connected databases — "
-            '"Customer", "Open Order", "Net Revenue" — each mapped to real '
-            "columns and SQL expressions. Use this first to learn what a "
-            "business word actually means in this deployment before asking a "
-            "question that depends on it."
-        ),
-    ),
     ToolSpec(
         method="GET",
         path="/api/terms/{term_id}",
