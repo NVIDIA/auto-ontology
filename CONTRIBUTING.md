@@ -36,6 +36,9 @@ uv sync --extra kumo                   # Python dependencies, including Kumo
 (cd frontend && pnpm install)          # frontend dependencies
 ```
 
+The `kumo` extra ships wheels for Linux and Apple silicon only. On an Intel Mac,
+run `uv sync` without it; the Kumo tests then fail locally and run in CI.
+
 To run the whole stack locally, follow the [Quickstart](README.md#quickstart)
 in the README.
 
@@ -50,23 +53,25 @@ uv run ruff check auto_ontology alembic dev_tools
 uv run ruff format --check auto_ontology alembic dev_tools
 ```
 
-**Python tests.** Many need Postgres with pgvector and the fixture databases:
+**Python tests.** Many need Postgres with pgvector and the fixture databases.
+Use a dedicated container on its own port: the fixture seed resets every
+catalog and semantic row in the database it connects to.
 
 ```bash
-docker run -d --name auto-ontology-test -p 5432:5432 \
+docker run -d --name auto-ontology-test -p 5433:5432 \
   -e POSTGRES_USER=auto_ontology -e POSTGRES_PASSWORD=auto_ontology \
-  -e POSTGRES_DB=auto_ontology pgvector/pgvector:pg17
-export POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_USER=auto_ontology \
-  POSTGRES_PASSWORD=auto_ontology POSTGRES_DATABASE=auto_ontology
-
-uv run python -m dev_tools.fixtures.seed_fixtures
-uv run alembic upgrade head
-CONNECTION_STRINGS="postgresql://auto_ontology:auto_ontology@localhost:5432/pagila,sqlite:///$PWD/dev_tools/fixtures/sql/chinook.sqlite" \
-  uv run python -m dev_tools.fixtures.seed_graph_fixture --reset
+  -e POSTGRES_DB=auto_ontology pgvector/pgvector:pg17 &&
+until docker exec auto-ontology-test pg_isready -U auto_ontology >/dev/null 2>&1; do sleep 1; done &&
+export POSTGRES_HOST=localhost POSTGRES_PORT=5433 POSTGRES_USER=auto_ontology \
+  POSTGRES_PASSWORD=auto_ontology POSTGRES_DATABASE=auto_ontology &&
+uv run python -m dev_tools.fixtures.seed_fixtures &&
+uv run alembic upgrade head &&
+CONNECTION_STRINGS="postgresql://auto_ontology:auto_ontology@localhost:5433/pagila,sqlite:///$PWD/dev_tools/fixtures/sql/chinook.sqlite" \
+  uv run python -m dev_tools.fixtures.seed_graph_fixture --reset &&
 uv run pytest auto_ontology dev_tools -q
 ```
 
-**MCP server:** `(cd mcp && uv run pytest -q)`
+**MCP server:** `uv run ruff check mcp && uv run ruff format --check mcp && (cd mcp && uv run pytest -q)`
 
 **Frontend:** `(cd frontend && pnpm lint && pnpm format:check && pnpm build)`
 
