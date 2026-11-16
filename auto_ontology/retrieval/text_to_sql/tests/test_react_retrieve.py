@@ -645,6 +645,27 @@ def test_a_table_only_a_definition_names_is_in_view(
     assert ctx.was_shown("sales", "orders")
 
 
+def test_a_table_named_only_past_the_clipped_sql_is_not_in_view(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    padding = ", ".join(f"c{i}" for i in range(300))
+    long_sql = (
+        f"SELECT {padding} FROM finance.refunds r "
+        "JOIN finance.hidden_ledger h ON h.id = r.id"
+    )
+    assert long_sql.index("hidden_ledger") > 500
+    clipped = {**REVENUE, "sql": long_sql}
+    monkeypatch.setattr(
+        tool, "_get_candidates_information", lambda *a, **k: [dict(clipped)]
+    )
+    ctx = _ctx()
+
+    text = tool.retrieve(ctx, "refunds")
+
+    assert "hidden_ledger" not in text
+    assert not ctx.was_shown("finance", "hidden_ledger")
+
+
 ORDERS_ARCHIVE = {
     "id": "t-orders-archive",
     "name": "orders_archive",

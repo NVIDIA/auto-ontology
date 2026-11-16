@@ -506,6 +506,20 @@ def _sql_tables(sql: str | None) -> set[tuple[str | None, str | None]]:
     }
 
 
+def _tables_in_view(sql: str | None) -> set[tuple[str | None, str | None]]:
+    """The tables a definition's SQL names *and* the model is shown.
+
+    The SQL is clipped for display (see :func:`_definition_block`), so a table
+    named only past the cut was never seen and must not count as in view.
+    """
+    shown = _clip(sql, _MAX_DEFINITION_CHARS).lower()
+    return {
+        (schema, name)
+        for schema, name in _sql_tables(sql)
+        if name and re.search(rf"\b{re.escape(name.lower())}\b", shown)
+    }
+
+
 def _join_lines(
     ctx: ToolContext, new_tables: list[dict]
 ) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
@@ -679,7 +693,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             for line, tables in sibling_lines(ctx, new_tables)
         ]
     definitions = [
-        (block, _sql_tables(hit.get("sql")))
+        (block, _tables_in_view(hit.get("sql")))
         for hit in hits
         if (block := _definition_block(hit)) is not None
     ]
