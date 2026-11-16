@@ -190,9 +190,9 @@ tool at a time:
   tables and columns with their descriptions and stored values, definitions
   with their SQL, and join paths. The model searches again whenever something
   is missing.
-- **`run_sql`:** look at stored values or test a draft. Table and column names
-  are checked against the catalog and against what `retrieve` showed before
-  the query runs.
+- **`run_sql`:** look at stored values or test a draft. Before the query runs,
+  table and column names are checked against the catalog, and tables against
+  what `retrieve` showed.
 - **`submit`:** give the final query and an explanation. The query is checked
   and run, and an error goes back to the model to fix. A question about the
   data itself, such as which tables exist or what a term means, is answered in
