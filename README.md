@@ -9,7 +9,7 @@ SPDX-License-Identifier: Apache-2.0
 [![#1 on the BEAVER leaderboard](https://img.shields.io/badge/BEAVER_leaderboard-%231-76b900)](https://beaverbench.github.io/#leaderboard)
 [![#2 on the BIRD-Interact leaderboard](https://img.shields.io/badge/BIRD--Interact_leaderboard-%232-76b900)](https://bird-interact.github.io/)
 
-Agents can retrieve documents and query databases, but reliability gates agentic analytics: a revenue metric answered faster is worth nothing if the number is wrong. Agents need context to answer accurately: what each business concept means, where it lives, how it connects, how to calculate it, where it comes from, and whether to trust it. NVIDIA Auto Ontology is an open library that builds that context layer automatically from enterprise metadata, reconciles definitions across systems, and exposes it to any agent harness through MCP, CLI, and API. It complements the semantic models customers already own, and [Apache Ossie](https://ossie.apache.org/) keeps it portable.
+Agents can retrieve documents and query databases, but reliability gates agentic analytics: a revenue metric answered faster is worth nothing if the number is wrong. Agents need context to answer accurately: what each business concept means, where it lives, how it connects, how to calculate it, where it comes from, and whether to trust it. An ontology holds that context: a shared, governed map from the concepts people ask about to the data behind them. NVIDIA Auto Ontology is an open library that builds that ontology automatically from enterprise metadata, reconciles definitions across systems, and exposes it to any agent harness through MCP, CLI, and API. It complements the semantic models customers already own, and [Apache Ossie](https://ossie.apache.org/) keeps it portable.
 
 It enables developers to:
 
@@ -30,36 +30,6 @@ An ontology matters most when:
 
 With one well-modeled source and a fixed set of questions, direct SQL may be
 enough.
-
-## Benchmarks
-
-To run a text-to-SQL benchmark such as BIRD, refer to
-[auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval), which
-scores the same model with and without the ontology on
-[NeMo Gym](https://github.com/NVIDIA-NeMo/Gym).
-
-> **Licensing:** Auto Ontology is distributed under the
-> [Apache License 2.0](./LICENSE). Third-party open-source components
-> bundled, linked, or otherwise used by this project are listed in
-> [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
-
-## Software Components
-
-| Component           | Technology                        | Role                                                                                 | Port |
-| ------------------- | --------------------------------- | ------------------------------------------------------------------------------------ | ---- |
-| Frontend            | Next.js, Better Auth, Prisma      | Web UI for chat, catalog, analytics, and settings; auth and RBAC; public API gateway | 3000 |
-| Backend             | FastAPI (Python 3.12+), LangChain | Text-to-SQL agent, catalog, ontology APIs                                            | 3001 |
-| Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation                                                   | 3002 |
-| MCP server          | FastMCP                           | Read-only agent tools over the public API                                            | 3003 |
-| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store                                            | 5432 |
-| HashiCorp Vault     | Optional                          | Connection credential storage                                                        | n/a  |
-
-Browser and API clients go through the web app on port 3000, and MCP clients
-through the MCP server on port 3003, which calls the same public API. Keep
-ports 3001 and 3002 on a private network: FastAPI trusts the user identity the
-frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
-service's endpoints (ingest, delete, reset, compile) have no authentication of
-their own.
 
 ## Quickstart
 
@@ -165,59 +135,19 @@ again. For other setup failures, see the
 
 ## How it works
 
-```mermaid
-flowchart LR
-  subgraph clients["Clients"]
-    direction TB
-    ui["Browser: web UI"]
-    rest["Scripts: REST API with API tokens"]
-    mcpc["MCP clients: Cursor, Claude Desktop, agents"]
-  end
-  mcp["MCP server: read-only tools (FastMCP, port 3003)"]
-  fe["Web app, auth, API gateway (Next.js, port 3000)"]
-  subgraph private["Private network"]
-    direction TB
-    be["Backend: text-to-SQL agent, catalog and ontology APIs (FastAPI, port 3001)"]
-    ing["Ingestion and semantic compilation (FastAPI, port 3002)"]
-    pg[("Postgres + pgvector: app data, catalog, ontology, embeddings")]
-  end
-  src[("Source databases: 10 connectors")]
-  models["Model endpoints: NVIDIA NIM or OpenAI-compatible (reasoning, non-reasoning, embed, rerank)"]
-  vault["Vault (optional): connection credentials"]
-  kumo["KumoRFM (optional): predictions"]
-  ui --> fe
-  rest --> fe
-  mcpc --> mcp
-  mcp -- "public API" --> fe
-  fe --> be
-  fe -- "users, sessions, settings" --> pg
-  be -- "trigger ingest and compile" --> ing
-  be --> pg
-  ing --> pg
-  be -- "run SQL" --> src
-  ing -- "read schema, sample values" --> src
-  be --> models
-  ing --> models
-  be -.-> vault
-  ing -.-> vault
-  be -.-> kumo
-```
-
-Full pipeline detail, with tool-flow diagrams for generating an ontology and
-answering a question: [docs/architecture.md](./docs/architecture.md).
-
 Auto Ontology works in two stages: it generates an ontology that people
 certify, and the agent answers questions from it.
 
-The ontology holds three kinds of definition:
+The ontology answers six questions, each with its own element:
 
-- **Terms:** business concepts such as *Customer* or *Invoice Line*, each with a
-  description and synonyms, mapped to the columns that hold them.
-- **SQL attributes:** reviewed SQL expressions under a term, such as a margin or
-  a rolling total. The agent reuses them, so answers compute each measure the
-  same way.
-- **Relationships:** how tables join, including bridge tables, inferred from
-  keys and from the data.
+| Question                 | Element       | In Auto Ontology                                                                                                 |
+| ------------------------ | ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| What does it mean?       | Concept       | A term, such as *Customer* or *Invoice Line*, with a description and synonyms                                    |
+| Where is it?             | Mapping       | Column attributes tie each term to the tables and columns that hold it                                           |
+| What's connected?        | Relationship  | Joins between tables, including bridge tables: declared keys, plus inferred links confirmed against the data     |
+| How do I calculate it?   | Metric        | SQL attributes: reviewed SQL under a term, such as a margin, reused so answers compute each measure the same way |
+| Where does it come from? | Lineage       | Each term and attribute links to its source tables and columns, and each answer returns its SQL                  |
+| Should I use it?         | Certification | Experts certify names, descriptions, and attributes, and certified elements are marked as reviewed               |
 
 **Generate:** the ingestion service builds a first draft from the source
 databases, and people refine it. Semantic compilation starts once you turn it
@@ -287,6 +217,65 @@ open standard for exchanging semantic models. Ossie includes a
 which Auto Ontology uses to import and export model definitions as Ossie YAML.
 Use **Settings → Import / Export**, or `POST /api/model/import` and
 `POST /api/model/export`.
+
+The services behind both stages, and how clients reach them:
+
+```mermaid
+flowchart LR
+  subgraph clients["Clients"]
+    direction TB
+    ui["Browser: web UI"]
+    rest["Scripts: REST API with API tokens"]
+    mcpc["MCP clients: Cursor, Claude Desktop, agents"]
+  end
+  mcp["MCP server: read-only tools (FastMCP, port 3003)"]
+  fe["Web app, auth, API gateway (Next.js, port 3000)"]
+  subgraph private["Private network"]
+    direction TB
+    be["Backend: text-to-SQL agent, catalog and ontology APIs (FastAPI, port 3001)"]
+    ing["Ingestion and semantic compilation (FastAPI, port 3002)"]
+    pg[("Postgres + pgvector: app data, catalog, ontology, embeddings")]
+  end
+  src[("Source databases: 10 connectors")]
+  models["Model endpoints: NVIDIA NIM or OpenAI-compatible (reasoning, non-reasoning, embed, rerank)"]
+  vault["Vault (optional): connection credentials"]
+  kumo["KumoRFM (optional): predictions"]
+  ui --> fe
+  rest --> fe
+  mcpc --> mcp
+  mcp -- "public API" --> fe
+  fe --> be
+  fe -- "users, sessions, settings" --> pg
+  be -- "trigger ingest and compile" --> ing
+  be --> pg
+  ing --> pg
+  be -- "run SQL" --> src
+  ing -- "read schema, sample values" --> src
+  be --> models
+  ing --> models
+  be -.-> vault
+  ing -.-> vault
+  be -.-> kumo
+```
+
+| Component           | Technology                        | Role                                                                                 | Port |
+| ------------------- | --------------------------------- | ------------------------------------------------------------------------------------ | ---- |
+| Frontend            | Next.js, Better Auth, Prisma      | Web UI for chat, catalog, analytics, and settings; auth and RBAC; public API gateway | 3000 |
+| Backend             | FastAPI (Python 3.12+), LangChain | Text-to-SQL agent, catalog, ontology APIs                                            | 3001 |
+| Ingestion service   | FastAPI (Python 3.12+)            | Ingestion and semantic compilation                                                   | 3002 |
+| MCP server          | FastMCP                           | Read-only agent tools over the public API                                            | 3003 |
+| Postgres + pgvector | PostgreSQL 17                     | Catalog, ontology, app data, vector store                                            | 5432 |
+| HashiCorp Vault     | Optional                          | Connection credential storage                                                        | n/a  |
+
+Browser and API clients go through the web app on port 3000, and MCP clients
+through the MCP server on port 3003, which calls the same public API. Keep
+ports 3001 and 3002 on a private network: FastAPI trusts the user identity the
+frontend forwards in the `x-auto-ontology-user-id` header, and the ingestion
+service's endpoints (ingest, delete, reset, compile) have no authentication of
+their own.
+
+Full pipeline detail, with tool-flow diagrams for generating an ontology and
+answering a question: [docs/architecture.md](./docs/architecture.md).
 
 ## Use it from your agent
 
@@ -446,6 +435,13 @@ KumoRFM is a hosted service: to answer, the agent uploads the connected tables
 to it, capped by `KUMO_MAX_TABLES` (20 by default) and
 `KUMO_MAX_ROWS_PER_TABLE` (unlimited unless set). Review what that sends, and
 complete your organization's data review, before you enable it.
+
+## Benchmarks
+
+To run a text-to-SQL benchmark such as BIRD, refer to
+[auto-ontology-eval](https://github.com/NVIDIA/auto-ontology-eval), which
+scores the same model with and without the ontology on
+[NeMo Gym](https://github.com/NVIDIA-NeMo/Gym).
 
 ## Contributing
 
