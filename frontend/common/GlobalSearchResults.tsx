@@ -22,7 +22,7 @@ import { SearchObjectType } from '@/enums/search';
 // page.
 import { tagPath } from '@/app/settings/tags/tags-path';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
-import { searchTokens, synonymWordTokens } from '@/lib/searchTokens';
+import { NOT_WORD_CHAR, searchTokens, synonymWordTokens } from '@/lib/searchTokens';
 import type { GlobalSearchItem } from '@/types/search';
 
 const parentTermName = (item: GlobalSearchItem): string | null => {
@@ -132,7 +132,7 @@ const HighlightedWholeWords = ({ text, query }: { text: string; query: string })
 	const tokens = synonymWordTokens(query);
 	if (tokens.length === 0) return <>{text}</>;
 	const escaped = tokens.map(escapeRegExp).join('|');
-	const matcher = new RegExp(`(^|[^a-z0-9])(${escaped})(?=[^a-z0-9]|$)`, 'gi');
+	const matcher = new RegExp(`(^|${NOT_WORD_CHAR})(${escaped})(?=${NOT_WORD_CHAR}|$)`, 'giu');
 	const nodes: ReactNode[] = [];
 	let cursor = 0;
 	for (const match of text.matchAll(matcher)) {
