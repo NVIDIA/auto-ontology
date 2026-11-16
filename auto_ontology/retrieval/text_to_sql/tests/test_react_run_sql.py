@@ -190,6 +190,55 @@ def test_schema_catalog_guesses_no_copy_for_an_unqualified_name() -> None:
     assert sorted(catalog.schemas_with("orders")) == ["archive", "sales"]
 
 
+class _ThreeLevelConnector(SQLiteConnector):
+    """A Trino-like engine: names are ``catalog.schema.table``, bound to ``lake``."""
+
+    dialect = "trino"
+
+    def qualify(self, schema: str | None, table: str) -> str:
+        return f'"lake"."{schema}"."{table}"'
+
+
+def test_the_bound_catalog_comes_from_the_connectors_own_qualify() -> None:
+    assert tool.bound_catalog(_ThreeLevelConnector(SHOP_SCRIPT)) == "lake"
+    assert tool.bound_catalog(SQLiteConnector(SHOP_SCRIPT)) is None
+
+
+def test_run_sql_refuses_a_table_in_another_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = _ThreeLevelConnector(SHOP_SCRIPT)
+    monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
+    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx.show_table("sales", "orders")
+
+    text = tool.run_sql(ctx, "SELECT order_id FROM other.sales.orders")
+
+    assert text.splitlines() == [
+        "Not run. Fix these first:",
+        "- Not allowed: catalog 'other' in other.sales.orders. This database's "
+        "catalog is 'lake'; leave the catalog out or use it.",
+    ]
+    assert connector.executed == []
+    assert ctx.sql_runs == 0
+
+
+@pytest.mark.parametrize(
+    "table", ["sales.orders", "lake.sales.orders", "LAKE.sales.orders"]
+)
+def test_run_sql_allows_the_bound_catalog_or_none(
+    monkeypatch: pytest.MonkeyPatch, table: str
+) -> None:
+    connector = _ThreeLevelConnector("CREATE TABLE orders (order_id INTEGER);")
+    monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
+    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx.show_table("sales", "orders")
+
+    check = tool.check_query(ctx, connector, f"SELECT order_id FROM {table}")
+
+    assert check.problems == []
+
+
 @pytest.mark.parametrize(
     "shown, schema, owners, expected",
     [

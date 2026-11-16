@@ -318,12 +318,49 @@ def tables_not_shown(
     return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
 
 
+def bound_catalog(connector: SQLDatabase) -> str | None:
+    """The catalog *connector* is bound to; ``None`` on a two-level engine.
+
+    Read from the connector's own :meth:`qualify`, which is the one place that
+    knows its naming rule. ``database_name`` cannot stand in for it: that is
+    the catalog on Trino, Databricks and Kyuubi but the database everywhere else.
+    """
+    qualify = getattr(connector, "qualify", None)
+    if qualify is None:
+        return None
+    try:
+        reference = qualify("probe_schema", "probe_table")
+        dialect = getattr(connector, "dialect", None) or None
+        return exp.to_table(reference, dialect=dialect).catalog or None
+    except (ValueError, sqlglot.errors.ParseError):
+        return None
+
+
+def foreign_catalogs(statement: exp.Expression, catalog: str) -> list[str]:
+    """Tables *statement* names under a catalog other than *catalog*.
+
+    The connection is bound to one catalog, so ``other.sales.orders`` would read
+    a catalog the agent was never given, wherever the credential can reach.
+    """
+    problems = [
+        f"Not allowed: catalog {table.catalog!r} in {table.catalog}.{table.db}."
+        f"{table.name}. This database's catalog is {catalog!r}; leave the catalog "
+        "out or use it."
+        for table in statement.find_all(exp.Table)
+        if table.catalog and table.catalog.lower() != catalog.lower()
+    ]
+    return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
+
+
 def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResult:
     """:func:`check_sql` against *connector*'s catalog, then against what is in view."""
     catalog = catalog_for(ctx, connector)
     check = check_sql(sql, getattr(connector, "dialect", None), catalog)
     if check.problems or check.statement is None:
         return check
+    if bound := bound_catalog(connector):
+        if problems := foreign_catalogs(check.statement, bound):
+            return CheckResult(problems, check.statement)
     return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
 
 
