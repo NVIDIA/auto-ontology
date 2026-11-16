@@ -38,11 +38,10 @@ To run a text-to-SQL benchmark such as BIRD, refer to
 scores the same model with and without the ontology on
 [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym).
 
-> **Licensing and contributions:** Auto Ontology is distributed under the
+> **Licensing:** Auto Ontology is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
 > bundled, linked, or otherwise used by this project are listed in
-> [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
-> is currently not accepting external contributions.**
+> [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
 
 ## Software Components
 
@@ -448,16 +447,16 @@ to it, capped by `KUMO_MAX_TABLES` (20 by default) and
 `KUMO_MAX_ROWS_PER_TABLE` (unlimited unless set). Review what that sends, and
 complete your organization's data review, before you enable it.
 
-## Integrate with us
+## Contributing
+
+We welcome contributions: bug fixes, connectors, documentation, and examples.
+Please read the
+[Contributing Guidelines](https://github.com/NVIDIA/auto-ontology/blob/main/CONTRIBUTING.md)
+before submitting pull requests.
 
 To integrate an agent platform, application, or storage provider with
 Auto Ontology,
 [open an integration request](https://github.com/NVIDIA/auto-ontology/issues/new?template=integration.yml).
-
-The Auto Ontology team maintains the code and doesn't accept external pull
-requests. Integration requests and bug reports are welcome as issues. Report
-security vulnerabilities through [SECURITY.md](./SECURITY.md). Maintainer
-workflow is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Reference
 
