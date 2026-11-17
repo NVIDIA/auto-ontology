@@ -194,13 +194,19 @@ def run_episode(
     dialect: str | None = None,
     mode: EpisodeMode = EpisodeMode.SQL,
     custom_prompts: str | None = None,
+    sql_examples: list[dict[str, str]] | None = None,
+    value_anchors: list[dict[str, str]] | None = None,
+    shorten_answer: bool = False,
 ) -> EpisodeResult:
     """Run the model with *mode*'s tools until it answers or the budget ends.
 
     ``sql`` answers with ``submit``, ``predict`` with ``predict``, and ``auto``
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
+    *sql_examples*, *value_anchors* and *shorten_answer* shape a SQL answer, so
+    a ``predict`` episode ignores them.
     """
+    writes_sql = mode != EpisodeMode.PREDICT
     system_prompt = prompts.system_prompt_for(
         mode, dialect, information_answers=ctx.information_answers
     )
@@ -208,14 +214,20 @@ def run_episode(
         system_prompt = f"{system_prompt}\n\n{custom_prompts}"
     # Dialect rules, e.g. for MySQL: do not CAST or ROUND computed values,
     # which changes the digits an exact grader compares.
-    dialect_rules = (
-        format_dialect_rules(dialect).strip() if mode != EpisodeMode.PREDICT else ""
-    )
+    dialect_rules = format_dialect_rules(dialect).strip() if writes_sql else ""
     if dialect_rules:
         system_prompt = f"{system_prompt}\n\n{dialect_rules}"
+    if shorten_answer and writes_sql:
+        system_prompt = f"{system_prompt}\n\n{prompts.SHORT_ANSWER_RULES}"
+    user_message = prompts.user_message(
+        question,
+        evidence,
+        value_anchors=value_anchors if writes_sql else None,
+        sql_examples=sql_examples if writes_sql else None,
+    )
     messages: list[BaseMessage] = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=prompts.user_message(question, evidence)),
+        HumanMessage(content=user_message),
     ]
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages

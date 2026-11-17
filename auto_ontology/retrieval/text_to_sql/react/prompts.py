@@ -128,6 +128,202 @@ def custom_prompts_section(
     return "\n\n".join(parts)
 
 
+SHORT_ANSWER_RULES = """\
+OUTPUT SHAPE
+The answer is compared column for column, so its shape is part of being right.
+- SELECT only the columns explicitly asked; extra columns make the result wrong \
+even when the rows are right. For superlative or ranking questions (most, least, \
+top, highest, lowest, peak, best, worst), select ONLY the item named, the ranking \
+key OR the aggregated value, never both, and never add the ORDER BY metric unless \
+its value is asked. To identify an entity (who, which, what), return one \
+identifying column (name if it exists, else id), not both.
+- If the user asks for a name, project the requested name fields and never add \
+IDs unless the user explicitly asks for them.
+- Keep the question's field order: project the requested outputs from left to \
+right in the order the user names them.
+- If evidence maps an answer concept to specific columns, keep that projection \
+exactly; do not collapse, reshape or replace those columns unless the question \
+asks for a transformed value.
+- When the question or evidence asks for one aggregate over two alternative \
+categories joined by 'and' (for example, a count for X and Y), return ONE \
+aggregate and combine the category predicates with OR in the filter. Do not \
+project separate conditional aggregates for X and Y. If separate results, a \
+comparison, a per-category breakdown or distinct metrics are asked for, keep \
+those separate outputs.
+- When the question asks for an entity's general 'basic information', 'details' \
+or 'some info' without naming attributes, project only the entity's primary \
+identifier and name or title column(s) beside the requested metrics, never every \
+descriptive column of the table.
+- When a breakdown asks for both counts and percentages across several \
+categories, place all category counts together followed by all category \
+percentages, unless the user interleaves them.
+- When concatenating labels or values into a comma-separated string, use ', ' \
+(comma and space) as the delimiter unless an unspaced comma is asked for.
+- When computing a derived formula, ratio, score or category from nullable \
+columns or JSON fields, handle NULL operands inside that calculation. Do not drop \
+a row another aggregate still needs. Exclude it only when the derived value is \
+the only result and a NULL input would make it meaningless; if the question asks \
+to include rows with missing data, use ORDER BY ... DESC NULLS LAST so NULLs \
+never come first."""
+
+_SQL_EXAMPLES_GUIDANCE = """\
+Solved question/SQL pairs from OTHER databases, chosen because their wording \
+resembles this question. They are precedent for how a request of this kind \
+becomes SQL, and nothing else.
+1. Judge which pairs ask for the same KIND of thing as this question: a count, a \
+ratio, a share, a superlative, a per-group breakdown, one entity or a list. \
+Ignore the subject matter.
+2. From the pairs that match in kind, carry over the construction: which \
+aggregate answers it, whether a join is needed to reach a name or label, whether \
+a ratio is cast before dividing, whether a conditional share puts the filter in \
+a CASE inside the aggregate rather than in WHERE, and whether DISTINCT is needed.
+3. When a pair's evidence states a formula, see how it became SQL (operand \
+order, the cast, scaling by 100, rounding) and give this question's evidence the \
+same treatment.
+4. Then write the query for this database from scratch: every table and column \
+from what retrieve showed you, every filter value from this question or its \
+evidence. Names, aliases and literals in the pairs do not exist here.
+5. The pairs are ordered by wording similarity, not by fit: prefer the one whose \
+kind matches this question most closely, not the first.
+6. If none matches, ignore them all. Forcing an ill-fitting pattern is worse \
+than using none.
+The question, its evidence and this database outrank every pair. The pairs tell \
+you nothing about which columns to return or how many, whether to add LIMIT, how \
+many tables your query needs, which columns exist here, or which values to \
+filter on."""
+
+
+def sql_examples_section(sql_examples: list[dict[str, str]] | None) -> str:
+    """Solved question/SQL pairs from other databases; "" when there are none.
+
+    Each pair keeps its own evidence, since how a stated formula became SQL is
+    the part that transfers.
+    """
+    blocks: list[str] = []
+    for example in sql_examples or []:
+        sql = " ".join((example.get("sql") or "").split())
+        if not sql:
+            continue
+        header = f"{len(blocks) + 1}."
+        if source := (example.get("db") or "").strip():
+            header += f" [source database: {source}]"
+        lines = [header]
+        if question := (example.get("question") or "").strip():
+            lines.append(f"   Question: {question}")
+        if evidence := " ".join((example.get("evidence") or "").split()):
+            lines.append(f"   Evidence: {evidence}")
+        lines.append(f"   SQL: {sql}")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "REFERENCE QUERY PATTERNS\n"
+        + _SQL_EXAMPLES_GUIDANCE
+        + "\n\n"
+        + "\n\n".join(blocks)
+    )
+
+
+def value_anchors_section(value_anchors: list[dict[str, str]] | None) -> str:
+    """Question phrases looked up in this database; "" when none were.
+
+    Each anchor is a fact about the live data: the phrase is stored in this
+    column with this spelling, or (``kind="absent"``) stored nowhere. The schema
+    alone cannot tell a code column from a display column holding the same
+    label, and filtering the wrong one still returns rows.
+    """
+    if not value_anchors:
+        return ""
+    # Between columns of one table a row count decides nothing while reading as
+    # though it did (MailCity can hold a city in more rows than City), so it is
+    # dropped where columns of the same table compete.
+    rivals: dict[tuple[str, str], set[str]] = {}
+    for anchor in value_anchors:
+        key = (
+            (anchor.get("phrase") or "").strip().lower(),
+            (anchor.get("tbl") or "").strip().lower(),
+        )
+        rivals.setdefault(key, set()).add((anchor.get("col") or "").strip().lower())
+
+    found: list[str] = []
+    absent: list[str] = []
+    for anchor in value_anchors:
+        phrase = (anchor.get("phrase") or "").strip()
+        if not phrase:
+            continue
+        kind = (anchor.get("kind") or "value").strip()
+        if kind == "absent":
+            absent.append(f'"{phrase}"')
+            continue
+        table = (anchor.get("tbl") or "").strip()
+        column = (anchor.get("col") or "").strip()
+        value = (anchor.get("stored_value") or "").strip()
+        if not (table and column and value):
+            continue
+        rows = str(anchor.get("n_rows") or "")
+        contested = len(rivals.get((phrase.lower(), table.lower()), ())) > 1
+        count = (
+            f" — {int(rows):,} row{'' if int(rows) == 1 else 's'}"
+            if rows.isdigit() and not contested
+            else ""
+        )
+        claim = (
+            f"= '{value}'{count}"
+            if kind != "contains"
+            else f"contains it inside values such as '{value}' (no value equals the phrase)"
+        )
+        gloss = (anchor.get("description") or "").strip()
+        named = f" ({gloss})" if gloss else ""
+        found.append(f'- "{phrase}": {table}."{column}"{named} {claim}')
+    if not found and not absent:
+        return ""
+
+    lines = [
+        "VERIFIED DATABASE VALUES",
+        "Phrases from the question, already looked up in this database. Every "
+        "line below is a fact about what the data contains; you do not need "
+        "run_sql to confirm it.",
+    ]
+    if found:
+        lines += ["", *found]
+    if absent:
+        lines += [
+            "",
+            "Stated in the question but stored NOWHERE in this database: "
+            + ", ".join(sorted(set(absent)))
+            + ".",
+        ]
+    never_invent = (
+        " Never filter on a phrase listed as stored nowhere; find what the "
+        "database does store for that idea, or express the condition another way."
+        if absent
+        else ""
+    )
+    lines += [
+        "",
+        "Use these when choosing a filter: take the column and the exact stored "
+        "spelling from here instead of inferring either from the question's "
+        "wording or a column's name. A line reading = '...' supports an equality "
+        "filter on that spelling; a line saying the column merely contains the "
+        "phrase does not — match such a column with LIKE, or not at all if the "
+        "question means an exact category. A phrase listed under several columns "
+        "is genuinely ambiguous: decide which column the question means from its "
+        "wording and the column's role, not from the order listed. Where a column "
+        "is followed by a documented name in parentheses, a qualifier in that "
+        "name must also be in the question to pick that column; an unqualified "
+        "mention means the plain column. A row count, where given, says only how "
+        "many rows hold that value: where one phrase sits in several tables, the "
+        "larger count tends to mark the table the value belongs to. A small count "
+        "is no reason to distrust a match — a value held by one row is often the "
+        "very entity the question names."
+        + never_invent
+        + " Evidence still outranks these lines, and a phrase missing from this "
+        "list is not thereby missing from the database: only the listed phrases "
+        "were looked up.",
+    ]
+    return "\n".join(lines)
+
+
 USER_TEMPLATE = """\
 QUESTION
 {question}
@@ -461,9 +657,25 @@ def out_of_calls_for(mode: EpisodeMode) -> str:
     return f"No tool calls left; {final}."
 
 
-def user_message(question: str, evidence: str | None) -> str:
+def user_message(
+    question: str,
+    evidence: str | None,
+    *,
+    value_anchors: list[dict[str, str]] | None = None,
+    sql_examples: list[dict[str, str]] | None = None,
+) -> str:
+    """The question, then its evidence, verified values and reference patterns.
+
+    Anchors come before the patterns: they state what this database holds,
+    which binds the query more tightly than precedent from another database.
+    """
     evidence = (evidence or "").strip()
-    evidence_block = f"\nEVIDENCE\n{evidence}\n" if evidence else ""
+    sections = [
+        f"EVIDENCE\n{evidence}" if evidence else "",
+        value_anchors_section(value_anchors),
+        sql_examples_section(sql_examples),
+    ]
+    evidence_block = "".join(f"\n{section}\n" for section in sections if section)
     return USER_TEMPLATE.format(
         question=question.strip(), evidence_block=evidence_block
     )
