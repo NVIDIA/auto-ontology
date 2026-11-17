@@ -320,7 +320,9 @@ body {
 
 .result-chart-tick,
 .result-chart-vallabel,
-.result-chart-catlabel {
+.result-chart-catlabel,
+.result-chart-cat,
+.result-chart-unit {
 	fill: var(--result-chart-muted);
 	font-size: 10px;
 }
