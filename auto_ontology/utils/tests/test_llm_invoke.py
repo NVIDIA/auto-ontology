@@ -524,7 +524,11 @@ def _hosted_chat_nvidia(
 ) -> tuple[Any, list[dict]]:
     """A real hosted ``ChatNVIDIA`` whose HTTP call returns *contents* in turn."""
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
+    from langchain_nvidia_ai_endpoints._common import _NVIDIABaseClient
 
+    # The pinned SDK does not know this model, so constructing the client would
+    # list models over the network (GET {base_url}/models). Serve an empty list.
+    monkeypatch.setattr(_NVIDIABaseClient, "available_models", property(lambda _s: []))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         client = ChatNVIDIA(
