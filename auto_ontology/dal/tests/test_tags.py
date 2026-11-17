@@ -61,6 +61,7 @@ from sqlalchemy.exc import IntegrityError  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.pii import (  # noqa: E402
     clear_values_of_pii_columns,
+    fetch_attributes_of_pii_columns,
     mark_columns_pii_processed,
     pii_tagged_column_ids,
     realign_sql_attribute_pii,
@@ -997,15 +998,8 @@ def test_clear_values_of_pii_columns_clears_tagged_columns_once(
     status = _add(s.catalog_column, table_id=tagged.table, name="status", **profile)
     tagged.label(column_id=email)
 
-    cleared = clear_values_of_pii_columns()
+    assert clear_values_of_pii_columns() == 1
 
-    assert cleared == [
-        {
-            "column_name": "email",
-            "table_id": tagged.table,
-            "database_name": tagged.prefix,
-        }
-    ]
     rows = {
         row["id"]: row
         for row in store().query_read(
@@ -1014,7 +1008,7 @@ def test_clear_values_of_pii_columns_clears_tagged_columns_once(
     }
     assert all(rows[email][name] is None for name in profile)
     assert all(rows[status][name] == value for name, value in profile.items())
-    assert clear_values_of_pii_columns() == []
+    assert clear_values_of_pii_columns() == 0
 
 
 def test_clear_values_of_pii_columns_keeps_to_the_given_ids(
@@ -1030,10 +1024,39 @@ def test_clear_values_of_pii_columns_keeps_to_the_given_ids(
     tagged.label(column_id=first)
     tagged.label(column_id=second)
 
-    cleared = clear_values_of_pii_columns([second])
+    assert clear_values_of_pii_columns([second]) == 1
+    assert clear_values_of_pii_columns([]) == 0
+    (row,) = store().query_read(
+        select(s.catalog_column.c.sample_values).where(s.catalog_column.c.id == first)
+    )
+    assert row["sample_values"] == "[1]"
 
-    assert [row["column_name"] for row in cleared] == ["b"]
-    assert clear_values_of_pii_columns([]) == []
+
+def test_fetch_attributes_of_pii_columns_ignores_the_profile(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cleared column still names its attributes: their vectors may not be."""
+    monkeypatch.setattr(
+        "auto_ontology.dal.pii.get_tag_by_name", lambda _name: {"id": tagged.tag}
+    )
+    tagged.link(
+        s.column__has_attribute,
+        column_id=tagged.column,
+        attribute_id=tagged.column_attribute,
+    )
+
+    assert fetch_attributes_of_pii_columns([tagged.column]) == []
+
+    tagged.label(column_id=tagged.column)
+
+    assert fetch_attributes_of_pii_columns([tagged.column]) == [
+        {
+            "attribute_id": tagged.column_attribute,
+            "table_id": tagged.table,
+            "database_name": tagged.prefix,
+        }
+    ]
+    assert fetch_attributes_of_pii_columns([]) == []
 
 
 def test_pii_tagged_column_ids_is_empty_without_the_pii_tag(
