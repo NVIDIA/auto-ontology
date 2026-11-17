@@ -23,6 +23,7 @@ from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.db_errors import is_infrastructure_error
 from auto_ontology.dal.attributes import merge_column_attribute
 from auto_ontology.dal.datasources import (
+    clear_column_values,
     mark_table_as_junction,
     store_column_date_formats,
     store_column_distinct_ratios,
@@ -30,6 +31,7 @@ from auto_ontology.dal.datasources import (
     store_column_sample_values,
     store_column_uniqueness,
 )
+from auto_ontology.dal.pii import pii_tagged_column_ids
 from auto_ontology.semantic.date_format import infer_date_format, is_date_type
 from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
@@ -457,6 +459,16 @@ def probe_ascending_distinct_values(
     return [_json_ready_sample(v) for v in df.iloc[:, 0].tolist()]
 
 
+def pii_column_names(columns: Sequence[dict[str, Any]]) -> set[str]:
+    """Names of the catalog *columns* tagged ``PII``, which are never sampled."""
+    ids = {str(col["id"]): col.get("name") for col in columns if col.get("id")}
+    return {
+        name
+        for column_id in pii_tagged_column_ids(list(ids))
+        if (name := ids.get(column_id))
+    }
+
+
 def _store_key_distinct_values(
     table: dict[str, Any],
     connector: "SQLDatabase",
@@ -481,8 +493,14 @@ def calculate_columns_profiling(
     connector: "SQLDatabase",
     *,
     probe_distinct_values: bool = True,
+    pii_columns: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Profile a table's columns from a live sample of up to 1000 rows.
+
+    Columns tagged ``PII`` (``pii_columns``, looked up from the catalog when
+    None) are left out of the ``SELECT`` itself, so their values never leave
+    the warehouse. They get no profile at all -- no samples, ``is_unique``,
+    ratio, or format.
 
     Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
     ``is_unique`` flag (at least 95% of non-null values distinct, the measured
@@ -532,9 +550,29 @@ def calculate_columns_profiling(
     # two-level name would resolve against the wrong catalog.
     qualified = connector.qualify(schema_name, table_name)
 
+    if pii_columns is None:
+        pii_columns = pii_column_names(columns)
+    if pii_columns:
+        dialect = getattr(connector, "dialect", None)
+        selected = [
+            quoted_identifier(name, dialect)
+            for col in columns
+            if (name := col.get("name")) and name not in pii_columns
+        ]
+        if not selected:
+            logger.info(
+                "[%s] every column is tagged PII — skipping value sampling",
+                table_name,
+            )
+            return {}
+        select_list = ", ".join(selected)
+    else:
+        select_list = "*"
+
     try:
         df = execute_capped(
-            connector, f"SELECT * FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}"
+            connector,
+            f"SELECT {select_list} FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}",
         )
     except Exception as exc:
         _sampling_breaker.record_failure(connector, exc)
@@ -864,7 +902,25 @@ def process_table(
     # values for FK detection below.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
-    if connector is not None and _sampling_breaker.is_open(connector):
+    # PII columns are never sampled and their catalog values never reach a
+    # prompt. When the tags cannot be read, nothing is sampled: guessing that
+    # no column is PII would move exactly the values this guards.
+    pii_columns: set[str] | None
+    try:
+        pii_columns = pii_column_names(ctx.get("columns", []))
+    except Exception:
+        logger.debug("PII tag lookup failed", exc_info=True)
+        pii_columns = None
+    for col in ctx.get("columns", []):
+        if pii_columns is None or col.get("name") in pii_columns:
+            col["sample_values"] = None
+    if pii_columns:
+        clear_column_values(table_id, sorted(pii_columns))
+    if pii_columns is None:
+        logger.warning(
+            "[%s] Skipping value sampling — could not read PII tags", table_name
+        )
+    elif connector is not None and _sampling_breaker.is_open(connector):
         # Already established that this warehouse is not answering samples.
         # Re-asking costs the timeout per table and returns nothing.
         logger.info(
@@ -880,6 +936,7 @@ def process_table(
                     ctx.get("columns", []),
                     connector,
                     probe_distinct_values=probe_distinct_values,
+                    pii_columns=pii_columns,
                 )
         except Exception:
             logger.warning(
@@ -912,8 +969,10 @@ def process_table(
         | declared_pk_column_names(table)
         | set(fk_suggestions.pk_column_names)
     ) & column_names
+    key_names -= pii_columns or set()
     if (
         probe_key_values
+        and pii_columns is not None
         and key_names
         and connector is not None
         and not _sampling_breaker.is_open(connector)
@@ -1005,7 +1064,13 @@ def process_table(
         except Exception:
             logger.warning("[%s] failed to fetch persisted terms", table_name)
 
-        if embedder is not None and terms:
+        # The embedding reads sample_values from the catalog, where a PII
+        # column's are cleared only once its tag has been read.
+        if pii_columns is None and embedder is not None and terms:
+            logger.warning(
+                "[%s] Skipping inline embed — could not read PII tags", table_name
+            )
+        elif embedder is not None and terms:
             try:
                 with _step(table_name, f"Embedding {len(terms)} term(s)"):
                     for term in terms:

@@ -36,6 +36,7 @@ from auto_ontology.dal import rules as rules_dal
 from auto_ontology.dal import tags as tags_dal
 from auto_ontology.dal.search import search_tokens
 from auto_ontology.dal.session import write_transaction
+from auto_ontology.ingestion_service.pii import run_pii_withholding
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.responses import IdResponse, RulePageResponse, RuleResponse
@@ -364,6 +365,9 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
         except ValueError as exc:
             raise _name_conflict(exc) from exc
         rule_service.label_targets(rule_id=rule_id, tag_ids=tags, targets=targets)
+    column_ids = [item for kind, item in targets if kind == tags_dal.TARGET_COLUMN]
+    if column_ids:
+        run_pii_withholding("rules", column_ids)
     return {"data": {"id": rule_id}}
 
 
