@@ -18,6 +18,7 @@ so existing instances keep profiling after an upgrade that adds the toggle).
 from __future__ import annotations
 
 import logging
+import os
 
 import psycopg
 
@@ -102,6 +103,21 @@ def is_distinct_value_probing_enabled() -> bool:
     metered warehouse.
     """
     return read_configuration_flag(DISTINCT_VALUE_PROBING_ENABLED_KEY, default=True)
+
+
+#: An environment variable rather than a ``configurations`` row: it is an
+#: operator's decision about one warehouse's cost, made at deploy time.
+PREVENT_SEMANTIC_FK_DB_QUERIES_ENV = "PREVENT_SEMANTIC_FK_DB_QUERIES"
+
+
+def is_semantic_fk_db_query_prevented() -> bool:
+    """Whether semantic FK creation must not query the warehouse.
+
+    Covers the distinct-value probes on suspected key columns and the join
+    check an inferred FK must pass before it is stored. Unset means allowed.
+    """
+    value = os.environ.get(PREVENT_SEMANTIC_FK_DB_QUERIES_ENV, "")
+    return value.strip().lower() in {"true", "1", "yes"}
 
 
 def is_pii_detection_enabled() -> bool:

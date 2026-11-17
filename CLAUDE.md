@@ -4,11 +4,11 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Auto Ontology
+# Auto-Ontology
 
 Full-stack repo: Next.js frontend (`/frontend`) + FastAPI backend (`/auto_ontology`).
 
-This file is for **Auto Ontology maintainers**. User/partner agent skills live in
+This file is for **Auto-Ontology maintainers**. User/partner agent skills live in
 `skills/` — start at [`AGENTS.md`](./AGENTS.md).
 
 ## Dev Commands

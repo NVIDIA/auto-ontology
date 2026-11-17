@@ -4,7 +4,7 @@
 """add the conversation table
 
 Revision ID: a1c7e3f20b94
-Revises: f3a91c0e5b27
+Revises: caee572fa81c
 Create Date: 2026-10-19 11:48:02.117356
 
 """
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "a1c7e3f20b94"
-down_revision: Union[str, Sequence[str], None] = "f3a91c0e5b27"
+down_revision: Union[str, Sequence[str], None] = "caee572fa81c"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

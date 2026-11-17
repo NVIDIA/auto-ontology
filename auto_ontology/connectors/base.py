@@ -122,6 +122,11 @@ class SQLDatabase(ABC):
     #: statement, which during ingestion costs far more than the cap saves.
     supports_statement_timeout: bool = False
 
+    #: Whether :meth:`execute` takes ``read_only=True`` and has the engine
+    #: refuse writes for that statement. Agent-issued SQL passes it when this is
+    #: set; a parse-level check alone cannot see what a called function does.
+    supports_read_only: bool = False
+
     #: Optional regex allow/deny filter over relation names, set from the
     #: connection by :func:`auto_ontology.connectors.registry.create_connector`.
     #: Connectors do not read it themselves — it is enforced centrally in

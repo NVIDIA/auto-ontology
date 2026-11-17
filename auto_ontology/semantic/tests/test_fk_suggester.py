@@ -165,6 +165,36 @@ def test_non_unique_uuid_cannot_be_inferred_as_primary_key(
     assert [suggestion.column_name for suggestion in result.suggestions] == [
         "owner_uuid"
     ]
+    assert result.pk_column_names == []
+
+
+@patch(
+    "auto_ontology.semantic.fk_suggester.get_llm_client",
+    return_value=MagicMock(),
+)
+@patch(
+    "auto_ontology.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(
+        fk_suggestions=[], pk_column_names=["event_key", "invented"]
+    ),
+)
+def test_inferred_primary_key_names_are_returned(
+    _mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    table = {"id": "t1", "name": "events", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {"name": "event_key", "data_type": "uuid"},
+            {"name": "owner_uuid", "data_type": "uuid"},
+        ],
+        "fks": [],
+    }
+    profiling = {"event_key": {"sample_values": ["e1", "e2"], "is_unique": True}}
+
+    result = suggest_potential_foreign_keys(table, ctx, profiling)
+
+    assert result.pk_column_names == ["event_key"]
 
 
 @patch(

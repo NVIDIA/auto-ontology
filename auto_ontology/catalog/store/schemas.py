@@ -485,13 +485,24 @@ def add_pks(pks_df, database_name: str):
     ``UPDATE ... FROM (VALUES ...)`` covers every table. Previously each part
     cost an id lookup plus its own autocommitted update.
 
-    Grouping preserves the order the rows arrived in, which is what makes the
-    stored ``pk`` array match the key's column order.
+    The rows are put in key order by ``ordinal_position``, each column's place
+    in its key, before they are grouped. Not every connector returns them in
+    that order: Snowflake's ``SHOW PRIMARY KEYS`` lists a table's key columns
+    alphabetically, and SQLite's ``PRAGMA table_info`` in the table's column
+    order. A key declared ``(L_ORDERKEY, L_LINENUMBER)`` was stored as
+    ``{L_LINENUMBER, L_ORDERKEY}``. The sort is stable, so rows already in key
+    order stay as they are, and rows from a connector that reports no position
+    keep the order they arrived in.
     """
     if pks_df is None or pks_df.empty:
         return
 
     ids = _table_ids_by_name(database_name)
+
+    if "ordinal_position" in pks_df.columns:
+        pks_df = pks_df.assign(
+            _key_position=pd.to_numeric(pks_df["ordinal_position"], errors="coerce")
+        ).sort_values("_key_position", kind="stable")
 
     parts: dict[str, list[str]] = {}
     for row in pks_df.to_dict(orient="records"):
