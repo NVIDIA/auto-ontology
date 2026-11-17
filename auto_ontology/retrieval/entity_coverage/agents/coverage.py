@@ -9,7 +9,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from auto_ontology.dal.attributes import fetch_attr_column_contexts
+from auto_ontology.dal.attributes import (
+    fetch_attr_column_contexts,
+    fetch_attr_sample_values,
+)
 from auto_ontology.dal.custom_analyses import fetch_custom_analyses_with_sql
 from auto_ontology.dal.sql_attributes import fetch_sql_attributes_with_sql
 from auto_ontology.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
@@ -57,21 +60,59 @@ def _covered_entities(
     return {e for e in entities if e in covered}
 
 
+def _normalize_value(text: str) -> str:
+    return " ".join(str(text).casefold().split())
+
+
+def _value_covered_entities(
+    entities: list[str],
+    covered: set[str],
+    col_attr_hits: list[dict[str, Any]],
+) -> set[str]:
+    """Uncovered entities that are a stored value of a retrieved column.
+
+    A named constant such as a repository name is a value in the data, not a
+    concept, so its embedding is not near any attribute's name-and-description
+    text and the distance filter leaves it uncovered. When the whole phrase
+    equals a profiled sample value of a retrieved ColumnAttribute's column
+    (case and spacing aside), the data does name it. Equality only: a phrase
+    that merely contains a value ("open ticket" vs the status ``open``) is a
+    concept and stays graded by distance.
+
+    ``col_attr_hits`` is every retrieved hit, before the distance filter,
+    since a value's column rarely lands within the cutoff.
+    """
+    pending = {_normalize_value(e): e for e in entities if e not in covered}
+    if not pending:
+        return set()
+    attr_ids = list({str(h["id"]) for h in col_attr_hits if h.get("id")})
+    found: set[str] = set()
+    for values in fetch_attr_sample_values(attr_ids).values():
+        for value in values:
+            entity = pending.get(_normalize_value(value))
+            if entity is not None:
+                found.add(entity)
+    return found
+
+
 def _compute_coverage(
     entities: list[str],
     col_attr_hits: list[dict[str, Any]],
+    value_covered: set[str] | None = None,
 ) -> float:
     if not entities:
         return 0.0
-    return len(_covered_entities(entities, col_attr_hits)) / len(entities)
+    covered = _covered_entities(entities, col_attr_hits) | (value_covered or set())
+    return len(covered) / len(entities)
 
 
 def _uncovered_entities(
     entities: list[str],
     col_attr_hits: list[dict[str, Any]],
+    value_covered: set[str] | None = None,
 ) -> list[str]:
     """Entities with no covering ColumnAttribute hit (order preserved)."""
-    covered = _covered_entities(entities, col_attr_hits)
+    covered = _covered_entities(entities, col_attr_hits) | (value_covered or set())
     return [e for e in entities if e not in covered]
 
 
@@ -174,10 +215,8 @@ class CoverageGradeAgent(BaseAgent):
         entities: list[str] = list(path_state.get("entities") or [])
         max_distance = float(path_state.get("max_distance", DEFAULT_MAX_DISTANCE))
 
-        col_hits = _filter_by_distance(
-            list(path_state.get("retrieved_column_attributes") or []),
-            max_distance,
-        )
+        retrieved_col_hits = list(path_state.get("retrieved_column_attributes") or [])
+        col_hits = _filter_by_distance(retrieved_col_hits, max_distance)
         sql_hits = _filter_by_distance(
             list(path_state.get("retrieved_sql_attributes") or []),
             max_distance,
@@ -187,7 +226,12 @@ class CoverageGradeAgent(BaseAgent):
             max_distance,
         )
 
-        coverage = _compute_coverage(entities, col_hits)
+        value_covered = _value_covered_entities(
+            entities,
+            _covered_entities(entities, col_hits),
+            retrieved_col_hits,
+        )
+        coverage = _compute_coverage(entities, col_hits, value_covered)
 
         ranked = _rank_candidates(
             _enrich_column_attributes(
@@ -205,7 +249,7 @@ class CoverageGradeAgent(BaseAgent):
         }
         if path_state.get("return_uncovered_entities"):
             final_response["uncovered_entities"] = _uncovered_entities(
-                entities, col_hits
+                entities, col_hits, value_covered
             )
         path_state["final_response"] = final_response
         path_state["coverage"] = coverage
