@@ -9,9 +9,9 @@ import type { KeyboardEvent } from 'react';
  *
  * Key handlers must ignore these events: the Enter that confirms a composed
  * syllable is otherwise read as submit or commit, sending the message early and
- * leaving the last syllable behind. `keyCode === 229` covers Safari, which
- * delivers the confirming keydown after `compositionend`, when `isComposing` is
- * already false.
+ * leaving the last syllable behind. `keyCode === 229` is a fallback for IMEs
+ * that deliver the confirming keydown with `isComposing` already false (Safari
+ * with Japanese input, for example).
  */
 export function isImeComposing(e: KeyboardEvent): boolean {
 	return e.nativeEvent.isComposing || e.keyCode === 229;
