@@ -118,6 +118,29 @@ def test_steps_are_logged_in_pipeline_order(
     assert [s.split("] ", 1)[1].rstrip("…") for s in starts] == order
 
 
+def test_unreadable_pii_tags_skip_the_inline_embed(
+    _stubbed: None, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
+    """The embed reads catalog sample_values, not cleared for unknown PII."""
+
+    def _unreadable(_ids: list[str]) -> set[str]:
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(visit_enter, "pii_tagged_column_ids", _unreadable)
+    embedded: list[Any] = []
+    embedder = SimpleNamespace(embed_term=lambda *a: embedded.append(a))
+    ctx = {"columns": [{"id": "c1", "name": "status"}], "fks": []}
+
+    with caplog.at_level(logging.INFO, logger="auto_ontology.semantic.visit_enter"):
+        visit_enter.process_table(
+            TABLE, ctx, domain_summary=None, embedder=embedder, database_name="mydb"
+        )
+
+    assert embedded == []
+    messages = [record.getMessage() for record in caplog.records]
+    assert "[orders] Skipping inline embed — could not read PII tags" in messages
+
+
 def test_sampling_skip_is_logged_without_connector(
     _stubbed: None, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
 ) -> None:
