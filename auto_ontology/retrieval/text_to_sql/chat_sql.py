@@ -76,11 +76,18 @@ def execute_chat_sql(
     has a statement timeout, client side for DuckDB, SQLite and HeavyDB. One
     that doesn't advertise ``supports_statement_timeout`` is called unchanged,
     so the cap never breaks a connector with no way to honour it.
+
+    The statement also runs read-only on connectors advertising
+    ``supports_read_only``: the SQL is model-written, and no parse-level check
+    can see what a function it calls does.
     """
     log_chat_sql(connector, sql, kind=kind)
 
-    if not getattr(connector, "supports_statement_timeout", False):
-        return connector.execute(sql)
-    if timeout_s is None:
-        timeout_s = get_sql_query_timeout_seconds()
-    return connector.execute(sql, timeout_s=timeout_s)
+    kwargs: dict[str, Any] = {}
+    if getattr(connector, "supports_read_only", False) is True:
+        kwargs["read_only"] = True
+    if getattr(connector, "supports_statement_timeout", False):
+        kwargs["timeout_s"] = (
+            get_sql_query_timeout_seconds() if timeout_s is None else timeout_s
+        )
+    return connector.execute(sql, **kwargs)

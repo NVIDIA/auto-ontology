@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agents for the entity-coverage LangGraph."""
+"""Agents for the entity-coverage pipeline."""
 
 from auto_ontology.retrieval.entity_coverage.agents.coverage import CoverageGradeAgent
 from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (

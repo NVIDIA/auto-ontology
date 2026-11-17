@@ -20,6 +20,9 @@ class InteractiveSessionState:
     original_question: str
     working_question: str
     max_clarify_turns: int = 5
+    # JSON object "db|table|column" -> meaning. When set, the clarify prompt
+    # lists tables and columns from it instead of from db_schema.
+    column_meanings: str = ""
     clarify_history: list[dict] = field(default_factory=list)  # [{"q": ..., "a": ...}]
     phase: InteractivePhase = InteractivePhase.ROUND1_CLARIFY
     prior_round_sql: Optional[str] = None
@@ -114,9 +117,25 @@ class InteractiveSessionState:
         default_factory=list
     )  # injected verbatim into evidence, computed once
     _ambiguity_resolved: bool = False  # guards the once-only resolution call — an empty notes list still means "already ran"
+    # Whether the SQL the grader saw on the last non-debug submit returned
+    # ``"float"`` or ``"decimal"`` (None: neither). Recorded after order
+    # stabilization, which can change the type. The debug retry uses the other one.
+    first_submit_numeric_kind: Optional[str] = None
+    # Type-blind digest of the result *before* that stabilization. The debug
+    # retry compares it with its own pre-stabilization values and flips the
+    # numeric type only when they still match.
+    first_submit_values_digest: Optional[str] = None
+    # The SQL `step` last returned to the grader. Numeric-type alignment and
+    # order stabilization rewrite it after generation, so it can differ from
+    # ``path_state["sql_code"]``.
+    last_submitted_sql: str = ""
     scalar_hint: bool = (
         False  # True when output type is detected as scalar (one-way: False→True only)
     )
+    # Opt-in for callers graded by a checker that compares rounded numbers with
+    # ``==`` (BIRD-Interact): keep float casts on the numeric side and let the one
+    # debug retry switch float <-> numeric output. Off for everyone else.
+    numeric_type_alignment: bool = False
     # Callers that already refine evidence can disable the text-to-SQL graph's
     # second evidence-refinement pass.
     skip_evidence_refinement: bool = False

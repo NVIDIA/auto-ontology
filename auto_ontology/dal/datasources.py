@@ -31,6 +31,7 @@ from sqlalchemy import (
     distinct,
     func,
     literal,
+    or_,
     select,
     update,
 )
@@ -521,6 +522,67 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
     )
 
 
+def store_column_distinct_values(table_id: str, values: dict[str, list]) -> None:
+    """Write each column's lowest distinct values, JSON-encoded.
+
+    Encoded like ``sample_values`` (types kept, nulls dropped), and a column
+    whose list holds nothing is left alone.
+    """
+    encoded = {
+        name: dumped
+        for name, column_values in values.items()
+        if (dumped := dump_sample_values(column_values)) is not None
+    }
+    _set_column_property(table_id, encoded, "distinct_values")
+
+
+def store_column_distinct_ratios(table_id: str, ratios: dict[str, float]) -> None:
+    """Write the measured share of distinct sampled values onto columns."""
+    _set_column_property(
+        table_id,
+        {name: float(ratio) for name, ratio in ratios.items()},
+        "distinct_ratio",
+    )
+
+
+def store_column_descriptions(table_id: str, descriptions: dict[str, str]) -> list[str]:
+    """Write generated descriptions onto columns that lack a real one.
+
+    A column counts as lacking one when its description is blank or merely
+    repeats its name (case-insensitively). The check runs in the ``UPDATE``
+    itself, so a description someone saved in the meantime is never replaced.
+    Returns the ids of the columns written.
+    """
+    if not descriptions:
+        return []
+    current = func.trim(func.coalesce(s.catalog_column.c.description, ""))
+    rows = store().query_write(
+        update(s.catalog_column)
+        .where(
+            s.catalog_column.c.table_id == table_id,
+            s.catalog_column.c.name.in_(list(descriptions)),
+            s.catalog_column.c.description_certified.is_(False),
+            or_(
+                current == "",
+                func.lower(current) == func.lower(s.catalog_column.c.name),
+            ),
+        )
+        .values(
+            description_certified=False,
+            description=case(
+                {
+                    name: literal(text, s.catalog_column.c.description.type)
+                    for name, text in descriptions.items()
+                },
+                value=s.catalog_column.c.name,
+                else_=s.catalog_column.c.description,
+            ),
+        )
+        .returning(s.catalog_column.c.id)
+    )
+    return [row["id"] for row in rows]
+
+
 def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
     """Write inferred value notations onto Column ``format``.
 
@@ -866,6 +928,7 @@ def fetch_all_tables_without_term(
             s.catalog_table.c.id,
             s.catalog_table.c.name,
             s.catalog_table.c.description,
+            s.catalog_table.c.pk,
             s.catalog_schema.c.name.label("schema_name"),
         )
         .select_from(_table_join())
@@ -954,6 +1017,55 @@ def fetch_columns_for_table(
     return table
 
 
+def _semantic_fk_target_expr() -> ColumnElement:
+    """``schema.table.column`` a catalog column's semantic FK lands on.
+
+    The FK points at an attribute; the column that owns the attribute is the
+    target. Correlated on ``catalog_column``.
+    """
+    semantic_owner = s.column__has_attribute.alias("semantic_fk_owner")
+    semantic_target = s.catalog_column.alias("semantic_fk_target")
+    semantic_table = s.catalog_table.alias("semantic_fk_table")
+    semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
+    return (
+        select(
+            func.concat_ws(
+                ".",
+                semantic_schema.c.name,
+                semantic_table.c.name,
+                semantic_target.c.name,
+            )
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                semantic_owner,
+                semantic_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                semantic_target,
+                semantic_target.c.id == semantic_owner.c.column_id,
+            )
+            .join(
+                semantic_table,
+                semantic_table.c.id == semantic_target.c.table_id,
+            )
+            .join(
+                semantic_schema,
+                semantic_schema.c.id == semantic_table.c.schema_id,
+            )
+        )
+        .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+        .correlate(s.catalog_column)
+        .order_by(
+            semantic_schema.c.name,
+            semantic_table.c.name,
+            semantic_target.c.name,
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     """Tables with a name/type/description/sample_values summary of each column.
 
@@ -966,23 +1078,24 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
     ``sample_values`` is what lets a SQL-generating model write a correct
     ``->``/``->>`` path into a JSONB column instead of guessing a plausible
-    sibling key — this is the only per-column field ``candidates_preparation``'s
-    "back-fill" step (§4a: any table whose columns arrived without
-    sample_values from the vector-index hit) exists to supply. It was
-    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
-    dropped it from this query's rewrite (the Neo4j Cypher version had it);
-    restored so the back-fill isn't a no-op again. ``is_nullable`` is included
+    sibling key. It was selected here from Aug 2026 until the
+    Neo4j-to-Postgres port silently dropped it from this query's rewrite (the
+    Neo4j Cypher version had it); restored so a table whose columns arrived
+    without sample_values from the vector-index hit can be back-filled. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
+    ``semantic_fk`` resolves the referenced attribute back to its owning column
+    and returns that target as ``schema.table.column`` for SQL prompts.
     """
     if not table_ids:
         return []
+    semantic_fk_target = _semantic_fk_target_expr()
     try:
         rows = store().query_read(
             select(
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
-                s.catalog_table.c.description,
+                table_description_expr().label("description"),
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
@@ -992,6 +1105,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
+                semantic_fk_target.label("semantic_fk"),
             )
             .select_from(
                 _table_join().join(
@@ -1036,13 +1150,56 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
+                    "semantic_fk": row["semantic_fk"],
                 }
             )
     return list(tables.values())
 
 
+def fetch_table_column_names(database_name: str | None) -> list[dict[str, Any]]:
+    """Every table in *database_name* (all databases when ``None``) with its
+    column names: ``{id, name, schema_name, database_name, columns}``.
+
+    Names only, so a whole catalog is cheap to compare table against table.
+    """
+    query = select(
+        s.catalog_table.c.id,
+        s.catalog_table.c.name,
+        s.catalog_database.c.name.label("database_name"),
+        s.catalog_schema.c.name.label("schema_name"),
+        s.catalog_column.c.name.label("column_name"),
+    ).select_from(
+        _table_join().join(
+            s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
+        )
+    )
+    if database_name:
+        query = query.where(s.catalog_database.c.name == database_name)
+    rows = store().query_read(
+        query.order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+    )
+
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            str(row["id"]),
+            {
+                "id": str(row["id"]),
+                "name": row["name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "database_name": row["database_name"] or "",
+                "columns": [],
+            },
+        )
+        table["columns"].append(row["column_name"])
+    return list(tables.values())
+
+
 def fetch_table_context(table_id: str) -> dict[str, Any]:
     """``{columns, fks}`` for one table — what the SQL generator is handed.
+
+    ``description`` falls back through the column's attributes;
+    ``own_description`` is the column's alone.
 
     ``is_foreign_key_target`` marks a column some *other* column already points
     at; ``auto_ontology.semantic.fk_suggester`` drops those from the columns it offers the
@@ -1060,6 +1217,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "name": r["name"],
             "data_type": r["data_type"],
             "description": r["description"],
+            "own_description": r["own_description"],
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
             "format": r["format"],
@@ -1071,6 +1229,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 s.catalog_column.c.name,
                 s.catalog_column.c.data_type,
                 column_description_expr().label("description"),
+                s.catalog_column.c.description.label("own_description"),
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,
@@ -1447,7 +1606,9 @@ def find_table_key_columns(
     from ``catalog_table.pk`` (set at ingestion from the DDL); ``unique`` comes
     from ``catalog_column.is_unique`` (set from observed-data profiling — see
     :func:`store_column_uniqueness`), so it also catches a unique-in-practice
-    column with no declared constraint. Returns ``{"pk": [], "unique": []}``
+    column with no declared constraint. Only columns whose sample was fully
+    distinct count: a column flagged unique at a ``distinct_ratio`` below 1.0
+    is mostly distinct, which proves neither claim. Returns ``{"pk": [], "unique": []}``
     (not ``None``) when no match is found.
     """
     empty: dict[str, list[str]] = {"pk": [], "unique": []}
@@ -1477,6 +1638,12 @@ def find_table_key_columns(
         select(s.catalog_column.c.name).where(
             s.catalog_column.c.table_id == table_id,
             s.catalog_column.c.is_unique.is_(True),
+            # Callers prove a GROUP BY vacuous or a join 1:1 from this, which
+            # mostly-distinct is not.
+            or_(
+                s.catalog_column.c.distinct_ratio.is_(None),
+                s.catalog_column.c.distinct_ratio >= 1.0,
+            ),
         )
     )
     unique_cols = list(

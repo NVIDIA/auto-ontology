@@ -20,6 +20,7 @@ from sqlalchemy import (
     and_,
     any_,
     bindparam,
+    case,
     func,
     literal,
     or_,
@@ -31,6 +32,7 @@ from sqlalchemy.dialects.postgresql import insert
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.term_families import attribute_family_prefix
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ def merge_column_attribute(
     source_column: str,
     attr_name: str,
     datatype: str,
-    description: str | None,
+    description: str | None = None,
 ) -> str | None:
     """Upsert a ColumnAttribute and link it to its column and Term.
 
@@ -214,7 +216,9 @@ def update_column_attribute(
             s.column_attribute.c.source_column,
             s.column_attribute.c.certified,
             s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.description.label("column_description"),
             s.catalog_column.c.sample_values,
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
             s.term.c.id.label("term_id"),
             s.term.c.synonyms.label("term_synonyms"),
             s.catalog_database.c.name.label("database_name"),
@@ -436,12 +440,6 @@ def column_participates_in_semantic_fk(col_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-#: The FK target side of the join. Aliased because `catalog_column` and
-#: `catalog_table` already appear as the *source* side of the same statement.
-_fk_target_column = s.catalog_column.alias("fk_target_column")
-_fk_target_table = s.catalog_table.alias("fk_target_table")
-
-
 def find_unlinked_fk_columns(
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -466,30 +464,25 @@ def find_unlinked_fk_columns(
             s.catalog_column.c.name,
             s.catalog_column.c.description,
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.distinct_values,
+            s.catalog_column.c.data_type,
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
             s.column__foreign_key.c.target_column_id.label("fk_target_col_id"),
-            # The FK target's *table*, not just its column: `resolve_semantic_fks`
-            # skips a candidate whose target table is the source table, which it
-            # cannot tell without this.
-            _fk_target_table.c.id.label("fk_target_table_id"),
         )
         .select_from(
             s.catalog_column.join(
                 s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
             )
+            .join(
+                s.catalog_schema,
+                s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+            )
             .outerjoin(
                 s.column__foreign_key,
                 s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
-            )
-            .outerjoin(
-                _fk_target_column,
-                _fk_target_column.c.id == s.column__foreign_key.c.target_column_id,
-            )
-            .outerjoin(
-                _fk_target_table,
-                _fk_target_table.c.id == _fk_target_column.c.table_id,
             )
         )
         .where(
@@ -502,17 +495,206 @@ def find_unlinked_fk_columns(
         )
     )
     if database_name is not None:
-        statement = statement.select_from(
-            s.catalog_schema.join(
-                s.catalog_database,
-                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+        statement = statement.where(
+            s.catalog_schema.c.database_id.in_(
+                select(s.catalog_database.c.id).where(
+                    s.catalog_database.c.name == database_name
+                )
             )
-        ).where(
-            s.catalog_table.c.schema_id == s.catalog_schema.c.id,
-            s.catalog_database.c.name == database_name,
         )
 
     return [dict(r) for r in store().query_read(statement)]
+
+
+def fetch_value_key_candidates(database_name: str) -> list[dict[str, Any]]:
+    """Every column of *database_name* a semantic FK may point at.
+
+    The same targets the vector search allows: a column that owns a
+    ColumnAttribute and was profiled unique. One row per column, carrying the
+    attribute to link to (the lowest id when it owns several) and its stored
+    ``distinct_values``, which is ``None`` until a probe has written them.
+
+    Rows carry ``attribute_id``, ``column_id``, ``column_name``, ``data_type``,
+    ``distinct_values``, ``table_id``, ``table_name`` and ``schema_name``.
+    """
+    statement = (
+        select(
+            func.min(s.column__has_attribute.c.attribute_id).label("attribute_id"),
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.data_type,
+            s.catalog_column.c.distinct_values,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.column__has_attribute.join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            s.catalog_column.c.is_unique.is_(True),
+        )
+        .group_by(
+            s.catalog_column.c.id,
+            s.catalog_table.c.id,
+            s.catalog_schema.c.name,
+        )
+        .order_by(s.catalog_table.c.name, s.catalog_column.c.name)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def fetch_attributes_to_describe(database_name: str) -> list[dict[str, Any]]:
+    """Every semantic ColumnAttribute of *database_name* with no description yet.
+
+    One row per attribute, joined to its owning column, table and Term, with
+    everything a description is written from: ``attribute_id``,
+    ``attribute_name``, ``term_name``, ``term_description``, ``table_id``,
+    ``table_name``, ``table_description``, ``column_id``, ``column_name``,
+    ``column_description``, ``data_type``, ``sample_values``, ``format`` and
+    ``family_prefix``.
+    """
+    blank = func.trim(func.coalesce(s.column_attribute.c.description, "")) == ""
+    statement = (
+        select(
+            s.column_attribute.c.id.label("attribute_id"),
+            s.column_attribute.c.name.label("attribute_name"),
+            s.term.c.name.label("term_name"),
+            s.term.c.description.label("term_description"),
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_table.c.description.label("table_description"),
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.description.label("column_description"),
+            s.catalog_column.c.data_type,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.format,
+            attribute_family_prefix(s.column_attribute.c.id).label("family_prefix"),
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+            .join(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+            blank,
+        )
+        .order_by(s.catalog_table.c.name, s.catalog_column.c.ordinal_position)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def fetch_semantic_fk_ends(database_name: str) -> list[dict[str, Any]]:
+    """Both ends of every SEMANTIC_FK whose source column is in *database_name*.
+
+    Rows carry ``source_column_id``, ``source_table_name``,
+    ``source_column_name``, ``target_attribute_id``, ``target_table_name`` and
+    ``target_column_name`` — the target being the column that owns the
+    referenced attribute.
+    """
+    source_column = s.catalog_column.alias("fk_end_source_column")
+    source_table = s.catalog_table.alias("fk_end_source_table")
+    source_schema = s.catalog_schema.alias("fk_end_source_schema")
+    target_column = s.catalog_column.alias("fk_end_target_column")
+    target_table = s.catalog_table.alias("fk_end_target_table")
+    statement = (
+        select(
+            source_column.c.id.label("source_column_id"),
+            source_table.c.name.label("source_table_name"),
+            source_column.c.name.label("source_column_name"),
+            s.column__semantic_fk.c.attribute_id.label("target_attribute_id"),
+            target_table.c.name.label("target_table_name"),
+            target_column.c.name.label("target_column_name"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                source_column, source_column.c.id == s.column__semantic_fk.c.column_id
+            )
+            .join(source_table, source_table.c.id == source_column.c.table_id)
+            .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == source_schema.c.database_id,
+            )
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                target_column,
+                target_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(target_table, target_table.c.id == target_column.c.table_id)
+        )
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(source_table.c.name, source_column.c.name)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def store_attribute_descriptions(descriptions: dict[str, str]) -> int:
+    """Write descriptions onto attributes that still have none.
+
+    Keyed by attribute id. An attribute described in the meantime — by a person
+    editing it while a compile runs — keeps its description. Returns the number
+    of attributes written.
+    """
+    if not descriptions:
+        return 0
+    attribute = s.column_attribute
+    rows = store().query_write(
+        update(attribute)
+        .where(
+            attribute.c.id.in_(list(descriptions)),
+            func.trim(func.coalesce(attribute.c.description, "")) == "",
+        )
+        .values(
+            description=case(
+                {
+                    attr_id: literal(text, attribute.c.description.type)
+                    for attr_id, text in descriptions.items()
+                },
+                value=attribute.c.id,
+                else_=attribute.c.description,
+            )
+        )
+        .returning(attribute.c.id)
+    )
+    return len(rows)
 
 
 def _same_database(src_column_id: str, tgt_attr_id: str) -> bool:
@@ -549,6 +731,109 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
         .on_conflict_do_nothing()
     )
     return True
+
+
+def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
+    """Return semantic FKs with the context needed to choose one join default."""
+    source_column = s.catalog_column.alias("join_default_source_column")
+    source_table = s.catalog_table.alias("join_default_source_table")
+    source_schema = s.catalog_schema.alias("join_default_source_schema")
+    source_database = s.catalog_database.alias("join_default_source_database")
+    target_column = s.catalog_column.alias("join_default_target_column")
+    target_table = s.catalog_table.alias("join_default_target_table")
+    target_schema = s.catalog_schema.alias("join_default_target_schema")
+
+    statement = (
+        select(
+            source_table.c.id.label("source_table_id"),
+            source_table.c.name.label("source_table_name"),
+            source_table.c.description.label("source_table_description"),
+            source_schema.c.name.label("source_schema_name"),
+            source_column.c.id.label("source_column_id"),
+            source_column.c.name.label("source_column_name"),
+            source_column.c.description.label("source_column_description"),
+            s.column__semantic_fk.c.attribute_id.label("target_attribute_id"),
+            s.column_attribute.c.name.label("target_attribute_name"),
+            s.column_attribute.c.description.label("target_attribute_description"),
+            target_table.c.id.label("target_table_id"),
+            target_table.c.name.label("target_table_name"),
+            target_table.c.description.label("target_table_description"),
+            target_schema.c.name.label("target_schema_name"),
+            target_column.c.id.label("target_column_id"),
+            target_column.c.name.label("target_column_name"),
+            target_column.c.description.label("target_column_description"),
+            s.column__semantic_fk.c.use_in_join_paths,
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                source_column,
+                source_column.c.id == s.column__semantic_fk.c.column_id,
+            )
+            .join(source_table, source_table.c.id == source_column.c.table_id)
+            .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+            .join(
+                source_database,
+                source_database.c.id == source_schema.c.database_id,
+            )
+            .join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                target_column,
+                target_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(target_table, target_table.c.id == target_column.c.table_id)
+            .join(target_schema, target_schema.c.id == target_table.c.schema_id)
+        )
+        .where(source_database.c.name == database_name)
+        .order_by(
+            source_table.c.id,
+            s.column__semantic_fk.c.attribute_id,
+            func.lower(source_column.c.name),
+            source_column.c.id,
+        )
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def set_semantic_fk_join_default(
+    source_table_id: str,
+    target_attribute_id: str,
+    selected_column_id: str,
+) -> None:
+    """Atomically enable one semantic FK in a source-table/target group."""
+    source_column_ids = select(s.catalog_column.c.id).where(
+        s.catalog_column.c.table_id == source_table_id
+    )
+    statement = (
+        update(s.column__semantic_fk)
+        .where(
+            s.column__semantic_fk.c.attribute_id == target_attribute_id,
+            s.column__semantic_fk.c.column_id.in_(source_column_ids),
+        )
+        .values(
+            use_in_join_paths=case(
+                (
+                    s.column__semantic_fk.c.column_id == selected_column_id,
+                    True,
+                ),
+                else_=False,
+            )
+        )
+        .returning(s.column__semantic_fk.c.column_id)
+    )
+    with write_transaction():
+        updated = store().query_write(statement)
+        if selected_column_id not in {row["column_id"] for row in updated}:
+            raise ValueError(
+                "Selected semantic FK column does not belong to the requested group"
+            )
 
 
 def _column_path_select(link_table):
@@ -668,6 +953,7 @@ _SEMANTIC_TABLE_EDGES = (
     .where(
         _fk_schema.c.database_id == bindparam("database_id"),
         _owner_schema.c.database_id == bindparam("database_id"),
+        s.column__semantic_fk.c.use_in_join_paths.is_(True),
     )
     .distinct()
 )
@@ -856,6 +1142,7 @@ def find_connected_junction_tables(
             target_table.c.id.in_(kept_ids),
             junction_table.c.id != target_table.c.id,
             junction_schema.c.database_id == target_schema.c.database_id,
+            s.column__semantic_fk.c.use_in_join_paths.is_(True),
         )
     )
 
@@ -1041,6 +1328,8 @@ def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:
         .where(
             fk_a.c.column_id == col_a_id,
             fk_b.c.column_id == col_b_id,
+            fk_a.c.use_in_join_paths.is_(True),
+            fk_b.c.use_in_join_paths.is_(True),
             # The shared target must be the hub table's own declared PK, not
             # just any attribute the two columns happen to share -- see the
             # docstring above.
@@ -1152,6 +1441,8 @@ def find_anchor_hub_siblings(
         )
         .where(
             s.catalog_table.c.id == anchor_table_id,
+            s.column__semantic_fk.c.use_in_join_paths.is_(True),
+            sibling_fk.c.use_in_join_paths.is_(True),
             # The hub column must be the hub table's own declared PK -- the
             # same discipline find_shared_hub_bridge applies.
             hub_col.c.name == any_(hub_table.c.pk),

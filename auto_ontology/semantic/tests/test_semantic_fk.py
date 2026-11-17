@@ -6,13 +6,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from auto_ontology.semantic import semantic_fk
 from auto_ontology.semantic.embed import _build_rows
+from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
 
 
 def _hit(
@@ -50,87 +53,418 @@ def test_format_sample_values_handles_legacy_json_string_and_native_list() -> No
     )
 
 
-def test_distinct_samples_drops_none_and_preserves_order() -> None:
-    assert semantic_fk._distinct_samples(["a", None, "b", "a"]) == ["a", "b"]
-    assert semantic_fk._distinct_samples('["a", null, "b", "a"]') == ["a", "b"]
+def _key_row(
+    attr_id: str,
+    table_id: str,
+    values: list | None,
+    *,
+    table_name: str = "target_table",
+    column_name: str = "id",
+) -> dict:
+    return {
+        "attribute_id": attr_id,
+        "column_id": f"{attr_id}-column",
+        "column_name": column_name,
+        "data_type": "integer",
+        "distinct_values": json.dumps(values) if values is not None else None,
+        "table_id": table_id,
+        "table_name": table_name,
+        "schema_name": "public",
+    }
 
 
-@patch("auto_ontology.semantic.semantic_fk._match_hit_by_sample_values")
-@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="other-attr")
-def test_vdb_resolution_excludes_same_table_candidates(
-    mock_llm_pick: MagicMock,
-    mock_sql_fallback: MagicMock,
-) -> None:
+def _keys(
+    rows: list[dict], connector: MagicMock | None = None
+) -> semantic_fk._KeyIndex:
+    with patch(
+        "auto_ontology.semantic.semantic_fk.fetch_value_key_candidates",
+        return_value=rows,
+    ):
+        return semantic_fk._KeyIndex("database", connector or MagicMock())
+
+
+def _fk_column(values: list | None, *, name: str = "customer_ref") -> dict:
+    return {
+        "id": "source-column",
+        "name": name,
+        "table_id": "table-1",
+        "table_name": "orders",
+        "schema_name": "public",
+        "distinct_values": json.dumps(values) if values is not None else None,
+    }
+
+
+def _retriever(*hits: dict) -> MagicMock:
     retriever = MagicMock()
-    retriever.query.side_effect = [
-        [_hit("same-attr", "table-1"), _hit("other-attr", "table-2")],
-        [_hit("same-attr", "table-1")],
-    ]
+    retriever.query.side_effect = [list(hits), []]
+    return retriever
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="own-key")
+def test_vdb_resolution_offers_own_table_keys_but_not_the_column_itself(
+    mock_llm_pick: MagicMock,
+) -> None:
+    itself = _hit("itself", "table-1", source_column="parent_id")
+    own_key = _hit("own-key", "table-1", source_column="id")
+    other = _hit("other-attr", "table-2")
+    retriever = MagicMock()
+    retriever.query.side_effect = [[itself, own_key, other], [itself]]
     column = {
         "id": "source-column",
-        "name": "id",
+        "name": "parent_id",
         "table_id": "table-1",
-        "table_name": "tags",
+        "table_name": "posts",
     }
 
     selected = semantic_fk._resolve_via_vdb(column, retriever, "database")
 
-    assert selected == "other-attr"
-    assert mock_llm_pick.call_args.args[1] == [_hit("other-attr", "table-2")]
+    assert selected == "own-key"
+    assert mock_llm_pick.call_args.args[1] == [own_key, other]
     assert all(
         call.kwargs["vdb_kwargs"]["where"]["is_unique"] is True
         for call in retriever.query.call_args_list
     )
-    mock_sql_fallback.assert_not_called()
 
 
-@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit")
-def test_vdb_resolution_skips_llm_when_only_same_table_candidate_exists(
-    mock_llm_pick: MagicMock,
-) -> None:
-    retriever = MagicMock()
-    retriever.query.side_effect = [[_hit("same-attr", "table-1")], []]
-    column = {
-        "id": "source-column",
-        "name": "id",
-        "table_id": "table-1",
-        "table_name": "tags",
-    }
+def test_own_table_candidates_are_marked_for_the_llm() -> None:
+    column = {"id": "source-column", "name": "parent_id", "table_id": "table-1"}
+    with (
+        patch("auto_ontology.semantic.semantic_fk.get_llm_client"),
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output",
+            return_value=None,
+        ) as invoke,
+    ):
+        semantic_fk._llm_pick_hit(
+            column, [_hit("own-key", "table-1"), _hit("other", "table-2")]
+        )
 
-    assert semantic_fk._resolve_via_vdb(column, retriever, "database") is None
-    mock_llm_pick.assert_not_called()
+    prompt = invoke.call_args.args[1][1].content
+    assert "column_id=own-key [same table] |" in prompt
+    assert "column_id=other |" in prompt
 
 
-@patch(
-    "auto_ontology.semantic.semantic_fk._match_hit_by_sample_values",
-    return_value="target-attr",
-)
-@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value=None)
-def test_vdb_resolution_uses_sql_fallback_when_llm_abstains(
-    _mock_llm_pick: MagicMock,
-    mock_sql_fallback: MagicMock,
-) -> None:
-    retriever = MagicMock()
-    hit = _hit("target-attr", "table-2")
-    retriever.query.side_effect = [[hit], []]
-    column = {
-        "id": "source-column",
-        "name": "id",
-        "table_id": "table-1",
-        "table_name": "tags",
-        "sample_values": '["72", "35"]',
-    }
-    connector = MagicMock()
+def test_self_reference_needs_the_llms_pick_to_be_confirmed() -> None:
+    """A table's own dense id holds nearly any integer FK's values."""
+    keys = _keys([_key_row("own-key", "table-1", [100, 101, 102])])
+    hits = [_hit("own-key", "table-1", score=0.1)]
 
-    selected = semantic_fk._resolve_via_vdb(
-        column,
-        retriever,
-        "database",
-        connector,
+    assert (
+        semantic_fk._confirm_by_values(
+            _fk_column([100, 101]), [100, 101], hits, None, keys
+        )
+        is None
+    )
+    assert (
+        semantic_fk._confirm_by_values(
+            _fk_column([100, 101]), [100, 101], hits, "own-key", keys
+        )
+        == "own-key"
     )
 
-    assert selected == "target-attr"
-    mock_sql_fallback.assert_called_once_with(column, [hit], connector)
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="picked")
+def test_pick_stands_unconfirmed_when_fk_column_has_no_values(
+    _mock_llm_pick: MagicMock,
+) -> None:
+    keys = _keys([_key_row("picked", "table-2", [999])])
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column(None), _retriever(_hit("picked", "table-2")), "database", keys
+    )
+
+    assert selected == "picked"
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="picked")
+def test_llm_pick_is_confirmed_by_values(_mock_llm_pick: MagicMock) -> None:
+    keys = _keys(
+        [
+            _key_row("picked", "table-2", [100, 101, 102]),
+            _key_row("closer", "table-3", [100, 101, 102]),
+        ]
+    )
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column([100, 102]),
+        _retriever(_hit("closer", "table-3", score=0.1), _hit("picked", "table-2")),
+        "database",
+        keys,
+    )
+
+    assert selected == "picked"
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="picked")
+def test_unconfirmed_pick_falls_to_next_hit_by_distance(
+    _mock_llm_pick: MagicMock,
+) -> None:
+    keys = _keys(
+        [
+            _key_row("picked", "table-2", [900, 901]),
+            _key_row("far", "table-3", [100, 101, 102]),
+            _key_row("near", "table-4", [100, 101, 102]),
+        ]
+    )
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column([100, 101]),
+        _retriever(
+            _hit("picked", "table-2", score=0.1),
+            _hit("far", "table-3", score=0.9),
+            _hit("near", "table-4", score=0.3),
+        ),
+        "database",
+        keys,
+    )
+
+    assert selected == "near"
+
+
+def test_short_values_cannot_confirm_a_hit_the_llm_did_not_pick() -> None:
+    """`votes.VoteTypeId` in 1..16 is contained in `comments.Id` by coincidence."""
+    keys = _keys([_key_row("comments-id", "table-2", list(range(1, 21)))])
+    column = _fk_column([1, 2, 3, 5, 8], name="VoteTypeId")
+    hits = [_hit("comments-id", "table-2", score=0.1)]
+
+    assert (
+        semantic_fk._confirm_by_values(column, [1, 2, 3, 5, 8], hits, None, keys)
+        is None
+    )
+    assert (
+        semantic_fk._confirm_by_values(
+            column, [1, 2, 3, 5, 8], hits, "comments-id", keys
+        )
+        == "comments-id"
+    )
+
+
+def test_value_only_search_shortlists_containing_keys_for_the_llm() -> None:
+    keys = _keys(
+        [
+            _key_row("vector-hit", "table-2", [900, 901]),
+            _key_row("holder", "table-3", [1000, 1001, 1002], table_name="clients"),
+            _key_row("stranger", "table-4", [5000, 5001]),
+            _key_row("own-key", "table-1", [1000, 1001, 1002], table_name="orders"),
+            _key_row("source", "table-1", [1000, 1001, 1002], table_name="orders"),
+        ]
+    )
+    with patch(
+        "auto_ontology.semantic.semantic_fk._llm_pick_hit",
+        side_effect=[None, "holder"],
+    ) as pick:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column([1000, 1002]),
+            _retriever(_hit("vector-hit", "table-2")),
+            "database",
+            keys,
+        )
+
+    assert selected == "holder"
+    fallback = pick.call_args_list[1]
+    assert [hit["metadata"]["id"] for hit in fallback.args[1]] == ["holder", "own-key"]
+    assert fallback.kwargs["system_prompt"] == semantic_fk._VALUE_SYSTEM_PROMPT
+    assert "public.clients.id" in fallback.args[1][0]["text"]
+
+
+def test_value_only_search_runs_without_vector_hits() -> None:
+    keys = _keys([_key_row("holder", "table-3", [1000, 1001])])
+    with patch(
+        "auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="holder"
+    ) as pick:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column([1000, 1001]), _retriever(), "database", keys
+        )
+
+    assert selected == "holder"
+    pick.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("name", "values"),
+    [("customer_ref", [1, 2, 3]), ("customer_name", ["Alice", "Bob"])],
+    ids=["short-values", "label-column"],
+)
+def test_value_only_search_skips_ambiguous_columns(name: str, values: list) -> None:
+    keys = _keys([_key_row("holder", "table-3", values)])
+    with patch("auto_ontology.semantic.semantic_fk._llm_pick_hit") as pick:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column(values, name=name), _retriever(), "database", keys
+        )
+
+    assert selected is None
+    pick.assert_not_called()
+
+
+def _families(*members: tuple[str, str, str]) -> semantic_fk._Families:
+    return semantic_fk._Families(
+        [
+            {"table_id": table, "family_id": family, "base_name": base}
+            for table, family, base in members
+        ]
+    )
+
+
+# table-1 OLD_ROOMS, table-2 NEW_HOTELS, table-3 OLD_HOTELS, table-4 NEW_SPA
+_FAMILIES = _families(
+    ("table-1", "old", "ROOMS"),
+    ("table-2", "new", "HOTELS"),
+    ("table-3", "old", "HOTELS"),
+    ("table-4", "new", "SPA"),
+)
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "crosses"),
+    [
+        ("table-1", "table-2", True),
+        ("table-1", "table-3", False),
+        ("table-1", "table-4", False),
+        ("table-1", "shared-dimension", False),
+        ("standalone", "table-2", False),
+    ],
+    ids=[
+        "own-family-has-a-copy",
+        "same-family",
+        "own-family-has-no-copy",
+        "target-in-no-family",
+        "source-in-no-family",
+    ],
+)
+def test_family_crossing(source: str, target: str, crosses: bool) -> None:
+    assert _FAMILIES.crosses(source, target) is crosses
+
+
+def test_a_target_sharing_any_family_is_not_crossing() -> None:
+    families = _families(
+        ("table-1", "old", "ROOMS"),
+        ("table-2", "new", "HOTELS"),
+        ("table-2", "old", "HOTELS"),
+    )
+
+    assert not families.crosses("table-1", "table-2")
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="same-family")
+def test_vector_hits_from_another_family_are_never_offered(
+    mock_llm_pick: MagicMock,
+) -> None:
+    retriever = _retriever(
+        _hit("other-family", "table-2", score=0.1),
+        _hit("same-family", "table-3", score=0.5),
+    )
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column(None), retriever, "database", families=_FAMILIES
+    )
+
+    assert selected == "same-family"
+    assert [h["metadata"]["id"] for h in mock_llm_pick.call_args.args[1]] == [
+        "same-family"
+    ]
+
+
+def test_value_only_search_skips_keys_from_another_family() -> None:
+    keys = _keys(
+        [
+            _key_row("other-family", "table-2", [1000, 1001]),
+            _key_row("same-family", "table-3", [1000, 1001]),
+        ]
+    )
+    with patch(
+        "auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="same-family"
+    ) as pick:
+        semantic_fk._resolve_via_vdb(
+            _fk_column([1000, 1001]), _retriever(), "database", keys, _FAMILIES
+        )
+
+    assert [h["metadata"]["id"] for h in pick.call_args.args[1]] == ["same-family"]
+
+
+def test_key_index_probes_missing_values_once_and_stores_them() -> None:
+    keys = _keys([_key_row("attr", "table-2", None, column_name="code")])
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.probe_ascending_distinct_values",
+            return_value=["A01", "A02"],
+        ) as probe,
+        patch(
+            "auto_ontology.semantic.semantic_fk.store_column_distinct_values"
+        ) as store,
+    ):
+        assert keys.values("attr") == ["A01", "A02"]
+        assert keys.values("attr") == ["A01", "A02"]
+
+    probe.assert_called_once_with(keys.connector, "public", "target_table", "code")
+    store.assert_called_once_with("table-2", {"code": ["A01", "A02"]})
+    assert keys.stored()[0][1] == ["A01", "A02"]
+
+
+def test_key_index_remembers_a_failed_probe() -> None:
+    keys = _keys([_key_row("attr", "table-2", None)])
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.probe_ascending_distinct_values",
+            return_value=None,
+        ) as probe,
+        patch(
+            "auto_ontology.semantic.semantic_fk.store_column_distinct_values"
+        ) as store,
+    ):
+        assert keys.values("attr") is None
+        assert keys.values("attr") is None
+
+    probe.assert_called_once()
+    store.assert_not_called()
+
+
+def _join_keys(*results: object) -> semantic_fk._KeyIndex:
+    connector = MagicMock(dialect="postgres")
+    connector.qualify.side_effect = lambda schema, table: f'"{schema}"."{table}"'
+    connector.supports_statement_timeout = False
+    connector.execute.side_effect = list(results)
+    return _keys([_key_row("attr", "table-2", [1])], connector)
+
+
+def test_join_validation_accepts_a_returned_row() -> None:
+    keys = _join_keys(pd.DataFrame({"hit": [1]}))
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    sql = keys.connector.execute.call_args.args[0]
+    assert sql == (
+        'SELECT 1 AS hit FROM "public"."orders" s JOIN "public"."target_table" t '
+        'ON s."customer_ref" = t."id" LIMIT 1'
+    )
+
+
+def test_join_validation_rejects_an_empty_join_without_retrying() -> None:
+    keys = _join_keys(pd.DataFrame({"hit": []}))
+
+    assert not semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    assert keys.connector.execute.call_count == 1
+
+
+def test_join_validation_retries_as_text_after_a_type_error() -> None:
+    keys = _join_keys(
+        RuntimeError("operator does not exist"), pd.DataFrame({"hit": [1]})
+    )
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    retry = keys.connector.execute.call_args.args[0]
+    assert 'CAST(s."customer_ref" AS TEXT) = CAST(t."id" AS TEXT)' in retry
+
+
+def test_join_validation_rejects_when_both_attempts_fail() -> None:
+    keys = _join_keys(RuntimeError("bad"), RuntimeError("still bad"))
+
+    assert not semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+
+
+def test_join_validation_rejects_an_unknown_target() -> None:
+    keys = _join_keys()
+
+    assert not semantic_fk._join_returns_rows(keys, _fk_column([1]), "missing")
+    keys.connector.execute.assert_not_called()
 
 
 def test_column_attribute_embedding_includes_physical_table() -> None:
@@ -158,151 +492,6 @@ def test_column_attribute_embedding_includes_physical_table() -> None:
     assert rows[0]["metadata"]["content_metadata"]["is_unique"] is True
 
 
-def _probe_result(*values: object, ok: bool = True) -> dict:
-    return {
-        "ok": ok,
-        "rows": [{"matched_value": value} for value in values],
-    }
-
-
-def _run_sample_fallback(
-    column: dict,
-    hits: list[dict],
-    *probe_results: dict,
-) -> tuple[str | None, MagicMock]:
-    executor = MagicMock()
-    executor.__enter__.return_value = executor
-    executor.run.side_effect = list(probe_results)
-    with patch(
-        "auto_ontology.semantic.semantic_fk.ProbeExecutor",
-        return_value=executor,
-    ):
-        selected = semantic_fk._match_hit_by_sample_values(
-            column,
-            hits,
-            MagicMock(dialect="postgresql"),
-        )
-    return selected, executor
-
-
-def test_sql_fallback_selects_candidate_containing_all_samples() -> None:
-    column = {"name": "id", "table_name": "tags", "sample_values": '["72", "35"]'}
-
-    selected, executor = _run_sample_fallback(
-        column,
-        [_hit("torrent-id", "torrent-table", source_column="ID")],
-        _probe_result(72, 35),
-    )
-
-    assert selected == "torrent-id"
-    assert executor.run.call_count == 1
-
-
-def test_sql_fallback_rejects_partial_or_missing_matches() -> None:
-    column = {"name": "id", "table_name": "tags", "sample_values": '["72", "35"]'}
-
-    selected, _executor = _run_sample_fallback(
-        column,
-        [
-            _hit("partial", "table-2"),
-            _hit("missing", "table-3"),
-        ],
-        _probe_result(72),
-        _probe_result(),
-    )
-
-    assert selected is None
-
-
-def test_sql_fallback_uses_best_vdb_score_when_multiple_candidates_match() -> None:
-    column = {"name": "id", "table_name": "tags", "sample_values": '["72", "35"]'}
-
-    selected, _executor = _run_sample_fallback(
-        column,
-        [
-            _hit("weaker", "table-2", score=0.4),
-            _hit("stronger", "table-3", score=0.1),
-        ],
-        _probe_result(72, 35),
-        _probe_result(72, 35),
-    )
-
-    assert selected == "stronger"
-
-
-def test_sql_fallback_continues_after_probe_failure() -> None:
-    column = {"name": "id", "table_name": "tags", "sample_values": '["72", "35"]'}
-
-    selected, _executor = _run_sample_fallback(
-        column,
-        [
-            _hit("failed", "table-2"),
-            _hit("matched", "table-3"),
-        ],
-        _probe_result(ok=False),
-        _probe_result(72, 35),
-    )
-
-    assert selected == "matched"
-
-
-@patch("auto_ontology.semantic.semantic_fk.ProbeExecutor")
-def test_sql_fallback_skips_without_samples_or_connector(
-    mock_executor: MagicMock,
-) -> None:
-    hit = _hit("target", "table-2")
-
-    assert (
-        semantic_fk._match_hit_by_sample_values(
-            {"sample_values": None}, [hit], MagicMock()
-        )
-        is None
-    )
-    assert (
-        semantic_fk._match_hit_by_sample_values(
-            {"sample_values": '["72"]'}, [hit], None
-        )
-        is None
-    )
-    mock_executor.assert_not_called()
-
-
-@patch("auto_ontology.semantic.semantic_fk.ProbeExecutor")
-def test_sql_fallback_skips_candidates_with_different_column_names(
-    mock_executor: MagicMock,
-) -> None:
-    column = {
-        "name": "id",
-        "table_name": "tags",
-        "sample_values": '["1"]',
-    }
-    hit = _hit(
-        "timestamp-attr",
-        "table-2",
-        source_column="lasteditedwhen",
-    )
-
-    assert semantic_fk._match_hit_by_sample_values(column, [hit], MagicMock()) is None
-    mock_executor.assert_not_called()
-
-
-def test_sample_match_sql_quotes_location_and_compares_as_text() -> None:
-    sql = semantic_fk._sample_match_sql(
-        {
-            "schema_name": "music",
-            "table_name": "torrents",
-            "source_column": "id",
-        },
-        ["72", "35"],
-        "postgresql",
-    )
-
-    assert sql is not None
-    assert 'FROM "music"."torrents"' in sql
-    assert "CAST(\"id\" AS TEXT) IN ('72', '35')" in sql
-    assert sql.endswith("LIMIT 2")
-
-
 def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) -> None:
     candidates = [
         {"id": "col-1", "name": "customer_id", "table_name": "orders"},
@@ -320,9 +509,17 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
             return_value=MagicMock(),
         ),
         patch(
+            "auto_ontology.semantic.semantic_fk.fetch_table_families",
+            return_value={},
+        ),
+        patch(
             "auto_ontology.semantic.semantic_fk._resolve_connector", return_value=None
         ),
         patch("auto_ontology.semantic.semantic_fk._resolve_via_vdb", return_value=None),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 0
 
@@ -330,3 +527,298 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
     assert (
         "Resolving semantic FK edges… (2/2): order_items.product_id" in caplog.messages
     )
+
+
+def _join_group_row(column_id: str, column_name: str) -> dict:
+    return {
+        "source_table_id": "orders-table",
+        "source_table_name": "orders",
+        "source_table_description": "Customer orders.",
+        "source_column_id": column_id,
+        "source_column_name": column_name,
+        "source_column_description": f"The {column_name} role.",
+        "target_attribute_id": "customer-attribute",
+        "target_attribute_name": "Customer ID",
+        "target_table_id": "customers-table",
+        "target_table_name": "customers",
+        "target_table_description": "Customers.",
+        "target_column_id": "customer-id",
+        "target_column_name": "id",
+        "target_column_description": "Customer identifier.",
+        "use_in_join_paths": True,
+    }
+
+
+def test_single_semantic_fk_is_default_without_llm() -> None:
+    group = [_join_group_row("customer-id-column", "customer_id")]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+        patch("auto_ontology.semantic.semantic_fk.get_llm_client") as get_llm_client,
+    ):
+        assert semantic_fk.select_semantic_fk_join_defaults("database") == 1
+
+    get_llm_client.assert_not_called()
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "customer-id-column",
+    )
+
+
+def test_llm_selects_default_from_parallel_semantic_fks() -> None:
+    group = [
+        _join_group_row("billing-column", "billing_customer_id"),
+        _join_group_row("customer-column", "customer_id"),
+    ]
+    result = SemanticFkJoinDefaultSelection(
+        selected_column_id="customer-column",
+        rationale="The unqualified customer relationship.",
+    )
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output",
+            return_value=result,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "customer-column",
+    )
+
+
+def test_invalid_llm_selection_uses_deterministic_default() -> None:
+    group = [
+        _join_group_row("z-column", "z_customer_id"),
+        _join_group_row("a-column", "a_customer_id"),
+    ]
+    result = SemanticFkJoinDefaultSelection(
+        selected_column_id="invented-column",
+        rationale="Invalid.",
+    )
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output",
+            return_value=result,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "a-column",
+    )
+
+
+def test_missing_llm_uses_deterministic_default() -> None:
+    group = [
+        _join_group_row("z-column", "z_customer_id"),
+        _join_group_row("a-column", "a_customer_id"),
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.get_llm_client",
+            side_effect=EnvironmentError("not configured"),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "a-column",
+    )
+
+
+def test_resolution_always_normalizes_join_defaults() -> None:
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_semantic_fks",
+            return_value=3,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.select_semantic_fk_join_defaults"
+        ) as select_defaults,
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 3
+
+    select_defaults.assert_called_once_with("database")
+
+
+def _run_inferred_resolution(
+    *, join_ok: bool, prevented: bool = False
+) -> tuple[int, MagicMock, MagicMock, MagicMock]:
+    candidates = [{"id": "col-1", "name": "customer_ref", "table_name": "orders"}]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._build_retriever",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_table_families",
+            return_value={},
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.is_semantic_fk_db_query_prevented",
+            return_value=prevented,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=MagicMock(),
+        ) as resolve_connector,
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_value_key_candidates",
+            return_value=[],
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_via_vdb", return_value="attr"
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._join_returns_rows",
+            return_value=join_ok,
+        ) as join,
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
+        ) as merge,
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
+    ):
+        created = semantic_fk.resolve_semantic_fks("database")
+    return created, resolve_connector, join, merge
+
+
+def test_inferred_fk_is_stored_when_the_join_returns_rows() -> None:
+    created, _connector, join, merge = _run_inferred_resolution(join_ok=True)
+
+    assert created == 1
+    join.assert_called_once()
+    merge.assert_called_once_with("col-1", "attr")
+
+
+def test_inferred_fk_is_dropped_when_the_join_returns_nothing() -> None:
+    created, _connector, _join, merge = _run_inferred_resolution(join_ok=False)
+
+    assert created == 0
+    merge.assert_not_called()
+
+
+def test_prevented_db_queries_store_the_pick_without_validation() -> None:
+    created, resolve_connector, join, merge = _run_inferred_resolution(
+        join_ok=False, prevented=True
+    )
+
+    assert created == 1
+    resolve_connector.assert_not_called()
+    join.assert_not_called()
+    merge.assert_called_once_with("col-1", "attr")
+
+
+@pytest.mark.parametrize(
+    ("name", "target"),
+    [("customer_id", "customers-id"), ("parent_id", "orders-id")],
+    ids=["other-table", "self-reference"],
+)
+def test_declared_fk_is_trusted_without_a_join(name: str, target: str) -> None:
+    candidates = [
+        {
+            "id": "col-1",
+            "name": name,
+            "table_name": "orders",
+            "table_id": "orders-table",
+            "fk_target_col_id": target,
+        }
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_column_attribute_by_column_id",
+            return_value="attr",
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
+        ) as merge,
+        patch("auto_ontology.semantic.semantic_fk._join_returns_rows") as join,
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 1
+
+    merge.assert_called_once_with("col-1", "attr")
+    join.assert_not_called()
+
+
+def test_declared_fk_onto_the_column_itself_is_rejected() -> None:
+    candidates = [
+        {
+            "id": "col-1",
+            "name": "id",
+            "table_name": "orders",
+            "table_id": "orders-table",
+            "fk_target_col_id": "col-1",
+        }
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
+        ) as merge,
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 0
+
+    merge.assert_not_called()

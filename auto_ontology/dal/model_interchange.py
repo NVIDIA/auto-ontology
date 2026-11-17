@@ -343,6 +343,7 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
             select(
                 s.column__semantic_fk.c.column_id,
                 s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
+                s.column__semantic_fk.c.use_in_join_paths,
             )
             .select_from(
                 _catalog_join().join(
@@ -526,6 +527,7 @@ def assemble_export_document(
         ModelSemanticFk(
             column_attribute_id=str(row["column_attribute_id"]),
             column_id=str(row["column_id"]),
+            use_in_join_paths=bool(row.get("use_in_join_paths", True)),
         )
         for row in rows["semantic_fks"]
         if str(row.get("column_attribute_id") or "") in _attribute_ids
@@ -1472,6 +1474,7 @@ def _import_column_attributes(
                     live_id=live_attr_id,
                     name=attr.name,
                     description=attr.description,
+                    column_description=col_ctx.description,
                     term_name=term.name,
                     source_column=col_ctx.name,
                     table_id=ctx["live_table_id"],
@@ -1501,11 +1504,26 @@ def _import_semantic_fks(
                 fk.column_attribute_id,
             )
             continue
-        rows.append({"column_id": column_id, "attribute_id": attribute_id})
-    _link(
-        s.column__semantic_fk,
-        rows,
-    )
+        rows.append(
+            {
+                "column_id": column_id,
+                "attribute_id": attribute_id,
+                "use_in_join_paths": fk.use_in_join_paths,
+            }
+        )
+    if rows:
+        statement = insert(s.column__semantic_fk).values(rows)
+        store().query_write(
+            statement.on_conflict_do_update(
+                index_elements=[
+                    s.column__semantic_fk.c.column_id,
+                    s.column__semantic_fk.c.attribute_id,
+                ],
+                set_={
+                    "use_in_join_paths": statement.excluded.use_in_join_paths,
+                },
+            )
+        )
 
 
 def _cached_dialects_and_schemas(

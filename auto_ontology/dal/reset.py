@@ -69,6 +69,7 @@ def _delete_scoped_semantic(database_name: str) -> int:
     "Belonging" is resolved per entity, because each reaches a database by a
     different path:
 
+    * a **TermFamily** through its schema;
     * a **Term** through the tables that represent it;
     * a **ColumnAttribute** through its ``table_id``;
     * a **SqlAttribute** and a **CustomAnalysis** through the tables their SQL
@@ -85,6 +86,25 @@ def _delete_scoped_semantic(database_name: str) -> int:
     """
     tables = _table_ids(database_name)
     deleted = 0
+
+    # TermFamily: scoped by schema. Deleting its Terms only cascades the links,
+    # which would leave the families standing empty.
+    deleted += len(
+        store().query_write(
+            delete(s.term_family)
+            .where(
+                s.term_family.c.schema_id.in_(
+                    select(s.catalog_schema.c.id)
+                    .join(
+                        s.catalog_database,
+                        s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                    )
+                    .where(s.catalog_database.c.name == database_name)
+                )
+            )
+            .returning(s.term_family.c.id)
+        )
+    )
 
     def only_ours(link_table, owner_column, table_column):
         """Rows whose links all land inside this database, and at least one does."""
@@ -172,6 +192,7 @@ def _delete_all_semantic() -> int:
     """
     deleted = 0
     for table in (
+        s.term_family,
         s.term,
         s.column_attribute,
         s.sql_attribute,

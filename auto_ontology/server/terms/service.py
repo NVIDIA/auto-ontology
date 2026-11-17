@@ -105,8 +105,9 @@ def update_column_attribute(
     that Column (same path as catalog column edit), re-embeds the Column in
     the data VDB, then re-embeds this ColumnAttribute in the semantic VDB.
 
-    The certification flag carries no embedding content, so a
-    certification-only update skips the VDB refresh entirely.
+    Neither the certification flag nor the description is embedding content —
+    the attribute embeds its column's description — so an update touching only
+    those skips the VDB refresh entirely.
 
     Raises ``ValueError`` when the owning Column's declared SQL type does not
     accept hand-written samples.
@@ -134,10 +135,7 @@ def update_column_attribute(
     if row is None:
         return None
 
-    content_changed = (
-        name is not None or description is not None or sample_values is not None
-    )
-    if not content_changed:
+    if name is None and sample_values is None:
         row["sample_values"] = stringify_sample_values(row.get("sample_values"))
         return row
 
@@ -165,7 +163,8 @@ def update_column_attribute(
         attr = {
             "id": row["id"],
             "name": row["name"],
-            "description": row.get("description"),
+            "column_description": row.get("column_description"),
+            "family_prefix": row.get("family_prefix"),
             "term_name": row.get("term_name"),
             "source_column": row.get("source_column"),
             "sample_values": row.get("sample_values"),

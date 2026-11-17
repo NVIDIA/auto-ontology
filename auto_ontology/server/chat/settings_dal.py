@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 def fetch_acronyms() -> list[dict[str, str]]:
     """Return acronyms as ``[{"name": ..., "description": ...}, ...]``.
 
-    Shape matches ``AgentState.acronyms`` / the dicts
-    consumed by ``rules_to_text`` in the text-to-SQL pipeline.
+    Shape matches the ``acronyms`` field of the text-to-SQL payload.
     """
     try:
         with psycopg.connect(

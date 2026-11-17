@@ -14,10 +14,12 @@ from auto_ontology.retrieval.kumo.pql_gen import (
     _predict_resilient,
     _resolve_indices,
     _retry_at_full_neighbourhood,
+    _strip_unasked_generic_entity_filter,
     canonicalize_pql_identifiers,
     extract_pql,
     parse_entity,
 )
+from auto_ontology.retrieval.text_to_sql.react.prompts import custom_prompts_section
 
 # The SDK's client-side per-table row cap (kumorfm.rfm.payload.validate_payload_table_rows).
 _ROW_LIMIT_ERROR = (
@@ -239,3 +241,50 @@ def test_unquote_and_quote_round_trip() -> None:
     assert pql_gen.quote_name("Customer ID") == "`Customer ID`"
     assert pql_gen.quote_name("CUSTOMER_ID") == "CUSTOMER_ID"
     assert pql_gen.quote_name("*") == "*"
+
+
+_TYPE_FILTERED_PQL = (
+    "PREDICT COUNT(orders.*, 0, 30, days) = 0 "
+    "FOR EACH customers.id WHERE customers.customer_type = 'enterprise'"
+)
+_UNFILTERED_PQL = "PREDICT COUNT(orders.*, 0, 30, days) = 0 FOR EACH customers.id"
+_ORGANIZATION = custom_prompts_section(
+    "Report churn over 30 days.",
+    [
+        {"name": "strategic accounts", "description": "customer_type = 'enterprise'"},
+        {"name": "ARR", "description": "annual recurring revenue"},
+    ],
+)
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Which strategic accounts will churn?", _TYPE_FILTERED_PQL),
+        ("Which accounts will churn?", _UNFILTERED_PQL),
+        ("Which enterprise accounts will churn?", _TYPE_FILTERED_PQL),
+        ("Which accounts with high ARR will churn?", _UNFILTERED_PQL),
+    ],
+)
+def test_an_entity_type_filter_stays_only_when_the_question_scopes_it(
+    question: str, expected: str
+) -> None:
+    assert (
+        _strip_unasked_generic_entity_filter(
+            _TYPE_FILTERED_PQL, question, _ORGANIZATION
+        )
+        == expected
+    )
+
+
+def test_a_glossary_in_the_instructions_section_does_not_scope_the_filter() -> None:
+    organization = custom_prompts_section(
+        "- strategic accounts: customer_type = 'enterprise'", None
+    )
+
+    assert (
+        _strip_unasked_generic_entity_filter(
+            _TYPE_FILTERED_PQL, "Which strategic accounts will churn?", organization
+        )
+        == _UNFILTERED_PQL
+    )

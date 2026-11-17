@@ -73,6 +73,7 @@ def test_sample_values_are_refused_on_a_non_text_column(
     mock_patch.assert_not_called()
 
 
+@patch.object(service, "_refresh_semantic_column_attribute_embeddings")
 @patch.object(service, "fetch_parent_table_id_for_column", return_value="tbl-1")
 @patch.object(service, "_refresh_vdb_embeddings")
 @patch.object(service, "patch_catalog_node")
@@ -82,6 +83,7 @@ def test_other_properties_of_a_non_text_column_stay_editable(
     mock_patch: MagicMock,
     _mock_vdb: MagicMock,
     _mock_parent: MagicMock,
+    _mock_semantic: MagicMock,
 ) -> None:
     """Only sample values are typed; a description is text whatever the column is."""
     mock_fetch.return_value = {"data_type": "integer"}
@@ -114,3 +116,22 @@ def test_sample_values_on_a_node_that_is_no_column_are_left_alone(
     result = service.update_node_properties("tbl-1", {"sample_values": ["x"]})
 
     assert result == {"id": "tbl-1", "sample_values": ["x"]}
+
+
+@patch.object(service, "_refresh_semantic_column_attribute_embeddings")
+@patch.object(service, "fetch_parent_table_id_for_column", return_value="tbl-1")
+@patch.object(service, "_refresh_vdb_embeddings")
+@patch.object(service, "patch_catalog_node")
+def test_a_column_description_edit_refreshes_its_attributes_too(
+    mock_patch: MagicMock,
+    mock_vdb: MagicMock,
+    _mock_parent: MagicMock,
+    mock_semantic: MagicMock,
+) -> None:
+    """The attribute embeds its column's description, so it goes stale with it."""
+    mock_patch.return_value = _patched_column(description="Order total")
+
+    service.update_node_properties("col-1", {"description": "Order total"})
+
+    mock_vdb.assert_called_once_with(["col-1", "tbl-1"])
+    mock_semantic.assert_called_once_with("col-1")

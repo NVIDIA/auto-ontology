@@ -47,6 +47,12 @@ starting with "also"), closely preserve the previous question structure.
 - If the follow-up explicitly signals that part of the previous SQL's structure should \
 change, narrow, or drop this time (e.g. a different formula, a restricted table/join scope,\
 an output change), do not carry forward that part.
+- Preserve the exact left-to-right output column order requested by the follow-up question. \
+If the follow-up asks to "also include" new column(s), place all requested columns in the \
+exact order specified. If the follow-up defines a new summary or a specific new set of \
+output columns for each group (e.g. "for each group, list the top 3 IDs... and order by \
+average risk"), request ONLY those specified columns in SELECT and do not carry forward \
+extra Phase 1 output columns that are only used for ORDER BY.
 """
 
 
@@ -59,7 +65,7 @@ def merge_follow_up_question(
     names and conditions drawn from the Phase 1 SQL."""
     prompt = _FOLLOW_UP_MERGE_PROMPT.format(
         p1_question=p1_question,
-        p1_sql=p1_sql[:800],
+        p1_sql=p1_sql[:4000],
         p2_question=p2_question,
     )
     merged = safe_invoke_text_nr(prompt).strip()
