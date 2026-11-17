@@ -7,7 +7,11 @@
 Short on purpose. Rules about how SQL should look belong in code — the checks
 ``run_sql`` and ``submit`` apply — not here: rule blocks in the writer prompt
 lost accuracy every time they were measured, and a policy being trained should
-learn conventions from reward, not from a list.
+learn conventions from reward, not from a list. Output column order is the
+exception: no check can tell which order the question asked for, and graders
+that compare rows positionally fail a query whose columns are otherwise right.
+So is the shape of the result: a query that aggregates, groups or limits when
+the question did not ask for it runs cleanly and returns plausible rows.
 """
 
 from __future__ import annotations
@@ -60,9 +64,18 @@ the error and can keep working.
 
 Return exactly the requested output fields and no others.
 
+Aggregate, GROUP BY or LIMIT only when the question or its clarifications ask \
+for a total, a breakdown or a top-N. GROUP BY only the columns the question \
+asks to list or break down; do not add a key or id to it.
+
 Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
-choose one."""
+choose one.
+
+SELECT the requested outputs from left to right in the same order the question \
+and its clarifications name them. When a breakdown asks for counts and \
+percentages across several categories, put all the counts first and then all \
+the percentages, unless the question interleaves them."""
 
 _GREP_LINE = """\
 - grep: search all rows of a run_sql result too long to show (run_sql says \
@@ -156,6 +169,16 @@ FINAL_RUN_LAST_CALL = (
 )
 
 PREDICT_LAST_CALL = "No tool calls left. Call predict now."
+
+NO_QUERIES_LEFT = (
+    "No budget left to run queries. Call submit now with your best query; it "
+    "is checked against the schema but not run."
+)
+
+FINAL_RUN_NO_QUERIES_LEFT = (
+    "No budget left to run queries. Call run_sql with final=true now with your "
+    "best query; it is checked against the schema but not run."
+)
 
 _KINDS = sorted(KIND_LABELS)
 
@@ -431,6 +454,12 @@ def last_call_for(mode: EpisodeMode, *, information_answers: bool = False) -> st
     if information_answers_offered(information_answers):
         return INFORMATION_LAST_CALL
     return LAST_CALL if config.submit_tool_enabled() else FINAL_RUN_LAST_CALL
+
+
+def no_queries_left_for() -> str:
+    return (
+        NO_QUERIES_LEFT if config.submit_tool_enabled() else FINAL_RUN_NO_QUERIES_LEFT
+    )
 
 
 def nudge_for(mode: EpisodeMode, *, information_answers: bool = False) -> str:
