@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import Select, Text, exists, literal, not_, or_, select
+from sqlalchemy import ColumnElement, Select, Text, exists, literal, not_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
@@ -81,9 +81,37 @@ def pii_tagged_column_ids(column_ids: list[str]) -> set[str]:
     return tagged
 
 
-def clear_values_of_pii_columns(
-    column_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
+def _pii_column_scope(
+    column_ids: list[str] | None,
+) -> tuple[ColumnElement[bool], list[list[str] | None]] | None:
+    """The "column is tagged ``PII``" condition, and the id chunks to apply it to.
+
+    ``None`` when there is nothing to do: no ``PII`` tag exists yet, or
+    *column_ids* names no column. A ``None`` chunk means the whole catalog.
+    """
+    pii_tag = get_tag_by_name(PII_TAG_NAME)
+    if pii_tag is None:
+        return None
+    tagged = (
+        select(literal(1))
+        .where(
+            s.tag_target.c.tag_id == str(pii_tag["id"]),
+            s.tag_target.c.column_id == s.catalog_column.c.id,
+        )
+        .exists()
+    )
+    if column_ids is None:
+        return tagged, [None]
+    ids = [column_id for column_id in column_ids if column_id]
+    if not ids:
+        return None
+    return tagged, [
+        ids[offset : offset + IN_QUERY_BATCH]
+        for offset in range(0, len(ids), IN_QUERY_BATCH)
+    ]
+
+
+def clear_values_of_pii_columns(column_ids: list[str] | None = None) -> int:
     """Null the value profile of ``PII``-tagged columns that still hold one.
 
     Every field in :data:`~auto_ontology.dal.datasources.VALUE_PROFILE_COLUMNS`,
@@ -93,86 +121,82 @@ def clear_values_of_pii_columns(
     tag counts, and a column cleared once is not touched again: the pass is
     idempotent and the first run is the backfill.
 
-    Returns one row per cleared column: ``column_name``, ``table_id`` and
-    ``database_name``.
+    Returns how many columns were cleared.
     """
-    pii_tag = get_tag_by_name(PII_TAG_NAME)
-    if pii_tag is None:
-        return []
-    if column_ids is not None:
-        column_ids = [column_id for column_id in column_ids if column_id]
-        if not column_ids:
-            return []
-
-    tagged = (
-        select(literal(1))
-        .where(
-            s.tag_target.c.tag_id == str(pii_tag["id"]),
-            s.tag_target.c.column_id == s.catalog_column.c.id,
-        )
-        .exists()
-    )
+    scope = _pii_column_scope(column_ids)
+    if scope is None:
+        return 0
+    tagged, chunks = scope
     holding = or_(
         *(s.catalog_column.c[name].is_not(None) for name in VALUE_PROFILE_COLUMNS)
     )
-    chunks: list[list[str] | None] = (
-        [None]
-        if column_ids is None
-        else [
-            column_ids[offset : offset + IN_QUERY_BATCH]
-            for offset in range(0, len(column_ids), IN_QUERY_BATCH)
-        ]
-    )
 
-    cleared: list[dict[str, Any]] = []
+    cleared = 0
     for chunk in chunks:
         conditions = [tagged, holding]
         if chunk is not None:
             conditions.append(s.catalog_column.c.id.in_(chunk))
-        cleared.extend(
-            store().query_write(
-                s.catalog_column.update()
-                .where(*conditions)
-                .values(dict.fromkeys(VALUE_PROFILE_COLUMNS))
-                .returning(
-                    s.catalog_column.c.name.label("column_name"),
-                    s.catalog_column.c.table_id,
-                )
-            )
+        rows = store().query_write(
+            s.catalog_column.update()
+            .where(*conditions)
+            .values(dict.fromkeys(VALUE_PROFILE_COLUMNS))
+            .returning(s.catalog_column.c.id)
         )
-    if not cleared:
-        return []
+        cleared += len(rows)
+    return cleared
 
-    table_ids = sorted({str(row["table_id"]) for row in cleared})
-    database_of: dict[str, str] = {}
-    for offset in range(0, len(table_ids), IN_QUERY_BATCH):
-        rows = store().query_read(
-            select(
-                s.catalog_table.c.id.label("table_id"),
-                s.catalog_database.c.name.label("database_name"),
-            )
-            .select_from(
-                s.catalog_table.join(
-                    s.catalog_schema,
-                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
-                ).join(
-                    s.catalog_database,
-                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+
+def fetch_attributes_of_pii_columns(
+    column_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """The ColumnAttributes owned by ``PII``-tagged columns, wherever they live.
+
+    Every tagged column, or only those among *column_ids*, whatever their
+    profile holds: a vector embedded from the values outlives the catalog
+    clearing them, so this is what the semantic VDB is checked against.
+
+    Rows carry ``attribute_id``, ``table_id`` and ``database_name``.
+    """
+    scope = _pii_column_scope(column_ids)
+    if scope is None:
+        return []
+    tagged, chunks = scope
+
+    rows: list[dict[str, Any]] = []
+    for chunk in chunks:
+        conditions = [tagged]
+        if chunk is not None:
+            conditions.append(s.catalog_column.c.id.in_(chunk))
+        rows.extend(
+            dict(row)
+            for row in store().query_read(
+                select(
+                    s.column__has_attribute.c.attribute_id,
+                    s.catalog_table.c.id.label("table_id"),
+                    s.catalog_database.c.name.label("database_name"),
                 )
-            )
-            .where(
-                s.catalog_table.c.id.in_(table_ids[offset : offset + IN_QUERY_BATCH])
+                .select_from(
+                    s.column__has_attribute.join(
+                        s.catalog_column,
+                        s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+                    )
+                    .join(
+                        s.catalog_table,
+                        s.catalog_table.c.id == s.catalog_column.c.table_id,
+                    )
+                    .join(
+                        s.catalog_schema,
+                        s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                    )
+                    .join(
+                        s.catalog_database,
+                        s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                    )
+                )
+                .where(*conditions)
             )
         )
-        database_of.update({str(row["table_id"]): row["database_name"] for row in rows})
-    return [
-        {
-            "column_name": row["column_name"],
-            "table_id": str(row["table_id"]),
-            "database_name": database_of.get(str(row["table_id"])),
-        }
-        for row in cleared
-    ]
+    return rows
 
 
 def _column_attributes_of_tagged_columns(tag_id: str) -> Select:

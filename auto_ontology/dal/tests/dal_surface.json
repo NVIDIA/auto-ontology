@@ -131,7 +131,8 @@
     "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'"
   },
   "pii": {
-    "clear_values_of_pii_columns": "(column_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
+    "clear_values_of_pii_columns": "(column_ids: 'list[str] | None' = None) -> 'int'",
+    "fetch_attributes_of_pii_columns": "(column_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
     "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'",
     "pii_tagged_column_ids": "(column_ids: 'list[str]') -> 'set[str]'",
     "realign_sql_attribute_pii": "(attr_id: 'str', tag_id: 'str | None') -> 'bool'",

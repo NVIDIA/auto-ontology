@@ -52,6 +52,7 @@ from auto_ontology.dal.tags import (
     TARGET_TABLE,
     TARGET_TERM,
 )
+from auto_ontology.ingestion_service.pii import run_pii_withholding
 from auto_ontology.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
@@ -171,6 +172,19 @@ def label_targets(
         "Rule %s applied %d labels over %d targets", rule_id, applied, len(targets)
     )
     return applied
+
+
+def withhold_pii_of_targets(targets: list[tuple[str, str]]) -> None:
+    """Withhold the values of the PII-tagged columns among a new rule's *targets*.
+
+    Call after the transaction :func:`label_targets` ran in has committed,
+    never inside it: re-embedding calls the embedding endpoint, which must not
+    hold that transaction open. Columns the rule did not tag ``PII`` are left
+    alone -- the withholding reads the labels, not the rule.
+    """
+    column_ids = [item_id for kind, item_id in targets if kind == TARGET_COLUMN]
+    if column_ids:
+        run_pii_withholding("rules", column_ids)
 
 
 def _taggable_selects(selects: dict[str, Select]) -> dict[str, Select]:
