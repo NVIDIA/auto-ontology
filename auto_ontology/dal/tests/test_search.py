@@ -30,6 +30,8 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from sqlalchemy import Text, cast, literal, select  # noqa: E402
+
 from auto_ontology.catalog.constants import Labels, TableTypes  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal import search  # noqa: E402
@@ -1334,25 +1336,152 @@ def test_synonym_tokens_survive_non_latin_scripts(
     assert search.synonym_word_tokens(search_term) == expected
 
 
-@pytest.mark.parametrize(
-    ("synonym", "tokens", "expected"),
-    [
-        ("顧客", ["顧客"], True),
-        ("顧客 お客様", ["顧客"], True),
-        ("клиент", ["клиент"], True),
-        ("Société Générale", ["société"], True),
-        ("São Paulo", ["são", "paulo"], True),
-        ("顧客", ["お客様"], False),
-        ("Business Unit", ["uni"], False),
-        ("Générale", ["néral"], False),
-        ("Générale", ["générale"], True),
-        ("कला", ["कल"], False),
-        ("कला", ["कला"], True),
-    ],
-)
+#: One row per shape the whole-word test has to get right, shared by the twin
+#: and the database so the two cannot drift apart on *what they are asked*.
+#: ``expected`` is what a reader of the synonym would answer, and it is here for
+#: a reason: without it the two implementations could agree on a bug.
+SYNONYM_WHOLE_WORD_MATRIX = [
+    # An exact synonym, in a script that writes its vowels as marks.
+    ("कला", "कला", True),
+    # The shorter word must not match inside the longer one, either direction.
+    ("कला", "कल", False),
+    ("कल", "कला", False),
+    # A virama is a mark like any other: it holds क्षेत्र together. `[[:alnum:]]`
+    # does not call it alnum under a C.UTF-8 ctype, so a boundary class here
+    # splits the word and matches क -- which is the bug this matrix pins.
+    ("क्षेत्र", "क", False),
+    ("क्षेत्र", "क्षेत्र", True),
+    # `_` is a boundary, so a token separated by one still matches, but the
+    # identifier is not two words either.
+    ("total_amount", "total", True),
+    ("total_amount", "amount", True),
+    ("created_at", "created-at", True),
+    ("Business Unit", "unit", True),
+    ("Business Unit", "uni", False),
+    # No boundary between CJK characters, so only the whole run matches.
+    ("顧客", "顧", False),
+    ("顧客", "顧客", True),
+    ("顧客 お客様", "顧客", True),
+    ("клиент", "клиент", True),
+    # Separators the ASCII set never mentions: em dash, degree sign, ideographic
+    # full stop, right single quote, plus, emoji.
+    ("unit—price", "unit", True),
+    ("100°C", "c", True),
+    ("foo。bar", "bar", True),
+    ("l’été", "été", True),
+    ("a+b", "a", True),
+    ("emoji🌍test", "test", True),
+    ("Société Générale", "société", True),
+    ("Société Générale", "néral", False),
+    ("São Paulo", "são", True),
+    ("Générale", "générale", True),
+    # U+0130 is the one code point where Python's lower() expands and Postgres's
+    # does not, so the two discover the match differently unless they agree.
+    ("İstanbul", "İstanbul", True),
+    ("İstanbul", "istanbul", True),
+    ("İzmir Raporu", "izmir", True),
+    ("Türkiye İş Bankası", "iş", True),
+]
+
+
+@pytest.fixture(scope="module")
+def synonym_terms() -> Iterator[dict[tuple[str, str], str]]:
+    """One Term per matrix row, so the predicate runs against real rows.
+
+    Rows are named after the run's prefix and their index rather than the
+    synonym, because a Term's name is unique and one synonym here is asked two
+    ways.
+    """
+    prefix = f"gz{uuid.uuid4().hex[:8]}"
+    with write_transaction():
+        terms = {
+            (synonym, query): _add(
+                s.term,
+                name=f"{prefix}_probe_{index}",
+                source=SEMANTIC_SOURCE,
+                synonyms=[synonym],
+            )
+            for index, (synonym, query, _) in enumerate(SYNONYM_WHOLE_WORD_MATRIX)
+        }
+    yield terms
+    with write_transaction():
+        store().query_write(
+            s.term.delete().where(s.term.c.id.in_(list(terms.values())))
+        )
+
+
+def _database_says(term_id: str, query: str) -> bool:
+    """Ask Postgres the question the ranking asks, about one Term.
+
+    ``_synonym_exists`` is the statement under test rather than an internal
+    detail, so the test reaches for it directly: a copy of the SQL here would
+    pass while the query the service sends drifted.
+    """
+    rows = store().query_read(
+        select(s.term.c.id).where(
+            s.term.c.id == term_id,
+            search._synonym_exists(search.synonym_word_tokens(query)),
+        )
+    )
+    return bool(rows)
+
+
+@pytest.mark.parametrize(("synonym", "query", "expected"), SYNONYM_WHOLE_WORD_MATRIX)
 def test_synonyms_in_any_script_match_whole_words(
-    synonym: str, tokens: list[str], expected: bool
+    synonym: str, query: str, expected: bool
 ) -> None:
-    """The Python twin has to agree with the regex Postgres runs, or a Term is
-    returned for a reason its own synonym list cannot explain."""
+    """The Python twin has to agree with the predicate Postgres runs, or a Term
+    is returned for a reason its own synonym list cannot explain."""
+    tokens = search.synonym_word_tokens(query)
+    assert tokens, f"{query!r} tokenises to nothing"
     assert search.synonym_matches_tokens(synonym, tokens) is expected
+
+
+@pytest.mark.parametrize(("synonym", "query", "expected"), SYNONYM_WHOLE_WORD_MATRIX)
+def test_the_database_agrees_with_the_twin_on_whole_words(
+    synonym_terms: dict[tuple[str, str], str],
+    synonym: str,
+    query: str,
+    expected: bool,
+) -> None:
+    """The half of the twin that only the database can prove.
+
+    A whole-word boundary is a property of Postgres's regex engine and of the
+    cluster's ctype, so nothing but a real query settles it -- the same matrix
+    the Python side is asked, answered by the statement the service sends.
+    """
+    assert _database_says(synonym_terms[(synonym, query)], query) is expected
+
+
+@pytest.mark.parametrize("mark", ["\u094d", "\u093e", "\u0301", "\u0e31", "\u064e"])
+def test_a_mark_is_never_a_boundary_to_the_database(mark: str) -> None:
+    """The pattern spells marks out, and this is the claim it makes.
+
+    ``[[:alnum:]]`` answers differently per cluster -- the Devanagari virama is
+    alnum under one ctype and not under another -- which is why the class does
+    not lean on it for marks. If one of these ever reads as a separator, a
+    synonym containing it matches on a fragment, and the predicate invents hits.
+    """
+    pattern = f"^[^{search._word_char_class()}]$"
+    rows = store().query_read(
+        select(cast(literal(mark), Text).op("~")(pattern).label("is_separator"))
+    )
+    assert rows[0]["is_separator"] is False
+
+
+def test_the_ctype_classifies_letters_and_digits_as_words() -> None:
+    """The one thing the predicate does ask the cluster's ctype for.
+
+    Marks are spelled out, but letters and digits are not: a cluster whose ctype
+    stops at ASCII answers no here, and every synonym in a non-Latin script would
+    then match on a fragment. Failing on this line names the cause instead of
+    leaving it to a puzzling search result.
+    """
+    rows = store().query_read(
+        select(
+            cast(literal("क"), Text).op("~")("[[:alnum:]]").label("devanagari"),
+            cast(literal("顧"), Text).op("~")("[[:alnum:]]").label("han"),
+            cast(literal("7"), Text).op("~")("[[:alnum:]]").label("digit"),
+        )
+    )
+    assert rows[0] == {"devanagari": True, "han": True, "digit": True}
