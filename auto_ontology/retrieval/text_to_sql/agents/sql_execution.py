@@ -2,59 +2,21 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-SQL Execution Agent
-
-Executes validated SQL via the injected DB connector.
-"""
+"""Run SQL through an injected DB connector and package the result."""
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-from auto_ontology.connectors.db_errors import is_infrastructure_error
-from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
-from auto_ontology.retrieval.text_to_sql.connector_routing import (
-    resolve_connector_from_tables,
-)
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
-    SQL_CORRECTION_ERROR,
     cast_jsonb_numeric_projections,
     numeric_column_kinds,
     result_values_digest,
 )
-from auto_ontology.retrieval.text_to_sql.state import AgentState
 from auto_ontology.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
-
-# Shown when the database could not be reached. The user cannot act on a driver
-# stack trace, but "the question was fine, the connection was not" tells them
-# retrying is worthwhile and that nothing is wrong with how they asked.
-_INFRASTRUCTURE_MESSAGE = (
-    "I couldn't reach the database, so the query never ran. This is a "
-    "connection problem, not a problem with your question — please try again "
-    "in a moment. If it keeps happening, the database connection needs "
-    "attention."
-)
-
-# This agent's node name in the graph. ``stream_agent_response`` matches
-# ``record_thought`` entries against the *graph* node name, not the agent's,
-# so a thought filed under "sql_execution" would never reach the client.
-_GRAPH_NODE_NAME = "execute_sql_query"
-
-# Execution errors go into a step message. Drivers can return very long ones
-# (echoed query text, stack traces), so cap what gets surfaced.
-_MAX_ERROR_CHARS = 300
-
-
-def _short_error(error: str) -> str:
-    """One-line, length-capped form of a driver error for a step message."""
-    collapsed = " ".join(str(error).split())
-    if len(collapsed) <= _MAX_ERROR_CHARS:
-        return collapsed
-    return collapsed[:_MAX_ERROR_CHARS].rstrip() + "…"
 
 
 class QueryResponse:
@@ -81,7 +43,7 @@ class QueryResponse:
         # the statement the driver echoed, so it has to be this text.
         self.statement = statement
         # Set when the statement that should be submitted is not the statement
-        # that was generated. Execution reports it; reconstruction installs it.
+        # that was generated.
         self.sql_correction = sql_correction
 
 
@@ -99,12 +61,12 @@ def _sql_correction_for(
     frame: Any,
     record_numeric_kinds: bool,
 ) -> Optional[str]:
-    """The statement reconstruction should run, or None when *original_sql* is fine.
+    """The statement that should be submitted, or None when *original_sql* is fine.
 
     A bare JSON numeric projection comes back as text, and a sqlite schema
     qualifier is stripped before execution. Either way the generated SQL is
-    not what ran. The corrected text is reported as ``SQL_CORRECTION_ERROR``
-    rather than submitted from here.
+    not what ran. The corrected text is reported back rather than submitted
+    from here.
     """
     if not record_numeric_kinds:
         return None
@@ -193,126 +155,3 @@ def _run_sql(
         values_digest=values_digest,
         sql_correction=sql_correction,
     )
-
-
-class SQLExecutionAgent(BaseAgent):
-    """
-    Agent that executes SQL.
-
-    Input:
-    - ``path_state["sql_code"]`` (from validation) or ``sql_generation_result.sql_code``
-    - ``connectors``: list of injected DB connectors (the first is used to execute).
-
-    Output:
-    - ``path_state["sql_response_from_db"]``: :class:`QueryResponse`
-    """
-
-    def __init__(self):
-        # Any execution exception or missing SQL must route to reconstruction.
-        # Without an explicit failure decision, the generic wrapper can preserve
-        # the preceding valid_sql value when execution itself fails.
-        super().__init__("sql_execution", failure_decision="invalid_sql")
-
-    def validate_input(self, state: AgentState) -> bool:
-        path_state = state.get("path_state", {})
-        sql_code = path_state.get("sql_code")
-        if not sql_code or not str(sql_code).strip():
-            llm = path_state.get("sql_generation_result")
-            sql_code = getattr(llm, "sql_code", None) if llm else None
-        if not sql_code or not str(sql_code).strip():
-            self.logger.warning("No SQL code found for execution")
-            return False
-        return True
-
-    def execute(self, state: AgentState) -> Dict[str, Any]:
-        path_state = state.get("path_state", {})
-        sql_code = path_state.get("sql_code")
-        if not sql_code or not str(sql_code).strip():
-            llm = path_state.get("sql_generation_result")
-            sql_code = getattr(llm, "sql_code", "") if llm else ""
-
-        connectors = state.get("connectors") or []
-        relevant_tables = path_state.get("relevant_tables", [])
-        connector = resolve_connector_from_tables(relevant_tables, connectors)
-
-        # Only for callers that asked for numeric-type alignment (BIRD-Interact's
-        # coordinator); every other caller keeps the exact call and result shape
-        # it had before.
-        record_kinds = bool(state.get("numeric_type_alignment"))
-        if record_kinds:
-            response_from_db = _run_sql(sql_code, connector, record_numeric_kinds=True)
-        else:
-            response_from_db = _run_sql(sql_code, connector)
-
-        if response_from_db.sql_correction:
-            # The query ran, but not as generated: a JSON numeric came back as
-            # text, or the dialect rewrote a qualifier. Reconstruction installs
-            # the corrected statement. Doing it here would submit SQL the
-            # generator never produced.
-            path_state["error"] = SQL_CORRECTION_ERROR
-            path_state["sql_correction"] = response_from_db.sql_correction
-            record_thought(
-                path_state,
-                _GRAPH_NODE_NAME,
-                "Query needs a rewrite before its result can be submitted.",
-            )
-            return {"decision": "invalid_sql", "path_state": path_state}
-
-        if response_from_db.error:
-            self.logger.info(
-                "SQL execution failed\n  SQL: %s\n  Error: %s",
-                sql_code[:300],
-                response_from_db.error,
-            )
-            path_state["error"] = response_from_db.error
-            if is_infrastructure_error(
-                response_from_db.error, response_from_db.statement or sql_code
-            ):
-                # Rewriting the query cannot reach an unreachable database, so
-                # the reconstruction loop would spend every one of its attempts
-                # re-issuing statements that fail identically and then give up
-                # anyway. Stop now and say what actually happened. This has to
-                # come before the thought below, which promises a rewrite that
-                # this path deliberately does not do.
-                self.logger.error(
-                    "SQL execution failed for infrastructure reasons; "
-                    "not attempting reconstruction: %s",
-                    response_from_db.error,
-                )
-                record_thought(
-                    path_state,
-                    _GRAPH_NODE_NAME,
-                    f"Couldn't reach the database: "
-                    f"{_short_error(response_from_db.error)}",
-                )
-                return {
-                    "decision": "unconstructable",
-                    "path_state": {
-                        **path_state,
-                        "unconstructable_explanation": _INFRASTRUCTURE_MESSAGE,
-                    },
-                }
-            # Without this the retry is invisible: the graph loops back to
-            # reconstruction and the user just watches the step list bounce
-            # between "Generating SQL" and "Running query" with no reason
-            # given. The driver's message is already user-facing text.
-            record_thought(
-                path_state,
-                _GRAPH_NODE_NAME,
-                f"Query failed, rewriting it: {_short_error(response_from_db.error)}",
-            )
-            return {"decision": "invalid_sql", "path_state": path_state}
-
-        updated_path_state = {
-            **path_state,
-            "sql_response_from_db": response_from_db.result,
-        }
-        if record_kinds:
-            # Numeric types of what just ran, tagged with that SQL so a reader
-            # can tell when they are stale. A statement that differs from the
-            # generated one never reaches here: it fails over above.
-            executed_sql = (response_from_db.statement or sql_code).strip()
-            updated_path_state["result_numeric_kinds"] = response_from_db.numeric_kinds
-            updated_path_state["result_numeric_kinds_sql"] = executed_sql
-            updated_path_state["result_values_digest"] = response_from_db.values_digest
-        return {"decision": "valid_sql", "path_state": updated_path_state}

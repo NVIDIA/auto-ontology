@@ -4,9 +4,15 @@
 
 import sys
 import types
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from auto_ontology.retrieval.interactive.grounding import ground_external_knowledge
+
+if TYPE_CHECKING:
+    from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
 
 def _make_llm(response: str) -> MagicMock:
@@ -64,7 +70,7 @@ def test_ground_passes_question_and_kg_to_prompt():
     assert "churn rate" in prompt_text
 
 
-# ── wiring: _run_sql_generation injects grounded_kb into custom_prompts ───────
+# ── wiring: _run_sql_generation grounds the evidence in the KB ────────────────
 #
 # coordinator._run_sql_generation does a lazy `from auto_ontology.retrieval.text_to_sql.main import ...`
 # which triggers module-level LLM client initialisation (requires REASONING_API_KEY).
@@ -84,7 +90,7 @@ def _make_fake_t2s_state():
     return mod
 
 
-def test_run_sql_generation_sets_custom_prompts():
+def test_run_sql_generation_grounds_evidence_in_the_kb():
     from auto_ontology.retrieval.interactive.coordinator import _run_sql_generation
     from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
@@ -118,7 +124,7 @@ def test_run_sql_generation_sets_custom_prompts():
         patch(
             "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
             return_value="",
-        ),
+        ) as generate_evidence,
     ):
         sys.modules["auto_ontology.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
             fake_get_agent_response
@@ -132,11 +138,12 @@ def test_run_sql_generation_sets_custom_prompts():
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.main", None)
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.state", None)
 
-    assert captured_payload.get("custom_prompts") != ""
-    assert "PPR" in captured_payload["custom_prompts"]
+    knowledge = generate_evidence.call_args.args[1]
+    assert "PPR" in knowledge
+    assert captured_payload["question"] == "What is the average PPR?"
 
 
-def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
+def test_run_sql_generation_empty_kg_grounds_nothing():
     from auto_ontology.retrieval.interactive.coordinator import _run_sql_generation
     from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
@@ -158,9 +165,15 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
 
     mock_llm = MagicMock()
 
-    with patch(
-        "auto_ontology.retrieval.interactive.coordinator._get_fast_llm",
-        return_value=mock_llm,
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._get_fast_llm",
+            return_value=mock_llm,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
+            return_value="",
+        ) as generate_evidence,
     ):
         sys.modules["auto_ontology.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
             fake_get_agent_response
@@ -174,5 +187,94 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.main", None)
             sys.modules.pop("auto_ontology.retrieval.text_to_sql.state", None)
 
-    assert captured_payload.get("custom_prompts") == ""
+    assert generate_evidence.call_args.args[1] == ""
+    assert captured_payload["question"] == "How many panels?"
     mock_llm.invoke.assert_not_called()
+
+
+def _evidence_sent(sess: "InteractiveSessionState") -> str:
+    from auto_ontology.retrieval.interactive.coordinator import _run_sql_generation
+
+    captured_payload: dict[str, Any] = {}
+
+    def fake_get_agent_response(payload: dict[str, Any]) -> dict[str, Any]:
+        captured_payload.update(payload)
+        return {"sql_code": "SELECT 2", "path_state": {}}
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._get_fast_llm",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
+            return_value="Revenue is price * quantity.",
+        ),
+    ):
+        sys.modules["auto_ontology.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
+            fake_get_agent_response
+        )
+        sys.modules["auto_ontology.retrieval.text_to_sql.state"] = (
+            _make_fake_t2s_state()
+        )
+        try:
+            _run_sql_generation(sess)
+        finally:
+            sys.modules.pop("auto_ontology.retrieval.text_to_sql.main", None)
+            sys.modules.pop("auto_ontology.retrieval.text_to_sql.state", None)
+    return captured_payload["evidence"]
+
+
+def _session() -> "InteractiveSessionState":
+    from auto_ontology.retrieval.interactive.state import InteractiveSessionState
+
+    return InteractiveSessionState(
+        session_id="s1",
+        task_id="t1",
+        db_name="shop",
+        db_schema="TABLE orders ...",
+        external_kb="",
+        original_question="What is the revenue?",
+        working_question="What is the revenue?",
+    )
+
+
+@pytest.mark.parametrize(
+    "debug_error", ["no such column: price", None], ids=["error", "wrong_results"]
+)
+def test_a_debug_turn_sends_the_rejected_sql_and_its_feedback(
+    debug_error: str | None,
+) -> None:
+    from auto_ontology.retrieval.interactive.coordinator import _apply_debug_seed
+
+    sess = _session()
+    sess.path_state["sql_code"] = "SELECT SUM(price) FROM orders"
+    _apply_debug_seed(sess, debug_error=debug_error)
+
+    evidence = _evidence_sent(sess)
+
+    assert evidence.startswith("Revenue is price * quantity.")
+    assert "## Previous Attempt" in evidence
+    assert "SELECT SUM(price) FROM orders" in evidence
+    assert sess.path_state["error"] in evidence
+
+
+def test_a_debug_turn_sends_the_submitted_sql_not_the_generated_one() -> None:
+    from auto_ontology.retrieval.interactive.coordinator import _apply_debug_seed
+
+    sess = _session()
+    sess.path_state["sql_code"] = "SELECT AVG(price) FROM orders"
+    sess.last_submitted_sql = "SELECT CAST(AVG(price) AS DECIMAL) FROM orders"
+    _apply_debug_seed(sess, debug_error=None)
+
+    evidence = _evidence_sent(sess)
+
+    assert "SELECT CAST(AVG(price) AS DECIMAL) FROM orders" in evidence
+    assert "SELECT AVG(price) FROM orders" not in evidence
+
+
+def test_a_first_turn_sends_no_previous_attempt() -> None:
+    sess = _session()
+    sess.path_state["error"] = {"type": "ValueError", "message": "boom"}
+
+    assert "Previous Attempt" not in _evidence_sent(sess)
