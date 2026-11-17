@@ -95,16 +95,13 @@ export function formatValue(
 }
 
 /**
- * Format a value for an axis tick. Large plain numbers are compacted so they fit
- * the axis gutter ("2,000,000,000" -> "2B"); every other format defers to
- * {@link formatValue} (currency already compacts, percent stays short).
+ * Format a value for an axis tick. Large plain numbers and large currency values
+ * are compacted so they fit the axis gutter ("2,000,000,000" -> "2B"); percent
+ * stays short. {@link formatValueFull} keeps currency values unabridged.
  */
-export function formatTick(
-	value: number,
-	format: ValueFormat = 'number',
-	currency?: string,
-): string {
+export function formatTick(value: number, format: ValueFormat = 'number', currency?: string): string {
 	if (format === 'number' && Math.abs(value) >= 10000) return compactNumber(value);
+	if (format === 'currency' && currency && Math.abs(value) >= 1000) return `${currency} ${compactNumber(value)}`;
 	return formatValue(value, format, currency);
 }
 
