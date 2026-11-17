@@ -230,6 +230,16 @@ def test_drain_times_out_while_the_worker_is_still_warming() -> None:
     assert worker.startup_error is None
 
 
+def test_submit_queues_nothing_after_a_failed_startup() -> None:
+    """No child reads the input pipe, so a large payload could block the feeder."""
+    worker = _fake_worker(_FakeProc(alive=False, exitcode=1))
+    worker.drain_until_ready()
+
+    worker.submit("q", evidence="x" * 1_000_000)
+
+    assert worker._in_q.puts == []
+
+
 def test_events_raise_the_startup_error_instead_of_waiting() -> None:
     worker = _fake_worker(_FakeProc(alive=False, exitcode=1))
     worker.drain_until_ready()
