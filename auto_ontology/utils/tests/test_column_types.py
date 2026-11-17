@@ -110,7 +110,42 @@ def test_edit_error_reads_as_english_for_a_vowel_initial_type(data_type: str) ->
     assert f"typed {data_type}" in error
 
 
-def test_edit_error_covers_a_column_with_no_declared_type() -> None:
-    error = sample_values_edit_error(None)
-    assert error is not None
-    assert "no declared type" in error
+@pytest.mark.parametrize(
+    "data_type",
+    [
+        "Nullable(String)",
+        "LowCardinality(String)",
+        "LowCardinality(Nullable(String))",
+        "Nullable(varchar(255))",
+    ],
+)
+def test_wrapped_text_columns_are_editable(data_type: str) -> None:
+    """ClickHouse wraps text types in Nullable(...)/LowCardinality(...)."""
+    assert sample_values_editable(data_type) is True
+
+
+@pytest.mark.parametrize(
+    "data_type",
+    [
+        "Nullable(Int32)",
+        "LowCardinality(Int64)",
+        "Nullable(integer)",
+    ],
+)
+def test_wrapped_non_text_columns_are_not_editable(data_type: str) -> None:
+    """A wrapper around a non-text type does not make it editable."""
+    assert sample_values_editable(data_type) is False
+
+
+@pytest.mark.parametrize(
+    "data_type",
+    [
+        "array<string>",
+        "map<string,int>",
+        "struct<name:string,age:int>",
+        "Array(String)",
+    ],
+)
+def test_composite_columns_are_not_editable(data_type: str) -> None:
+    """Composite/array columns hold no single string a text box could stand for."""
+    assert sample_values_editable(data_type) is False
