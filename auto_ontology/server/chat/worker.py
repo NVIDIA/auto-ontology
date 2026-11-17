@@ -266,7 +266,12 @@ class PrewarmedWorker:
         ones, so SQL executes under that user's own Databricks grants.
         *evidence* is optional authoritative evidence kept separate from
         the question.
+
+        A worker whose startup failed has no child reading the input pipe, so
+        nothing is queued. ``events()`` then reports the startup error.
         """
+        if self._startup_error is not None:
+            return
         self._in_q.put(
             (
                 _MSG_ASK,
