@@ -4152,7 +4152,7 @@
           }
         ],
         "database_name": "pagila",
-        "description": "",
+        "description": "A single film rental transaction.",
         "id": "<table:pagila.public.rental>",
         "label": "Table",
         "name": "rental",
@@ -4291,7 +4291,7 @@
           }
         ],
         "database_name": "pagila",
-        "description": "",
+        "description": "A motion picture available for rental.",
         "id": "<table:pagila.public.film>",
         "label": "Table",
         "name": "film",

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import subprocess
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,9 @@ EXEMPT_NAMES = {
     "next-env.d.ts",
 }
 EXEMPT_PREFIXES = ("vendor/",)
+# Written and signed by NVSkills CI (`/nvskills-ci`), which regenerates them
+# without a header. A header added here would break skill.oms.sig.
+EXEMPT_GLOBS = ("skills/*/BENCHMARK.md", "skills/*/skill-card.md")
 
 
 def _tracked_files() -> list[str]:
@@ -69,6 +73,7 @@ def _needs_header(path: str) -> bool:
         p.suffix.lower() in EXEMPT_SUFFIXES
         or p.name in EXEMPT_NAMES
         or path.startswith(EXEMPT_PREFIXES)
+        or any(fnmatch(path, pattern) for pattern in EXEMPT_GLOBS)
         or (ROOT / f"{path}.license").exists()
     )
 

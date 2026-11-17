@@ -51,3 +51,12 @@ def test_falls_back_when_there_are_no_connectors(mock_connectors: MagicMock) -> 
     mock_connectors.return_value = []
 
     assert sql_utils.get_dialects() == sql_utils._DEFAULT_DIALECTS
+
+
+def test_sql_naming_no_catalog_table_asks_for_a_full_query() -> None:
+    with patch.object(sql_utils, "parse_query_single", return_value=None):
+        with pytest.raises(sql_utils.SqlParseError) as raised:
+            sql_utils.validate_sql("SUM(amount)", ["postgres"], {})
+    message = str(raised.value)
+    assert "known to the catalog" in message
+    assert "Write a full query" in message

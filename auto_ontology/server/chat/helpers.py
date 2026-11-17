@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 # Re-exported so the router (and any other server-side consumer) can keep
 # importing NODE_LABELS from here. The dict itself now lives next to the
-# graph definition (``auto_ontology.retrieval.text_to_sql.node_labels``) so the agent
+# pipeline definition (``auto_ontology.retrieval.text_to_sql.node_labels``) so the agent
 # pipeline can also use it — e.g. when building the final run's ``thoughts``
 # summary in ``stream_agent_response`` — without the retrieval layer having
 # to depend on the server layer.
