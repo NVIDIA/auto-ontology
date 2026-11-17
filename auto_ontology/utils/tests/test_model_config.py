@@ -54,7 +54,10 @@ def test_an_sk_key_keeps_the_inference_api_defaults(
     clean_env.setenv("DEFAULT_MODELS_API_KEY", "sk-test")
 
     assert model_config.resolve("REASONING", "MODEL") == (
-        "nvidia/nvidia/nemotron-3.5-lightning"
+        "azure/anthropic/claude-opus-5-5"
+    )
+    assert model_config.resolve("NON_REASONING", "MODEL") == (
+        "azure/anthropic/claude-sonnet-5-5"
     )
     assert model_config.resolve("EMBED", "MODEL") == (
         "nvidia/nvidia/nemotron-3.5-embed-1b-nvfp4"
