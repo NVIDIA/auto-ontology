@@ -35,7 +35,7 @@ export type ChartSpec = {
 	title: string;
 	subtitle?: string;
 	x: { key: string; label?: string };
-	y?: { label?: string; format?: ValueFormat };
+	y?: { label?: string; format?: ValueFormat; currency?: string };
 	series: ChartSeries[];
 	data: Record<string, ChartCell>[];
 	kpis?: ChartKpi[];

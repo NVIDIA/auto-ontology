@@ -13,7 +13,7 @@ import type { Mark, RenderInput } from './types';
  * label, grouped bars rely on the legend and tooltip.
  */
 export function renderBar({ spec, box, min, max, colors, fmt }: RenderInput): Mark[] {
-	const marks: Mark[] = verticalAxis(box, min, max, fmt, spec.y?.label);
+	const marks: Mark[] = verticalAxis(box, min, max, fmt, spec.y?.label, spec.y?.currency);
 	const cats = spec.data.map((row) => String(row[spec.x.key] ?? ''));
 	const baselineY = projectY(Math.max(min, 0), box, min, max);
 	const band = box.w / Math.max(cats.length, 1);
@@ -28,7 +28,7 @@ export function renderBar({ spec, box, min, max, colors, fmt }: RenderInput): Ma
 			if (value == null) return;
 			const x = center - groupWidth / 2 + barWidth * si;
 			const y = projectY(value, box, min, max);
-			const tip = `${cat}${seriesCount > 1 ? ` · ${series.label ?? series.key}` : ''}: ${formatValueFull(value, fmt)}`;
+			const tip = `${cat}${seriesCount > 1 ? ` · ${series.label ?? series.key}` : ''}: ${formatValueFull(value, fmt, spec.y?.currency)}`;
 			marks.push({
 				kind: 'rect',
 				x,
@@ -45,7 +45,7 @@ export function renderBar({ spec, box, min, max, colors, fmt }: RenderInput): Ma
 					kind: 'text',
 					x: center,
 					y: labelY,
-					text: formatValue(value, fmt),
+					text: formatValue(value, fmt, spec.y?.currency),
 					anchor: 'middle',
 					variant: 'value',
 				});

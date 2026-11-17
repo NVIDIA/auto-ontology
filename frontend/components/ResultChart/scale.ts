@@ -69,7 +69,11 @@ export function compactNumber(value: number): string {
 }
 
 /** Format a value for an axis tick / label, per the spec's `y.format` (compact for space). */
-export function formatValue(value: number, format: ValueFormat = 'number'): string {
+export function formatValue(
+	value: number,
+	format: ValueFormat = 'number',
+	currency?: string,
+): string {
 	if (!Number.isFinite(value)) return '–';
 	switch (format) {
 		case 'percent': {
@@ -79,7 +83,12 @@ export function formatValue(value: number, format: ValueFormat = 'number'): stri
 		case 'compact':
 			return compactNumber(value);
 		case 'currency':
-			return `$${compactNumber(value)}`;
+			if (!currency) return localeNumber(value);
+			try {
+				return value.toLocaleString('en-US', { style: 'currency', currency });
+			} catch {
+				return `${currency} ${compactNumber(value)}`;
+			}
 		default:
 			return localeNumber(value);
 	}
@@ -90,13 +99,21 @@ export function formatValue(value: number, format: ValueFormat = 'number'): stri
  * the axis gutter ("2,000,000,000" -> "2B"); every other format defers to
  * {@link formatValue} (currency already compacts, percent stays short).
  */
-export function formatTick(value: number, format: ValueFormat = 'number'): string {
+export function formatTick(
+	value: number,
+	format: ValueFormat = 'number',
+	currency?: string,
+): string {
 	if (format === 'number' && Math.abs(value) >= 10000) return compactNumber(value);
-	return formatValue(value, format);
+	return formatValue(value, format, currency);
 }
 
 /** Format the exact value (never abbreviated) for hover tooltips, in the best human-readable form. */
-export function formatValueFull(value: number, format: ValueFormat = 'number'): string {
+export function formatValueFull(
+	value: number,
+	format: ValueFormat = 'number',
+	currency?: string,
+): string {
 	if (!Number.isFinite(value)) return '–';
 	switch (format) {
 		case 'percent': {
@@ -104,7 +121,12 @@ export function formatValueFull(value: number, format: ValueFormat = 'number'): 
 			return `${pct.toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
 		}
 		case 'currency':
-			return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+			if (!currency) return localeNumber(value);
+			try {
+				return value.toLocaleString('en-US', { style: 'currency', currency });
+			} catch {
+				return `${currency} ${localeNumber(value)}`;
+			}
 		default:
 			return localeNumber(value);
 	}
