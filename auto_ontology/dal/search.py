@@ -249,12 +249,18 @@ def _word_tokens(text: str) -> list[str]:
 
 
 def _is_word_char(char: str) -> bool:
-    """True for a letter, a digit, or a mark that sits inside a word.
+    """True for a letter, a number, or a mark that sits inside a word.
 
-    ``str.isalnum`` covers the first two in every script but not the
-    dependent vowel signs and other marks Devanagari, Thai or Arabic write
-    inside a word: ``कला`` would otherwise tokenize as ``कल``, and ``कल``
-    would then match the longer synonym.
+    ``str.isalnum`` covers letters and numbers in every script -- including
+    ``²``, which a libc ctype does not call alnum -- but not the dependent vowel
+    signs and other marks Devanagari, Thai or Arabic write inside a word:
+    ``कला`` would otherwise tokenize as ``कल``, and ``कल`` would then match the
+    longer synonym.
+
+    This is not only the Python rule. :func:`_word_char_ranges` turns this
+    predicate into the character class Postgres matches with, so the boundary
+    SQL draws and the boundary here are one decision rather than two that have
+    to be kept in step.
     """
     if not char:
         return False
@@ -263,36 +269,38 @@ def _is_word_char(char: str) -> bool:
 
 
 @cache
-def _mark_ranges() -> str:
-    """Every mark code point, as a Postgres regex bracket-class body.
+def _word_char_ranges() -> str:
+    """Every code point :func:`_is_word_char` accepts, as a regex class body.
 
-    Word boundaries are Postgres's to decide, and ``[[:alnum:]]`` is not a
-    reliable yes for a mark: it depends on the cluster's ctype. Measured on
-    Postgres 17 with the ``C.UTF-8`` ctype, ``U+094D`` (the Devanagari virama)
-    is neither alnum nor punct, so ``क्षेत्र`` grows a boundary after ``क`` --
-    and the synonym ``क्षेत्र`` then answers the search ``क``, which
-    :func:`synonym_matches_tokens` refuses. Spelling the marks out removes the
-    guess, and takes them from :mod:`unicodedata` so both sides of the twin read
-    one table instead of two opinions.
+    Word boundaries are Postgres's to decide, and it decides differently per
+    cluster and per build. Measured on Postgres 17.12: `[[:alnum:]]` calls
+    ``U+094D`` (the Devanagari virama) neither alnum nor punct, so ``क्षेत्र``
+    grows a boundary after ``क`` and the synonym answers the search ``क``; and
+    under a libc ctype ``glibc`` excludes ``U+00B2`` from alnum while
+    ``str.isalnum`` accepts it, so ``m`` would match ``m²`` in SQL and not in
+    Python. Spelling out the characters removes the question, and taking them
+    from :func:`_is_word_char` means the class *is* the twin's rule rather than
+    a second opinion about it: a code point the two disagree on cannot exist.
 
-    The scan is ~0.4 s, hence the cache: it is paid once per process, not once
-    per query.
+    The scan is ~0.6 s, hence the cache: it is paid once per process, not once
+    per query, and the pattern it returns is 12 KB of ranges that Postgres
+    compiles once per session.
     """
     ranges: list[tuple[int, int]] = []
     start: int | None = None
-    last_mark = 0
+    last_word = 0
 
     for code_point in range(sys.maxunicode + 1):
-        if unicodedata.category(chr(code_point)) in _MARK_CATEGORIES:
+        if _is_word_char(chr(code_point)):
             if start is None:
                 start = code_point
-            last_mark = code_point
+            last_word = code_point
         elif start is not None:
-            ranges.append((start, last_mark))
+            ranges.append((start, last_word))
             start = None
 
     if start is not None:
-        ranges.append((start, last_mark))
+        ranges.append((start, last_word))
 
     ranges_out: list[str] = []
     for first, last in ranges:
@@ -316,7 +324,7 @@ def _word_char_class() -> str:
     Deliberately not bracketed: callers wrap it, and nesting ``[...]`` inside
     ``[...]`` is not how Postgres reads a class.
     """
-    return f"[:alnum:]{_mark_ranges()}"
+    return _word_char_ranges()
 
 
 def _simple_lower(text: str) -> str:
@@ -756,11 +764,12 @@ def _synonym_exists(synonym_tokens: list[str]):
 
     Whole-word is answered by spacing rather than by a boundary class: every
     run of non-word characters collapses to one space, the synonym is padded,
-    and a token matches when the padded token is in it. ``[[:alnum:]]`` alone
-    cannot draw that line, because it reads a combining mark as a separator in
-    some ctypes and as a letter in others -- see :func:`_mark_ranges`. Folding
-    to a space also keeps ``total`` finding ``total_amount``, since ``_`` is a
-    separator like any other: the identifier is one word, not two.
+    and a token matches when the padded token is in it. The word characters are
+    spelled out from :func:`_is_word_char` rather than asked of
+    ``[[:alnum:]]``, because Postgres answers that question differently per
+    cluster and per build -- see :func:`_word_char_ranges`. Folding to a space
+    also keeps ``total`` finding ``total_amount``, since ``_`` is a separator
+    like any other: the identifier is one word, not two.
     """
     # ``render_derived`` and not ``alias``: the alias alone emits
     # ``AS syn``, which names the table but leaves its one column called ``syn``

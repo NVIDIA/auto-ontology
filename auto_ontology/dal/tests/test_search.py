@@ -1381,6 +1381,17 @@ SYNONYM_WHOLE_WORD_MATRIX = [
     ("İstanbul", "istanbul", True),
     ("İzmir Raporu", "izmir", True),
     ("Türkiye İş Bankası", "iş", True),
+    # Numbers that ``str.isalnum`` accepts and a libc ctype does not: a
+    # superscript, an Arabic-Indic digit, a Roman numeral, a fraction. These are
+    # why the class is the Python predicate rather than ``[[:alnum:]]`` -- with
+    # the class, ``m`` stops matching ``m²`` in SQL while the twin agrees it
+    # should not.
+    ("m²", "m²", True),
+    ("m²", "m", False),
+    ("m² s", "m²", True),
+    ("٣ ي", "٣", True),
+    ("Ⅳ quarter", "Ⅳ", True),
+    ("½ tasse", "½", True),
 ]
 
 
@@ -1453,35 +1464,54 @@ def test_the_database_agrees_with_the_twin_on_whole_words(
     assert _database_says(synonym_terms[(synonym, query)], query) is expected
 
 
-@pytest.mark.parametrize("mark", ["\u094d", "\u093e", "\u0301", "\u0e31", "\u064e"])
-def test_a_mark_is_never_a_boundary_to_the_database(mark: str) -> None:
-    """The pattern spells marks out, and this is the claim it makes.
+@pytest.mark.parametrize(
+    ("char", "is_word"),
+    [
+        ("क", True),
+        ("्", True),  # virama: a mark, and not alnum to every ctype
+        ("²", True),  # a number to str.isalnum, not alnum to a libc ctype
+        ("٣", True),  # an Arabic-Indic digit
+        ("顧", True),
+        ("7", True),
+        ("_", False),  # a separator: `total` must still find `total_amount`
+        ("-", False),
+        (" ", False),
+        ("。", False),
+        ("🌍", False),
+        ("\u200b", False),  # zero-width space
+    ],
+)
+def test_the_database_reads_the_same_word_characters(char: str, is_word: bool) -> None:
+    """The class *is* the twin's predicate, and this is where that is proven.
 
-    ``[[:alnum:]]`` answers differently per cluster -- the Devanagari virama is
-    alnum under one ctype and not under another -- which is why the class does
-    not lean on it for marks. If one of these ever reads as a separator, a
-    synonym containing it matches on a fragment, and the predicate invents hits.
+    ``search._is_word_char`` generates the ranges, so this cannot disagree about
+    the rule -- it can only disagree about the escape into Postgres regex, which
+    is the failure a hand-maintained range list invites. Both directions get a
+    character: folding a word character to a space loses an exact synonym, and
+    keeping a separator makes a fragment match.
     """
+    pattern = f"[^{search._word_char_class()}]"
+    rows = store().query_read(
+        select(cast(literal(char), Text).op("~")(pattern).label("is_separator"))
+    )
+    assert rows[0]["is_separator"] is (not is_word)
+
+
+def test_the_class_covers_every_word_character_the_twin_accepts() -> None:
+    """The ranges are generated, so the only thing to check is their coverage.
+
+    A mark that fell outside the ranges would be a separator to Postgres and a
+    word character to the twin; this samples one from each category the predicate
+    accepts, across scripts, and asks the database the same question.
+    """
+    characters = ["क", "्", "ा", "²", "٣", "Ⅳ", "½", "顧", "お", "é", "7", "Z"]
     pattern = f"^[^{search._word_char_class()}]$"
     rows = store().query_read(
-        select(cast(literal(mark), Text).op("~")(pattern).label("is_separator"))
-    )
-    assert rows[0]["is_separator"] is False
-
-
-def test_the_ctype_classifies_letters_and_digits_as_words() -> None:
-    """The one thing the predicate does ask the cluster's ctype for.
-
-    Marks are spelled out, but letters and digits are not: a cluster whose ctype
-    stops at ASCII answers no here, and every synonym in a non-Latin script would
-    then match on a fragment. Failing on this line names the cause instead of
-    leaving it to a puzzling search result.
-    """
-    rows = store().query_read(
         select(
-            cast(literal("क"), Text).op("~")("[[:alnum:]]").label("devanagari"),
-            cast(literal("顧"), Text).op("~")("[[:alnum:]]").label("han"),
-            cast(literal("7"), Text).op("~")("[[:alnum:]]").label("digit"),
+            *(
+                cast(literal(char), Text).op("~")(pattern).label(f"separator_{index}")
+                for index, char in enumerate(characters)
+            )
         )
     )
-    assert rows[0] == {"devanagari": True, "han": True, "digit": True}
+    assert [value for value in rows[0].values()] == [False] * len(characters)
