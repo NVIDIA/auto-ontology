@@ -29,9 +29,11 @@ One call does three things, all through existing data-access functions:
    (:func:`fetch_attr_column_contexts`), each table with its columns, stored
    values and semantic FKs (:func:`fetch_tables_by_ids`), the join routes from
    every new table to the tables earlier calls already showed
-   (:func:`find_join_routes`), the other parts of every split entity a new
-   table belongs to (:func:`fetch_concept_members`), and the near-copies of
-   every new table (:mod:`.siblings`).
+    (:func:`find_join_routes`, or the ranked alternatives of
+    :func:`find_join_paths` for tables more than one hop apart when
+    ``TEXT_TO_SQL_REACT_JOIN_ROUTES`` is above 1), the other parts of every
+    split entity a new table belongs to (:func:`fetch_concept_members`), and
+    the near-copies of every new table (:mod:`.siblings`).
 
 The model sees only tables and columns, with their descriptions.
 
@@ -49,7 +51,11 @@ import sqlglot
 from sqlglot import exp
 
 from auto_ontology.catalog.constants import Labels
-from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_routes
+from auto_ontology.dal.attributes import (
+    fetch_attr_column_contexts,
+    find_join_paths,
+    find_join_routes,
+)
 from auto_ontology.dal.candidates import expand_info
 from auto_ontology.dal.concepts import fetch_concept_members
 from auto_ontology.dal.datasources import (
@@ -531,19 +537,69 @@ def _tables_in_view(sql: str | None) -> set[tuple[str | None, str | None]]:
     }
 
 
+def _join_routes(anchor: str, dest: str, boost: set[str]) -> tuple[list[dict], bool]:
+    """The routes to offer between two columns' tables, and whether they are ranked.
+
+    :func:`find_join_routes` answers unless more routes are asked for and the
+    tables are more than one hop apart: then the single shortest route gives
+    way to :func:`find_join_paths`' ranked alternatives, where a route through
+    a table the model has searched for ranks higher, the way a question's
+    tables decide between routes that are equally short. Directly joined
+    tables keep every direct column pair either way.
+    """
+    routes = find_join_routes(anchor, dest)
+    limit = config.join_routes()
+    if limit == 1 or not routes or len(routes[0]["hops"]) == 1:
+        return routes, False
+    ranked = [
+        {"hops": route["path"], "default": True}
+        for route in find_join_paths(anchor, dest, k=limit, boost_table_ids=boost)
+        if route.get("path")
+    ]
+    if len(ranked) < 2:
+        return routes, False
+    return ranked, True
+
+
+def _join_line(table: dict, other: dict, routes: list[dict], *, ranked: bool) -> str:
+    head = f"JOIN {_qualified(table)} ↔ {_qualified(other)}"
+    if len(routes) == 1:
+        return f"{head}: " + " → ".join(_hop_text(h) for h in routes[0]["hops"])
+    if ranked:
+        options = [
+            f"  {n}. " + " → ".join(_hop_text(h) for h in route["hops"])
+            for n, route in enumerate(routes, 1)
+        ]
+        return "\n".join(
+            [
+                f"{head}: {len(routes)} routes, best ranked first. They mean "
+                "different things; use the one whose meaning fits the question, "
+                "whole."
+            ]
+            + options
+        )
+    return f"{head}, one of:" + "".join(
+        "\n  "
+        + " → ".join(_hop_text(h) for h in route["hops"])
+        + (" (default)" if route["default"] else "")
+        for route in routes
+    )
+
+
 def _join_lines(
     ctx: ToolContext, new_tables: list[dict]
 ) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
     """Join routes from each new table to every table already in view.
 
     Two tables one hop apart get every direct column pair, the default first;
-    the others get their one shortest route. Each line comes with every table
-    on its routes, bridges included. Only the first route is kept in
-    ``ctx.join_paths``.
+    the others get their one shortest route, or the ranked alternatives when
+    more are asked for. Each line comes with every table on its routes,
+    bridges included. Only the first route is kept in ``ctx.join_paths``.
     """
     lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
     lookups = 0
     others = list(ctx.seen_tables.values()) + new_tables
+    boost = set(ctx.seen_tables) | {str(t["id"]) for t in new_tables}
     for table in new_tables:
         for other in others:
             pair = frozenset((str(table["id"]), str(other["id"])))
@@ -557,24 +613,16 @@ def _join_lines(
             dest = _anchor_column_id(ctx, other)
             if not anchor or not dest:
                 continue
-            routes = find_join_routes(anchor, dest)
+            routes, ranked = _join_routes(anchor, dest, boost)
             if not routes:
                 continue
+            # The first route only: ``predict`` links its graph with these,
+            # and one link per table pair is what it expects.
             ctx.join_paths.append({"path": routes[0]["hops"]})
-            head = f"JOIN {_qualified(table)} ↔ {_qualified(other)}"
-            if len(routes) == 1:
-                line = f"{head}: " + " → ".join(_hop_text(h) for h in routes[0]["hops"])
-            else:
-                line = f"{head}, one of:" + "".join(
-                    "\n  "
-                    + " → ".join(_hop_text(h) for h in route["hops"])
-                    + (" (default)" if route["default"] else "")
-                    for route in routes
-                )
             tables: set[tuple[str | None, str | None]] = set()
             for route in routes:
                 tables |= _hop_tables(route["hops"])
-            lines.append((line, tables))
+            lines.append((_join_line(table, other, routes, ranked=ranked), tables))
     return lines
 
 
