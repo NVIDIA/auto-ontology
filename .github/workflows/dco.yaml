@@ -77,12 +77,11 @@ jobs:
               git commit --amend -s --no-edit
               git push --force-with-lease
 
-          To sign off every commit on your branch, first fetch main from the
-          NVIDIA/auto-ontology repository (in a fork, `origin` is your fork, so
-          use a separate remote), then rebase onto it:
-              git remote add upstream https://github.com/NVIDIA/auto-ontology.git
-              git fetch upstream main
-              git rebase --signoff upstream/main
+          To sign off every commit on your branch, fetch main straight from the
+          NVIDIA/auto-ontology repository (in a fork, `origin` is your fork), then
+          rebase onto what was fetched:
+              git fetch https://github.com/NVIDIA/auto-ontology.git main
+              git rebase --signoff FETCH_HEAD
               git push --force-with-lease
           MSG
             exit 1
