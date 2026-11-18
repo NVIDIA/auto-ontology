@@ -61,6 +61,7 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
         lambda *_a, **_k: ("term1", "Order"),
     )
     monkeypatch.setattr(visit_enter, "merge_column_attribute", lambda **_k: None)
+    monkeypatch.setattr(visit_enter, "clear_column_values", lambda *_a: None)
     monkeypatch.setattr(
         visit_enter,
         "fetch_terms_and_attributes_for_table",
@@ -121,7 +122,7 @@ def test_steps_are_logged_in_pipeline_order(
 def test_unreadable_pii_tags_skip_the_inline_embed(
     _stubbed: None, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
 ) -> None:
-    """The embed reads catalog sample_values, not cleared for unknown PII."""
+    """The embed reads catalog sample_values, so unknown PII tags skip it."""
 
     def _unreadable(_ids: list[str]) -> set[str]:
         raise RuntimeError("store down")
