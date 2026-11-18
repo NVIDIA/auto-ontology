@@ -454,6 +454,10 @@ def probe_ascending_distinct_values(
     _sampling_breaker.record_success(connector)
     if df is None:
         return None
+    # A column with no non-null value returns no rows, which a connector may
+    # give as a frame with no columns at all.
+    if df.empty:
+        return []
     return [_json_ready_sample(v) for v in df.iloc[:, 0].tolist()]
 
 

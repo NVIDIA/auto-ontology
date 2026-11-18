@@ -1101,6 +1101,18 @@ def test_key_value_probe_reads_the_lowest_distinct_values() -> None:
     )
 
 
+@pytest.mark.parametrize("empty", [pd.DataFrame(), pd.DataFrame({"id": []})])
+def test_key_value_probe_of_a_column_with_no_values_returns_none_of_them(
+    empty: pd.DataFrame,
+) -> None:
+    connector = _mock_connector()
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = empty
+
+    assert probe_ascending_distinct_values(connector, "raw", "orders", "id") == []
+    assert not _sampling_breaker.is_open(connector)
+
+
 def test_key_value_probe_failure_counts_toward_the_breaker() -> None:
     connector = _CappedConnector(TimeoutError("cancelled"))
 
