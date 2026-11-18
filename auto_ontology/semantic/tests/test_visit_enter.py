@@ -766,6 +766,7 @@ def test_process_table_withholds_pii_columns(
 
 
 @patch("auto_ontology.semantic.visit_enter._store_key_distinct_values")
+@patch("auto_ontology.semantic.visit_enter.clear_column_values")
 @patch("auto_ontology.semantic.visit_enter.pii_tagged_column_ids")
 @patch("auto_ontology.semantic.visit_enter.calculate_columns_profiling")
 @patch("auto_ontology.semantic.visit_enter._resolve_connector")
@@ -781,6 +782,7 @@ def test_process_table_samples_nothing_when_pii_tags_are_unreadable(
     mock_resolve: MagicMock,
     mock_profiling: MagicMock,
     mock_pii_ids: MagicMock,
+    mock_clear: MagicMock,
     mock_key_probe: MagicMock,
 ) -> None:
     from auto_ontology.semantic.models import PotentialFkResult, TableTermsResult
@@ -807,6 +809,7 @@ def test_process_table_samples_nothing_when_pii_tags_are_unreadable(
     mock_profiling.assert_not_called()
     mock_key_probe.assert_not_called()
     assert ctx["columns"][0]["sample_values"] is None
+    mock_clear.assert_called_once_with("t1", ["account_id"])
 
 
 @patch("auto_ontology.semantic.visit_enter.get_connectors")

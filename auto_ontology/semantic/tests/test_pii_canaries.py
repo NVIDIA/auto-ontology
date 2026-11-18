@@ -174,6 +174,10 @@ def test_pii_canaries_stay_put_when_the_tags_cannot_be_read() -> None:
     assert warehouse.statements == []
     assert _leaks(warehouse, recorded, CANARY) == []
     assert _leaks(warehouse, recorded, STALE_CANARY) == []
+    # Profiles persisted by earlier runs may hold PII; with no tags, all go.
+    recorded["clear_column_values"].assert_called_once_with(
+        "t-users", ["email", "id", "phone", "status"]
+    )
 
 
 def test_canaries_do_move_without_a_pii_tag() -> None:

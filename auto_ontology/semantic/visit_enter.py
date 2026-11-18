@@ -903,8 +903,9 @@ def process_table(
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     # PII columns are never sampled and their catalog values never reach a
-    # prompt. When the tags cannot be read, nothing is sampled: guessing that
-    # no column is PII would move exactly the values this guards.
+    # prompt. When the tags cannot be read, nothing is sampled and every
+    # persisted profile is cleared: guessing that no column is PII would move
+    # exactly the values this guards.
     pii_columns: set[str] | None
     try:
         pii_columns = pii_column_names(ctx.get("columns", []))
@@ -914,7 +915,12 @@ def process_table(
     for col in ctx.get("columns", []):
         if pii_columns is None or col.get("name") in pii_columns:
             col["sample_values"] = None
-    if pii_columns:
+    if pii_columns is None:
+        clear_column_values(
+            table_id,
+            sorted(n for col in ctx.get("columns", []) if (n := col.get("name"))),
+        )
+    elif pii_columns:
         clear_column_values(table_id, sorted(pii_columns))
     if pii_columns is None:
         logger.warning(
@@ -1064,8 +1070,8 @@ def process_table(
         except Exception:
             logger.warning("[%s] failed to fetch persisted terms", table_name)
 
-        # The embedding reads sample_values from the catalog, where a PII
-        # column's are cleared only once its tag has been read.
+        # The embedding reads sample_values from the catalog; without the PII
+        # tags it is not built at all.
         if pii_columns is None and embedder is not None and terms:
             logger.warning(
                 "[%s] Skipping inline embed — could not read PII tags", table_name
