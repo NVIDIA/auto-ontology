@@ -40,7 +40,7 @@ In [`frontend/CLAUDE.md`](./frontend/CLAUDE.md), loaded when working under `fron
 ## Git
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
-- Sign off every commit (`git commit -s`). The `DCO` check fails a PR to `main` if any commit lacks a `Signed-off-by:` trailer.
+- Sign off every commit (`git commit -s`). The `DCO` check fails a PR to `main` if any commit lacks a `Signed-off-by:` trailer. The check skips merge commits and commits whose author email is a `[bot]@users.noreply.github.com` address, so it does not guarantee a sign-off on every commit.
 - Branch from `main`.
 
 ### Opening a PR

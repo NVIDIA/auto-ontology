@@ -31,6 +31,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify Signed-off-by on every commit
         env:
@@ -43,7 +44,11 @@ jobs:
           checked=0
 
           # Merge commits are skipped; only the contributor's own commits count.
-          for sha in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
+          # Assign first so a failing rev-list stops the job (set -e does not see
+          # a failure inside the for-loop word list).
+          commits="$(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}")"
+
+          for sha in $commits; do
             author_email="$(git log -1 --format='%ae' "$sha")"
 
             # Bot commits (dependabot, github-actions, ...) cannot sign off.
@@ -72,8 +77,12 @@ jobs:
               git commit --amend -s --no-edit
               git push --force-with-lease
 
-          To sign off every commit on your branch:
-              git rebase --signoff origin/main
+          To sign off every commit on your branch, first fetch main from the
+          NVIDIA/auto-ontology repository (in a fork, `origin` is your fork, so
+          use a separate remote), then rebase onto it:
+              git remote add upstream https://github.com/NVIDIA/auto-ontology.git
+              git fetch upstream main
+              git rebase --signoff upstream/main
               git push --force-with-lease
           MSG
             exit 1
