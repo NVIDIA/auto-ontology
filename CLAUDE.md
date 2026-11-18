@@ -40,6 +40,7 @@ In [`frontend/CLAUDE.md`](./frontend/CLAUDE.md), loaded when working under `fron
 ## Git
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
+- Sign off every commit (`git commit -s`). The `DCO` check fails a PR to `main` if any commit lacks a `Signed-off-by:` trailer.
 - Branch from `main`.
 
 ### Opening a PR
