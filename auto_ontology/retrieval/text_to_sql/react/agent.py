@@ -78,6 +78,7 @@ class ReactSQLAgent(BaseAgent):
             custom_prompts=state.get("custom_prompts") or "",
         )
         connector = connector_for(ctx)
+        ctx.dialect = getattr(connector, "dialect", None)
         # A connector that charges for queries says so through cost_status.
         cost_status = getattr(connector, "cost_status", None)
         if callable(cost_status):
@@ -90,7 +91,7 @@ class ReactSQLAgent(BaseAgent):
             ctx,
             question=get_question_for_processing(state),
             evidence=state.get("evidence"),
-            dialect=getattr(connector, "dialect", None),
+            dialect=ctx.dialect,
             mode=episode_mode(state.get("prediction_override")),
             custom_prompts=state.get("custom_prompts"),
             sql_examples=state.get("sql_examples"),

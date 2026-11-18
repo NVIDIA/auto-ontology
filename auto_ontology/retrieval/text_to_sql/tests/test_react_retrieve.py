@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 import pytest
+import sqlglot
+from sqlglot import exp
 
 from auto_ontology.retrieval.text_to_sql.react import retrieve as tool
 from auto_ontology.retrieval.text_to_sql.react import siblings
@@ -378,7 +380,7 @@ _OPAQUE_TABLE = {
 
 
 def test_a_matched_column_is_tagged_and_the_others_are_not() -> None:
-    text = tool._table_block(_OPAQUE_TABLE, {"C_NM"}, False)
+    text = tool._table_block(_ctx(), _OPAQUE_TABLE, {"C_NM"}, False)
 
     assert text.splitlines() == [
         "TABLE crm.customers",
@@ -389,13 +391,13 @@ def test_a_matched_column_is_tagged_and_the_others_are_not() -> None:
 
 
 def test_no_column_is_tagged_when_the_search_matched_none() -> None:
-    text = tool._table_block(_OPAQUE_TABLE, set(), False)
+    text = tool._table_block(_ctx(), _OPAQUE_TABLE, set(), False)
 
     assert "matches the query" not in text
 
 
 def test_a_shortened_table_tags_its_matched_column() -> None:
-    text = tool._short_table_block(_OPAQUE_TABLE, {"c_nm"})
+    text = tool._short_table_block(_ctx(), _OPAQUE_TABLE, {"c_nm"})
 
     assert "  c_nm TEXT ← matches the query" in text.splitlines()
     assert "  c1 INT" not in text
@@ -912,3 +914,52 @@ def test_a_concept_the_limit_dropped_is_shown_by_a_later_search(
     second = tool.retrieve(ctx, "customer status")
     assert "CONCEPT Customer: sales.orders + crm.customers" in second
     assert "concept-1" in ctx.shown_concepts
+
+
+_UUID_DB = "01a1d278-8f97-7755-8907-45833c5c34a5"
+
+
+@pytest.mark.parametrize(
+    ("schema", "table", "column", "shown"),
+    [
+        ("sales-data", "orders", "amount", '"sales-data".orders'),
+        (_UUID_DB, "orders", "amount", f'"{_UUID_DB}".orders'),
+        ("crm", "Customers", "customerId", 'crm."Customers"'),
+        ("crm", "customers", "status", "crm.customers"),
+    ],
+)
+def test_names_are_shown_the_way_postgres_needs_them_written(
+    schema: str, table: str, column: str, shown: str
+) -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    block = tool._table_block(
+        ctx,
+        {"schema_name": schema, "name": table, "columns": [{"name": column}]},
+        set(),
+        False,
+    )
+
+    assert block.splitlines()[0] == f"TABLE {shown}"
+    written = block.splitlines()[1].strip()
+    sql = f"SELECT {written} FROM {shown}"
+    statement = sqlglot.parse_one(sql, read="postgres")
+    assert statement.find(exp.Table).db == schema
+    assert statement.find(exp.Table).name == table
+    assert statement.find(exp.Column).name == column
+
+
+def test_join_routes_quote_their_names() -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    hop = {
+        "source_schema": "sales-data",
+        "source_table": "orders",
+        "source_column": "customerId",
+        "target_schema": "crm",
+        "target_table": "customers",
+        "target_column": "id",
+    }
+
+    assert (
+        tool._hop_text(ctx, hop)
+        == '"sales-data".orders."customerId" = crm.customers.id'
+    )

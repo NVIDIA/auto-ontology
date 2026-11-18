@@ -315,10 +315,6 @@ def _in_database(ctx: ToolContext, table: dict) -> bool:
     return not ctx.database_name or table.get("database_name") == ctx.database_name
 
 
-def _qualified(table: dict) -> str:
-    return ".".join(p for p in (table.get("schema_name"), table.get("name")) if p)
-
-
 def _clip(text: Any, limit: int) -> str:
     collapsed = " ".join(str(text or "").split())
     return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
@@ -338,9 +334,13 @@ def _sample_values(values: Any) -> str:
 _MATCH_MARK = " ← matches the query"
 
 
-def _column_line(column: dict, matched: set[str] | frozenset[str] = frozenset()) -> str:
+def _column_line(
+    ctx: ToolContext, column: dict, matched: set[str] | frozenset[str] = frozenset()
+) -> str:
     """One column; *matched* is the lowercase names the search matched."""
-    parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
+    parts = [
+        f"  {ctx.name(column.get('name'))} {column.get('data_type') or ''}".rstrip()
+    ]
     if str(column.get("name") or "").lower() in matched:
         parts.append(_MATCH_MARK)
     details = []
@@ -385,8 +385,10 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
     return chosen, len(columns) - len(chosen)
 
 
-def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
-    header = f"TABLE {_qualified(table)}"
+def _table_block(
+    ctx: ToolContext, table: dict, matched: set[str], seen_before: bool
+) -> str:
+    header = f"TABLE {ctx.qualified(table)}"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     if seen_before:
@@ -397,10 +399,10 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
             if str(c.get("name")).lower() in lowered
         ]
         lines = [header + " (shown earlier; matched columns only)"]
-        return "\n".join(lines + [_column_line(c) for c in columns])
+        return "\n".join(lines + [_column_line(ctx, c) for c in columns])
     columns, hidden = _shown_columns(table, matched)
     lowered = {m.lower() for m in matched}
-    lines = [header] + [_column_line(c, lowered) for c in columns]
+    lines = [header] + [_column_line(ctx, c, lowered) for c in columns]
     if hidden:
         lines.append(
             f"  … {hidden} more columns not shown; retrieve with a narrower query "
@@ -409,14 +411,14 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     return "\n".join(lines)
 
 
-def _short_table_block(table: dict, matched: set[str]) -> str:
+def _short_table_block(ctx: ToolContext, table: dict, matched: set[str]) -> str:
     """*table* in a few lines, for when its full block does not fit.
 
     Keeps the description and the columns a query most likely needs -- the
     matched ones, the key and the foreign keys -- without their descriptions,
     and says how to see the rest.
     """
-    header = f"TABLE {_qualified(table)}"
+    header = f"TABLE {ctx.qualified(table)}"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     keys = {str(k) for k in table.get("pk") or []}
@@ -431,7 +433,9 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     ]
     lines = [header + " (shortened to fit)"]
     for column in kept:
-        line = f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()
+        line = (
+            f"  {ctx.name(column.get('name'))} {column.get('data_type') or ''}".rstrip()
+        )
         if str(column.get("name") or "").lower() in lowered:
             line += _MATCH_MARK
         if column.get("semantic_fk"):
@@ -439,7 +443,7 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
         lines.append(line)
     if hidden := len(columns) - len(kept):
         lines.append(
-            f"  … {hidden} more columns not shown; retrieve {_qualified(table)} "
+            f"  … {hidden} more columns not shown; retrieve {ctx.qualified(table)} "
             "to see all of them"
         )
     return "\n".join(lines)
@@ -484,12 +488,14 @@ def _anchor_column_id(ctx: ToolContext, table: dict) -> str | None:
     return ctx.anchor_column_ids[table_id]
 
 
-def _hop_text(hop: dict) -> str:
-    left = ".".join(p for p in (hop.get("source_schema"), hop.get("source_table")) if p)
-    right = ".".join(
-        p for p in (hop.get("target_schema"), hop.get("target_table")) if p
+def _hop_text(ctx: ToolContext, hop: dict) -> str:
+    left = ctx.name(
+        hop.get("source_schema"), hop.get("source_table"), hop.get("source_column")
     )
-    text = f"{left}.{hop.get('source_column')} = {right}.{hop.get('target_column')}"
+    right = ctx.name(
+        hop.get("target_schema"), hop.get("target_table"), hop.get("target_column")
+    )
+    text = f"{left} = {right}"
     return f"{text} [key {hop['key']}]" if hop.get("key") else text
 
 
@@ -561,13 +567,15 @@ def _join_lines(
             if not routes:
                 continue
             ctx.join_paths.append({"path": routes[0]["hops"]})
-            head = f"JOIN {_qualified(table)} ↔ {_qualified(other)}"
+            head = f"JOIN {ctx.qualified(table)} ↔ {ctx.qualified(other)}"
             if len(routes) == 1:
-                line = f"{head}: " + " → ".join(_hop_text(h) for h in routes[0]["hops"])
+                line = f"{head}: " + " → ".join(
+                    _hop_text(ctx, h) for h in routes[0]["hops"]
+                )
             else:
                 line = f"{head}, one of:" + "".join(
                     "\n  "
-                    + " → ".join(_hop_text(h) for h in route["hops"])
+                    + " → ".join(_hop_text(ctx, h) for h in route["hops"])
                     + (" (default)" if route["default"] else "")
                     for route in routes
                 )
@@ -744,7 +752,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # not "also found": it is not in ``seen_tables`` (that holds tables shown in
     # full), but listing it again would tell the model it has not met it.
     past_limit = [
-        _qualified(t)
+        ctx.qualified(t)
         for t in found[config.max_tables_per_retrieve() :]
         if not ctx.was_shown(t.get("schema_name"), str(t.get("name")))
     ]
@@ -761,7 +769,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # last: new tables, how they join, definitions that carry SQL, then tables
     # seen before. Each block carries the tables it names.
     new_blocks = {
-        str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
+        str(t["id"]): _table_block(ctx, t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
@@ -781,10 +789,12 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if (block := _definition_block(hit)) is not None
     ]
     named += definitions
-    earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
+    earlier = [
+        (_table_block(ctx, t, matched[str(t["id"])], True), t) for t in revisited
+    ]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
-        **{new_blocks[str(t["id"])]: _qualified(t) for t in new_tables},
+        **{new_blocks[str(t["id"])]: ctx.qualified(t) for t in new_tables},
         **{block: block.split("\n")[0].split(" — ")[0] for block, _ in definitions},
     }
     if not named:
@@ -794,7 +804,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         )
     short_blocks = {
         new_blocks[str(t["id"])]: _short_table_block(
-            t, matched.get(str(t["id"]), set())
+            ctx, t, matched.get(str(t["id"]), set())
         )
         for t in new_tables
     }
