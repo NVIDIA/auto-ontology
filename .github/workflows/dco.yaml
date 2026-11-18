@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: DCO
+
+# Enforces the sign-off rule in CONTRIBUTING.md ("Signing your work"): every
+# commit in a pull request must carry a `Signed-off-by: Name <email>` trailer.
+#
+# This is deliberately a plain shell check using only actions/checkout, because
+# the enterprise action allowlist blocks most third-party actions (see the note
+# in ci-client.yml) and a blocked action fails the workflow before any step runs.
+#
+# No `paths:` filter on purpose. This job is meant to be a *required* status
+# check on `main`; a required check that is skipped by a path filter never
+# reports, and the PR would be stuck waiting on it forever.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify Signed-off-by on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          failed=0
+          checked=0
+
+          # Merge commits are skipped; only the contributor's own commits count.
+          for sha in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
+            author_email="$(git log -1 --format='%ae' "$sha")"
+
+            # Bot commits (dependabot, github-actions, ...) cannot sign off.
+            if [[ "$author_email" == *"[bot]@users.noreply.github.com" ]]; then
+              echo "skip  ${sha:0:12}  (bot author)"
+              continue
+            fi
+
+            checked=$((checked + 1))
+            if git log -1 --format='%B' "$sha" \
+               | grep -Eiq '^Signed-off-by: .+ <[^<>[:space:]]+@[^<>[:space:]]+>[[:space:]]*$'; then
+              echo "ok    ${sha:0:12}  $(git log -1 --format='%s' "$sha")"
+            else
+              echo "::error::Commit ${sha:0:12} is missing a Signed-off-by line: $(git log -1 --format='%s' "$sha")"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            cat <<'MSG'
+
+          One or more commits are not signed off. This project requires the
+          Developer Certificate of Origin (see CONTRIBUTING.md, "Signing your work").
+
+          To fix the most recent commit:
+              git commit --amend -s --no-edit
+              git push --force-with-lease
+
+          To sign off every commit on your branch:
+              git rebase --signoff origin/main
+              git push --force-with-lease
+          MSG
+            exit 1
+          fi
+
+          echo "DCO check passed (${checked} commit(s) checked)."
