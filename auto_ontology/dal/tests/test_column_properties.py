@@ -166,6 +166,44 @@ def test_store_column_distinct_values_keeps_them_apart_from_samples(world) -> No
     assert json.loads(row["sample_values"]) == [7, 3]
 
 
+def test_clear_column_values_nulls_only_the_named_columns(world) -> None:
+    world.table("users")
+    world.column("users", "email")
+    world.column("users", "status", position=2)
+    users = world.tables["users"]
+    d.store_column_sample_values(users, {"email": ["a@b.c"], "status": ["open"]})
+    d.store_column_distinct_values(users, {"email": ["a@b.c"], "status": ["open"]})
+    d.store_column_uniqueness(users, {"email": True, "status": True})
+    d.store_column_distinct_ratios(users, {"email": 1.0, "status": 1.0})
+    d.store_column_date_formats(users, {"email": "YYYY-MM-DD", "status": "YYYY"})
+
+    d.clear_column_values(users, ["email"])
+
+    rows = {
+        row["name"]: row
+        for row in store().query_read(
+            select(
+                s.catalog_column.c.name,
+                s.catalog_column.c.sample_values,
+                s.catalog_column.c.distinct_values,
+                s.catalog_column.c.is_unique,
+                s.catalog_column.c.distinct_ratio,
+                s.catalog_column.c.format,
+            ).where(s.catalog_column.c.table_id == users)
+        )
+    }
+    assert rows["email"]["sample_values"] is None
+    assert rows["email"]["distinct_values"] is None
+    assert rows["email"]["is_unique"] is None
+    assert rows["email"]["distinct_ratio"] is None
+    assert rows["email"]["format"] is None
+    assert json.loads(rows["status"]["sample_values"]) == ["open"]
+    assert json.loads(rows["status"]["distinct_values"]) == ["open"]
+    assert rows["status"]["is_unique"] is True
+    assert rows["status"]["distinct_ratio"] == 1.0
+    assert rows["status"]["format"] == "YYYY"
+
+
 def test_key_columns_count_only_fully_distinct_unique_columns(world) -> None:
     """A mostly-distinct column is unique for the semantic layer, but cannot
     prove a GROUP BY vacuous or a join 1:1 for the text-to-SQL validators."""

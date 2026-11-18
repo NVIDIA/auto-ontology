@@ -19,7 +19,7 @@ Two shapes recur and are easy to break:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Sequence
 
 import pandas as pd
 from sqlalchemy import (
@@ -509,6 +509,38 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
         if (dumped := dump_sample_values(values)) is not None
     }
     _set_column_property(table_id, encoded, "sample_values")
+
+
+#: The ``catalog_column`` fields profiling derives from a column's values.
+VALUE_PROFILE_COLUMNS = (
+    "sample_values",
+    "distinct_values",
+    "is_unique",
+    "distinct_ratio",
+    "format",
+)
+
+
+def clear_column_values(table_id: str, column_names: Sequence[str]) -> None:
+    """Null everything profiling derived from the values of columns.
+
+    That is every field in :data:`VALUE_PROFILE_COLUMNS`. The store functions
+    above leave a column they are not given untouched, so a profile persisted
+    before a column was withheld from sampling would otherwise outlive the
+    decision. A stale ``is_unique`` is not harmless: it keeps the column a
+    semantic FK target, whose values are probed live when none are stored.
+    """
+    names = list(column_names)
+    if not names:
+        return
+    store().query_write(
+        update(s.catalog_column)
+        .where(
+            s.catalog_column.c.table_id == table_id,
+            s.catalog_column.c.name.in_(names),
+        )
+        .values(dict.fromkeys(VALUE_PROFILE_COLUMNS))
+    )
 
 
 def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:

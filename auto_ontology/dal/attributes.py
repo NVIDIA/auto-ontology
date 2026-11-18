@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import insert
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.tags import PII_TAG_NAME
 from auto_ontology.dal.term_families import attribute_family_prefix
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
 
@@ -514,9 +515,21 @@ def fetch_value_key_candidates(database_name: str) -> list[dict[str, Any]]:
     attribute to link to (the lowest id when it owns several) and its stored
     ``distinct_values``, which is ``None`` until a probe has written them.
 
+    A column tagged ``PII`` is never a candidate, whatever its profile says: a
+    candidate without stored values gets them probed from the warehouse.
+
     Rows carry ``attribute_id``, ``column_id``, ``column_name``, ``data_type``,
     ``distinct_values``, ``table_id``, ``table_name`` and ``schema_name``.
     """
+    pii_tagged = (
+        select(literal(1))
+        .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
+        .where(
+            s.tag_target.c.column_id == s.catalog_column.c.id,
+            func.lower(func.trim(s.tag.c.name)) == PII_TAG_NAME.lower(),
+        )
+        .exists()
+    )
     statement = (
         select(
             func.min(s.column__has_attribute.c.attribute_id).label("attribute_id"),
@@ -545,6 +558,7 @@ def fetch_value_key_candidates(database_name: str) -> list[dict[str, Any]]:
         .where(
             s.catalog_database.c.name == database_name,
             s.catalog_column.c.is_unique.is_(True),
+            ~pii_tagged,
         )
         .group_by(
             s.catalog_column.c.id,
