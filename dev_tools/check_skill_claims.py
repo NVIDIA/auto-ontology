@@ -165,9 +165,10 @@ def check_file(path: Path) -> list[Finding]:
         if row := _TABLE_ROW.match(line.strip()):
             method, api_path, perm_cell = row.groups()
             api_path = api_path.strip()
-            if problem := _check_operation(method, api_path):
+            abbreviated = "..." in api_path
+            if not abbreviated and (problem := _check_operation(method, api_path)):
                 add(number, "operation", f"{method} {api_path}", problem)
-            ops = _openapi().get(_template(api_path), {})
+            ops = {} if abbreviated else _openapi().get(_template(api_path), {})
             documented = ops.get(method)
             claimed = set(re.findall(r"[a-z][A-Za-z]+:[a-z][A-Za-z]+", perm_cell))
             for perm in sorted(claimed - _all_permissions()):
