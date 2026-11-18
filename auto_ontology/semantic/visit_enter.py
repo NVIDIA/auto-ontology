@@ -430,7 +430,8 @@ def probe_ascending_distinct_values(
     lists comparable although each is cut short (``semantic.fk_values``).
     ``None`` when the probe fails or the sampling breaker is open; a timeout
     or lost connection counts against the breaker like any other profiling
-    query.
+    query. ``[]`` when the query succeeded but returned no values (some
+    connectors return a DataFrame with no columns at all for zero rows).
     """
     if _sampling_breaker.is_open(connector):
         return None
@@ -454,6 +455,8 @@ def probe_ascending_distinct_values(
     _sampling_breaker.record_success(connector)
     if df is None:
         return None
+    if df.empty:
+        return []
     return [_json_ready_sample(v) for v in df.iloc[:, 0].tolist()]
 
 
@@ -467,9 +470,23 @@ def _store_key_distinct_values(
     for column_name in sorted(column_names):
         if _sampling_breaker.is_open(connector):
             break
-        probed = probe_ascending_distinct_values(
-            connector, table.get("schema_name"), table["name"], column_name
-        )
+        try:
+            probed = probe_ascending_distinct_values(
+                connector, table.get("schema_name"), table["name"], column_name
+            )
+        except Exception as exc:
+            # One column's unexpected failure must not cost the other key
+            # columns their values. record_failure only counts timeouts and
+            # connectivity errors, so an ordinary bug does not trip the breaker.
+            _sampling_breaker.record_failure(connector, exc)
+            logger.warning(
+                "[%s] key-value probe failed for column %r (%s) — skipping column",
+                table["name"],
+                column_name,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            continue
         if probed:
             values[column_name] = probed
     store_column_distinct_values(table["id"], values)

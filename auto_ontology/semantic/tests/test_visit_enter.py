@@ -24,6 +24,7 @@ from auto_ontology.semantic.visit_enter import (
     _keep_persisted_sample,
     _sample_key,
     _sampling_breaker,
+    _store_key_distinct_values,
     calculate_columns_profiling,
     probe_ascending_distinct_values,
     process_table,
@@ -1111,6 +1112,80 @@ def test_key_value_probe_failure_counts_toward_the_breaker() -> None:
     calls = len(connector.calls)
     assert probe_ascending_distinct_values(connector, "raw", "t", "id") is None
     assert len(connector.calls) == calls
+
+
+def test_key_value_probe_with_an_empty_result_returns_no_values() -> None:
+    connector = _mock_connector()
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = pd.DataFrame({"id": []})
+
+    assert probe_ascending_distinct_values(connector, "raw", "orders", "id") == []
+
+
+def test_key_value_probe_with_a_zero_column_result_returns_no_values() -> None:
+    """Postgres returns a column-less frame for zero rows; iloc[:, 0] raised."""
+    connector = _mock_connector()
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = pd.DataFrame()
+
+    assert probe_ascending_distinct_values(connector, "raw", "orders", "id") == []
+
+
+def test_one_failing_key_column_does_not_stop_the_next(store_key_values) -> None:
+    connector = _CappedConnector()
+
+    def probe(_connector, _schema, _table, column):
+        if column == "a_bad":
+            raise RuntimeError("unexpected")
+        return [1, 2]
+
+    with patch(
+        "auto_ontology.semantic.visit_enter.probe_ascending_distinct_values",
+        side_effect=probe,
+    ) as mock_probe:
+        _store_key_distinct_values(TABLE, connector, {"a_bad", "b_good"})
+
+    assert mock_probe.call_count == 2
+    store_key_values.assert_called_once_with("t1", {"b_good": [1, 2]})
+
+
+def test_an_ordinary_key_probe_exception_does_not_trip_the_breaker() -> None:
+    connector = _CappedConnector()
+    columns = {f"c{i}" for i in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES + 2)}
+
+    with patch(
+        "auto_ontology.semantic.visit_enter.probe_ascending_distinct_values",
+        side_effect=RuntimeError("unexpected"),
+    ):
+        _store_key_distinct_values(TABLE, connector, columns)
+
+    assert not _sampling_breaker.is_open(connector)
+
+
+def test_a_key_probe_timeout_outside_the_query_counts_toward_the_breaker() -> None:
+    connector = _CappedConnector()
+    columns = {f"c{i}" for i in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES)}
+
+    with patch(
+        "auto_ontology.semantic.visit_enter.probe_ascending_distinct_values",
+        side_effect=TimeoutError("cancelled"),
+    ):
+        _store_key_distinct_values(TABLE, connector, columns)
+
+    assert _sampling_breaker.is_open(connector)
+
+
+def test_a_persistence_error_while_storing_key_values_propagates(
+    store_key_values,
+) -> None:
+    store_key_values.side_effect = RuntimeError("db down")
+
+    with patch(
+        "auto_ontology.semantic.visit_enter.probe_ascending_distinct_values",
+        return_value=[1],
+    ):
+        with pytest.raises(RuntimeError, match="db down"):
+            _store_key_distinct_values(TABLE, _CappedConnector(), {"id"})
 
 
 def _process_keys_table(
