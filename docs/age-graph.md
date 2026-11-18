@@ -38,17 +38,19 @@ things (`auto_ontology/catalog/constants.py`,
 | `Database`, `Schema`, `Table`, `Column` | `catalog_*` |
 | `Term` | `term` |
 | `ColumnAttribute`, `SqlAttribute` | `column_attribute`, `sql_attribute` |
+| `TermFamily` | `term_family` |
 | `Tag`, `Zone` | `tag`, `zone` |
 
 | Edge | Shape | From table |
 | --- | --- | --- |
-| `CONTAINS` | Database→Schema→Table→Column | parent FKs |
+| `CONTAINS` | Database→Schema→Table→Column, Schema→TermFamily | parent FKs |
 | `FOREIGN_KEY` | Column→Column | `column__foreign_key` |
 | `JOIN` | Table→Table, Column→Column | `table__join`, `column__join` |
 | `UNION` | Column→Column | `column__union` |
 | `REPRESENTS` | Table→Term | `table__term` |
 | `HAS_ATTRIBUTE`, `SEMANTIC_FK` | Column→ColumnAttribute | `column__has_attribute`, `column__semantic_fk` |
 | `PROPERTY_OF` | ColumnAttribute/SqlAttribute→Term | `*_attribute__term` |
+| `MEMBER_OF` | Term→TermFamily (`base_name` on the edge) | `term__term_family` |
 | `TAGGED` | Tag→Term/Table/Column/attribute | `tag_target` |
 | `ZONE_OF` | Zone→Database/Schema/Table | `zone_target` |
 

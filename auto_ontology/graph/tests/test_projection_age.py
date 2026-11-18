@@ -64,6 +64,7 @@ def seeded() -> Iterator[dict[str, str]]:
             "sql_attr",
             "tag",
             "zone",
+            "family",
         )
     }
     rows = [
@@ -131,6 +132,14 @@ def seeded() -> Iterator[dict[str, str]]:
         ),
         (s.tag, {"id": ids["tag"], "name": f"{p}-finance"}),
         (s.zone, {"id": ids["zone"], "name": f"{p}-zone"}),
+        (
+            s.term_family,
+            {"id": ids["family"], "schema_id": ids["schema"], "prefix": "v1_"},
+        ),
+        (
+            s.term__term_family,
+            {"term_id": ids["term"], "family_id": ids["family"], "base_name": "orders"},
+        ),
         (
             s.column__foreign_key,
             {"source_column_id": ids["o_cust"], "target_column_id": ids["c_id"]},
@@ -215,6 +224,7 @@ def test_every_edge_type_is_projected(graph: str, seeded: dict[str, str]) -> Non
             (i["db"], i["schema"]),
             (i["schema"], i["orders"]),
             (i["orders"], i["o_cust"]),
+            (i["schema"], i["family"]),
         },
         "FOREIGN_KEY": {(i["o_cust"], i["c_id"])},
         "JOIN": {(i["orders"], i["customers"]), (i["o_cust"], i["c_id"])},
@@ -225,6 +235,7 @@ def test_every_edge_type_is_projected(graph: str, seeded: dict[str, str]) -> Non
         "PROPERTY_OF": {(i["attr"], i["term"]), (i["sql_attr"], i["term"])},
         "TAGGED": {(i["tag"], i["term"])},
         "ZONE_OF": {(i["zone"], i["orders"])},
+        "MEMBER_OF": {(i["term"], i["family"])},
     }
     assert set(expected) == set(edge_labels())
     for label, pairs in expected.items():
@@ -267,7 +278,9 @@ def test_neighborhood_walks_from_a_term(graph: str, seeded: dict[str, str]) -> N
     one = queries.term_neighborhood(seeded["term"], depth=1, graph=graph)
     assert one is not None
     ids = {n["id"] for n in one["nodes"]}
-    assert ids == {seeded[k] for k in ("term", "orders", "attr", "sql_attr", "tag")}
+    assert ids == {
+        seeded[k] for k in ("term", "orders", "attr", "sql_attr", "tag", "family")
+    }
     assert {
         "type": "REPRESENTS",
         "source": seeded["orders"],

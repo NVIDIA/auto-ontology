@@ -54,6 +54,10 @@ from auto_ontology.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
 
 LABEL_TAG = "Tag"
 REL_TAGGED = "TAGGED"
+# Names from the comments on ``term_family`` / ``term__term_family`` in
+# ``auto_ontology/dal/schema.py``.
+LABEL_TERM_FAMILY = "TermFamily"
+REL_MEMBER_OF = "MEMBER_OF"
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,7 @@ NODES: tuple[NodeSpec, ...] = (
         s.sql_attribute,
         ("name", "description", "expression", "source", "certified"),
     ),
+    NodeSpec(LABEL_TERM_FAMILY, s.term_family, ("prefix",)),
     NodeSpec(LABEL_TAG, s.tag, ("name",)),
     NodeSpec(LABEL_ZONE, s.zone, ("name", "description", "enabled")),
 )
@@ -128,6 +133,7 @@ EDGES: tuple[EdgeSpec, ...] = (
     # Catalog hierarchy: parent FK on the child row.
     _parent(s.catalog_schema, Labels.DB, Labels.SCHEMA, "database_id"),
     _parent(s.catalog_table, Labels.SCHEMA, Labels.TABLE, "schema_id"),
+    _parent(s.term_family, Labels.SCHEMA, LABEL_TERM_FAMILY, "schema_id"),
     _parent(s.catalog_column, Labels.TABLE, Labels.COLUMN, "table_id"),
     # Physical relationships between columns and tables.
     EdgeSpec(
@@ -201,6 +207,16 @@ EDGES: tuple[EdgeSpec, ...] = (
         s.sql_attribute__term,
         "attribute_id",
         "term_id",
+    ),
+    # Term families: one version of a schema kept in several copies.
+    EdgeSpec(
+        REL_MEMBER_OF,
+        LABEL_TERM,
+        LABEL_TERM_FAMILY,
+        s.term__term_family,
+        "term_id",
+        "family_id",
+        ("base_name",),
     ),
     # Governance: tags and zones, one spec per target kind.
     *(
