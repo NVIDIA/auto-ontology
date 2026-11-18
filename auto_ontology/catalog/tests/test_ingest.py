@@ -124,3 +124,39 @@ def test_skips_schemas_that_produced_no_frames() -> None:
 
     assert list(tables_df["id"]) == ["t1"]
     assert columns_df.empty
+
+
+def test_delete_table_cleans_up_orphaned_semantic_rows(monkeypatch) -> None:
+    """Deleting a catalog table also removes its attributes and unrepresented terms."""
+    from contextlib import nullcontext
+
+    from auto_ontology.catalog.store import db as store_db
+
+    writes: list[str] = []
+
+    class _FakeStore:
+        def query_read(self, statement):
+            sql = str(statement)
+            if "FROM catalog_column" in sql:
+                return [{"id": "col-1"}]
+            if "FROM table__term" in sql:
+                return [{"term_id": "term-1"}]
+            if "FROM column__has_attribute" in sql:
+                return [{"attribute_id": "attr-1"}]
+            return []
+
+        def query_write(self, statement):
+            writes.append(str(statement))
+            return []
+
+    monkeypatch.setattr(store_db, "write_transaction", nullcontext)
+    monkeypatch.setattr(store_db, "store", lambda: _FakeStore())
+    monkeypatch.setattr(
+        store_db, "untag_attributes_of_columns_being_deleted", lambda _ids: None
+    )
+
+    store_db.delete_table("tbl-1")
+
+    assert any("DELETE FROM column_attribute" in sql for sql in writes)
+    assert any("DELETE FROM catalog_table" in sql for sql in writes)
+    assert any("DELETE FROM term" in sql for sql in writes)

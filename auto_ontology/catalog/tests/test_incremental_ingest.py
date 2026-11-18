@@ -277,3 +277,73 @@ def test_foreign_key_survives_reingest(source_db: str) -> None:
     _ingest(source_db)
 
     assert catalog.foreign_keys(source_db) == {("customer_id", "customer_id")}
+
+
+def test_dropped_table_and_column_clean_up_their_semantic_rows(
+    source_db: str,
+) -> None:
+    from sqlalchemy import select
+
+    from auto_ontology.dal import schema as s
+    from auto_ontology.dal.attributes import merge_column_attribute
+    from auto_ontology.dal.session import store
+    from auto_ontology.dal.terms import upsert_table_term
+
+    _ingest(source_db)
+    rows = store().query_read(
+        select(s.catalog_table.c.id, s.catalog_table.c.name)
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            ).join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.catalog_database.c.name == source_db)
+    )
+    table_ids = {row["name"]: row["id"] for row in rows}
+
+    orders_term = upsert_table_term(
+        f"{source_db}-Order", "order term", table_ids["orders"]
+    )
+    customer_term = upsert_table_term(
+        f"{source_db}-Customer", "customer term", table_ids["customer"]
+    )
+    assert orders_term is not None and customer_term is not None
+    orders_attr = merge_column_attribute(
+        term_name=orders_term[1],
+        table_id=table_ids["orders"],
+        source_column="order_id",
+        attr_name=f"{source_db}-order-id",
+        datatype="integer",
+        description="pk",
+    )
+    email_attr = merge_column_attribute(
+        term_name=customer_term[1],
+        table_id=table_ids["customer"],
+        source_column="email",
+        attr_name=f"{source_db}-email",
+        datatype="varchar",
+        description="email",
+    )
+    assert orders_attr is not None and email_attr is not None
+
+    _mutate(
+        source_db,
+        "DROP TABLE shop.orders",
+        "ALTER TABLE shop.customer DROP COLUMN email",
+    )
+    _ingest(source_db)
+
+    assert not store().query_read(
+        select(s.term.c.id).where(s.term.c.id == orders_term[0])
+    )
+    assert not store().query_read(
+        select(s.column_attribute.c.id).where(
+            s.column_attribute.c.id.in_([orders_attr, email_attr])
+        )
+    )
+    assert store().query_read(
+        select(s.term.c.id).where(s.term.c.id == customer_term[0])
+    )
