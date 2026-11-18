@@ -106,6 +106,21 @@ def _delete_scoped_semantic(database_name: str) -> int:
         )
     )
 
+    # Concept: scoped by database. Its member links and keys cascade with it.
+    deleted += len(
+        store().query_write(
+            delete(s.concept)
+            .where(
+                s.concept.c.database_id.in_(
+                    select(s.catalog_database.c.id).where(
+                        s.catalog_database.c.name == database_name
+                    )
+                )
+            )
+            .returning(s.concept.c.id)
+        )
+    )
+
     def only_ours(link_table, owner_column, table_column):
         """Rows whose links all land inside this database, and at least one does."""
         inside = (
@@ -193,6 +208,7 @@ def _delete_all_semantic() -> int:
     deleted = 0
     for table in (
         s.term_family,
+        s.concept,
         s.term,
         s.column_attribute,
         s.sql_attribute,

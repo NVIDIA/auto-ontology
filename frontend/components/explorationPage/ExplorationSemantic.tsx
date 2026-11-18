@@ -32,6 +32,9 @@ export const buildSemanticGraph = (graph: SemanticExplorationGraph): Exploration
 		relationshipCount: node.relationship_count,
 		columnAttributesCount: node.column_attributes_count,
 		sqlAttributesCount: node.sql_attributes_count,
+		concept: node.concept
+			? { id: node.concept.id, name: node.concept.name, termIds: node.concept.term_ids }
+			: null,
 	})),
 	links: graph.links.map((link) => ({
 		source: link.source,
@@ -104,6 +107,16 @@ export const ActiveTermCard = ({
 				<PropertyRow label="Name" value={node.name} />
 				<PropertyRow label="Description" value={node.description ?? ''} />
 				<PropertyRow label="ID" value={node.id} monospace />
+				{node.concept && (
+					<PropertyRow
+						label="Concept"
+						value={
+							node.concept.termIds.length > 1
+								? `${node.concept.name} (${node.concept.termIds.length} Terms)`
+								: node.concept.name
+						}
+					/>
+				)}
 			</div>
 			<div className="grid grid-cols-2 gap-2">
 				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">

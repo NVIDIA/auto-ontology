@@ -5,7 +5,7 @@
 """ColumnAttribute, SEMANTIC_FK, and the join-path traversal.
 
 The traversal gets most of the attention here, and one case in it gets more than
-the rest: **two columns that both point at the same attribute must not be joined
+the rest: **two columns that both point at the same key must not be joined
 to each other.** It is a wrong answer that looks completely reasonable — a join between two
 ``customer_id`` columns is exactly the sort of thing a reviewer nods at.
 """
@@ -23,6 +23,12 @@ from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import attributes as a  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.concepts import (  # noqa: E402
+    ensure_column_key,
+    ensure_term_concept,
+    fetch_table_concept_id,
+    merge_concepts,
+)
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
@@ -55,6 +61,8 @@ class World:
         self.tables: dict[str, str] = {}
         self.columns: dict[str, str] = {}
         self.attributes: dict[str, str] = {}
+        self.owners: dict[str, str] = {}
+        self.table_terms: dict[str, str] = {}
         # Cleaned up by id, not by name pattern: `update_column_attribute`
         # renames rows, and a renamed row no longer matches the prefix -- which
         # leaks it into the next test and collides on the 5-part merge key.
@@ -107,10 +115,33 @@ class World:
         self.attributes[key] = aid
         self.created.append((s.column_attribute, aid))
         if owner:
+            self.owners[key] = owner
             _link(
                 s.column__has_attribute, column_id=self.columns[owner], attribute_id=aid
             )
         return aid
+
+    def represent(self, table: str) -> str:
+        """The Term representing *table*, and so its one-member Concept."""
+        if table not in self.table_terms:
+            term_id = self.term(f"{table}-term")
+            _link(s.table__term, table_id=self.tables[table], term_id=term_id)
+            self.table_terms[table] = term_id
+            ensure_term_concept(term_id)
+        return self.table_terms[table]
+
+    def concept(self, table: str) -> str:
+        self.represent(table)
+        concept_id = fetch_table_concept_id(self.tables[table])
+        assert concept_id
+        return concept_id
+
+    def key(self, column: str) -> str:
+        """The Concept key *column* stands for, on its own table's Concept."""
+        self.represent(column.split(".")[0])
+        key_id = ensure_column_key(self.columns[column])
+        assert key_id
+        return key_id
 
     def references(
         self,
@@ -119,10 +150,11 @@ class World:
         *,
         use_in_join_paths: bool = True,
     ) -> None:
+        """*column* holds a semantic FK to the key of *attribute*'s owner column."""
         _link(
             s.column__semantic_fk,
             column_id=self.columns[column],
-            attribute_id=self.attributes[attribute],
+            key_id=self.key(self.owners[attribute]),
             use_in_join_paths=use_in_join_paths,
         )
 
@@ -148,78 +180,6 @@ def world():
 # --------------------------------------------------------------------------
 # find_join_path
 # --------------------------------------------------------------------------
-
-
-def test_finds_one_hop_junctions_over_declared_and_semantic_fks(world) -> None:
-    world.table("customers", pk=["id"])
-    world.column("customers", "id")
-    world.attribute("customer-id", owner="customers.id")
-    world.table("tags", pk=["id"])
-    world.column("tags", "id")
-
-    world.table("customer_tag")
-    world.column("customer_tag", "customer_id", 1)
-    world.column("customer_tag", "tag_id", 2)
-    store().query_write(
-        s.catalog_table.update()
-        .where(s.catalog_table.c.id == world.tables["customer_tag"])
-        .values(is_junction_table=True)
-    )
-    world.references("customer_tag.customer_id", "customer-id")
-    _link(
-        s.column__foreign_key,
-        source_column_id=world.columns["customer_tag.tag_id"],
-        target_column_id=world.columns["tags.id"],
-    )
-
-    # Connected through the same semantic FK shape, but not classified as a
-    # junction, so it must not be expanded.
-    world.table("customer_profile")
-    world.column("customer_profile", "customer_id")
-    world.references("customer_profile.customer_id", "customer-id")
-
-    junctions, paths = a.find_connected_junction_tables(
-        [world.tables["customers"], world.tables["tags"]]
-    )
-
-    assert junctions == [{"id": world.tables["customer_tag"], "name": "customer_tag"}]
-    joins = {
-        (
-            path[0]["source_table"],
-            path[0]["source_column"],
-            path[0]["target_table"],
-            path[0]["target_column"],
-        )
-        for path in paths
-    }
-    assert joins == {
-        ("customer_tag", "customer_id", "customers", "id"),
-        ("customer_tag", "tag_id", "tags", "id"),
-    }
-
-
-def test_connected_junctions_require_at_least_one_table() -> None:
-    assert a.find_connected_junction_tables([]) == ([], [])
-
-
-def test_connected_junctions_ignore_unselected_semantic_fks(world) -> None:
-    world.table("customers", pk=["id"])
-    world.column("customers", "id")
-    world.attribute("customer-id", owner="customers.id")
-    world.table("customer_tag")
-    world.column("customer_tag", "customer_id")
-    store().query_write(
-        s.catalog_table.update()
-        .where(s.catalog_table.c.id == world.tables["customer_tag"])
-        .values(is_junction_table=True)
-    )
-    world.references(
-        "customer_tag.customer_id",
-        "customer-id",
-        use_in_join_paths=False,
-    )
-
-    assert a.find_connected_junction_tables([world.tables["customers"]]) == ([], [])
 
 
 @pytest.fixture
@@ -294,9 +254,11 @@ def test_setting_join_default_disables_every_other_group_member(world) -> None:
         ("customer_id", "id"),
     }
 
+    assert {row["target_concept_id"] for row in group} == {world.concept("customers")}
+
     a.set_semantic_fk_join_default(
         world.tables["orders"],
-        world.attributes["customer-id"],
+        world.concept("customers"),
         world.columns["orders.customer_id"],
     )
 
@@ -304,7 +266,7 @@ def test_setting_join_default_disables_every_other_group_member(world) -> None:
         select(
             s.column__semantic_fk.c.column_id,
             s.column__semantic_fk.c.use_in_join_paths,
-        ).where(s.column__semantic_fk.c.attribute_id == world.attributes["customer-id"])
+        ).where(s.column__semantic_fk.c.key_id == world.key("customers.id"))
     )
     assert {row["column_id"]: row["use_in_join_paths"] for row in rows} == {
         world.columns["orders.billing_customer_id"]: False,
@@ -332,35 +294,34 @@ def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None
     ]
 
 
-def test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute(
-    world,
-) -> None:
-    """The fabrication risk routing-through-the-owner has to guard against.
+def test_an_fk_to_a_repeating_column_is_refused(world) -> None:
+    """A key is an identity, so a column profiled non-unique cannot be one.
 
-    `buyers.buyer_status_id` and `sellers.seller_status_id` both reference
-    `lookup.status_code` -- but `status_code` is *not* `lookup`'s own declared
-    PK, just an attribute they happen to share. Unlike the customers/orders/
-    invoices case above, joining these two columns through `lookup` would be
-    fabricated: nothing says a buyer and a seller with the same status code
-    are related. Entering a table from its owner side (as opposed to via a
-    real outgoing FK) is only ever legitimate when the shared attribute is
-    that table's own identity -- see `_find_table_join_hops`'s docstring, and
-    `find_shared_hub_bridge`, which applies the identical discipline for the
-    one shape this still can't reach.
+    `buyers.buyer_status_id` and `sellers.seller_status_id` both name values of
+    `lookup.status_code`, which repeats. Joining the two through `lookup` would
+    be fabricated: nothing says a buyer and a seller with the same status are
+    related. So no FK lands there, and no path routes through it.
     """
     world.table("lookup")
     world.column("lookup", "id", 1)
     world.column("lookup", "status_code", 2)
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["lookup.status_code"])
+        .values(is_unique=False)
+    )
     world.attribute("status-code", owner="lookup.status_code")
-
+    world.represent("lookup")
     world.table("buyers")
     world.column("buyers", "buyer_status_id")
-    world.references("buyers.buyer_status_id", "status-code")
-
     world.table("sellers")
     world.column("sellers", "seller_status_id")
-    world.references("sellers.seller_status_id", "status-code")
 
+    for column in ("buyers.buyer_status_id", "sellers.seller_status_id"):
+        assert (
+            a.merge_semantic_fk(world.columns[column], world.attributes["status-code"])
+            is False
+        )
     assert (
         a.find_join_path(
             world.columns["buyers.buyer_status_id"],
@@ -368,6 +329,83 @@ def test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute(
         )
         == []
     )
+
+
+@pytest.fixture
+def split(world):
+    """`customers` and `customer_ext` are one Concept; `orders` references it.
+
+    `orders.customer_id` was resolved against `customers.id`; `customer_ext`
+    lives in another schema, and keys the same customers by `customer_id`.
+    """
+    world.table("customers", pk=["id"])
+    world.column("customers", "id", 1)
+    world.column("customers", "name", 2)
+    world.schemas["crm"] = _add(
+        s.catalog_schema, database_id=world.databases["shopdb"], name="crm"
+    )
+    tid = _add(
+        s.catalog_table,
+        schema_id=world.schemas["crm"],
+        name="customer_ext",
+        pk=["customer_id"],
+    )
+    world.tables["customer_ext"] = tid
+    world.column("customer_ext", "customer_id", 1)
+    world.column("customer_ext", "segment", 2)
+    world.table("orders")
+    world.column("orders", "customer_id", 1)
+    world.column("orders", "total", 2)
+    world.attribute("customer-id", owner="customers.id")
+    world.references("orders.customer_id", "customer-id")
+    assert merge_concepts(
+        world.concept("customers"),
+        world.concept("customer_ext"),
+        key_pairs={
+            world.key("customer_ext.customer_id"): world.key("customers.id"),
+        },
+    )
+    return world
+
+
+def test_a_path_enters_the_member_holding_the_field(split) -> None:
+    """The FK reaches `customer_ext` on its own key column, fully qualified."""
+    hops = a.find_join_path(
+        split.columns["orders.total"], split.columns["customer_ext.segment"]
+    )
+    assert hops == [
+        {
+            "source_database": f"{split.prefix}-shopdb",
+            "source_schema": "public",
+            "source_table": "orders",
+            "source_column": "customer_id",
+            "target_database": f"{split.prefix}-shopdb",
+            "target_schema": "crm",
+            "target_table": "customer_ext",
+            "target_column": "customer_id",
+        }
+    ]
+
+
+def test_the_members_of_a_concept_join_on_their_key_columns(split) -> None:
+    hops = a.find_join_path(
+        split.columns["customers.name"], split.columns["customer_ext.segment"]
+    )
+    assert [
+        (h["source_schema"], h["source_table"], h["source_column"]) for h in hops
+    ] == [("public", "customers", "id")]
+    assert [
+        (h["target_schema"], h["target_table"], h["target_column"]) for h in hops
+    ] == [("crm", "customer_ext", "customer_id")]
+
+
+def test_the_fk_still_reaches_the_member_it_was_resolved_against(split) -> None:
+    hops = a.find_join_path(
+        split.columns["orders.total"], split.columns["customers.name"]
+    )
+    assert [(h["target_table"], h["target_column"]) for h in hops] == [
+        ("customers", "id")
+    ]
 
 
 def test_join_path_is_oriented_from_anchor_table_in_both_directions(joined) -> None:
@@ -432,15 +470,11 @@ def test_two_columns_in_the_same_table_need_no_join(world) -> None:
     """Two columns in one table resolve to the same table_id, so find_join_path
     returns early before any traversal -- no path to mistake for a join.
 
-    This used to be reachable via `join_path_edge`'s unconditional
-    `column <-> table` containment edges: naively pairing every column-kind
-    node on a BFS path by position would find the 2-edge path
-    `column -> table -> column` and mistake co-location for a real crossing
-    (confirmed live case: `therapy_details`/`medchg`, no FK between them,
-    reported as a false "1 hop" join). `find_join_path` and `find_table_bridge`
-    both now work at table granularity via `_find_table_join_hops`, which only
-    ever walks real semantic FK/owner edges and never the old containment
-    edges -- so the bug can no longer occur for either function.
+    A traversal over `column <-> table` containment edges would find the
+    2-edge path `column -> table -> column` and mistake co-location for a real
+    crossing (confirmed live case: `therapy_details`/`medchg`, no FK between
+    them, reported as a false "1 hop" join). `_find_table_join_hops` walks
+    only semantic FK and Concept identity edges, so it cannot.
     """
     world.table("customers")
     world.column("customers", "id", 1)
@@ -794,9 +828,8 @@ def test_update_of_a_missing_attribute_is_none(attributed) -> None:
 def test_contexts_read_semantic_fk_backwards(joined) -> None:
     """Binds the attribute and finds the column pointing *at* it.
 
-    This is the traversal `join_path_edge` deliberately omits, which is why this
-    function queries `column__semantic_fk` directly. If it ever starts reading
-    the view, this test is what fails.
+    The referencing column reaches the attribute through the Concept key its
+    FK targets, whose member column owns the attribute.
     """
     contexts = a.fetch_attr_column_contexts(
         [joined.attributes["customer-id"]], database_name=None
@@ -1001,6 +1034,7 @@ def test_semantic_fk_ends_name_the_owning_column(describable) -> None:
         "source_column_id": describable.columns["orders.customer_id"],
         "source_table_name": "orders",
         "source_column_name": "customer_id",
+        "target_concept_id": describable.concept("customers"),
         "target_attribute_id": describable.attributes["customer-id"],
         "target_table_name": "customers",
         "target_column_name": "id",
@@ -1087,16 +1121,40 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
     world.table("orders")
     world.column("orders", "customer_id")
     attr = world.attribute("customer-id", owner="customers.id")
+    world.represent("customers")
 
     for _ in range(2):
-        a.merge_semantic_fk(world.columns["orders.customer_id"], attr)
+        assert a.merge_semantic_fk(world.columns["orders.customer_id"], attr)
 
     rows = store().query_read(
-        select(s.column__semantic_fk.c.column_id).where(
-            s.column__semantic_fk.c.attribute_id == attr
+        select(s.column__semantic_fk.c.key_id).where(
+            s.column__semantic_fk.c.column_id == world.columns["orders.customer_id"]
         )
     )
-    assert len(rows) == 1
+    assert rows == [{"key_id": world.key("customers.id")}]
+
+
+def test_merge_semantic_fk_refuses_a_key_column_as_its_source(world) -> None:
+    """A Concept key column is the entity's identity, not a reference."""
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.table("vips", pk=["customer_id"])
+    world.column("vips", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+    world.represent("customers")
+    world.represent("vips")
+
+    assert a.merge_semantic_fk(world.columns["vips.customer_id"], attr) is False
+
+
+def test_merge_semantic_fk_needs_a_concept_on_the_target_table(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.table("orders")
+    world.column("orders", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+
+    assert a.merge_semantic_fk(world.columns["orders.customer_id"], attr) is False
 
 
 def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
@@ -1113,346 +1171,15 @@ def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
     world.column("remote_orders", "customer_id")
     attr = world.attribute("customer-id", owner="customers.id")
 
+    world.represent("customers")
+
     written = a.merge_semantic_fk(world.columns["remote_orders.customer_id"], attr)
     assert written is False
 
     rows = store().query_read(
         select(s.column__semantic_fk.c.column_id).where(
-            s.column__semantic_fk.c.attribute_id == attr
+            s.column__semantic_fk.c.column_id
+            == world.columns["remote_orders.customer_id"]
         )
     )
     assert rows == []
-
-
-# --------------------------------------------------------------------------
-# find_shared_hub_bridge
-# --------------------------------------------------------------------------
-
-
-@pytest.fixture
-def hub_and_spokes(world):
-    """A real identity hub with a declared PK, and two spokes FK-ing into it.
-
-    `robot_record` (docstring's own example) is the hub: its own declared PK
-    is `id`, and both `spoke_a.hub_id` and `spoke_b.hub_id` hold a *forward*
-    SEMANTIC_FK to the attribute that column owns -- the exact shape
-    find_join_path's forward-only guard cannot connect.
-    """
-    world.table("hub", pk=["id"])
-    world.column("hub", "id")
-    world.attribute("hub-id", owner="hub.id")
-
-    world.table("spoke_a")
-    world.column("spoke_a", "hub_id")
-    world.references("spoke_a.hub_id", "hub-id")
-
-    world.table("spoke_b")
-    world.column("spoke_b", "hub_id")
-    world.references("spoke_b.hub_id", "hub-id")
-    return world
-
-
-def test_finds_the_shared_pk_anchored_hub(hub_and_spokes) -> None:
-    result = a.find_shared_hub_bridge(
-        hub_and_spokes.columns["spoke_a.hub_id"],
-        hub_and_spokes.columns["spoke_b.hub_id"],
-    )
-    assert result == {"hub_table": "hub", "hub_column": "id"}
-
-
-def test_shared_hub_bridge_is_order_independent(hub_and_spokes) -> None:
-    assert a.find_shared_hub_bridge(
-        hub_and_spokes.columns["spoke_b.hub_id"],
-        hub_and_spokes.columns["spoke_a.hub_id"],
-    ) == {"hub_table": "hub", "hub_column": "id"}
-
-
-def test_hub_helpers_ignore_unselected_semantic_fks(hub_and_spokes) -> None:
-    store().query_write(
-        s.column__semantic_fk.update()
-        .where(
-            s.column__semantic_fk.c.column_id
-            == hub_and_spokes.columns["spoke_b.hub_id"]
-        )
-        .values(use_in_join_paths=False)
-    )
-
-    assert (
-        a.find_shared_hub_bridge(
-            hub_and_spokes.columns["spoke_a.hub_id"],
-            hub_and_spokes.columns["spoke_b.hub_id"],
-        )
-        == {}
-    )
-    assert a.find_anchor_hub_siblings(hub_and_spokes.tables["spoke_a"]) == ([], 0)
-
-
-def test_shared_hub_bridge_returns_empty_for_the_same_column_twice(
-    hub_and_spokes,
-) -> None:
-    col = hub_and_spokes.columns["spoke_a.hub_id"]
-    assert a.find_shared_hub_bridge(col, col) == {}
-
-
-def test_shared_hub_bridge_requires_the_targets_own_declared_pk(world) -> None:
-    """Two FKs sharing a target that is NOT that table's declared PK must not bridge.
-
-    Same shape as `hub_and_spokes`, but `hub.id` is never declared as the
-    table's PK -- this is what keeps the function from treating "any
-    attribute two FK columns happen to share" as a hub.
-    """
-    world.table("hub")  # no pk=...
-    world.column("hub", "id")
-    world.attribute("hub-id", owner="hub.id")
-    world.table("spoke_a")
-    world.column("spoke_a", "hub_id")
-    world.references("spoke_a.hub_id", "hub-id")
-    world.table("spoke_b")
-    world.column("spoke_b", "hub_id")
-    world.references("spoke_b.hub_id", "hub-id")
-
-    result = a.find_shared_hub_bridge(
-        world.columns["spoke_a.hub_id"], world.columns["spoke_b.hub_id"]
-    )
-    assert result == {}
-
-
-def test_shared_hub_bridge_returns_empty_when_fks_target_different_attributes(
-    world,
-) -> None:
-    world.table("hub_x", pk=["id"])
-    world.column("hub_x", "id")
-    world.attribute("hub-x-id", owner="hub_x.id")
-    world.table("hub_y", pk=["id"])
-    world.column("hub_y", "id")
-    world.attribute("hub-y-id", owner="hub_y.id")
-    world.table("spoke_a")
-    world.column("spoke_a", "x_id")
-    world.references("spoke_a.x_id", "hub-x-id")
-    world.table("spoke_b")
-    world.column("spoke_b", "y_id")
-    world.references("spoke_b.y_id", "hub-y-id")
-
-    result = a.find_shared_hub_bridge(
-        world.columns["spoke_a.x_id"], world.columns["spoke_b.y_id"]
-    )
-    assert result == {}
-
-
-# --------------------------------------------------------------------------
-# find_anchor_hub_siblings
-# --------------------------------------------------------------------------
-
-
-def test_finds_the_hub_and_its_sibling(hub_and_spokes) -> None:
-    results, truncated = a.find_anchor_hub_siblings(hub_and_spokes.tables["spoke_a"])
-    assert truncated == 0
-    by_target = {r["target_table"]: r for r in results}
-    assert by_target["hub"]["is_hub"] is True
-    assert by_target["hub"]["source_table"] == "spoke_a"
-    assert by_target["spoke_b"]["is_hub"] is False
-    assert by_target["spoke_b"]["hub_table"] == "hub"
-    # The anchor itself and any non-sibling table must not show up.
-    assert "spoke_a" not in by_target
-
-
-def test_hub_siblings_are_empty_for_a_table_with_no_outgoing_fk(world) -> None:
-    world.table("lonely")
-    world.column("lonely", "id")
-    results, truncated = a.find_anchor_hub_siblings(world.tables["lonely"])
-    assert results == []
-    assert truncated == 0
-
-
-def test_hub_siblings_caps_and_reports_the_truncated_count(world) -> None:
-    world.table("hub", pk=["id"])
-    world.column("hub", "id")
-    world.attribute("hub-id", owner="hub.id")
-    world.table("anchor")
-    world.column("anchor", "hub_id")
-    world.references("anchor.hub_id", "hub-id")
-    for i in range(3):
-        name = f"sib{i}"
-        world.table(name)
-        world.column(name, "hub_id")
-        world.references(f"{name}.hub_id", "hub-id")
-
-    results, truncated = a.find_anchor_hub_siblings(
-        world.tables["anchor"], max_siblings=2
-    )
-    siblings = [r for r in results if not r["is_hub"]]
-    assert len(siblings) == 2
-    assert truncated == 1
-
-
-def test_hub_siblings_uncapped_when_max_siblings_is_none(world) -> None:
-    world.table("hub", pk=["id"])
-    world.column("hub", "id")
-    world.attribute("hub-id", owner="hub.id")
-    world.table("anchor")
-    world.column("anchor", "hub_id")
-    world.references("anchor.hub_id", "hub-id")
-    for i in range(3):
-        name = f"sib{i}"
-        world.table(name)
-        world.column(name, "hub_id")
-        world.references(f"{name}.hub_id", "hub-id")
-
-    results, truncated = a.find_anchor_hub_siblings(
-        world.tables["anchor"], max_siblings=None
-    )
-    siblings = [r for r in results if not r["is_hub"]]
-    assert len(siblings) == 3
-    assert truncated == 0
-
-
-def test_table_bridge_reaches_across_a_pk_anchored_shared_hub(hub_and_spokes) -> None:
-    """A genuine identity hub is a real bridge, same as find_shared_hub_bridge finds.
-
-    Two spokes connected only through a shared hub (both FKs point *at* the
-    hub, neither points *out* of it) are reachable precisely because the hub
-    column is the hub table's own declared PK -- the same discipline
-    find_shared_hub_bridge applies. Without that PK check, this would be the
-    exact "two unrelated FK columns coincidentally sharing a target"
-    fabrication risk covered by
-    test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute.
-    """
-    bridge_tables, hops = a.find_table_bridge(
-        hub_and_spokes.tables["spoke_a"], hub_and_spokes.tables["spoke_b"]
-    )
-    assert [t["name"] for t in bridge_tables] == ["hub"]
-    assert [(h["source_table"], h["source_column"]) for h in hops] == [
-        ("spoke_a", "hub_id"),
-        ("hub", "id"),
-    ]
-    assert [(h["target_table"], h["target_column"]) for h in hops] == [
-        ("hub", "id"),
-        ("spoke_b", "hub_id"),
-    ]
-
-
-# --------------------------------------------------------------------------
-# find_table_bridge
-# --------------------------------------------------------------------------
-
-
-@pytest.fixture
-def bridged(world):
-    """`orders -> customers -> addresses`, same shape as the join-path fixture.
-
-    `customers` is a genuine intermediate bridge table: reachable by the
-    ordinary forward-FK BFS, unlike the hub/spoke shape above.
-    """
-    world.table("orders")
-    world.column("orders", "customer_id")
-    world.table("customers")
-    world.column("customers", "id", 1)
-    world.column("customers", "address_id", 2)
-    world.table("addresses")
-    world.column("addresses", "id")
-    world.attribute("customer-id", owner="customers.id")
-    world.attribute("address-id", owner="addresses.id")
-    world.references("orders.customer_id", "customer-id")
-    world.references("customers.address_id", "address-id")
-    return world
-
-
-def test_finds_a_genuine_intermediate_bridge_table(bridged) -> None:
-    bridge_tables, hops = a.find_table_bridge(
-        bridged.tables["orders"], bridged.tables["addresses"]
-    )
-    assert [t["name"] for t in bridge_tables] == ["customers"]
-    assert [(h["source_table"], h["source_column"]) for h in hops] == [
-        ("orders", "customer_id"),
-        ("customers", "address_id"),
-    ]
-    assert [(h["target_table"], h["target_column"]) for h in hops] == [
-        ("customers", "id"),
-        ("addresses", "id"),
-    ]
-
-
-def test_table_bridge_tries_both_directions(bridged) -> None:
-    """SEMANTIC_FK is forward-only, so the reverse start must also be tried."""
-    bridge_tables, hops = a.find_table_bridge(
-        bridged.tables["addresses"], bridged.tables["orders"]
-    )
-    assert [t["name"] for t in bridge_tables] == ["customers"]
-    assert hops
-
-
-def test_table_bridge_restricts_to_allowed_table_ids(bridged) -> None:
-    """A real bridge that was never a pre-filter candidate must be discarded."""
-    bridge_tables, hops = a.find_table_bridge(
-        bridged.tables["orders"],
-        bridged.tables["addresses"],
-        allowed_table_ids={bridged.tables["orders"], bridged.tables["addresses"]},
-    )
-    assert (bridge_tables, hops) == ([], [])
-
-
-def test_table_bridge_allows_when_the_bridge_is_in_the_allowed_set(bridged) -> None:
-    bridge_tables, hops = a.find_table_bridge(
-        bridged.tables["orders"],
-        bridged.tables["addresses"],
-        allowed_table_ids={
-            bridged.tables["orders"],
-            bridged.tables["customers"],
-            bridged.tables["addresses"],
-        },
-    )
-    assert [t["name"] for t in bridge_tables] == ["customers"]
-
-
-def test_table_bridge_returns_empty_for_unconnected_tables(world) -> None:
-    world.table("alpha")
-    world.column("alpha", "x")
-    world.table("beta")
-    world.column("beta", "y")
-    assert a.find_table_bridge(world.tables["alpha"], world.tables["beta"]) == (
-        [],
-        [],
-    )
-
-
-# --------------------------------------------------------------------------
-# find_kept_table_bridges
-# --------------------------------------------------------------------------
-
-
-def test_kept_table_bridges_finds_a_bridge_between_a_pair(bridged) -> None:
-    bridge_tables, bridge_paths, skipped = a.find_kept_table_bridges(
-        [bridged.tables["orders"], bridged.tables["addresses"]]
-    )
-    assert [t["name"] for t in bridge_tables] == ["customers"]
-    assert len(bridge_paths) == 1
-    assert skipped == 0
-
-
-def test_kept_table_bridges_excludes_tables_already_kept(bridged) -> None:
-    """A bridge table already in the kept set must not be "rediscovered"."""
-    bridge_tables, bridge_paths, skipped = a.find_kept_table_bridges(
-        [
-            bridged.tables["orders"],
-            bridged.tables["customers"],
-            bridged.tables["addresses"],
-        ]
-    )
-    assert bridge_tables == []
-    # The join hops for both pairs touching customers are still surfaced.
-    assert len(bridge_paths) >= 1
-
-
-def test_kept_table_bridges_requires_at_least_two_tables(bridged) -> None:
-    assert a.find_kept_table_bridges([]) == ([], [], 0)
-    assert a.find_kept_table_bridges([bridged.tables["orders"]]) == ([], [], 0)
-
-
-def test_kept_table_bridges_respects_the_cap(bridged) -> None:
-    """max_bridge_tables=0 means no pair is ever checked."""
-    bridge_tables, bridge_paths, skipped = a.find_kept_table_bridges(
-        [bridged.tables["orders"], bridged.tables["addresses"]],
-        max_bridge_tables=0,
-    )
-    assert (bridge_tables, bridge_paths) == ([], [])
-    assert skipped == 1

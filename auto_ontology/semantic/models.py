@@ -226,6 +226,26 @@ class FkHitSelection(BaseModel):
     rationale: str = Field(default="")
 
 
+class ConceptMergeDecision(BaseModel):
+    """LLM output: whether two tables are parts of one real-world entity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    same_entity: bool = Field(
+        ...,
+        description=(
+            "True only when both tables describe the same entity, one row per "
+            "entity in each, split across two tables. False when they are two "
+            "entities that merely share an id, such as an order and its shipment."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description="A short singular business name for the entity, when same_entity.",
+    )
+    rationale: str = Field(default="")
+
+
 class SemanticFkJoinDefaultSelection(BaseModel):
     """LLM output selecting one FK column as the default join relationship."""
 

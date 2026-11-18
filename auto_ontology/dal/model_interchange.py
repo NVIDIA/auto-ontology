@@ -28,6 +28,15 @@ from auto_ontology.catalog.constants import Props
 from auto_ontology.catalog.model import CatalogNode
 from auto_ontology.catalog.store.queries import add_query
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.attributes import attribute_owner_column_id
+from auto_ontology.dal.concepts import (
+    ensure_column_key,
+    ensure_concept_key,
+    delete_orphan_concepts,
+    ensure_term_concept,
+    merge_concepts,
+    semantic_fk_targets,
+)
 from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
@@ -54,6 +63,8 @@ from auto_ontology.server.model_interchange.schemas import (
     AutoOntologyModelDocument,
     ModelColumn,
     ModelColumnAttribute,
+    ModelConcept,
+    ModelConceptKey,
     ModelCustomAnalysis,
     ModelDatabase,
     ModelDataLayer,
@@ -336,23 +347,78 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
     ]
 
 
+def _export_concepts(database_ids: list[str]) -> list[dict[str, Any]]:
+    """Each Concept with its Terms and its keys' member columns."""
+    concepts = store().query_read(
+        select(
+            s.concept.c.id,
+            _payload_identity(s.concept).label("yaml_id"),
+            s.concept.c.name,
+            s.concept.c.description,
+        )
+        .join(s.catalog_database, s.catalog_database.c.id == s.concept.c.database_id)
+        .where(_database_scope(database_ids))
+        .order_by(s.concept.c.name)
+    )
+    ids = [row["id"] for row in concepts]
+    if not ids:
+        return []
+    terms: dict[str, list[str]] = {}
+    for row in store().query_read(
+        select(s.term__concept.c.concept_id, s.term__concept.c.term_id)
+        .where(s.term__concept.c.concept_id.in_(ids))
+        .order_by(s.term__concept.c.term_id)
+    ):
+        terms.setdefault(row["concept_id"], []).append(row["term_id"])
+    keys: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in store().query_read(
+        select(
+            s.concept_key.c.concept_id,
+            s.concept_key.c.id.label("key_id"),
+            s.concept_key.c.name,
+            s.concept_key__column.c.column_id,
+        )
+        .join(
+            s.concept_key__column,
+            s.concept_key__column.c.key_id == s.concept_key.c.id,
+        )
+        .where(s.concept_key.c.concept_id.in_(ids))
+        .order_by(s.concept_key.c.id, s.concept_key__column.c.table_id)
+    ):
+        key = keys.setdefault(row["concept_id"], {}).setdefault(
+            row["key_id"], {"id": row["key_id"], "name": row["name"], "column_ids": []}
+        )
+        key["column_ids"].append(row["column_id"])
+    return [
+        {
+            "id": row["yaml_id"],
+            "name": row["name"],
+            "description": row["description"] or "",
+            "term_ids": terms.get(row["id"], []),
+            "keys": list(keys.get(row["id"], {}).values()),
+        }
+        for row in concepts
+    ]
+
+
 def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
+    targets = semantic_fk_targets("export_fk_targets", one_per_fk=True)
     return [
         dict(r)
         for r in store().query_read(
             select(
-                s.column__semantic_fk.c.column_id,
-                s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
-                s.column__semantic_fk.c.use_in_join_paths,
+                targets.c.fk_column_id.label("column_id"),
+                targets.c.key_id.label("concept_key_id"),
+                targets.c.target_attribute_id.label("column_attribute_id"),
+                targets.c.use_in_join_paths,
             )
             .select_from(
                 _catalog_join().join(
-                    s.column__semantic_fk,
-                    s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
+                    targets, targets.c.fk_column_id == s.catalog_column.c.id
                 )
             )
             .where(_database_scope(database_ids))
-            .distinct()
+            .order_by(targets.c.fk_column_id)
         )
     ]
 
@@ -437,6 +503,7 @@ def fetch_export_rows(database_ids: list[str]) -> dict[str, Any]:
         "foreign_keys": _export_foreign_keys(database_ids),
         "joins": _export_joins(database_ids),
         "terms": _export_terms(database_ids),
+        "concepts": _export_concepts(database_ids),
         "semantic_fks": _export_semantic_fks(database_ids),
         "sql_attributes": _export_sql_attributes(database_ids),
         "custom_analyses": _export_custom_analyses(database_ids),
@@ -523,16 +590,28 @@ def assemble_export_document(
     ]
     _term_ids = {term.id for term in terms}
     _attribute_ids = {attr.id for term in terms for attr in term.columns_attributes}
-    semantic_fks = [
-        ModelSemanticFk(
-            column_attribute_id=str(row["column_attribute_id"]),
-            column_id=str(row["column_id"]),
-            use_in_join_paths=bool(row.get("use_in_join_paths", True)),
+    concepts = _assemble_concepts(
+        rows.get("concepts") or [], term_ids=_term_ids, column_ids=column_ids
+    )
+    _key_ids = {key.id for concept in concepts for key in concept.keys}
+    semantic_fks = []
+    for row in rows["semantic_fks"]:
+        if str(row.get("column_id") or "") not in column_ids:
+            continue
+        key_id = str(row.get("concept_key_id") or "")
+        attribute_id = str(row.get("column_attribute_id") or "")
+        key_id = key_id if key_id in _key_ids else ""
+        attribute_id = attribute_id if attribute_id in _attribute_ids else ""
+        if not key_id and not attribute_id:
+            continue
+        semantic_fks.append(
+            ModelSemanticFk(
+                column_id=str(row["column_id"]),
+                concept_key_id=key_id,
+                column_attribute_id=attribute_id,
+                use_in_join_paths=bool(row.get("use_in_join_paths", True)),
+            )
         )
-        for row in rows["semantic_fks"]
-        if str(row.get("column_attribute_id") or "") in _attribute_ids
-        and str(row.get("column_id") or "") in column_ids
-    ]
     sql_attributes = _assemble_sql_attributes(
         rows["sql_attributes"],
         sql_column_resolver,
@@ -561,12 +640,42 @@ def assemble_export_document(
         ),
         semantic_layer=ModelSemanticLayer(
             terms=terms,
+            concepts=concepts,
             semantic_fks=semantic_fks,
             sql_attributes=sql_attributes,
             custom_analyses=custom_analyses,
         ),
         zones=[],
     )
+
+
+def _assemble_concepts(
+    rows: list[dict[str, Any]], *, term_ids: set[str], column_ids: set[str]
+) -> list[ModelConcept]:
+    """Concepts scoped to the exported Terms, keys to the exported columns."""
+    concepts = []
+    for row in rows:
+        members = _scoped_ids(row.get("term_ids") or [], term_ids)
+        if not members:
+            continue
+        keys = [
+            ModelConceptKey(
+                id=str(key["id"]),
+                name=key.get("name") or "",
+                column_ids=_scoped_ids(key.get("column_ids") or [], column_ids),
+            )
+            for key in row.get("keys") or []
+        ]
+        concepts.append(
+            ModelConcept(
+                id=str(row["id"]),
+                name=row.get("name") or "",
+                description=row.get("description") or "",
+                term_ids=members,
+                keys=[key for key in keys if key.column_ids],
+            )
+        )
+    return concepts
 
 
 def _column_live_id_map(catalog_rows: list[dict[str, Any]]) -> dict[str, str]:
@@ -988,6 +1097,7 @@ def apply_import_model(
         _import_column_attributes(
             document, id_map, created, skipped, embed_buffer, column_meta
         )
+        _import_concepts(document, id_map)
         _import_semantic_fks(document, id_map)
         _import_sql_attributes(
             document, id_map, created, skipped, embed_buffer, term_names, schema_cache
@@ -1320,6 +1430,7 @@ def _delete_scoped_semantics_not_in_payload(
             _payload_identity(s.term).notin_(keep_terms or [""]),
         )
     )
+    delete_orphan_concepts(live_db_ids)
 
 
 def _import_terms(
@@ -1489,37 +1600,97 @@ def _import_column_attributes(
     _link(s.column_attribute__term, property_of_rows)
 
 
+def _import_concepts(
+    document: AutoOntologyModelDocument, id_map: dict[str, str]
+) -> None:
+    """Give every imported Term a Concept, then rebuild the document's merges.
+
+    A document without a ``concepts`` section still yields one Concept per
+    Term. Each listed Concept folds its Terms' Concepts into the first, and each
+    key unifies the keys its columns stand for; the document's key id is mapped
+    to the live key so :func:`_import_semantic_fks` can target it.
+    """
+    for term in document.semantic_layer.terms:
+        live_term_id = _remap_optional(id_map, term.id)
+        if live_term_id is not None:
+            ensure_term_concept(live_term_id)
+
+    for concept in document.semantic_layer.concepts:
+        live_concepts = [
+            concept_id
+            for term_id in concept.term_ids
+            if (live_term_id := _remap_optional(id_map, term_id)) is not None
+            and (concept_id := ensure_term_concept(live_term_id)) is not None
+        ]
+        live_concepts = list(dict.fromkeys(live_concepts))
+        if not live_concepts:
+            continue
+        survivor, *absorbed = live_concepts
+        for other in absorbed:
+            merge_concepts(survivor, other)
+        key_pairs: dict[str, str] = {}
+        for key in concept.keys:
+            live_keys = [
+                key_id
+                for column_id in key.column_ids
+                if (live_column_id := _remap_optional(id_map, column_id)) is not None
+                and (key_id := ensure_concept_key(survivor, live_column_id)) is not None
+            ]
+            live_keys = list(dict.fromkeys(live_keys))
+            if not live_keys:
+                continue
+            id_map[key.id] = live_keys[0]
+            key_pairs.update({other: live_keys[0] for other in live_keys[1:]})
+        merge_concepts(survivor, survivor, key_pairs=key_pairs, name=concept.name)
+        store().query_write(
+            update(s.concept)
+            .where(s.concept.c.id == survivor, s.concept.c.imported_id.is_(None))
+            .values(imported_id=concept.id)
+        )
+
+
 def _import_semantic_fks(
     document: AutoOntologyModelDocument, id_map: dict[str, str]
 ) -> None:
+    """Point each FK column at its Concept key.
+
+    The key comes from ``concept_key_id`` when the document's Concepts carried
+    it, else from the key of the column owning ``column_attribute_id`` -- the
+    only reference a document written before Concept keys has.
+    """
     rows = []
     for fk in document.semantic_layer.semantic_fks:
         column_id = _remap_optional(id_map, fk.column_id)
-        attribute_id = _remap_optional(id_map, fk.column_attribute_id)
-        if column_id is None or attribute_id is None:
-            # The pair reaches an attribute whose term fell outside this export.
+        key_id = (
+            _remap_optional(id_map, fk.concept_key_id) if fk.concept_key_id else None
+        )
+        if key_id is None and fk.column_attribute_id:
+            attribute_id = _remap_optional(id_map, fk.column_attribute_id)
+            owner = attribute_owner_column_id(attribute_id) if attribute_id else None
+            key_id = ensure_column_key(owner) if owner else None
+        if column_id is None or key_id is None:
+            # The pair reaches a key whose Concept fell outside this export.
             logger.debug(
                 "import: semantic fk %s -> %s is out of scope; skipping",
                 fk.column_id,
-                fk.column_attribute_id,
+                fk.concept_key_id or fk.column_attribute_id,
             )
             continue
         rows.append(
             {
                 "column_id": column_id,
-                "attribute_id": attribute_id,
+                "key_id": key_id,
                 "use_in_join_paths": fk.use_in_join_paths,
             }
         )
+    rows = list({row["column_id"]: row for row in rows}.values())
     if rows:
         statement = insert(s.column__semantic_fk).values(rows)
         store().query_write(
             statement.on_conflict_do_update(
-                index_elements=[
-                    s.column__semantic_fk.c.column_id,
-                    s.column__semantic_fk.c.attribute_id,
-                ],
+                index_elements=[s.column__semantic_fk.c.column_id],
                 set_={
+                    "key_id": statement.excluded.key_id,
                     "use_in_join_paths": statement.excluded.use_in_join_paths,
                 },
             )

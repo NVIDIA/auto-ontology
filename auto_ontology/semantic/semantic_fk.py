@@ -7,11 +7,11 @@
 Algorithm
 ---------
 1. Find every Column node that has no SEMANTIC_FK edge and no HAS_ATTRIBUTE
-   edge (i.e. a FK column that the taxonomy pass skipped).
+   edge (i.e. a FK column that the taxonomy pass skipped) and keys no Concept.
 2. For each such column:
    a. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
-      graph, look up the ColumnAttribute attached to the target Column and
-      create SEMANTIC_FK directly. A declared FK that targets *the column
+      graph, create SEMANTIC_FK to the Concept key the target Column stands
+      for, making the column a key of its table's Concept if needed. A declared FK that targets *the column
       itself* is rejected; one that targets another column of the same table
       is a self-reference (``posts.parent_id → posts.id``) and is kept.
    b. **Inferred** — otherwise, search the *semantic* VDB for ColumnAttributes
@@ -50,9 +50,9 @@ from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
     fetch_semantic_fk_join_groups,
     fetch_value_key_candidates,
-    find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
+    merge_semantic_fk_to_column,
     set_semantic_fk_join_default,
 )
 from auto_ontology.dal.datasources import store_column_distinct_values
@@ -185,30 +185,25 @@ def _resolve_semantic_fks(database_name: str) -> int:
                     col.get("name"),
                 )
                 continue
-            attr_id = find_column_attribute_by_column_id(fk_target_col_id)
-            if attr_id:
-                _log_start(index, col)
-                # merge_semantic_fk refuses (and logs) a cross-database edge on
-                # its own -- should be structurally impossible for a declared
-                # FK, whose target is always a column in the same connected
-                # database, but treat "not written" the same as "no attribute
-                # found" rather than assume.
-                if merge_semantic_fk(col["id"], attr_id):
-                    declared_written += 1
-                    logger.debug(
-                        "resolve_semantic_fks [declared]: %s.%s → attr %s",
-                        col.get("table_name"),
-                        col.get("name"),
-                        attr_id,
-                    )
-                else:
-                    llm_queue.append((index, col))
-            else:
+            _log_start(index, col)
+            # merge_semantic_fk_to_column refuses (and logs) a cross-database
+            # edge, and a target whose table has no Concept to key. Either way
+            # the column is left for the unmatched-FK stage: the declared
+            # target is the one answer, so inference has nothing to add.
+            if merge_semantic_fk_to_column(col["id"], fk_target_col_id):
+                declared_written += 1
                 logger.debug(
-                    "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
+                    "resolve_semantic_fks [declared]: %s.%s → column %s",
+                    col.get("table_name"),
+                    col.get("name"),
                     fk_target_col_id,
                 )
-                llm_queue.append((index, col))
+            else:
+                logger.debug(
+                    "resolve_semantic_fks [declared]: target column %s cannot be "
+                    "a Concept key — left for the unmatched-FK stage",
+                    fk_target_col_id,
+                )
         else:
             llm_queue.append((index, col))
 
@@ -294,11 +289,14 @@ def _resolve_semantic_fks(database_name: str) -> int:
 
 
 def select_semantic_fk_join_defaults(database_name: str) -> int:
-    """Persist exactly one join-path default for every semantic FK group."""
+    """Persist exactly one join-path default for every semantic FK group.
+
+    A group is one source table's FKs into one Concept.
+    """
     rows = fetch_semantic_fk_join_groups(database_name)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        key = (row["source_table_id"], row["target_attribute_id"])
+        key = (row["source_table_id"], row["target_concept_id"])
         grouped.setdefault(key, []).append(row)
 
     ambiguous = [group for group in grouped.values() if len(group) > 1]
@@ -319,7 +317,7 @@ def select_semantic_fk_join_defaults(database_name: str) -> int:
                 len(ambiguous),
             )
 
-    for (source_table_id, target_attribute_id), group in grouped.items():
+    for (source_table_id, target_concept_id), group in grouped.items():
         selected_column_id = group[0]["source_column_id"]
         if len(group) > 1:
             llm_selected = _select_join_default_with_llm(group, llm)
@@ -336,7 +334,7 @@ def select_semantic_fk_join_defaults(database_name: str) -> int:
 
         set_semantic_fk_join_default(
             source_table_id,
-            target_attribute_id,
+            target_concept_id,
             selected_column_id,
         )
         logger.info(
@@ -767,17 +765,32 @@ def _join_returns_rows(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) 
             attribute_id,
         )
         return False
+    return join_probe_returns_rows(keys.connector, col, target)
+
+
+def join_probe_returns_rows(
+    connector: SQLDatabase,
+    col: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    stage: str = "resolve_semantic_fks",
+) -> bool:
+    """Whether joining *col* (``name``) to *target* (``column_name``) returns a row.
+
+    Both carry ``table_name`` and ``schema_name``.
+    """
     label = (
         f"{col.get('table_name')}.{col.get('name')} -> "
         f"{target['table_name']}.{target['column_name']}"
     )
     for as_text in (False, True):
-        sql = _join_probe_sql(keys.connector, col, target, as_text=as_text)
+        sql = _join_probe_sql(connector, col, target, as_text=as_text)
         try:
-            df = execute_capped(keys.connector, sql)
+            df = execute_capped(connector, sql)
         except Exception as exc:
             logger.info(
-                "resolve_semantic_fks [join]: %s failed%s (%s)",
+                "%s [join]: %s failed%s (%s)",
+                stage,
                 label,
                 " as text" if as_text else "",
                 type(exc).__name__,
@@ -785,11 +798,9 @@ def _join_returns_rows(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) 
             continue
         if df is not None and len(df) > 0:
             return True
-        logger.info(
-            "resolve_semantic_fks [join]: %s returns no rows; not stored", label
-        )
+        logger.info("%s [join]: %s returns no rows; not stored", stage, label)
         return False
-    logger.info("resolve_semantic_fks [join]: %s could not run; not stored", label)
+    logger.info("%s [join]: %s could not run; not stored", stage, label)
     return False
 
 

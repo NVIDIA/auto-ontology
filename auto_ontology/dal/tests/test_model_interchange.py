@@ -31,6 +31,11 @@ from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import model_interchange as mi  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.concepts import (  # noqa: E402
+    ensure_term_concept,
+    fetch_column_key_id,
+    merge_concepts,
+)
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
@@ -129,11 +134,9 @@ class World:
             attribute_id=self.attribute,
         )
         _link(s.column_attribute__term, attribute_id=self.attribute, term_id=self.term)
-        _link(
-            s.column__semantic_fk,
-            column_id=self.customer_ref,
-            attribute_id=self.attribute,
-        )
+        self.concept = ensure_term_concept(self.term)
+        self.key = fetch_column_key_id(self.order_id)
+        _link(s.column__semantic_fk, column_id=self.customer_ref, key_id=self.key)
 
 
 def _cleanup(prefix: str) -> None:
@@ -197,6 +200,13 @@ def _reid(document, seed: str):
     for fk in document.semantic_layer.semantic_fks:
         fk.column_id = new(fk.column_id)
         fk.column_attribute_id = new(fk.column_attribute_id)
+        fk.concept_key_id = new(fk.concept_key_id) if fk.concept_key_id else ""
+    for concept in document.semantic_layer.concepts:
+        concept.id = new(concept.id)
+        concept.term_ids = [new(term_id) for term_id in concept.term_ids]
+        for key in concept.keys:
+            key.id = new(key.id)
+            key.column_ids = [new(column_id) for column_id in key.column_ids]
     return document
 
 
@@ -404,6 +414,112 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
         _cleanup(f"{world.prefix}-copy")
 
 
+def _copied_fk_key_tables(document) -> set[str]:
+    """Names of the tables the copied FK's key has member columns on."""
+    return {
+        row["name"]
+        for row in store().query_read(
+            select(s.catalog_table.c.name)
+            .select_from(
+                s.column__semantic_fk.join(
+                    s.catalog_column,
+                    s.catalog_column.c.id == s.column__semantic_fk.c.column_id,
+                )
+                .join(
+                    s.concept_key__column,
+                    s.concept_key__column.c.key_id == s.column__semantic_fk.c.key_id,
+                )
+                .join(
+                    s.catalog_table,
+                    s.catalog_table.c.id == s.concept_key__column.c.table_id,
+                )
+            )
+            .where(
+                s.catalog_column.c.imported_id
+                == document.semantic_layer.semantic_fks[0].column_id
+            )
+        )
+    }
+
+
+def _merge_customers_into_orders(world) -> None:
+    """Make ``customers`` a second member of the Order Concept, keyed on ``id``."""
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.customers)
+        .values(pk=["id"])
+    )
+    customer_term = _add(
+        s.term, name=f"{world.prefix}-Customer", source=SEMANTIC_SOURCE
+    )
+    _link(s.table__term, table_id=world.customers, term_id=customer_term)
+    customer_concept = ensure_term_concept(customer_term)
+    assert merge_concepts(
+        world.concept,
+        customer_concept,
+        key_pairs={fetch_column_key_id(world.customer_id): world.key},
+    )
+
+
+def test_a_merged_concept_survives_the_round_trip(world) -> None:
+    _merge_customers_into_orders(world)
+    target = f"{world.prefix}-copy"
+    document = _reid(_document(world), target)
+    document.data_layer.databases[0].schemas[0].database_name = target
+
+    (concept,) = document.semantic_layer.concepts
+    assert len(concept.term_ids) == 2
+    (key,) = concept.keys
+    assert len(key.column_ids) == 2
+    assert document.semantic_layer.semantic_fks[0].concept_key_id == key.id
+
+    try:
+        mi.apply_import_model(document, replace=False)
+        assert _copied_fk_key_tables(document) == {"orders", "customers"}
+        copied = store().query_read(
+            select(s.concept.c.id)
+            .join(
+                s.catalog_database, s.catalog_database.c.id == s.concept.c.database_id
+            )
+            .where(s.catalog_database.c.name == target)
+        )
+        assert len(copied) == 1
+    finally:
+        _cleanup(target)
+
+
+def test_a_document_without_concepts_keys_fks_by_attribute(world) -> None:
+    """A document written before Concept keys names only the target attribute."""
+    target = f"{world.prefix}-copy"
+    document = _reid(_document(world), target)
+    document.data_layer.databases[0].schemas[0].database_name = target
+    document.semantic_layer.concepts = []
+    for fk in document.semantic_layer.semantic_fks:
+        fk.concept_key_id = ""
+
+    try:
+        mi.apply_import_model(document, replace=False)
+        assert _copied_fk_key_tables(document) == {"orders"}
+    finally:
+        _cleanup(target)
+
+
+def test_replace_drops_the_concept_of_a_dropped_term(world) -> None:
+    document = _document(world)
+    document.semantic_layer.terms = []
+    document.semantic_layer.concepts = []
+    document.semantic_layer.semantic_fks = []
+
+    mi.apply_import_model(document, replace=True)
+
+    assert (
+        store().query_read(
+            select(s.concept.c.id).where(s.concept.c.id == world.concept)
+        )
+        == []
+    )
+
+
 def test_the_round_trip_is_idempotent(world) -> None:
     """Idempotence.
 
@@ -447,7 +563,7 @@ def test_reimport_updates_semantic_fk_join_path_selection(world) -> None:
     selected = store().query_read(
         select(s.column__semantic_fk.c.use_in_join_paths).where(
             s.column__semantic_fk.c.column_id == world.customer_ref,
-            s.column__semantic_fk.c.attribute_id == world.attribute,
+            s.column__semantic_fk.c.key_id == world.key,
         )
     )
     assert selected == [{"use_in_join_paths": False}]

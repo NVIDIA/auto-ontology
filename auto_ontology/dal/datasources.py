@@ -36,8 +36,13 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy import values as sa_values
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import (
+    semantic_fk_attribute_links,
+    semantic_fk_targets,
+)
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
     column_description_expr,
@@ -839,6 +844,7 @@ def _terms_count(table_id: ColumnElement) -> ColumnElement:
             .exists()
         )
 
+    referencing = semantic_fk_attribute_links("terms_count_referencing")
     direct = (
         select(literal(1))
         .where(
@@ -851,7 +857,7 @@ def _terms_count(table_id: ColumnElement) -> ColumnElement:
     return (
         select(func.count())
         .select_from(s.term)
-        .where(direct | via(s.column__has_attribute) | via(s.column__semantic_fk))
+        .where(direct | via(s.column__has_attribute) | via(referencing))
         .correlate(owner)
         .scalar_subquery()
     )
@@ -1018,50 +1024,50 @@ def fetch_columns_for_table(
 
 
 def _semantic_fk_target_expr() -> ColumnElement:
-    """``schema.table.column`` a catalog column's semantic FK lands on.
+    """What a catalog column's semantic FK references, for SQL prompts.
 
-    The FK points at an attribute; the column that owns the attribute is the
-    target. Correlated on ``catalog_column``.
+    ``schema.table.column`` when the target Concept has one member, which is
+    every Concept that is not a split entity. A split one names the Concept
+    and each member's key column, ``Customer (sales.customer.customer_id,
+    sales.customer_ext.customer_id)``: any of them joins. Correlated on
+    ``catalog_column``.
     """
-    semantic_owner = s.column__has_attribute.alias("semantic_fk_owner")
-    semantic_target = s.catalog_column.alias("semantic_fk_target")
-    semantic_table = s.catalog_table.alias("semantic_fk_table")
-    semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
+    member_column = s.catalog_column.alias("semantic_fk_target")
+    member_table = s.catalog_table.alias("semantic_fk_table")
+    member_schema = s.catalog_schema.alias("semantic_fk_schema")
+    qualified = func.concat_ws(
+        ".", member_schema.c.name, member_table.c.name, member_column.c.name
+    )
+    members = func.string_agg(
+        qualified,
+        aggregate_order_by(literal(", "), qualified),
+    )
     return (
         select(
-            func.concat_ws(
-                ".",
-                semantic_schema.c.name,
-                semantic_table.c.name,
-                semantic_target.c.name,
+            case(
+                (func.count() > 1, s.concept.c.name + " (" + members + ")"),
+                else_=func.min(qualified),
             )
         )
         .select_from(
             s.column__semantic_fk.join(
-                semantic_owner,
-                semantic_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+                s.concept_key, s.concept_key.c.id == s.column__semantic_fk.c.key_id
+            )
+            .join(s.concept, s.concept.c.id == s.concept_key.c.concept_id)
+            .join(
+                s.concept_key__column,
+                s.concept_key__column.c.key_id == s.column__semantic_fk.c.key_id,
             )
             .join(
-                semantic_target,
-                semantic_target.c.id == semantic_owner.c.column_id,
+                member_column,
+                member_column.c.id == s.concept_key__column.c.column_id,
             )
-            .join(
-                semantic_table,
-                semantic_table.c.id == semantic_target.c.table_id,
-            )
-            .join(
-                semantic_schema,
-                semantic_schema.c.id == semantic_table.c.schema_id,
-            )
+            .join(member_table, member_table.c.id == member_column.c.table_id)
+            .join(member_schema, member_schema.c.id == member_table.c.schema_id)
         )
         .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+        .group_by(s.concept.c.name)
         .correlate(s.catalog_column)
-        .order_by(
-            semantic_schema.c.name,
-            semantic_table.c.name,
-            semantic_target.c.name,
-        )
-        .limit(1)
         .scalar_subquery()
     )
 
@@ -1084,8 +1090,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     without sample_values from the vector-index hit can be back-filled. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
-    ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    ``semantic_fk`` names what the column references for SQL prompts — see
+    :func:`_semantic_fk_target_expr`.
     """
     if not table_ids:
         return []
@@ -1361,11 +1367,11 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     # target contributes nothing and the size comparison fails -- the second of
     # the two checks described above.
     #
-    # The SEMANTIC_FK route is Column -> ColumnAttribute <- Column: the
-    # attribute this column references is *owned* by some other column, and that
-    # other column is the join target. Reversing it would make every bridge
-    # point back at itself.
-    sem_owner = s.column__has_attribute.alias("sem_owner")
+    # The SEMANTIC_FK route is Column -> Concept key -> member Column: the key
+    # this column references is held by some other column, and that other
+    # column is the join target -- one member of a split Concept is enough.
+    # Reversing it would make every bridge point back at itself.
+    sem_owner = semantic_fk_targets("sem_owner", one_per_fk=True)
     resolved = (
         select(
             s.catalog_column.c.id.label("column_id"),
@@ -1386,15 +1392,8 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
             )
             .outerjoin(fk_table, fk_table.c.id == fk_target.c.table_id)
             .outerjoin(fk_schema, fk_schema.c.id == fk_table.c.schema_id)
-            .outerjoin(
-                s.column__semantic_fk,
-                s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
-            )
-            .outerjoin(
-                sem_owner,
-                sem_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
-            )
-            .outerjoin(sem_target, sem_target.c.id == sem_owner.c.column_id)
+            .outerjoin(sem_owner, sem_owner.c.fk_column_id == s.catalog_column.c.id)
+            .outerjoin(sem_target, sem_target.c.id == sem_owner.c.target_column_id)
             .outerjoin(sem_table, sem_table.c.id == sem_target.c.table_id)
             .outerjoin(sem_schema, sem_schema.c.id == sem_table.c.schema_id)
         )

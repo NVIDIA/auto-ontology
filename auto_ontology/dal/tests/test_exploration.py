@@ -29,6 +29,8 @@ pytest.importorskip("sqlalchemy")
 
 from auto_ontology.dal import exploration as e  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.concepts import ensure_term_concept, merge_concepts  # noqa: E402
+from auto_ontology.dal.tests.fk_links import link_semantic_fk  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
@@ -368,11 +370,13 @@ def test_table_details_finds_terms_by_either_route(world) -> None:
         attribute_id=attribute,
         term_id=world.terms["Customer"],
     )
+    world.table("customers", columns=("id",))
     _link(
-        s.column__semantic_fk,
-        column_id=world.columns["orders.id"],
+        s.column__has_attribute,
+        column_id=world.columns["customers.id"],
         attribute_id=attribute,
     )
+    link_semantic_fk(world.columns["orders.id"], attribute)
 
     details = e.fetch_table_exploration_details(world.tables["orders"])
     assert {t["name"] for t in details["terms"]} == {
@@ -548,6 +552,29 @@ def test_a_semantic_link_is_undirected_and_appears_once(semantic) -> None:
         tuple(sorted((link["source"], link["target"]))) for link in payload["links"]
     ]
     assert len(pairs) == len(set(pairs))
+
+
+def test_terms_of_one_concept_are_linked_and_name_it(world) -> None:
+    """A split entity's tables share no table, so only the Concept links them."""
+    world.table("customer")
+    world.table("customer_ext")
+    customer = world.term("Customer", represents=("customer",))
+    ext = world.term("Customer Ext", represents=("customer_ext",))
+    concept = ensure_term_concept(customer)
+    assert merge_concepts(concept, ensure_term_concept(ext))
+
+    payload = e.fetch_semantic_exploration_graph(database_id=world.database)
+
+    by_id = {node["id"]: node for node in payload["nodes"]}
+    assert by_id[customer]["concept"] == by_id[ext]["concept"]
+    assert by_id[customer]["concept"]["id"] == concept
+    assert set(by_id[customer]["concept"]["term_ids"]) == {customer, ext}
+    key = tuple(sorted((customer, ext)))
+    assert {
+        "source": key[0],
+        "target": key[1],
+        "relationship_types": ["SAME_CONCEPT"],
+    } in payload["links"]
 
 
 def test_semantic_graph_filters_to_one_database(world) -> None:

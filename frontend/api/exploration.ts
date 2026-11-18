@@ -110,6 +110,7 @@ export const explorationApi = {
 					relationshipCount: node.relationship_count,
 					columnAttributesCount: 0,
 					sqlAttributesCount: 0,
+					concept: null,
 				} satisfies ExplorationTermNode;
 			}
 			return {

@@ -1,6 +1,6 @@
 {
   "attributes": {
-    "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
+    "attribute_owner_column_id": "(attr_id: 'str') -> 'str | None'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
     "fetch_attributes_to_describe": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
@@ -8,22 +8,33 @@
     "fetch_semantic_fk_ends": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_value_key_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
-    "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
-    "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
-    "find_kept_table_bridges": "(table_ids: 'list[str]', allowed_table_ids: 'set[str] | None' = None, max_bridge_tables: 'int' = 5) -> 'tuple[list[dict], list[list[dict]], int]'",
-    "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",
-    "find_table_bridge": "(table_a_id: 'str', table_b_id: 'str', allowed_table_ids: 'set[str] | None' = None) -> 'tuple[list[dict], list[dict]]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None' = None) -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
-    "set_semantic_fk_join_default": "(source_table_id: 'str', target_attribute_id: 'str', selected_column_id: 'str') -> 'None'",
+    "merge_semantic_fk_to_column": "(src_column_id: 'str', target_column_id: 'str') -> 'bool'",
+    "set_semantic_fk_join_default": "(source_table_id: 'str', target_concept_id: 'str', selected_column_id: 'str') -> 'None'",
     "store_attribute_descriptions": "(descriptions: 'dict[str, str]') -> 'int'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
   },
   "candidates": {
     "expand_info": "(ids_and_labels: 'list | None') -> 'dict'"
+  },
+  "concepts": {
+    "delete_orphan_concepts": "(database_ids: 'Iterable[str]') -> 'int'",
+    "ensure_column_key": "(column_id: 'str') -> 'str | None'",
+    "ensure_concept_key": "(concept_id: 'str', column_id: 'str') -> 'str | None'",
+    "ensure_term_concept": "(term_id: 'str') -> 'str | None'",
+    "fetch_column_key_id": "(column_id: 'str') -> 'str | None'",
+    "fetch_concept_fields": "(concept_ids: 'Iterable[str]') -> 'list[dict[str, Any]]'",
+    "fetch_concept_members": "(table_ids: 'Iterable[str]') -> 'dict[str, dict[str, Any]]'",
+    "fetch_concept_merge_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_table_concept_id": "(table_id: 'str') -> 'str | None'",
+    "fetch_term_concepts": "(term_ids: 'Iterable[str]') -> 'dict[str, dict[str, Any]]'",
+    "merge_concepts": "(survivor_id: 'str', absorbed_id: 'str', *, key_pairs: 'Mapping[str, str] | None' = None, name: 'str | None' = None) -> 'bool'",
+    "semantic_fk_attribute_links": "(name: 'str' = 'semantic_fk_attribute') -> 'Subquery'",
+    "semantic_fk_targets": "(name: 'str' = 'semantic_fk_target', *, one_per_fk: 'bool' = False) -> 'Subquery'"
   },
   "connections": {
     "clear_connection": "(*, database_name: 'str') -> 'None'",

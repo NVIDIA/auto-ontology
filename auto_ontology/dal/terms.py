@@ -43,6 +43,10 @@ from sqlalchemy.dialects.postgresql import insert
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.attributes import fetch_column_attribute_columns_map
+from auto_ontology.dal.concepts import (
+    ensure_term_concept,
+    semantic_fk_attribute_links,
+)
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.tags import TARGET_COLUMN_ATTRIBUTE, TARGET_TERM, fetch_tags_map
@@ -426,6 +430,9 @@ def upsert_table_term(
     The proposed name is kept unless another table already owns it. Collisions
     are qualified with the table's full catalog identity, keeping the global
     ``(name, source)`` constraint and name-based attribute lookups unambiguous.
+    The Term's one-member Concept is created here as well
+    (:func:`~auto_ontology.dal.concepts.ensure_term_concept`), so every
+    committed Term has one.
     Returns ``(term_id, persisted_name)``, or ``None`` for a missing table.
     """
     with write_transaction():
@@ -492,6 +499,7 @@ def upsert_table_term(
                     .where(s.term.c.id == term_id)
                     .values(description=description, synonyms=synonyms or [])
                 )
+                ensure_term_concept(term_id)
                 return term_id, candidate_name
             if existing:
                 continue
@@ -516,6 +524,7 @@ def upsert_table_term(
             store().query_write(
                 insert(s.table__term).values(table_id=table_id, term_id=term_id)
             )
+            ensure_term_concept(term_id)
             return term_id, candidate_name
 
     raise RuntimeError(f"Could not allocate a private Term name for table {table_id}")
@@ -1507,6 +1516,7 @@ def fetch_term_table_pairs(
     # The link's own type is carried along so ``path`` can name it below -- the
     # two legs are otherwise identical, and unioning them first would lose which
     # one matched.
+    referencing = semantic_fk_attribute_links("term_pair_fk_attribute")
     link = (
         select(
             s.column__has_attribute.c.column_id,
@@ -1515,8 +1525,8 @@ def fetch_term_table_pairs(
         )
         .union(
             select(
-                s.column__semantic_fk.c.column_id,
-                s.column__semantic_fk.c.attribute_id,
+                referencing.c.column_id,
+                referencing.c.attribute_id,
                 literal(REL_SEMANTIC_FK).label("rel_type"),
             )
         )
@@ -1698,8 +1708,8 @@ _LINK_PATH_LABELS = {
 def _term_link_edges():
     """Every edge a term↔term path may walk, **undirected**, tagged with its type.
 
-    Unlike :data:`~auto_ontology.dal.schema.JOIN_PATH_EDGE_VIEW_SQL`, SEMANTIC_FK is
-    emitted in *both* directions here. A term↔term edge already means the two
+    SEMANTIC_FK is emitted in *both* directions here, each FK linking its
+    column to the attributes of its Concept key's member columns. A term↔term edge already means the two
     terms genuinely share a table under :func:`fetch_term_table_pairs`'s rules,
     so tracing some real path between them cannot fabricate a link the way
     ``find_join_path``'s column-to-column search could -- it can only surface a
@@ -1725,7 +1735,7 @@ def _term_link_edges():
         s.table__term,
         s.catalog_column,
         s.column_attribute__term,
-        s.column__semantic_fk,
+        semantic_fk_attribute_links("term_link_fk_attribute"),
         s.column__has_attribute,
     )
     return (
