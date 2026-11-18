@@ -66,8 +66,8 @@ the UI (user menu → API Tokens). A token **acts as its owner** — a viewer's
 token cannot do admin things. Creating and revoking tokens requires a signed-in
 session; a token cannot mint another token.
 
-Writes below need `catalog:edit` unless noted. A term or node can also be
-edited by members of its owner group. `403` means neither the owner's role nor
+Writes below need `catalog:edit` unless noted. A term, or a node other than a
+column, can also be edited by members of its owner group. `403` means neither the owner's role nor
 the row's owner group permits the write, not that the path is wrong.
 
 ## Instructions

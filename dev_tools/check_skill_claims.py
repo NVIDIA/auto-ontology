@@ -52,7 +52,7 @@ _REPO_PATH = re.compile(
 )
 _LINK = re.compile(r"\]\(((?!https?://|mailto:|#)[^)\s]+)\)")
 _TABLE_ROW = re.compile(
-    r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*`?(/api/[^|`]+)`?\s*\|\s*`?([^|`]*)`?\s*\|"
+    r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*`?(/api/[^|`]+)`?\s*\|([^|]*)\|"
 )
 
 
@@ -164,14 +164,19 @@ def check_file(path: Path) -> list[Finding]:
 
         if row := _TABLE_ROW.match(line.strip()):
             method, api_path, perm_cell = row.groups()
-            ops = _openapi().get(_template(api_path.strip()), {})
+            api_path = api_path.strip()
+            if problem := _check_operation(method, api_path):
+                add(number, "operation", f"{method} {api_path}", problem)
+            ops = _openapi().get(_template(api_path), {})
             documented = ops.get(method)
             claimed = set(re.findall(r"[a-z][A-Za-z]+:[a-z][A-Za-z]+", perm_cell))
+            for perm in sorted(claimed - _all_permissions()):
+                add(number, "permission", perm, "no operation requires it")
             if documented is not None and claimed and not documented <= claimed:
                 add(
                     number,
                     "permission",
-                    f"{method} {api_path.strip()} -> {', '.join(sorted(claimed))}",
+                    f"{method} {api_path} -> {', '.join(sorted(claimed))}",
                     f"documented: {', '.join(sorted(documented)) or '(none)'}",
                 )
 
@@ -206,7 +211,8 @@ def check_file(path: Path) -> list[Finding]:
             if target and not (path.parent / target).resolve().exists():
                 add(number, "link", link, "target does not exist")
 
-    return findings
+    # A table row's permission is read by the row rule and the prose rule.
+    return list(dict.fromkeys(findings))
 
 
 def check_all() -> list[Finding]:

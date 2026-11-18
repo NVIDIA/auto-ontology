@@ -161,10 +161,10 @@
     {
       "id": "management-eval-014-negative-probe-without-sql",
       "prompt": "I removed the Late Order measure and ran a negative probe: ask_question(\"How many late orders last week?\") returned no SQL and the answer \"I couldn't write a query that answers this question from the data I could find.\" Did the probe fail?",
-      "expected_output": "No. The probe passed: the agent found no query for the removed meaning and said so. A negative probe fails only when it returns SQL over the removed measure.",
+      "expected_output": "No. The probe passed: the agent found no query for the removed meaning and said so, without stating a late-order value. A negative probe fails when it returns SQL over the removed measure, or an answer that still states it.",
       "assertions": [
         "Treats the no-SQL unanswered message as a passing negative probe",
-        "States that SQL over the removed meaning would be the failure"
+        "States that SQL over the removed meaning, or an answer still stating it, would be the failure"
       ],
       "expected_skill": "nvidia-ontology-management",
       "expected_script": null
