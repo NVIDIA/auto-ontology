@@ -970,8 +970,22 @@ def test_join_routes_quote_their_names() -> None:
     )
 
 
-def test_a_join_route_is_quoted_in_its_tables_dialect() -> None:
-    ctx = ToolContext(connectors=[])
+def test_a_join_route_is_quoted_in_its_tables_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ToolContext(
+        connectors=[SimpleNamespace(database_name="lake", dialect="spark")],
+        dialect="postgres",
+    )
+    orders = {
+        "id": "t-orders",
+        "database_name": "lake",
+        "schema_name": "sales-data",
+        "name": "orders",
+    }
+    customers = {**orders, "id": "t-customers", "name": "customers"}
+    ctx.seen_tables["t-customers"] = customers
+    ctx.anchor_column_ids.update({"t-orders": "c-orders", "t-customers": "c-cust"})
     hop = {
         "source_schema": "sales-data",
         "source_table": "orders",
@@ -980,10 +994,13 @@ def test_a_join_route_is_quoted_in_its_tables_dialect() -> None:
         "target_table": "customers",
         "target_column": "id",
     }
+    monkeypatch.setattr(tool, "find_join_path", lambda *_: [hop])
 
-    assert (
-        tool._hop_text(ctx, hop, "spark")
-        == "`sales-data`.orders.customer_id = `sales-data`.customers.id"
+    [(line, _)] = tool._join_lines(ctx, [orders])
+
+    assert line == (
+        "JOIN `sales-data`.orders ↔ `sales-data`.customers: "
+        "`sales-data`.orders.customer_id = `sales-data`.customers.id"
     )
 
 
