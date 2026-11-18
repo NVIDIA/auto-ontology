@@ -56,6 +56,7 @@ def test_qualified_name_skips_empty_parts() -> None:
         ),
         ("kubeType", "postgres", '"kubeType"'),
         ("select", "postgres", '"select"'),
+        ("as", "postgres", '"as"'),
         ("my col", "postgres", '"my col"'),
         ("ORDERS", "snowflake", "ORDERS"),
         ("orders", "snowflake", '"orders"'),

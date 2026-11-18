@@ -434,6 +434,11 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["total"]["is_nullable"] is None
     assert columns["order_id"]["semantic_fk"] is None
     assert columns["customer_id"]["semantic_fk"] == "shop.customers.customer_id"
+    assert columns["customer_id"]["semantic_fk_parts"] == [
+        "shop",
+        "customers",
+        "customer_id",
+    ]
     assert columns["total"]["semantic_fk"] is None
 
 

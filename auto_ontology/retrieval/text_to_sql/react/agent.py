@@ -101,7 +101,10 @@ class ReactSQLAgent(BaseAgent):
             custom_prompts=state.get("custom_prompts") or "",
         )
         connector = connector_for(ctx)
-        ctx.dialect = getattr(connector, "dialect", None)
+        dialects = {getattr(c, "dialect", None) for c in ctx.connectors}
+        ctx.dialect = getattr(connector, "dialect", None) or (
+            dialects.pop() if len(dialects) == 1 else None
+        )
         # A connector that charges for queries says so through cost_status.
         cost_status = getattr(connector, "cost_status", None)
         if callable(cost_status):

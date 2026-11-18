@@ -62,9 +62,12 @@ def needs_quoting(name: str, dialect: str | None = None) -> bool:
     if target.normalize_identifier(exp.to_identifier(name)).name != name:
         return True
     try:
-        column = sqlglot.parse_one(f"SELECT {name}", read=target).selects[0]
+        selects = sqlglot.parse_one(f"SELECT {name}", read=target).selects
     except sqlglot.errors.SqlglotError:
         return True
+    if len(selects) != 1:
+        return True
+    column = selects[0]
     return not (
         isinstance(column, exp.Column) and column.name == name and not column.table
     )

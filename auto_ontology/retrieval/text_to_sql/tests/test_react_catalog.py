@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
+
 import sqlglot
 from sqlglot import exp
 
@@ -923,16 +924,16 @@ _UUID_DB = "01a1d278-8f97-7755-8907-45833c5c34a5"
 
 
 @pytest.mark.parametrize(
-    ("schema", "table", "column", "shown"),
+    ("schema", "table", "column", "shown", "column_shown"),
     [
-        ("sales-data", "orders", "amount", '"sales-data".orders'),
-        (_UUID_DB, "orders", "amount", f'"{_UUID_DB}".orders'),
-        ("crm", "Customers", "customerId", 'crm."Customers"'),
-        ("crm", "customers", "status", "crm.customers"),
+        ("sales-data", "orders", "amount", '"sales-data".orders', "amount"),
+        (_UUID_DB, "orders", "amount", f'"{_UUID_DB}".orders', "amount"),
+        ("crm", "Customers", "customerId", 'crm."Customers"', '"customerId"'),
+        ("crm", "customers", "status", "crm.customers", "status"),
     ],
 )
 def test_names_are_shown_the_way_postgres_needs_them_written(
-    schema: str, table: str, column: str, shown: str
+    schema: str, table: str, column: str, shown: str, column_shown: str
 ) -> None:
     ctx = ToolContext(connectors=[], dialect="postgres")
     block = tool._table_block(
@@ -944,6 +945,7 @@ def test_names_are_shown_the_way_postgres_needs_them_written(
 
     assert block.splitlines()[0] == f"TABLE {shown}"
     written = block.splitlines()[1].strip()
+    assert written == column_shown
     sql = f"SELECT {written} FROM {shown}"
     statement = sqlglot.parse_one(sql, read="postgres")
     assert statement.find(exp.Table).db == schema
@@ -966,3 +968,56 @@ def test_join_routes_quote_their_names() -> None:
         tool._hop_text(ctx, hop)
         == '"sales-data".orders."customerId" = crm.customers.id'
     )
+
+
+def test_names_are_quoted_for_the_database_the_table_is_in() -> None:
+    ctx = ToolContext(
+        connectors=[
+            SimpleNamespace(database_name="shop", dialect="postgres"),
+            SimpleNamespace(database_name="lake", dialect="spark"),
+        ],
+    )
+    table = {
+        "database_name": "lake",
+        "schema_name": "sales-data",
+        "name": "orders",
+        "columns": [
+            {
+                "name": "my col",
+                "semantic_fk": "sales-data.customers.id",
+                "semantic_fk_parts": ["sales-data", "customers", "id"],
+            }
+        ],
+    }
+
+    assert tool._table_block(ctx, table, set(), False).splitlines() == [
+        "TABLE `sales-data`.orders",
+        "  `my col` — references `sales-data`.customers.id",
+    ]
+
+
+def test_a_reference_is_quoted_part_by_part() -> None:
+    ctx = ToolContext(connectors=[], dialect="postgres")
+    column = {
+        "name": "customer_ref",
+        "semantic_fk": "crm.customers.v2.id",
+        "semantic_fk_parts": ["crm", "customers.v2", "id"],
+    }
+
+    assert tool._column_line(ctx, column) == (
+        '  customer_ref — references crm."customers.v2".id'
+    )
+
+
+def test_a_short_block_says_to_retrieve_the_name_as_searched() -> None:
+    ctx = ToolContext(connectors=[], dialect="postgres")
+    table = {
+        "schema_name": "sales-data",
+        "name": "orders",
+        "columns": [{"name": "a"}, {"name": "b"}],
+    }
+
+    assert tool._short_table_block(ctx, table, set()).splitlines() == [
+        'TABLE "sales-data".orders (shortened to fit)',
+        "  … 2 more columns not shown; retrieve sales-data.orders to see all of them",
+    ]
