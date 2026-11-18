@@ -1131,10 +1131,12 @@ def test_key_value_probe_with_a_zero_column_result_returns_no_values() -> None:
     assert probe_ascending_distinct_values(connector, "raw", "orders", "id") == []
 
 
-def test_one_failing_key_column_does_not_stop_the_next(store_key_values) -> None:
+def test_one_failing_key_column_does_not_stop_the_next(
+    store_key_values: MagicMock,
+) -> None:
     connector = _CappedConnector()
 
-    def probe(_connector, _schema, _table, column):
+    def probe(_connector: MagicMock, _schema, _table, column):
         if column == "a_bad":
             raise RuntimeError("unexpected")
         return [1, 2]
@@ -1176,7 +1178,7 @@ def test_a_key_probe_timeout_outside_the_query_counts_toward_the_breaker() -> No
 
 
 def test_a_persistence_error_while_storing_key_values_propagates(
-    store_key_values,
+    store_key_values: MagicMock,
 ) -> None:
     store_key_values.side_effect = RuntimeError("db down")
 
