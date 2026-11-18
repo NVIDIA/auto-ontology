@@ -282,6 +282,20 @@ def test_undeclared_column_takes_the_most_common_storage_class(
     assert _types(db, "mixed") == {"code": "INTEGER"}
 
 
+def test_undeclared_column_named_like_sql_aliases_is_inferred(
+    connector_factory: Callable[[str], SQLiteDatabase],
+) -> None:
+    """Grouping by the expression keeps a column named ``storage`` or ``n``
+    from shadowing the inference query's own names."""
+    db = connector_factory(
+        """
+        CREATE TABLE odd (storage, n);
+        INSERT INTO odd VALUES ('a', 1), ('b', 2), ('c', 3);
+        """
+    )
+    assert _types(db, "odd") == {"storage": "TEXT", "n": "INTEGER"}
+
+
 def test_declared_types_are_kept_as_declared(
     connector_factory: Callable[[str], SQLiteDatabase],
 ) -> None:

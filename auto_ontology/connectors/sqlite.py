@@ -230,10 +230,10 @@ class SQLiteDatabase(SQLDatabase):
         column = _quote(column_name)
         try:
             row = self._conn.execute(
-                f"SELECT typeof({column}) AS storage, COUNT(*) AS n FROM "
+                f"SELECT typeof({column}) FROM "
                 f"(SELECT {column} FROM {_quote(table_name)} "
                 f"WHERE {column} IS NOT NULL LIMIT {_TYPE_SAMPLE_ROWS}) "
-                "GROUP BY storage ORDER BY n DESC LIMIT 1"
+                f"GROUP BY typeof({column}) ORDER BY COUNT(*) DESC LIMIT 1"
             ).fetchone()
         except sqlite3.Error:
             return "TEXT"
