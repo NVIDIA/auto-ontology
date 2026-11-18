@@ -344,6 +344,95 @@ def test_assemble_export_document_keeps_in_scope_references() -> None:
     assert document.semantic_layer.terms[0].represents == ["tbl-1"]
 
 
+def test_assemble_export_document_orders_fks_joins_and_semantic_fks_deterministically() -> (
+    None
+):
+    base = _catalog_rows()[0]
+    rows = _export_rows()
+    rows["catalog"] = [
+        base,
+        {
+            **base,
+            "column_id": "col-2",
+            "column_name": "customer_id",
+            "ordinal_position": 2,
+        },
+        {
+            **base,
+            "table_id": "tbl-2",
+            "table_name": "customers",
+            "column_id": "col-3",
+            "column_name": "id",
+            "ordinal_position": 1,
+        },
+    ]
+    rows["terms"][0]["columns_attributes"] = [
+        {"id": "attr-1", "name": "order id", "description": "", "column_id": "col-1"},
+        {
+            "id": "attr-2",
+            "name": "customer id",
+            "description": "",
+            "column_id": "col-3",
+        },
+    ]
+    rows["foreign_keys"] = [
+        {"source_column_id": "col-3", "target_column_id": "col-1"},
+        {"source_column_id": "col-2", "target_column_id": "col-3"},
+        {"source_column_id": "col-2", "target_column_id": "col-1"},
+    ]
+    rows["joins"] = [
+        {"source_table_id": "tbl-2", "target_table_id": "tbl-1", "join_columns": []},
+        {"source_table_id": "tbl-1", "target_table_id": "tbl-2", "join_columns": []},
+    ]
+    rows["semantic_fks"] = [
+        {
+            "column_id": "col-3",
+            "column_attribute_id": "attr-1",
+            "use_in_join_paths": True,
+        },
+        {
+            "column_id": "col-2",
+            "column_attribute_id": "attr-2",
+            "use_in_join_paths": True,
+        },
+        {
+            "column_id": "col-2",
+            "column_attribute_id": "attr-1",
+            "use_in_join_paths": False,
+        },
+    ]
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    assert [
+        (fk.source_column_id, fk.target_column_id)
+        for fk in document.data_layer.foreign_keys
+    ] == [
+        ("col-2", "col-1"),
+        ("col-2", "col-3"),
+        ("col-3", "col-1"),
+    ]
+    assert [
+        (join.source_table_id, join.target_table_id)
+        for join in document.data_layer.joins
+    ] == [
+        ("tbl-1", "tbl-2"),
+        ("tbl-2", "tbl-1"),
+    ]
+    assert [
+        (sfk.column_id, sfk.column_attribute_id)
+        for sfk in document.semantic_layer.semantic_fks
+    ] == [
+        ("col-2", "attr-1"),
+        ("col-2", "attr-2"),
+        ("col-3", "attr-1"),
+    ]
+
+
 def test_assemble_export_document_drops_sql_attributes_of_absent_terms() -> None:
     rows = _export_rows()
     rows["terms"] = []
