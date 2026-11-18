@@ -970,6 +970,23 @@ def test_join_routes_quote_their_names() -> None:
     )
 
 
+def test_a_join_route_is_quoted_in_its_tables_dialect() -> None:
+    ctx = ToolContext(connectors=[])
+    hop = {
+        "source_schema": "sales-data",
+        "source_table": "orders",
+        "source_column": "customer_id",
+        "target_schema": "sales-data",
+        "target_table": "customers",
+        "target_column": "id",
+    }
+
+    assert (
+        tool._hop_text(ctx, hop, "spark")
+        == "`sales-data`.orders.customer_id = `sales-data`.customers.id"
+    )
+
+
 def test_names_are_quoted_for_the_database_the_table_is_in() -> None:
     ctx = ToolContext(
         connectors=[

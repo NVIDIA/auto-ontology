@@ -527,12 +527,18 @@ def _anchor_column_id(ctx: ToolContext, table: dict) -> str | None:
     return ctx.anchor_column_ids[table_id]
 
 
-def _hop_text(ctx: ToolContext, hop: dict) -> str:
+def _hop_text(ctx: ToolContext, hop: dict, dialect: str | None = None) -> str:
     left = ctx.name(
-        hop.get("source_schema"), hop.get("source_table"), hop.get("source_column")
+        hop.get("source_schema"),
+        hop.get("source_table"),
+        hop.get("source_column"),
+        dialect=dialect,
     )
     right = ctx.name(
-        hop.get("target_schema"), hop.get("target_table"), hop.get("target_column")
+        hop.get("target_schema"),
+        hop.get("target_table"),
+        hop.get("target_column"),
+        dialect=dialect,
     )
     return f"{left} = {right}"
 
@@ -601,9 +607,12 @@ def _join_lines(
             hops = find_join_path(anchor, dest)
             if hops:
                 ctx.join_paths.append({"path": hops})
+                dialect = ctx.dialect_of(table)
+                if dialect != ctx.dialect_of(other):
+                    dialect = None
                 line = (
                     f"JOIN {ctx.qualified(table)} ↔ {ctx.qualified(other)}: "
-                    + " → ".join(_hop_text(ctx, h) for h in hops)
+                    + " → ".join(_hop_text(ctx, h, dialect) for h in hops)
                 )
                 lines.append((line, _hop_tables(hops)))
     return lines
