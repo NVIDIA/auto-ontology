@@ -232,3 +232,68 @@ def test_table_info_fallback_when_table_xinfo_returns_empty(
     legacy_cols = cols[cols["table_name"] == "legacy"]
     assert legacy_cols["column_name"].tolist() == ["id", "name"]
     assert legacy_cols["ordinal_position"].tolist() == [1, 2]
+
+
+def _types(db: SQLiteDatabase, table: str) -> dict[str, str]:
+    cols = db.get_columns()
+    rows = cols[cols["table_name"] == table]
+    return dict(zip(rows["column_name"], rows["data_type"]))
+
+
+def test_undeclared_columns_report_the_type_their_values_are_stored_as(
+    connector_factory: Callable[[str], SQLiteDatabase],
+) -> None:
+    """A column with no declared type keeps each value's own type, so ``'1'``
+    never matches a stored ``1``. Reporting the stored type keeps query writers
+    from quoting integer keys."""
+    db = connector_factory(
+        """
+        CREATE TABLE so_hdr (so_id, site_id, total, status_cd, payload, notes);
+        INSERT INTO so_hdr VALUES (1, 1, 10.5, 'R', x'00', NULL);
+        INSERT INTO so_hdr VALUES (2, 1, 20.0, 'P', x'01', NULL);
+        INSERT INTO so_hdr VALUES (3, 2, 7.25, 'C', x'02', NULL);
+        """
+    )
+    assert _types(db, "so_hdr") == {
+        "so_id": "INTEGER",
+        "site_id": "INTEGER",
+        "total": "REAL",
+        "status_cd": "TEXT",
+        "payload": "BLOB",
+        "notes": "TEXT",
+    }
+    # The inferred type is the one a comparison needs.
+    conn = db._conn
+    quoted = "SELECT COUNT(*) FROM so_hdr WHERE site_id = '1'"
+    assert tuple(conn.execute(quoted).fetchone()) == (0,)
+    unquoted = "SELECT COUNT(*) FROM so_hdr WHERE site_id = 1"
+    assert tuple(conn.execute(unquoted).fetchone()) == (2,)
+
+
+def test_undeclared_column_takes_the_most_common_storage_class(
+    connector_factory: Callable[[str], SQLiteDatabase],
+) -> None:
+    db = connector_factory(
+        """
+        CREATE TABLE mixed (code);
+        INSERT INTO mixed VALUES (1), (2), (3), ('n/a');
+        """
+    )
+    assert _types(db, "mixed") == {"code": "INTEGER"}
+
+
+def test_declared_types_are_kept_as_declared(
+    connector_factory: Callable[[str], SQLiteDatabase],
+) -> None:
+    """Only undeclared columns are inferred; a declared type is never overridden."""
+    db = connector_factory(
+        """
+        CREATE TABLE typed (id INTEGER, code TEXT, amount NUMERIC);
+        INSERT INTO typed VALUES (1, '7', 3);
+        """
+    )
+    assert _types(db, "typed") == {
+        "id": "INTEGER",
+        "code": "TEXT",
+        "amount": "NUMERIC",
+    }
