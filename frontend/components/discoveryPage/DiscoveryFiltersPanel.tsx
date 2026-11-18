@@ -8,11 +8,7 @@ import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { Button, SelectButton } from '@/common/Button';
-import {
-	SEARCH_TYPE_ICON,
-	SEARCH_TYPE_TAB_LABEL,
-	SEARCH_TYPE_TAB_ORDER,
-} from '@/common/globalSearchMeta';
+import { SEARCH_TYPE_TAB_LABEL, SEARCH_TYPE_TAB_ORDER } from '@/common/globalSearchMeta';
 import { Icon, IconName } from '@/common/icons';
 import { Popover } from '@/common/Popover';
 import { SearchInput } from '@/common/SearchInput';
@@ -21,7 +17,7 @@ import { DEFAULT_DISCOVERY_FILTERS } from '@/constants/discovery';
 import { UNTAGGED_TAG_FILTER } from '@/constants/search';
 import { ButtonTheme, SelectButtonTheme, Size } from '@/enums/button';
 import { PopoverAlign } from '@/enums/popover';
-import type { SearchObjectType } from '@/enums/search';
+import { SearchObjectType } from '@/enums/search';
 import { tagQueries } from '@/lib/queries/tags';
 import type { DiscoveryFilters } from '@/types/discovery';
 import { DataFilter } from './DataFilter';
@@ -117,6 +113,84 @@ const FilterRow = ({ icon, title, changed, children }: FilterRowProps) => (
 );
 
 /**
+ * The object list's sections, in the order the design system lays them out.
+ *
+ * Only kinds the search can send are listed: the design's BI objects, queries
+ * and documents have no `SearchObjectType`, so offering them would narrow the
+ * panel without narrowing the query.
+ */
+const OBJECT_FILTER_GROUPS: { title: string; types: SearchObjectType[] }[] = [
+	{
+		title: 'All Semantic Objects',
+		types: [
+			SearchObjectType.Term,
+			SearchObjectType.Attribute,
+			SearchObjectType.SqlAttribute,
+			SearchObjectType.Analysis,
+			SearchObjectType.PqlAnalysis,
+		],
+	},
+	{
+		title: 'All Data Objects',
+		types: [
+			SearchObjectType.Db,
+			SearchObjectType.Schema,
+			SearchObjectType.Table,
+			SearchObjectType.View,
+			SearchObjectType.Column,
+		],
+	},
+	{ title: 'System', types: [SearchObjectType.Tag] },
+];
+
+const OBJECT_FILTER_ICON: Record<SearchObjectType, IconName> = {
+	[SearchObjectType.Term]: IconName.Terms,
+	[SearchObjectType.Attribute]: IconName.SystemAttributes,
+	[SearchObjectType.SqlAttribute]: IconName.SystemQuery,
+	[SearchObjectType.Analysis]: IconName.SystemAnalysis,
+	[SearchObjectType.PqlAnalysis]: IconName.SystemMetric,
+	[SearchObjectType.Db]: IconName.SystemDatabase,
+	[SearchObjectType.Schema]: IconName.Schema,
+	[SearchObjectType.Table]: IconName.Table,
+	[SearchObjectType.View]: IconName.View,
+	[SearchObjectType.Column]: IconName.Column,
+	[SearchObjectType.Tag]: IconName.SystemTag,
+};
+
+type ObjectOptionProps = {
+	type: SearchObjectType;
+	checked: boolean;
+	onToggle: () => void;
+};
+
+const ObjectOption = ({ type, checked, onToggle }: ObjectOptionProps) => (
+	<button
+		type="button"
+		role="menuitemcheckbox"
+		aria-checked={checked}
+		onClick={onToggle}
+		className="flex w-full items-center justify-between gap-2 py-1 pr-2 pl-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-700"
+	>
+		<span className="flex min-w-0 items-center gap-1">
+			<Icon
+				name={OBJECT_FILTER_ICON[type]}
+				className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
+			/>
+			<span className="truncate text-sm leading-5 text-body dark:text-zinc-300">
+				{SEARCH_TYPE_TAB_LABEL[type]}
+			</span>
+		</span>
+		{checked && (
+			<Icon
+				name={IconName.SystemChecked}
+				className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
+				aria-hidden
+			/>
+		)}
+	</button>
+);
+
+/**
  * Which kinds of object a search may hit.
  *
  * Null is every kind, so the list opens with every box ticked — an unfiltered
@@ -153,7 +227,7 @@ const ObjectsFilter = ({
 			// stretched to it: the field is sized to the panel's column and a
 			// list of ten object names is not.
 			align={PopoverAlign.Right}
-			panelClassName="w-56 max-h-80 overflow-y-auto p-1"
+			panelClassName="w-56 max-h-[70vh] overflow-y-auto py-1.5"
 			trigger={({ open, toggle }) => (
 				<SelectButton
 					theme={SelectButtonTheme.SelectField}
@@ -170,11 +244,9 @@ const ObjectsFilter = ({
 			)}
 		>
 			{() => (
-				<div className="flex flex-col">
-					<div className="flex items-center justify-between gap-2 px-2 py-1">
-						<span className="text-xs font-medium text-secondary dark:text-zinc-400">
-							Filter By
-						</span>
+				<div className="flex flex-col" role="menu" aria-label="Object types">
+					<div className="flex items-center gap-5 px-4 py-1.5 text-sm leading-5 whitespace-nowrap">
+						<span className="text-secondary dark:text-zinc-400">Filter By</span>
 						<Button
 							theme={ButtonTheme.Minimal}
 							size={Size.SMALL}
@@ -184,27 +256,24 @@ const ObjectsFilter = ({
 							{bulkActionLabel(allSelected)}
 						</Button>
 					</div>
-					{SEARCH_TYPE_TAB_ORDER.map((type) => {
-						const checked = effective.includes(type);
-						return (
-							<label
-								key={type}
-								className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-body hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-							>
-								<input
-									type="checkbox"
-									checked={checked}
-									onChange={() => toggleType(type)}
-									className="h-4 w-4 shrink-0 accent-[#76b900]"
+					<div className="py-1.5" role="separator">
+						<div className="h-px bg-divider dark:bg-zinc-700" />
+					</div>
+					{OBJECT_FILTER_GROUPS.map((group) => (
+						<div key={group.title} role="group" aria-label={group.title}>
+							<p className="py-1.5 pl-4 text-xs leading-[18px] text-secondary dark:text-zinc-400">
+								{group.title}
+							</p>
+							{group.types.map((type) => (
+								<ObjectOption
+									key={type}
+									type={type}
+									checked={effective.includes(type)}
+									onToggle={() => toggleType(type)}
 								/>
-								<Icon
-									name={SEARCH_TYPE_ICON[type]}
-									className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
-								/>
-								<span className="truncate">{SEARCH_TYPE_TAB_LABEL[type]}</span>
-							</label>
-						);
-					})}
+							))}
+						</div>
+					))}
 				</div>
 			)}
 		</Popover>
