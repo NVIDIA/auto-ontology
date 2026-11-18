@@ -1,11 +1,12 @@
 ---
 name: nvidia-ontology-management
 description: >-
-  Model and publish semantic definitions in Auto Ontology. Use for terms, relationships,
-  measures, imports, and governed results—not deployment or querying.
+  Model and publish Auto Ontology semantics. Use for terms, relationships,
+  measures, imports, MCP write requests, and governed results; not deployment
+  or querying.
 license: Apache-2.0
 metadata:
-  version: "0.2.1"
+  version: "0.2.2"
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
@@ -55,6 +56,8 @@ the deployment or semantic layer is not ready.
 MCP is read-only, Auto Ontology has no generic result-row writeback endpoint, and current
 model import and certification APIs do not prove atomic promotion. Follow the
 publication gates below and fail closed when exact readback is unavailable.
+When asked to write through MCP, say that MCP is read-only and use the REST
+write path below.
 
 ## Auth
 
