@@ -511,12 +511,18 @@ def _anchor_column_id(ctx: ToolContext, table: dict) -> str | None:
     return ctx.anchor_column_ids[table_id]
 
 
-def _hop_text(ctx: ToolContext, hop: dict) -> str:
+def _hop_text(ctx: ToolContext, hop: dict, dialect: str | None = None) -> str:
     left = ctx.name(
-        hop.get("source_schema"), hop.get("source_table"), hop.get("source_column")
+        hop.get("source_schema"),
+        hop.get("source_table"),
+        hop.get("source_column"),
+        dialect=dialect,
     )
     right = ctx.name(
-        hop.get("target_schema"), hop.get("target_table"), hop.get("target_column")
+        hop.get("target_schema"),
+        hop.get("target_table"),
+        hop.get("target_column"),
+        dialect=dialect,
     )
     text = f"{left} = {right}"
     return f"{text} [key {hop['key']}]" if hop.get("key") else text
@@ -590,15 +596,18 @@ def _join_lines(
             if not routes:
                 continue
             ctx.join_paths.append({"path": routes[0]["hops"]})
+            dialect = ctx.dialect_of(table)
+            if dialect != ctx.dialect_of(other):
+                dialect = None
             head = f"JOIN {ctx.qualified(table)} ↔ {ctx.qualified(other)}"
             if len(routes) == 1:
                 line = f"{head}: " + " → ".join(
-                    _hop_text(ctx, h) for h in routes[0]["hops"]
+                    _hop_text(ctx, h, dialect) for h in routes[0]["hops"]
                 )
             else:
                 line = f"{head}, one of:" + "".join(
                     "\n  "
-                    + " → ".join(_hop_text(ctx, h) for h in route["hops"])
+                    + " → ".join(_hop_text(ctx, h, dialect) for h in route["hops"])
                     + (" (default)" if route["default"] else "")
                     for route in routes
                 )
