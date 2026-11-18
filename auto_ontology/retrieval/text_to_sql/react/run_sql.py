@@ -312,7 +312,7 @@ def tables_not_shown(
             )
             continue
         problems.append(
-            f"Not in view: {ctx.name(table.db, table.name)}. "
+            f"Not in view: {_as_written(table, ctx.dialect)}. "
             "Retrieve it (its exact name works) before using it."
         )
     return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
@@ -362,6 +362,13 @@ def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResu
         if problems := foreign_catalogs(check.statement, bound):
             return CheckResult(problems, check.statement)
     return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
+
+
+def _as_written(table: exp.Table, dialect: str | None) -> str:
+    db = table.args.get("db")
+    return exp.Table(this=table.this.copy(), db=db.copy() if db else None).sql(
+        dialect=dialect
+    )
 
 
 def connector_for(ctx: ToolContext) -> SQLDatabase | None:

@@ -335,11 +335,15 @@ _MATCH_MARK = " ← matches the query"
 
 
 def _column_line(
-    ctx: ToolContext, column: dict, matched: set[str] | frozenset[str] = frozenset()
+    ctx: ToolContext,
+    column: dict,
+    matched: set[str] | frozenset[str] = frozenset(),
+    dialect: str | None = None,
 ) -> str:
     """One column; *matched* is the lowercase names the search matched."""
     parts = [
-        f"  {ctx.name(column.get('name'))} {column.get('data_type') or ''}".rstrip()
+        f"  {ctx.name(column.get('name'), dialect=dialect)} "
+        f"{column.get('data_type') or ''}".rstrip()
     ]
     if str(column.get("name") or "").lower() in matched:
         parts.append(_MATCH_MARK)
@@ -351,7 +355,7 @@ def _column_line(
     if column.get("format"):
         details.append(f"format: {column['format']}")
     if column.get("semantic_fk"):
-        details.append(f"references {column['semantic_fk']}")
+        details.append(f"references {_fk_target(ctx, column, dialect)}")
     if details:
         parts.append(" — " + "; ".join(details))
     return "".join(parts)
@@ -385,9 +389,24 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
     return chosen, len(columns) - len(chosen)
 
 
+def _fk_target(ctx: ToolContext, column: dict, dialect: str | None) -> str:
+    target = column.get("semantic_fk_target")
+    if not target:
+        return str(column["semantic_fk"])
+    names = [ctx.name(*parts, dialect=dialect) for parts in target["columns"]]
+    if len(names) == 1:
+        return names[0]
+    return f"{target['concept']} ({', '.join(names)})"
+
+
+def _search_name(table: dict) -> str:
+    return ".".join(p for p in (table.get("schema_name"), table.get("name")) if p)
+
+
 def _table_block(
     ctx: ToolContext, table: dict, matched: set[str], seen_before: bool
 ) -> str:
+    dialect = ctx.dialect_of(table)
     header = f"TABLE {ctx.qualified(table)}"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
@@ -399,10 +418,12 @@ def _table_block(
             if str(c.get("name")).lower() in lowered
         ]
         lines = [header + " (shown earlier; matched columns only)"]
-        return "\n".join(lines + [_column_line(ctx, c) for c in columns])
+        return "\n".join(
+            lines + [_column_line(ctx, c, dialect=dialect) for c in columns]
+        )
     columns, hidden = _shown_columns(table, matched)
     lowered = {m.lower() for m in matched}
-    lines = [header] + [_column_line(ctx, c, lowered) for c in columns]
+    lines = [header] + [_column_line(ctx, c, lowered, dialect) for c in columns]
     if hidden:
         lines.append(
             f"  … {hidden} more columns not shown; retrieve with a narrower query "
@@ -418,6 +439,7 @@ def _short_table_block(ctx: ToolContext, table: dict, matched: set[str]) -> str:
     matched ones, the key and the foreign keys -- without their descriptions,
     and says how to see the rest.
     """
+    dialect = ctx.dialect_of(table)
     header = f"TABLE {ctx.qualified(table)}"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
@@ -434,16 +456,17 @@ def _short_table_block(ctx: ToolContext, table: dict, matched: set[str]) -> str:
     lines = [header + " (shortened to fit)"]
     for column in kept:
         line = (
-            f"  {ctx.name(column.get('name'))} {column.get('data_type') or ''}".rstrip()
+            f"  {ctx.name(column.get('name'), dialect=dialect)} "
+            f"{column.get('data_type') or ''}".rstrip()
         )
         if str(column.get("name") or "").lower() in lowered:
             line += _MATCH_MARK
         if column.get("semantic_fk"):
-            line += f" — references {column['semantic_fk']}"
+            line += f" — references {_fk_target(ctx, column, dialect)}"
         lines.append(line)
     if hidden := len(columns) - len(kept):
         lines.append(
-            f"  … {hidden} more columns not shown; retrieve {ctx.qualified(table)} "
+            f"  … {hidden} more columns not shown; retrieve {_search_name(table)} "
             "to see all of them"
         )
     return "\n".join(lines)

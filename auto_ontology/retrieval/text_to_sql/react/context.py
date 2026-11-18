@@ -91,12 +91,23 @@ class ToolContext:
     can_run_queries: Callable[[], bool] | None = None
     dialect: str | None = None
 
-    def name(self, *parts: str | None) -> str:
-        """*parts* joined the way the model should write them in this dialect."""
-        return ".".join(quoted_if_needed(p, self.dialect) for p in parts if p)
+    def name(self, *parts: str | None, dialect: str | None = None) -> str:
+        """*parts* joined the way the model should write them in *dialect*."""
+        dialect = dialect or self.dialect
+        return ".".join(quoted_if_needed(p, dialect) for p in parts if p)
+
+    def dialect_of(self, table: dict[str, Any]) -> str | None:
+        """The dialect of the database *table* is in, else the episode's."""
+        database = table.get("database_name")
+        for connector in self.connectors:
+            if database and getattr(connector, "database_name", None) == database:
+                return getattr(connector, "dialect", None) or self.dialect
+        return self.dialect
 
     def qualified(self, table: dict[str, Any]) -> str:
-        return self.name(table.get("schema_name"), table.get("name"))
+        return self.name(
+            table.get("schema_name"), table.get("name"), dialect=self.dialect_of(table)
+        )
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:

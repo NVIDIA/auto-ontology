@@ -151,7 +151,10 @@ def _with_rows(ctx: ToolContext, table: dict) -> str:
 def _only(ctx: ToolContext, table: dict, columns: list[str]) -> str:
     if not columns:
         return f"{ctx.qualified(table)} has no columns of its own"
-    listed = ", ".join(ctx.name(c) for c in columns[:_MAX_LISTED_COLUMNS])
+    dialect = ctx.dialect_of(table)
+    listed = ", ".join(
+        ctx.name(c, dialect=dialect) for c in columns[:_MAX_LISTED_COLUMNS]
+    )
     if len(columns) > _MAX_LISTED_COLUMNS:
         listed += f" and {len(columns) - _MAX_LISTED_COLUMNS} more"
     return f"only {ctx.qualified(table)} has {listed}"
