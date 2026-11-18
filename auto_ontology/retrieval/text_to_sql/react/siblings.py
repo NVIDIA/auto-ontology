@@ -52,10 +52,6 @@ class Sibling:
     jaccard: float
 
 
-def _qualified(table: dict) -> str:
-    return ".".join(p for p in (table.get("schema_name"), table.get("name")) if p)
-
-
 def _column_names(table: dict) -> dict[str, str]:
     """Lowercased name to name; columns may be names or column dicts."""
     names = [
@@ -97,7 +93,13 @@ def find_siblings(
                 jaccard=jaccard,
             )
         )
-    found.sort(key=lambda s: (-s.jaccard, _qualified(s.table)))
+    found.sort(
+        key=lambda s: (
+            -s.jaccard,
+            str(s.table.get("schema_name") or ""),
+            str(s.table.get("name")),
+        )
+    )
     return found[:_SIBLINGS_PER_TABLE]
 
 
@@ -136,23 +138,23 @@ def _row_count(ctx: ToolContext, table: dict) -> int | None:
         ctx.row_counts[key] = int(frame.iat[0, 0])
     except Exception:  # noqa: BLE001 — a missing count only drops a detail
         logger.info(
-            "ReAct sibling row count failed for %s", _qualified(table), exc_info=True
+            "ReAct sibling row count failed for %s", ctx.qualified(table), exc_info=True
         )
     return ctx.row_counts[key]
 
 
 def _with_rows(ctx: ToolContext, table: dict) -> str:
     count = _row_count(ctx, table)
-    return _qualified(table) + (f" ({count} rows)" if count is not None else "")
+    return ctx.qualified(table) + (f" ({count} rows)" if count is not None else "")
 
 
-def _only(table: dict, columns: list[str]) -> str:
+def _only(ctx: ToolContext, table: dict, columns: list[str]) -> str:
     if not columns:
-        return f"{_qualified(table)} has no columns of its own"
-    listed = ", ".join(columns[:_MAX_LISTED_COLUMNS])
+        return f"{ctx.qualified(table)} has no columns of its own"
+    listed = ", ".join(ctx.name(c) for c in columns[:_MAX_LISTED_COLUMNS])
     if len(columns) > _MAX_LISTED_COLUMNS:
         listed += f" and {len(columns) - _MAX_LISTED_COLUMNS} more"
-    return f"only {_qualified(table)} has {listed}"
+    return f"only {ctx.qualified(table)} has {listed}"
 
 
 def sibling_lines(
@@ -174,8 +176,8 @@ def sibling_lines(
             line = (
                 f"SIMILAR {_with_rows(ctx, table)} ~ {_with_rows(ctx, sibling.table)}: "
                 f"{sibling.shared} shared columns; "
-                f"{_only(table, sibling.only_here)}; "
-                f"{_only(sibling.table, sibling.only_there)}"
+                f"{_only(ctx, table, sibling.only_here)}; "
+                f"{_only(ctx, sibling.table, sibling.only_there)}"
             )
             lines.append((line, [table, sibling.table]))
     return lines

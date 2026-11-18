@@ -101,6 +101,7 @@ class ReactSQLAgent(BaseAgent):
             custom_prompts=state.get("custom_prompts") or "",
         )
         connector = connector_for(ctx)
+        ctx.dialect = getattr(connector, "dialect", None)
         # A connector that charges for queries says so through cost_status.
         cost_status = getattr(connector, "cost_status", None)
         if callable(cost_status):
@@ -108,7 +109,7 @@ class ReactSQLAgent(BaseAgent):
         can_run_queries = getattr(connector, "can_run_queries", None)
         if callable(can_run_queries):
             ctx.can_run_queries = can_run_queries
-        dialect = getattr(connector, "dialect", None)
+        dialect = ctx.dialect
         result = run_episode(
             state.get("reasoning_llm") or state["llm"],
             ctx,

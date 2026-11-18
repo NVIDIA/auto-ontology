@@ -331,7 +331,7 @@ def tables_not_shown(
             )
             continue
         problems.append(
-            f"Not in view: {'.'.join(p for p in (table.db, table.name) if p)}. "
+            f"Not in view: {ctx.name(table.db, table.name)}. "
             "Retrieve it (its exact name works) before using it."
         )
     return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]

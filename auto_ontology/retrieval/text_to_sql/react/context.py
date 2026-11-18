@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.utils.sql_identifiers import quoted_if_needed
 
 
 @dataclass
@@ -103,6 +104,14 @@ class ToolContext:
     shown_analyses: dict[str, dict[str, str]] = field(default_factory=dict)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    dialect: str | None = None
+
+    def name(self, *parts: str | None) -> str:
+        """*parts* joined the way the model should write them in this dialect."""
+        return ".".join(quoted_if_needed(p, self.dialect) for p in parts if p)
+
+    def qualified(self, table: dict[str, Any]) -> str:
+        return self.name(table.get("schema_name"), table.get("name"))
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
