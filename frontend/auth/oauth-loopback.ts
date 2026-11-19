@@ -2,6 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { LoopbackDelivery } from '@/types/auth';
+
 // Desktop MCP clients (Cursor, the Python SDK) register a short-lived loopback
 // HTTP listener as the OAuth redirect. Navigating Chrome to that URL is what
 // produces "This site can't be reached": the listener is gone, or bound to a
@@ -120,9 +122,7 @@ const pokeLoopbackViaIframe = (url: string): void => {
 // that never answers from leaving the page in its waiting state forever.
 const DELIVERY_TIMEOUT_MS = 5_000;
 
-type Delivery = 'reached' | 'refused';
-
-const deliverTo = async (url: string): Promise<Delivery> => {
+const deliverTo = async (url: string): Promise<LoopbackDelivery> => {
 	try {
 		await fetch(url, {
 			mode: 'no-cors',

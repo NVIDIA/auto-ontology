@@ -16,3 +16,9 @@ export type User = Pick<AppUser, 'id' | 'name' | 'email'> & {
 };
 
 export type UpdateUserInput = Pick<User, 'name' | 'role'>;
+
+/**
+ * Outcome of sending an OAuth callback to one loopback address: `reached` when a
+ * listener accepted the connection, `refused` when nothing was listening.
+ */
+export type LoopbackDelivery = 'reached' | 'refused';
