@@ -127,12 +127,18 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         seen["join"].append((anchor, dest))
         return [
             {
-                "source_schema": "sales",
-                "source_table": "orders",
-                "source_column": "cust_ref",
-                "target_schema": "crm",
-                "target_table": "customers",
-                "target_column": "customer_id",
+                "hops": [
+                    {
+                        "source_schema": "sales",
+                        "source_table": "orders",
+                        "source_column": "cust_ref",
+                        "target_schema": "crm",
+                        "target_table": "customers",
+                        "target_column": "customer_id",
+                        "key": "Customer.customer_id",
+                    }
+                ],
+                "default": True,
             }
         ]
 
@@ -148,7 +154,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         "find_column_id_by_table_and_name",
         lambda table, column, database: f"{table}.{column}",
     )
-    monkeypatch.setattr(tool, "find_join_path", join_path)
+    monkeypatch.setattr(tool, "find_join_routes", join_path)
     monkeypatch.setattr(
         tool,
         "fetch_attr_column_contexts",
@@ -189,9 +195,42 @@ def test_second_search_joins_new_tables_to_ones_already_shown(calls: dict) -> No
     )
     assert (
         "JOIN crm.customers ↔ sales.orders: "
-        "sales.orders.cust_ref = crm.customers.customer_id"
+        "sales.orders.cust_ref = crm.customers.customer_id [key Customer.customer_id]"
     ) in text
     assert calls["join"] == [("customers.customer_id", "orders.order_id")]
+
+
+def test_every_direct_join_is_listed_with_the_default_first(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def hop(column: str) -> dict:
+        return {
+            "source_schema": "sales",
+            "source_table": "orders",
+            "source_column": column,
+            "target_schema": "crm",
+            "target_table": "customers",
+            "target_column": "customer_id",
+            "key": "Customer.customer_id",
+        }
+
+    routes = [
+        {"hops": [hop("cust_ref")], "default": True},
+        {"hops": [hop("billing_ref")], "default": False},
+    ]
+    monkeypatch.setattr(tool, "find_join_routes", lambda _a, _d: routes)
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    assert (
+        "JOIN crm.customers ↔ sales.orders, one of:\n"
+        "  sales.orders.cust_ref = crm.customers.customer_id"
+        " [key Customer.customer_id] (default)\n"
+        "  sales.orders.billing_ref = crm.customers.customer_id"
+        " [key Customer.customer_id]"
+    ) in text
+    assert ctx.join_paths == [{"path": routes[0]["hops"]}]
 
 
 def test_a_table_already_shown_is_not_repeated_in_full(calls: dict) -> None:
@@ -623,12 +662,17 @@ def test_a_bridge_on_a_join_route_is_in_view(
     hop = {"source_column": "id", "target_column": "id"}
     monkeypatch.setattr(
         tool,
-        "find_join_path",
+        "find_join_routes",
         lambda _a, _d: [
-            {**hop, "source_schema": "sales", "source_table": "orders"}
-            | {"target_schema": "sales", "target_table": "order_links"},
-            {**hop, "source_schema": "sales", "source_table": "order_links"}
-            | {"target_schema": "crm", "target_table": "customers"},
+            {
+                "hops": [
+                    {**hop, "source_schema": "sales", "source_table": "orders"}
+                    | {"target_schema": "sales", "target_table": "order_links"},
+                    {**hop, "source_schema": "sales", "source_table": "order_links"}
+                    | {"target_schema": "crm", "target_table": "customers"},
+                ],
+                "default": True,
+            }
         ],
     )
     ctx = _ctx()

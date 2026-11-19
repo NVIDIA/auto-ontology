@@ -208,6 +208,7 @@ def test_a_two_column_join_is_one_hop(joined) -> None:
             "target_schema": "public",
             "target_table": "customers",
             "target_column": "id",
+            "key": f"{joined.prefix}-customers-term.id",
         }
     ]
 
@@ -234,6 +235,63 @@ def test_join_path_uses_only_the_selected_parallel_semantic_fk(world) -> None:
     assert len(hops) == 1
     assert hops[0]["source_column"] == "customer_id"
     assert hops[0]["target_column"] == "id"
+
+
+def test_adjacent_tables_get_every_parallel_fk_default_first(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("orders")
+    world.column("orders", "billing_customer_id", 1)
+    world.column("orders", "customer_id", 2)
+    world.references(
+        "orders.billing_customer_id", "customer-id", use_in_join_paths=False
+    )
+    world.references("orders.customer_id", "customer-id")
+
+    routes = a.find_join_routes(
+        world.columns["orders.billing_customer_id"], world.columns["customers.id"]
+    )
+
+    assert [
+        (
+            route["default"],
+            [(h["source_column"], h["target_column"], h["key"]) for h in route["hops"]],
+        )
+        for route in routes
+    ] == [
+        (True, [("customer_id", "id", f"{world.prefix}-customers-term.id")]),
+        (False, [("billing_customer_id", "id", f"{world.prefix}-customers-term.id")]),
+    ]
+
+
+def test_a_turned_off_fk_is_offered_directly_but_never_walked(world) -> None:
+    """A longer route only crosses default edges; one hop offers every edge."""
+    world.table("addresses", pk=["id"])
+    world.column("addresses", "id")
+    world.attribute("address-id", owner="addresses.id")
+    world.table("customers", pk=["id"])
+    world.column("customers", "id", 1)
+    world.column("customers", "address_id", 2)
+    world.attribute("customer-id", owner="customers.id")
+    world.references("customers.address_id", "address-id")
+    world.table("orders")
+    world.column("orders", "billing_customer_id", 1)
+    world.references(
+        "orders.billing_customer_id", "customer-id", use_in_join_paths=False
+    )
+
+    direct = a.find_join_routes(
+        world.columns["orders.billing_customer_id"], world.columns["customers.id"]
+    )
+    assert [route["default"] for route in direct] == [False]
+
+    assert (
+        a.find_join_routes(
+            world.columns["orders.billing_customer_id"], world.columns["addresses.id"]
+        )
+        == []
+    )
 
 
 def test_setting_join_default_disables_every_other_group_member(world) -> None:
@@ -383,6 +441,7 @@ def test_a_path_enters_the_member_holding_the_field(split) -> None:
             "target_schema": "crm",
             "target_table": "customer_ext",
             "target_column": "customer_id",
+            "key": f"{split.prefix}-customers-term.id",
         }
     ]
 
@@ -510,6 +569,7 @@ def test_endpoints_are_tables_to_connect_not_required_join_columns(world) -> Non
             "target_schema": "public",
             "target_table": "addresses",
             "target_column": "id",
+            "key": f"{world.prefix}-addresses-term.id",
         }
     ]
 

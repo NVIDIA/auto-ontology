@@ -40,6 +40,7 @@
     "attributes.find_column_attribute_by_column_id": "<attr:Film/film id/film_id>",
     "attributes.find_join_path__inventory_to_film": [
       {
+        "key": "Film.film_id",
         "source_column": "film_id",
         "source_database": "pagila",
         "source_schema": "public",
@@ -52,6 +53,7 @@
     ],
     "attributes.find_join_path__rental_to_customer": [
       {
+        "key": "Customer.customer_id",
         "source_column": "customer_id",
         "source_database": "pagila",
         "source_schema": "public",

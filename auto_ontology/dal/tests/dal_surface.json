@@ -10,6 +10,7 @@
     "fetch_value_key_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
+    "find_join_routes": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None' = None) -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
