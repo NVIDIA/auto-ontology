@@ -720,30 +720,35 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         return {(table.get("schema_name"), table.get("name"))}
 
     # Most useful first, since the limit shortens or only names what comes
-    # last: new tables, how they join, definitions that carry SQL, then tables
-    # seen before. Each block carries the tables it names.
+    # last: certified definitions, new tables, how they join,
+    # other definitions that carry SQL, then tables seen before. Each block
+    # carries the tables it names.
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
-    named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
-        (new_blocks[str(t["id"])], own(t)) for t in new_tables
-    ]
+    # Certified definitions lead, ahead of the tables (#268). They are short,
+    # and they are the deployment's reviewed answer to how a measure is
+    # calculated: placed after the tables, as other definitions are, the
+    # limit cut them on any catalog wide enough to fill it, so certifying a
+    # definition changed nothing the model saw. Uncertified definitions keep
+    # their place, so a catalog with nothing certified reads as before.
+    definitions: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    certified: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    for hit in hits:
+        if (block := _definition_block(hit)) is not None:
+            entry = (block, _tables_in_view(hit.get("sql")))
+            (certified if hit.get("certified") else definitions).append(entry)
+    named: list[tuple[str, set[tuple[str | None, str | None]]]] = list(certified)
+    named += [(new_blocks[str(t["id"])], own(t)) for t in new_tables]
     named += _join_lines(ctx, new_tables)
     if config.siblings_enabled():
         named += [
             (line, set().union(*(own(t) for t in tables)))
             for line, tables in sibling_lines(ctx, new_tables)
         ]
-    # Certified definitions first: when two compete for the same measure, the
-    # one a person reviewed is the one the model should see and use (#268).
-    # The sort is stable, so search order holds within each group.
-    definitions = [
-        (block, _tables_in_view(hit.get("sql")))
-        for hit in sorted(hits, key=lambda hit: not hit.get("certified"))
-        if (block := _definition_block(hit)) is not None
-    ]
     named += definitions
+    definitions = certified + definitions
     earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
