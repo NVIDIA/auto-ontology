@@ -9,6 +9,9 @@ export type ParsedTable = {
 	rows: TableRow[];
 };
 
+/** Column names come from query results, so a `__proto__` column must stay a plain field. */
+const emptyRow = (): TableRow => Object.create(null);
+
 /**
  * Parse a JSON-stringified list of objects (the shape used when the agent
  * returns ``list[dict]`` rows) into a uniform ``ParsedTable``. Column order
@@ -36,7 +39,7 @@ const parseJsonTable = (text: string): ParsedTable | null => {
 	const records = value as Array<Record<string, unknown>>;
 	const columns = Object.keys(records[0]);
 	const rows: TableRow[] = records.map((row) => {
-		const out: TableRow = {};
+		const out = emptyRow();
 		for (const col of columns) {
 			const cell = row[col];
 			out[col] = cell == null ? '' : String(cell);
@@ -80,7 +83,7 @@ const parseMarkdownTable = (text: string): ParsedTable | null => {
 	for (let i = separatorIdx + 1; i < lines.length; i++) {
 		const cells = splitRow(lines[i]);
 		if (cells.length !== columns.length) continue;
-		const row: TableRow = {};
+		const row = emptyRow();
 		columns.forEach((col, idx) => {
 			row[col] = cells[idx] ?? '';
 		});
@@ -113,7 +116,7 @@ const parseCsvTable = (text: string): ParsedTable | null => {
 	for (let i = 1; i < lines.length; i++) {
 		const cells = split(lines[i]);
 		if (cells.length !== columns.length) return null;
-		const row: TableRow = {};
+		const row = emptyRow();
 		columns.forEach((col, idx) => {
 			row[col] = cells[idx] ?? '';
 		});

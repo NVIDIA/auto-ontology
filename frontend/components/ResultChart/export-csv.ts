@@ -97,7 +97,7 @@ function toCell(text: string): ChartCell {
  */
 export function tableToCsv(table: ParsedTable, title: string): { filename: string; csv: string } {
 	const rows = table.rows.map((row) => {
-		const out: Record<string, ChartCell> = {};
+		const out: Record<string, ChartCell> = Object.create(null);
 		for (const col of table.columns) {
 			out[col] = toCell(row[col] ?? '');
 		}
