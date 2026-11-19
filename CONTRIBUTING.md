@@ -93,11 +93,8 @@ change"`. CI runs `alembic check`.
 2. Keep each pull request to one logical change, and link the issue it fixes
    (`Fixes #123`).
 3. Add or update tests for the behavior you change.
-4. New files must include the appropriate copyright and license header.
-   NVIDIA-owned work must use the approved NVIDIA header. External contributions
-   must retain or add attribution for the actual copyright owner(s); do not add
-   NVIDIA’s copyright notice to work NVIDIA does not own. DCO sign-off does not
-   transfer copyright ownership.
+4. New files must include the appropriate copyright and license header; see
+   [Copyright and license headers](#copyright-and-license-headers).
 5. Sign off every commit; see [Signing your work](#signing-your-work).
 6. Open the pull request, and describe what changed and how you tested it.
 
