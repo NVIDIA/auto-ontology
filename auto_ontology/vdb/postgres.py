@@ -732,7 +732,17 @@ class PostgresVDB:
             # seconds is not worth blocking a shutdown over.
             logger.debug("PostgresVDB.close: pool dispose did not complete")
 
+    def __enter__(self) -> "PostgresVDB":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
     def __del__(self) -> None:
+        # Not a substitute for close(): a store dropped on a worker thread was
+        # observed to leave its pool's connections open until the process
+        # exited (#553). Close per-call stores explicitly, usually by using
+        # the store as a context manager.
         try:
             self.close()
         except Exception:

@@ -86,7 +86,6 @@ def _embed_analysis(analysis_id: str) -> None:
     from auto_ontology.utils import get_embed_params
     from auto_ontology.vdb import get_semantic_vdb
 
-    vdb = get_semantic_vdb()
     database_name = fetch_database_name_for_analysis(analysis_id)
     if database_name is None:
         logger.warning(
@@ -95,12 +94,13 @@ def _embed_analysis(analysis_id: str) -> None:
             analysis_id,
         )
 
-    embed_custom_analyses(
-        embed_params=get_embed_params(),
-        vdb=vdb,
-        analysis_id=analysis_id,
-        database_name=database_name,
-    )
+    with get_semantic_vdb() as vdb:
+        embed_custom_analyses(
+            embed_params=get_embed_params(),
+            vdb=vdb,
+            analysis_id=analysis_id,
+            database_name=database_name,
+        )
 
 
 def _persist_analysis_with_sql(
