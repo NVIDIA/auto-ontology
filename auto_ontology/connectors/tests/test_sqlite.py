@@ -286,14 +286,16 @@ def test_undeclared_column_named_like_sql_aliases_is_inferred(
     connector_factory: Callable[[str], SQLiteDatabase],
 ) -> None:
     """Grouping by the expression keeps a column named ``storage`` or ``n``
-    from shadowing the inference query's own names."""
+    from shadowing the inference query's own names. Mostly integers with one
+    repeated text value: grouping by the column's values would pick ``'x'``,
+    the largest value group, and report TEXT."""
     db = connector_factory(
         """
         CREATE TABLE odd (storage, n);
-        INSERT INTO odd VALUES ('a', 1), ('b', 2), ('c', 3);
+        INSERT INTO odd VALUES (1, 7), (2, 8), (3, 9), ('x', 'y'), ('x', 'z');
         """
     )
-    assert _types(db, "odd") == {"storage": "TEXT", "n": "INTEGER"}
+    assert _types(db, "odd") == {"storage": "INTEGER", "n": "INTEGER"}
 
 
 def test_declared_types_are_kept_as_declared(
