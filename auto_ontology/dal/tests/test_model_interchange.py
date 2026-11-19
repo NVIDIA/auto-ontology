@@ -931,3 +931,71 @@ def test_replace_queues_changed_rows_for_reembedding(world) -> None:
     assert {world.term, world.attribute} <= buffer.replaced_semantic_ids
     queued = {row["metadata"]["id"] for row in buffer.semantic_rows}
     assert world.term in queued
+
+
+def _attribute_columns(attr_id: str) -> set[str]:
+    return {
+        row["column_id"]
+        for row in store().query_read(
+            select(s.column__has_attribute.c.column_id).where(
+                s.column__has_attribute.c.attribute_id == attr_id
+            )
+        )
+    }
+
+
+def test_a_rename_alone_reembeds_the_terms_attributes(world: World) -> None:
+    """The rename rewrites each attribute's term_name, which its vector embeds,
+    so the attribute is re-embedded even when nothing else about it changed."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    document = _document(world)
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert _attribute_row(world.attribute)["term_name"] == new_name
+    assert world.attribute in buffer.replaced_semantic_ids
+    queued = {row["metadata"]["id"]: row for row in buffer.semantic_rows}
+    assert world.attribute in queued
+    assert summary["updated"]["column_attributes"] == 1
+
+
+def test_a_rejected_rename_keeps_attributes_on_the_stored_name(world: World) -> None:
+    """A certified name keeps its value, so the attributes must keep copying it:
+    the Term's attribute list is matched through term_name."""
+    from auto_ontology.dal.terms import fetch_column_attributes_by_term_id
+
+    store().query_write(
+        s.term.update().where(s.term.c.id == world.term).values(name_certified=True)
+    )
+    document = _document(world)
+    document.semantic_layer.terms[0].name = f"{world.prefix}-Rejected"
+
+    summary = mi.apply_import_model(document, replace=True)
+
+    stored = f"{world.prefix}-Order"
+    assert _term_row(world.term)["name"] == stored
+    assert _attribute_row(world.attribute)["term_name"] == stored
+    assert [a["id"] for a in fetch_column_attributes_by_term_id(world.term)] == [
+        world.attribute
+    ]
+    assert ("term", "name", "certified") in {
+        (c["entity"], c["field"], c["reason"]) for c in summary["conflicts"]
+    }
+
+
+def test_moving_an_attribute_replaces_its_column_link(world: World) -> None:
+    document = _document(world)
+    document.semantic_layer.terms[0].columns_attributes[
+        0
+    ].column_id = world.customer_ref
+
+    mi.apply_import_model(document, replace=True)
+    again = mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.customer_ref}
+    assert _attribute_row(world.attribute)["term_name"] == f"{world.prefix}-Order"
+    assert again["updated"]["column_attributes"] == 0

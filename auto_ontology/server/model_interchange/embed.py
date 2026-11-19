@@ -277,14 +277,14 @@ def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:
 
     if buffer.semantic_rows:
         semantic_vdb = get_semantic_vdb()
-        # After the import committed, so a rolled-back import never loses the
-        # vectors of rows it did not change.
+        # Embed first: if the endpoint fails, the replaced rows keep their old
+        # vectors, still searchable, instead of none. Deletes run after the
+        # import committed, so a rolled-back import never loses a vector.
+        embedded = embed_rows(buffer.semantic_rows, get_embed_params(), what="imported")
         for live_id in sorted(buffer.replaced_semantic_ids):
             semantic_vdb.delete_by_id(live_id)
-        result["semantic_rows"] = _embed_and_ingest_rows(
-            buffer.semantic_rows,
-            semantic_vdb,
-        )
+        write_embedded_rows(semantic_vdb, embedded)
+        result["semantic_rows"] = len(embedded)
     else:
         result["semantic_rows"] = 0
 

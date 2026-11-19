@@ -853,8 +853,10 @@ def test_resolve_sql_column_ids_returns_parser_column_ids(
     ]
 
 
-def test_flush_deletes_replaced_vectors_before_writing_fresh_ones(monkeypatch) -> None:
-    """#525: the store appends, so a changed row's old vector must go first."""
+def test_flush_embeds_then_replaces_vectors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#525: embed first, then delete the replaced rows' old vectors, then
+    write: the store appends, so the old vector must go, but only once its
+    replacement exists."""
     from auto_ontology.server.model_interchange import embed
 
     calls: list[tuple[str, object]] = []
@@ -864,19 +866,50 @@ def test_flush_deletes_replaced_vectors_before_writing_fresh_ones(monkeypatch) -
             calls.append(("delete", node_id))
             return 1
 
-    vdb = FakeVDB()
     monkeypatch.setattr(embed, "resolve", lambda *_: "key")
-    monkeypatch.setattr(embed, "get_semantic_vdb", lambda: vdb)
+    monkeypatch.setattr(embed, "get_embed_params", lambda: None)
+    monkeypatch.setattr(embed, "get_semantic_vdb", FakeVDB)
     monkeypatch.setattr(
         embed,
-        "_embed_and_ingest_rows",
-        lambda rows, target: calls.append(("write", len(rows))) or len(rows),
+        "embed_rows",
+        lambda rows, params, what: calls.append(("embed", len(rows))) or rows,
+    )
+    monkeypatch.setattr(
+        embed,
+        "write_embedded_rows",
+        lambda vdb, rows: calls.append(("write", len(rows))),
     )
     buffer = embed.ImportEmbedBuffer(
-        semantic_rows=[{"metadata": {"id": "t1"}}],
-        replaced_semantic_ids={"t1"},
+        semantic_rows=[{"metadata": {"id": "t1"}}], replaced_semantic_ids={"t1"}
     )
 
     embed.flush_import_embeddings(buffer)
 
-    assert calls == [("delete", "t1"), ("write", 1)]
+    assert calls == [("embed", 1), ("delete", "t1"), ("write", 1)]
+
+
+def test_a_failed_embed_keeps_the_old_vectors(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_ontology.server.model_interchange import embed
+
+    deleted: list[str] = []
+
+    class FakeVDB:
+        def delete_by_id(self, node_id: str) -> int:
+            deleted.append(node_id)
+            return 1
+
+    def failing_embed(rows: list, params: object, what: str) -> list:
+        raise RuntimeError("embedding endpoint down")
+
+    monkeypatch.setattr(embed, "resolve", lambda *_: "key")
+    monkeypatch.setattr(embed, "get_embed_params", lambda: None)
+    monkeypatch.setattr(embed, "get_semantic_vdb", FakeVDB)
+    monkeypatch.setattr(embed, "embed_rows", failing_embed)
+    buffer = embed.ImportEmbedBuffer(
+        semantic_rows=[{"metadata": {"id": "t1"}}], replaced_semantic_ids={"t1"}
+    )
+
+    with pytest.raises(RuntimeError):
+        embed.flush_import_embeddings(buffer)
+
+    assert deleted == []

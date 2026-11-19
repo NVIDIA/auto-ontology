@@ -1086,6 +1086,9 @@ def apply_import_model(
     # certified fields that kept theirs (#525).
     updated: dict[str, int] = {key: 0 for key in created}
     conflicts: list[dict[str, Any]] = []
+    # Terms this import renamed: their attributes' denormalised term_name
+    # changed with them, so their vectors need rebuilding too.
+    renamed_terms: set[str] = set()
     term_names = {term.id: term.name for term in document.semantic_layer.terms}
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
 
@@ -1106,6 +1109,7 @@ def apply_import_model(
             replace=replace,
             updated=updated,
             conflicts=conflicts,
+            renamed_terms=renamed_terms,
         )
         _import_column_attributes(
             document,
@@ -1117,6 +1121,7 @@ def apply_import_model(
             replace=replace,
             updated=updated,
             conflicts=conflicts,
+            renamed_terms=renamed_terms,
         )
         _import_concepts(document, id_map)
         _import_semantic_fks(document, id_map)
@@ -1505,6 +1510,7 @@ def _update_matched_terms(
     matched: dict[str, str],
     conflicts: list[dict[str, Any]] | None,
     embed_buffer: ImportEmbedBuffer | None,
+    renamed_terms: set[str] | None = None,
 ) -> set[str]:
     """Give matched Terms the document's name and description (``replace``).
 
@@ -1582,6 +1588,8 @@ def _update_matched_terms(
         # ColumnAttributes, which a rename must keep in step.
         update_term(live_id, **changes)
         changed.add(live_id)
+        if "name" in changes and renamed_terms is not None:
+            renamed_terms.add(live_id)
         new_text[live_id] = (
             changes.get("name", row["name"]),
             changes.get("description", row["description"]) or "",
@@ -1612,6 +1620,7 @@ def _update_matched_attributes(
     context: dict[str, dict[str, Any]],
     conflicts: list[dict[str, Any]] | None,
     embed_buffer: ImportEmbedBuffer | None,
+    renamed_terms: set[str] | None = None,
 ) -> set[str]:
     """Give matched ColumnAttributes the document's values (``replace``).
 
@@ -1660,13 +1669,31 @@ def _update_matched_attributes(
         for field in _ATTRIBUTE_STRUCTURE:
             if (props.get(field) or "") != (row[field] or ""):
                 changes[field] = props.get(field)
-        if not changes:
+        # Renaming the Term already rewrote term_name here, so nothing above
+        # differs, but the vector still embeds the old name.
+        term_renamed = context[yaml_id]["live_term_id"] in (renamed_terms or set())
+        if not changes and not term_renamed:
             continue
-        store().query_write(
-            update(s.column_attribute)
-            .where(s.column_attribute.c.id == live_id)
-            .values(**changes)
-        )
+        if changes:
+            store().query_write(
+                update(s.column_attribute)
+                .where(s.column_attribute.c.id == live_id)
+                .values(**changes)
+            )
+        # A moved attribute keeps only its new links: the import re-links it
+        # afterwards, and inserting alone would leave the old ones standing.
+        if "source_column" in changes or "table_id" in changes:
+            store().query_write(
+                s.column__has_attribute.delete().where(
+                    s.column__has_attribute.c.attribute_id == live_id
+                )
+            )
+        if "term_name" in changes:
+            store().query_write(
+                s.column_attribute__term.delete().where(
+                    s.column_attribute__term.c.attribute_id == live_id
+                )
+            )
         changed.add(live_id)
 
         ctx = context[yaml_id]
@@ -1703,6 +1730,7 @@ def _import_terms(
     replace: bool = False,
     updated: dict[str, int] | None = None,
     conflicts: list[dict[str, Any]] | None = None,
+    renamed_terms: set[str] | None = None,
 ) -> None:
     terms = document.semantic_layer.terms
     term_results = _resolve_entities_batch(
@@ -1726,7 +1754,7 @@ def _import_terms(
         if not term_results[term.id][1]
     }
     changed = (
-        _update_matched_terms(terms, matched, conflicts, embed_buffer)
+        _update_matched_terms(terms, matched, conflicts, embed_buffer, renamed_terms)
         if replace
         else set()
     )
@@ -1800,12 +1828,28 @@ def _import_column_attributes(
     replace: bool = False,
     updated: dict[str, int] | None = None,
     conflicts: list[dict[str, Any]] | None = None,
+    renamed_terms: set[str] | None = None,
 ) -> None:
     attr_items: list[tuple[str, dict[str, Any]]] = []
     context: dict[str, dict[str, Any]] = {}
 
+    # The name each Term has after _import_terms, which is the document's only
+    # when the Term was created or renamed. A rename rejected as certified or
+    # taken keeps the stored name, and attributes must copy that one:
+    # fetch_column_attributes_by_term_id matches through term_name.
+    live_term_ids = [
+        _remap(id_map, term.id, kind="term") for term in document.semantic_layer.terms
+    ]
+    effective_names = {
+        row["id"]: row["name"]
+        for row in store().query_read(
+            select(s.term.c.id, s.term.c.name).where(s.term.c.id.in_(live_term_ids))
+        )
+    }
+
     for term in document.semantic_layer.terms:
         live_term_id = _remap(id_map, term.id, kind="term")
+        term_name = effective_names.get(live_term_id, term.name)
         for attr in term.columns_attributes:
             col_ctx = column_meta.get(attr.column_id)
             # Deliberately '' when the column is unknown: the schema keeps
@@ -1824,7 +1868,7 @@ def _import_column_attributes(
                         "name": attr.name,
                         "description": attr.description,
                         "source": SEMANTIC_SOURCE,
-                        "term_name": term.name,
+                        "term_name": term_name,
                         "source_column": col_ctx.name if col_ctx else "",
                         "table_id": live_table_id,
                     },
@@ -1836,6 +1880,7 @@ def _import_column_attributes(
                 "col_ctx": col_ctx,
                 "live_term_id": live_term_id,
                 "live_table_id": live_table_id,
+                "term_name": term_name,
             }
 
     attr_results = _resolve_entities_batch(s.column_attribute, attr_items)
@@ -1851,6 +1896,7 @@ def _import_column_attributes(
             context,
             conflicts,
             embed_buffer,
+            renamed_terms or set(),
         )
 
     has_attribute_rows: list[dict[str, Any]] = []
@@ -1885,7 +1931,7 @@ def _import_column_attributes(
                     name=attr.name,
                     description=attr.description,
                     column_description=col_ctx.description,
-                    term_name=term.name,
+                    term_name=ctx["term_name"],
                     source_column=col_ctx.name,
                     table_id=ctx["live_table_id"],
                     table_name=col_ctx.table_name,
