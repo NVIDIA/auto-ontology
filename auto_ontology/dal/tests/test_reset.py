@@ -236,7 +236,8 @@ def test_a_shared_terms_concept_keeps_the_other_databases_keys(world) -> None:
     """The Concept is scoped to one database, but its Term spans both.
 
     Deleting it by database would cascade the other database's key column and
-    the FKs into that key; it goes only once no Term belongs to it.
+    the FKs into that key; it goes only once no Term belongs to it. The reset
+    database's own FK into it still goes.
     """
     _, make = world
     shop, warehouse = make("shop"), make("warehouse")
@@ -259,6 +260,10 @@ def test_a_shared_terms_concept_keeps_the_other_databases_keys(world) -> None:
         ordinal_position=2,
     )
     _link(s.column__semantic_fk, column_id=reference, key_id=key)
+    shop_reference = _add(
+        s.catalog_column, table_id=shop.table, name="product_id", ordinal_position=2
+    )
+    _link(s.column__semantic_fk, column_id=shop_reference, key_id=key)
     own = _add(s.concept, database_id=shop.id, name="Order")
     _link(s.term__concept, term_id=shop.term("Order"), concept_id=own)
 
@@ -275,6 +280,11 @@ def test_a_shared_terms_concept_keeps_the_other_databases_keys(world) -> None:
             s.column__semantic_fk.c.column_id == reference
         )
     ) == [{"key_id": key}]
+    assert not store().query_read(
+        select(s.column__semantic_fk.c.key_id).where(
+            s.column__semantic_fk.c.column_id == shop_reference
+        )
+    ), "the reset database's own FK goes, though its Concept stays"
     assert not _exists(s.concept, own)
 
 
