@@ -219,6 +219,7 @@ def compile_semantic_layer(
             commit_slot.skip_if_unused()
 
     count = 0
+    fallback_terms: list[str] = []
 
     if embedder is not None:
         embedder.vdb.create_index()
@@ -232,6 +233,7 @@ def compile_semantic_layer(
             result = future.result()
             if result is not None:
                 count += 1
+                fallback_terms.extend(result.fallback_terms)
                 logger.debug(
                     "  terms=%s attrs=%s",
                     result.term_names,
@@ -246,4 +248,12 @@ def compile_semantic_layer(
         )
     else:
         logger.info("Compilation complete — %d table(s) processed", count)
+    if fallback_terms:
+        # A placeholder reads like any other Term, so name them all once at
+        # the end rather than leave them in per-table warnings.
+        logger.warning(
+            "%d placeholder Term(s) stored where a model step failed: %s",
+            len(fallback_terms),
+            sorted(fallback_terms),
+        )
     return count
