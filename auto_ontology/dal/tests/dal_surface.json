@@ -14,7 +14,7 @@
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None' = None) -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
-    "merge_semantic_fk_to_column": "(src_column_id: 'str', target_column_id: 'str') -> 'bool'",
+    "merge_semantic_fk_to_column": "(src_column_id: 'str', target_column_id: 'str', *, declared: 'bool' = False) -> 'bool'",
     "set_semantic_fk_join_default": "(source_table_id: 'str', target_concept_id: 'str', selected_column_id: 'str') -> 'None'",
     "store_attribute_descriptions": "(descriptions: 'dict[str, str]') -> 'int'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
@@ -31,6 +31,7 @@
     "fetch_concept_fields": "(concept_ids: 'Iterable[str]') -> 'list[dict[str, Any]]'",
     "fetch_concept_members": "(table_ids: 'Iterable[str]') -> 'dict[str, dict[str, Any]]'",
     "fetch_concept_merge_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_key_concept_id": "(key_id: 'str') -> 'str | None'",
     "fetch_table_concept_id": "(table_id: 'str') -> 'str | None'",
     "fetch_term_concepts": "(term_ids: 'Iterable[str]') -> 'dict[str, dict[str, Any]]'",
     "merge_concepts": "(survivor_id: 'str', absorbed_id: 'str', *, key_pairs: 'Mapping[str, str] | None' = None, name: 'str | None' = None) -> 'bool'",

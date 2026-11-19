@@ -214,7 +214,7 @@ def ensure_concept_key(concept_id: str, column_id: str) -> str | None:
     with write_transaction():
         existing = fetch_column_key_id(column_id)
         if existing is not None:
-            return existing if _key_concept(existing) == concept_id else None
+            return existing if fetch_key_concept_id(existing) == concept_id else None
         is_pk = (func.cardinality(s.catalog_table.c.pk) == 1) & (
             s.catalog_table.c.pk[1] == s.catalog_column.c.name
         )
@@ -246,7 +246,7 @@ def ensure_concept_key(concept_id: str, column_id: str) -> str | None:
         # Another writer made this column a key column after the read above.
         store().query_write(delete(s.concept_key).where(s.concept_key.c.id == key_id))
         existing = fetch_column_key_id(column_id)
-        return existing if _key_concept(existing) == concept_id else None
+        return existing if fetch_key_concept_id(existing) == concept_id else None
 
 
 def ensure_column_key(column_id: str) -> str | None:
@@ -288,7 +288,8 @@ def _key_tables(key_id: str) -> set[str]:
     }
 
 
-def _key_concept(key_id: str) -> str | None:
+def fetch_key_concept_id(key_id: str) -> str | None:
+    """The Concept *key_id* identifies, or ``None`` when there is no such key."""
     rows = store().query_read(
         select(s.concept_key.c.concept_id).where(s.concept_key.c.id == key_id)
     )
@@ -345,9 +346,9 @@ def merge_concepts(
         for absorbed_key, survivor_key in (key_pairs or {}).items():
             if absorbed_key == survivor_key:
                 continue
-            if _key_concept(absorbed_key) != absorbed_id:
+            if fetch_key_concept_id(absorbed_key) != absorbed_id:
                 continue
-            if _key_concept(survivor_key) != survivor_id:
+            if fetch_key_concept_id(survivor_key) != survivor_id:
                 continue
             if _key_tables(survivor_key) & _key_tables(absorbed_key):
                 continue

@@ -190,7 +190,7 @@ def _resolve_semantic_fks(database_name: str) -> int:
             # edge, and a target whose table has no Concept to key. Either way
             # the column is left for the unmatched-FK stage: the declared
             # target is the one answer, so inference has nothing to add.
-            if merge_semantic_fk_to_column(col["id"], fk_target_col_id):
+            if merge_semantic_fk_to_column(col["id"], fk_target_col_id, declared=True):
                 declared_written += 1
                 logger.debug(
                     "resolve_semantic_fks [declared]: %s.%s → column %s",

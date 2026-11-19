@@ -23,6 +23,7 @@ from sqlalchemy import (
     case,
     func,
     literal,
+    or_,
     union,
     select,
     true,
@@ -34,6 +35,7 @@ from auto_ontology.dal import schema as s
 from auto_ontology.dal.concepts import (
     ensure_column_key,
     fetch_column_key_id,
+    fetch_key_concept_id,
     semantic_fk_targets,
 )
 from auto_ontology.dal.datasources import fetch_col_table_contexts
@@ -415,10 +417,11 @@ def fetch_attr_column_contexts(
 def find_unlinked_fk_columns(
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Columns carrying no SEMANTIC_FK or HAS_ATTRIBUTE link, and keying no Concept.
+    """Columns carrying no SEMANTIC_FK or HAS_ATTRIBUTE link.
 
     A Concept key column is the entity's identity, not a reference to another
-    entity, so it is never an FK candidate.
+    entity, so it is a candidate only with a declared foreign key — a table
+    whose key also references another entity's, such as a 1:1 extension.
 
     The work list for FK resolution. Scoped to one database when asked, for the
     same reason as ``fetch_all_tables_without_term``: several databases share a
@@ -467,9 +470,12 @@ def find_unlinked_fk_columns(
             ~select(s.column__has_attribute.c.attribute_id)
             .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
             .exists(),
-            ~select(s.concept_key__column.c.key_id)
-            .where(s.concept_key__column.c.column_id == s.catalog_column.c.id)
-            .exists(),
+            or_(
+                s.column__foreign_key.c.target_column_id.is_not(None),
+                ~select(s.concept_key__column.c.key_id)
+                .where(s.concept_key__column.c.column_id == s.catalog_column.c.id)
+                .exists(),
+            ),
         )
     )
     if database_name is not None:
@@ -685,7 +691,9 @@ def attribute_owner_column_id(attr_id: str) -> str | None:
     return rows[0]["column_id"] if rows else None
 
 
-def merge_semantic_fk_to_column(src_column_id: str, target_column_id: str) -> bool:
+def merge_semantic_fk_to_column(
+    src_column_id: str, target_column_id: str, *, declared: bool = False
+) -> bool:
     """Point a column at the Concept key *target_column_id* stands for. Idempotent.
 
     The target column becomes a key of its own table's Concept when it is not
@@ -695,8 +703,9 @@ def merge_semantic_fk_to_column(src_column_id: str, target_column_id: str) -> bo
 
     Refuses — writes nothing, returns ``False`` — when the two columns are the
     same, belong to different ingested databases, when the source column is a
-    Concept key column itself (an identity, not a reference), or when the
-    target's table has no Concept. This is the one place a ``SEMANTIC_FK`` edge
+    Concept key column itself (an identity, not a reference) — unless the FK
+    is *declared* and targets a different Concept — or when the target's table
+    has no Concept. This is the one place a ``SEMANTIC_FK`` edge
     is created, so it is the one place that has to enforce that it never
     crosses a database boundary: a path built from such an edge would later
     name a table that doesn't exist in the query's target database.
@@ -710,7 +719,8 @@ def merge_semantic_fk_to_column(src_column_id: str, target_column_id: str) -> bo
             target_column_id,
         )
         return False
-    if fetch_column_key_id(src_column_id) is not None:
+    src_key_id = fetch_column_key_id(src_column_id)
+    if src_key_id is not None and not declared:
         logger.info(
             "merge_semantic_fk: %s is a Concept key column; not an FK",
             src_column_id,
@@ -719,6 +729,10 @@ def merge_semantic_fk_to_column(src_column_id: str, target_column_id: str) -> bo
     with write_transaction():
         key_id = ensure_column_key(target_column_id)
         if key_id is None:
+            return False
+        if src_key_id is not None and fetch_key_concept_id(
+            src_key_id
+        ) == fetch_key_concept_id(key_id):
             return False
         store().query_write(
             insert(s.column__semantic_fk)

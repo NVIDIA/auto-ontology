@@ -965,6 +965,24 @@ def test_unlinked_reports_a_declared_fk_target_when_there_is_one(world) -> None:
     assert rows["id"]["fk_target_col_id"] is None
 
 
+def test_unlinked_keeps_a_key_column_only_with_a_declared_fk(world) -> None:
+    """A key that also references another entity's key is a declared FK."""
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.table("vips", pk=["customer_id"])
+    world.column("vips", "customer_id")
+    world.represent("customers")
+    world.represent("vips")
+    _link(
+        s.column__foreign_key,
+        source_column_id=world.columns["vips.customer_id"],
+        target_column_id=world.columns["customers.id"],
+    )
+
+    names = {r["name"] for r in a.find_unlinked_fk_columns(f"{world.prefix}-shopdb")}
+    assert names == {"customer_id"}
+
+
 def test_unlinked_scopes_to_one_database(world) -> None:
     world.database("otherdb")
     world.table("here")
@@ -1205,6 +1223,41 @@ def test_merge_semantic_fk_refuses_a_key_column_as_its_source(world) -> None:
     world.represent("vips")
 
     assert a.merge_semantic_fk(world.columns["vips.customer_id"], attr) is False
+
+
+def test_merge_semantic_fk_takes_a_declared_fk_from_a_key_column(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.table("vips", pk=["customer_id"])
+    world.column("vips", "customer_id")
+    world.represent("customers")
+    world.represent("vips")
+
+    assert a.merge_semantic_fk_to_column(
+        world.columns["vips.customer_id"], world.columns["customers.id"], declared=True
+    )
+    rows = store().query_read(
+        select(s.column__semantic_fk.c.key_id).where(
+            s.column__semantic_fk.c.column_id == world.columns["vips.customer_id"]
+        )
+    )
+    assert rows == [{"key_id": world.key("customers.id")}]
+
+
+def test_merge_semantic_fk_refuses_a_declared_fk_within_one_concept(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id", 1)
+    world.column("customers", "code", 2)
+    world.represent("customers")
+
+    assert (
+        a.merge_semantic_fk_to_column(
+            world.columns["customers.id"],
+            world.columns["customers.code"],
+            declared=True,
+        )
+        is False
+    )
 
 
 def test_merge_semantic_fk_needs_a_concept_on_the_target_table(world) -> None:

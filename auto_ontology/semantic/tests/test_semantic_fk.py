@@ -791,7 +791,7 @@ def test_declared_fk_is_trusted_without_a_join(name: str, target: str) -> None:
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 1
 
-    merge.assert_called_once_with("col-1", target)
+    merge.assert_called_once_with("col-1", target, declared=True)
     join.assert_not_called()
 
 
