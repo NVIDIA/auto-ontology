@@ -40,6 +40,7 @@
     "attributes.find_column_attribute_by_column_id": "<attr:Film/film id/film_id>",
     "attributes.find_join_path__inventory_to_film": [
       {
+        "key": "Film.film_id",
         "source_column": "film_id",
         "source_database": "pagila",
         "source_schema": "public",
@@ -52,6 +53,7 @@
     ],
     "attributes.find_join_path__rental_to_customer": [
       {
+        "key": "Customer.customer_id",
         "source_column": "customer_id",
         "source_database": "pagila",
         "source_schema": "public",
@@ -398,19 +400,6 @@
         "id": "<col:chinook.main.Track.Milliseconds>",
         "is_unique": null,
         "name": "Milliseconds",
-        "sample_values": null,
-        "schema_name": "main",
-        "table_id": "<table:chinook.main.Track>",
-        "table_name": "Track"
-      },
-      {
-        "data_type": "INTEGER",
-        "description": null,
-        "distinct_values": null,
-        "fk_target_col_id": null,
-        "id": "<col:chinook.main.Track.TrackId>",
-        "is_unique": null,
-        "name": "TrackId",
         "sample_values": null,
         "schema_name": "main",
         "table_id": "<table:chinook.main.Track>",
@@ -1481,19 +1470,6 @@
         "schema_name": "public",
         "table_id": "<table:pagila.public.payment>",
         "table_name": "payment"
-      },
-      {
-        "data_type": "integer",
-        "description": null,
-        "distinct_values": null,
-        "fk_target_col_id": null,
-        "id": "<col:pagila.public.rental.rental_id>",
-        "is_unique": null,
-        "name": "rental_id",
-        "sample_values": null,
-        "schema_name": "public",
-        "table_id": "<table:pagila.public.rental>",
-        "table_name": "rental"
       },
       {
         "data_type": "integer",
@@ -6484,6 +6460,32 @@
       "nodes": [
         {
           "column_attributes_count": 1,
+          "concept": {
+            "id": "<unmapped-uuid>",
+            "name": "Payment",
+            "term_ids": [
+              "<term:Payment>"
+            ]
+          },
+          "description": "Money received for a rental. Owning table is partitioned.",
+          "id": "<term:Payment>",
+          "name": "Payment",
+          "relationship_count": 1,
+          "sql_attributes_count": 1,
+          "synonyms": [
+            "transaction"
+          ],
+          "zones": []
+        },
+        {
+          "column_attributes_count": 1,
+          "concept": {
+            "id": "<unmapped-uuid>",
+            "name": "Rental",
+            "term_ids": [
+              "<term:Rental>"
+            ]
+          },
           "description": "A single film rental transaction.",
           "id": "<term:Rental>",
           "name": "Rental",
@@ -6497,6 +6499,13 @@
         },
         {
           "column_attributes_count": 1,
+          "concept": {
+            "id": "<unmapped-uuid>",
+            "name": "Track",
+            "term_ids": [
+              "<term:Track>"
+            ]
+          },
           "description": "A single piece of recorded music.",
           "id": "<term:Track>",
           "name": "Track",
@@ -6515,19 +6524,14 @@
           ]
         },
         {
-          "column_attributes_count": 1,
-          "description": "Money received for a rental. Owning table is partitioned.",
-          "id": "<term:Payment>",
-          "name": "Payment",
-          "relationship_count": 1,
-          "sql_attributes_count": 1,
-          "synonyms": [
-            "transaction"
-          ],
-          "zones": []
-        },
-        {
           "column_attributes_count": 2,
+          "concept": {
+            "id": "<unmapped-uuid>",
+            "name": "Customer",
+            "term_ids": [
+              "<term:Customer>"
+            ]
+          },
           "description": "A person who rents films from a store.",
           "id": "<term:Customer>",
           "name": "Customer",
@@ -6541,6 +6545,13 @@
         },
         {
           "column_attributes_count": 3,
+          "concept": {
+            "id": "<unmapped-uuid>",
+            "name": "Film",
+            "term_ids": [
+              "<term:Film>"
+            ]
+          },
           "description": "A motion picture available for rental.",
           "id": "<term:Film>",
           "name": "Film",
@@ -6571,6 +6582,13 @@
       "nodes": [
         {
           "column_attributes_count": 3,
+          "concept": {
+            "id": "<unmapped-uuid>",
+            "name": "Film",
+            "term_ids": [
+              "<term:Film>"
+            ]
+          },
           "description": "A motion picture available for rental.",
           "id": "<term:Film>",
           "name": "Film",
