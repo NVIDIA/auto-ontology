@@ -40,8 +40,10 @@ def upgrade() -> None:
         ),
     )
     op.add_column("term", sa.Column("generation_note", sa.Text(), nullable=True))
+    # op.f: the name already follows METADATA's naming convention, which
+    # alembic/env.py applies, so it must not be prefixed a second time.
     op.create_check_constraint(
-        "ck_term_generation_status_value",
+        op.f("ck_term_generation_status_value"),
         "term",
         "generation_status IN ('generated', 'fallback')",
     )
@@ -49,6 +51,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_constraint("ck_term_generation_status_value", "term", type_="check")
+    op.drop_constraint(op.f("ck_term_generation_status_value"), "term", type_="check")
     op.drop_column("term", "generation_note")
     op.drop_column("term", "generation_status")

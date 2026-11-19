@@ -504,7 +504,9 @@ def _generation(term_id: str) -> tuple[str, str | None]:
     return row["generation_status"], row["generation_note"]
 
 
-def test_a_placeholder_term_is_stored_as_a_fallback_with_its_reason(world) -> None:
+def test_a_placeholder_term_is_stored_as_a_fallback_with_its_reason(
+    world: World,
+) -> None:
     """#533: a placeholder reads like any Term, so the row must say what it is."""
     world.table("orders")
 
@@ -521,7 +523,7 @@ def test_a_placeholder_term_is_stored_as_a_fallback_with_its_reason(world) -> No
     )
 
 
-def test_a_later_real_proposal_clears_the_placeholder(world) -> None:
+def test_a_later_real_proposal_clears_the_placeholder(world: World) -> None:
     world.table("orders")
     name = f"{world.prefix}-Orders"
     term_id, _ = t.upsert_table_term(
@@ -536,7 +538,7 @@ def test_a_later_real_proposal_clears_the_placeholder(world) -> None:
     assert _generation(term_id) == ("generated", None)
 
 
-def test_a_person_writing_the_description_clears_the_placeholder(world) -> None:
+def test_a_person_writing_the_description_clears_the_placeholder(world: World) -> None:
     world.table("orders")
     term_id, _ = t.upsert_table_term(
         f"{world.prefix}-Orders",
@@ -550,7 +552,9 @@ def test_a_person_writing_the_description_clears_the_placeholder(world) -> None:
     assert _generation(term_id) == ("generated", None)
 
 
-def test_a_person_certifying_the_description_clears_the_placeholder(world) -> None:
+def test_a_person_certifying_the_description_clears_the_placeholder(
+    world: World,
+) -> None:
     world.table("orders")
     term_id, _ = t.upsert_table_term(
         f"{world.prefix}-Orders",
@@ -564,7 +568,7 @@ def test_a_person_certifying_the_description_clears_the_placeholder(world) -> No
     assert _generation(term_id) == ("generated", None)
 
 
-def test_compilation_updates_and_name_edits_keep_the_placeholder(world) -> None:
+def test_compilation_updates_and_name_edits_keep_the_placeholder(world: World) -> None:
     """Only a person replacing the description replaces the placeholder: an
     update from compilation (no ``touch``) or a name-only edit leaves it."""
     world.table("orders")
@@ -581,7 +585,21 @@ def test_compilation_updates_and_name_edits_keep_the_placeholder(world) -> None:
     assert _generation(term_id) == ("fallback", "x")
 
 
-def test_generation_status_accepts_only_known_values(world) -> None:
+def test_placeholder_names_are_read_from_the_stored_status(world: World) -> None:
+    world.table("orders")
+    world.table("customers")
+    t.upsert_table_term(
+        f"{world.prefix}-Orders", "x", world.tables["orders"], fallback_reason="y"
+    )
+    t.upsert_table_term(f"{world.prefix}-Customer", "real", world.tables["customers"])
+
+    assert t.fetch_fallback_term_names(
+        [world.tables["orders"], world.tables["customers"]]
+    ) == [f"{world.prefix}-Orders"]
+    assert t.fetch_fallback_term_names([]) == []
+
+
+def test_generation_status_accepts_only_known_values(world: World) -> None:
     world.table("orders")
     term_id, _ = t.upsert_table_term(
         f"{world.prefix}-Orders", "d", world.tables["orders"]

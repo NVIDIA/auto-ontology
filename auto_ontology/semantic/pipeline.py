@@ -11,6 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import TracebackType
 
+from auto_ontology.dal.terms import fetch_fallback_term_names
 from auto_ontology.dal.datasources import (
     fetch_all_tables_without_term,
     fetch_table_context,
@@ -219,8 +220,6 @@ def compile_semantic_layer(
             commit_slot.skip_if_unused()
 
     count = 0
-    fallback_terms: list[str] = []
-
     if embedder is not None:
         embedder.vdb.create_index()
 
@@ -233,7 +232,6 @@ def compile_semantic_layer(
             result = future.result()
             if result is not None:
                 count += 1
-                fallback_terms.extend(result.fallback_terms)
                 logger.debug(
                     "  terms=%s attrs=%s",
                     result.term_names,
@@ -248,12 +246,23 @@ def compile_semantic_layer(
         )
     else:
         logger.info("Compilation complete — %d table(s) processed", count)
+    # From the stored status, not the per-table results: a table that failed
+    # after its placeholder Term was written returns no result, but the
+    # placeholder is stored all the same.
+    try:
+        fallback_terms = fetch_fallback_term_names(
+            [str(table["id"]) for table in tables if table.get("id")]
+        )
+    except Exception:
+        # A summary, never a reason to fail the compilation it describes.
+        logger.warning("Could not count placeholder Terms", exc_info=True)
+        fallback_terms = []
     if fallback_terms:
         # A placeholder reads like any other Term, so name them all once at
         # the end rather than leave them in per-table warnings.
         logger.warning(
             "%d placeholder Term(s) stored where a model step failed: %s",
             len(fallback_terms),
-            sorted(fallback_terms),
+            fallback_terms,
         )
     return count
