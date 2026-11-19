@@ -104,37 +104,76 @@ const pokeLoopbackViaIframe = (url: string): void => {
 	window.setTimeout(() => iframe.remove(), 10_000);
 };
 
-// Fetch every localhost alias so an IPv4 Chrome tab still hits a listener that
-// bound `[::1]:8787` (and the reverse). `no-cors` is required: the listener is
-// not Auto Ontology and will not send ACAO. A live listener answers with an opaque
-// response, which counts as fulfilled; a closed port rejects. Returns true only
-// when at least one alias was reached, so callers can tell delivery from a dead
-// listener. Each attempt has a deadline: a listener that accepts the socket
-// but never answers would otherwise leave the page in its waiting state forever.
+// The authorization code in the callback is single-use, so it is delivered to
+// one listener at most. The registered URI goes first; a localhost alias is
+// tried only when the previous address refused the connection, which covers an
+// IPv4 Chrome tab whose client bound `[::1]:8787` (and the reverse). Sending to
+// every alias at once let one client receive the same code two or three times
+// when the aliases reached the same listener, and every exchange after the
+// first failed with `invalid_grant` (#561).
+//
+// `no-cors` is required: the listener is not Auto Ontology and will not send
+// ACAO. A live listener answers with an opaque response, which resolves; a
+// closed port rejects with a `TypeError`. A timeout means something accepted the
+// connection and has not answered, so the request may well have arrived: that
+// counts as reached, and no other alias is tried. The deadline keeps a listener
+// that never answers from leaving the page in its waiting state forever.
 const DELIVERY_TIMEOUT_MS = 5_000;
 
-export const deliverLoopbackCallback = async (redirectUrl: string): Promise<boolean> => {
+type Delivery = 'reached' | 'refused';
+
+const deliverTo = async (url: string): Promise<Delivery> => {
+	try {
+		await fetch(url, {
+			mode: 'no-cors',
+			credentials: 'omit',
+			keepalive: true,
+			signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+		});
+		return 'reached';
+	} catch (error) {
+		return error instanceof DOMException && error.name === 'TimeoutError'
+			? 'reached'
+			: 'refused';
+	}
+};
+
+const deliverOnce = async (parsed: URL): Promise<boolean> => {
+	for (const url of loopbackCandidates(parsed)) {
+		if ((await deliverTo(url)) === 'reached') return true;
+	}
+	// Every address refused, which is also what a private-network-access block
+	// looks like from here. Try the registered URI once more as a nested
+	// navigation; see `pokeLoopbackViaIframe`.
+	pokeLoopbackViaIframe(parsed.toString());
+	return false;
+};
+
+// One delivery per callback URL for the life of the page, so a re-run effect or
+// a second submit cannot hand the same code to the client again.
+const deliveries = new Map<string, Promise<boolean>>();
+
+/**
+ * Deliver an OAuth callback to the MCP client's loopback listener, once.
+ *
+ * Resolves true when a listener was reached, false when every address refused
+ * the connection.
+ */
+export const deliverLoopbackCallback = (redirectUrl: string): Promise<boolean> => {
 	let parsed: URL;
 	try {
 		parsed = new URL(redirectUrl);
 	} catch {
-		return false;
+		return Promise.resolve(false);
 	}
-	if (!isLoopbackCallback(parsed)) return false;
+	if (!isLoopbackCallback(parsed)) return Promise.resolve(false);
 
-	const results = await Promise.allSettled(
-		loopbackCandidates(parsed).map((url) =>
-			fetch(url, {
-				mode: 'no-cors',
-				credentials: 'omit',
-				keepalive: true,
-				signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
-			}),
-		),
-	);
-	const delivered = results.some((result) => result.status === 'fulfilled');
-	if (!delivered) pokeLoopbackViaIframe(parsed.toString());
-	return delivered;
+	const key = parsed.toString();
+	const pending = deliveries.get(key);
+	if (pending) return pending;
+	const delivery = deliverOnce(parsed);
+	deliveries.set(key, delivery);
+	return delivery;
 };
 
 const redirectUrlFromPayload = (data: unknown): string | null => {
