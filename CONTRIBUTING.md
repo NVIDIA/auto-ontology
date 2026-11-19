@@ -112,6 +112,8 @@ After you open it:
 
 ## Copyright and license headers
 
+Each required header must include an `SPDX-License-Identifier` line.
+
 NVIDIA-authored files must use the approved NVIDIA copyright and license header.
 For external contributions, retain or add attribution for the actual copyright
 owner(s); do not add NVIDIA’s copyright notice to work NVIDIA does not own. DCO
