@@ -549,6 +549,27 @@ def upsert_table_term(
     raise RuntimeError(f"Could not allocate a private Term name for table {table_id}")
 
 
+def fetch_fallback_term_names(table_ids: list[str]) -> list[str]:
+    """Names of the placeholder Terms these tables represent (#533).
+
+    Read from the stored status rather than collected from compile results,
+    so a placeholder whose table failed after the Term was written is still
+    counted.
+    """
+    if not table_ids:
+        return []
+    rows = store().query_read(
+        select(s.term.c.name)
+        .select_from(s.term.join(s.table__term, s.table__term.c.term_id == s.term.c.id))
+        .where(
+            s.table__term.c.table_id.in_(table_ids),
+            s.term.c.generation_status == "fallback",
+        )
+        .distinct()
+    )
+    return sorted(row["name"] for row in rows)
+
+
 def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
     """``{term_name: [synonym, ...]}`` for the terms behind these attributes.
 
