@@ -99,17 +99,27 @@ def _timeout_message(timeout_s: float, elapsed_s: float | None) -> str:
 class SQLDatabase(ABC):
     """Abstract SQL database connector.
 
-    Subclasses must implement all abstract methods. The context-manager
-    protocol (``__enter__`` / ``__exit__``) is provided by this base class
-    and delegates to :meth:`close`.
+    Subclasses must implement all abstract methods, including the
+    :attr:`dialect` property used by the text-to-SQL agent to emit
+    dialect-appropriate SQL. The context-manager protocol (``__enter__`` /
+    ``__exit__``) is provided by this base class and delegates to
+    :meth:`close`.
 
     Parameters
     ----------
     connection_string:
         A driver-specific connection string or database path.
-    dialect:
-        SQL dialect used by this connector (e.g. ``"duckdb"``, ``"snowflake"``).
-        Used by the text-to-SQL agent to emit dialect-appropriate SQL.
+
+    Notes
+    -----
+    Connectors that support schema-filtered introspection
+    (:class:`~auto_ontology.connectors.databricks.DatabricksDatabase`,
+    :class:`~auto_ontology.connectors.snowflake.SnowflakeDatabase`,
+    :class:`~auto_ontology.connectors.kyuubi.KyuubiDatabase`, and
+    :class:`~auto_ontology.connectors.trino.TrinoDatabase`) also accept an
+    optional ``schemas: list[str] | None = None`` keyword argument in
+    ``__init__``, passed by
+    :func:`auto_ontology.connectors.registry.create_connector`.
     """
 
     #: Whether :meth:`execute` takes a ``timeout_s`` cap that is free to apply.
