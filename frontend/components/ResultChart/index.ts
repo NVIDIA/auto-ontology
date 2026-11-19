@@ -7,5 +7,5 @@ export { ResultChartCarousel } from './ResultChartCarousel';
 export { ChartKpiCard, KpiTiles } from './ChartKpi';
 export { fenceBareSpecs, parseCarouselSpec, parseChartSpec, parseKpiSpec, toNumber } from './parse';
 export { degenerateKpis, normalizeChart } from './normalize';
-export { specToCsv, downloadCsv } from './export-csv';
+export { specToCsv, tableToCsv, rowsToCsv, downloadCsv, downloadCsvText } from './export-csv';
 export type { ChartSpec, ChartCarouselSpec, ChartType } from './types';

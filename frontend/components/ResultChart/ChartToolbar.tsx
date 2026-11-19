@@ -32,7 +32,7 @@ export const ChartToolbar: FC<{
 		</button>
 		<button
 			type="button"
-			className="result-chart-tool"
+			className="result-chart-tool ml-auto"
 			title="Download the Chart Data as CSV"
 			onClick={() => downloadCsv(spec)}
 		>

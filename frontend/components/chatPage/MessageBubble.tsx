@@ -10,6 +10,8 @@ import { CopyButton } from '@/common/Button';
 import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
 import { SqlBlock } from '@/common/SqlBlock';
+import { Download } from '@/adapters/ui/icons';
+import { downloadCsvText, tableToCsv } from '@/components/ResultChart';
 import { DynamicTable } from './DynamicTable';
 import { FormattedContent } from './FormattedContent';
 
@@ -19,18 +21,41 @@ type QueryResultsSectionProps = {
 	sqlResponse: string | undefined;
 	parsedTable: ParsedTable | null;
 	singleCell: SingleCellResult | null;
+	timestamp: ChatMessage['timestamp'];
 	className?: string;
+};
+
+const exportTable = (table: ParsedTable, timestamp: ChatMessage['timestamp']) => {
+	const { filename, csv } = tableToCsv(
+		table,
+		`query-results-${formatDate(timestamp, 'YYYYMMDD-HHmm')}`,
+	);
+	downloadCsvText(filename, csv);
 };
 
 const QueryResultsSection = ({
 	sqlResponse,
 	parsedTable,
 	singleCell,
+	timestamp,
 	className,
 }: QueryResultsSectionProps) => (
 	<div className={className}>
-		<div className="mb-1 text-xs font-medium text-secondary dark:text-zinc-400">
-			Query results
+		<div className="mb-1 flex items-center justify-between">
+			<span className="text-xs font-medium text-secondary dark:text-zinc-400">
+				Query results
+			</span>
+			{parsedTable && (
+				<button
+					type="button"
+					title="Download the Query Results as CSV"
+					onClick={() => exportTable(parsedTable, timestamp)}
+					className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-secondary hover:bg-zinc-200 hover:text-heading dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
+				>
+					<Download className="h-3.5 w-3.5" />
+					CSV
+				</button>
+			)}
 		</div>
 		{!sqlResponse && <p className="text-xs italic text-secondary dark:text-zinc-500">null</p>}
 		{sqlResponse && singleCell && (
@@ -121,6 +146,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 						sqlResponse={message.sqlResponse}
 						parsedTable={parsedTable}
 						singleCell={singleCellResult}
+						timestamp={message.timestamp}
 						className={showText || showSql ? 'mt-3' : undefined}
 					/>
 				)}
