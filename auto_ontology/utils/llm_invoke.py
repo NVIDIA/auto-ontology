@@ -63,6 +63,12 @@ LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 # applies it for the duration of a block. See `run_semantic_compilation`.
 LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "0"))
 
+# Hybrid reasoning models such as Nemotron 3.5 think before every answer unless
+# the chat template is told not to. ``off`` sends ``enable_thinking: false`` with
+# every non-reasoning call; leave it unset for models whose template has no such
+# switch.
+NON_REASONING_THINKING = os.environ.get("NON_REASONING_THINKING", "")
+
 # The process-wide default, from the environment. None means unbounded. This is
 # what the guard falls back to whenever no `limit_inflight` block is active.
 _ENV_INFLIGHT: threading.BoundedSemaphore | None = (
@@ -218,12 +224,13 @@ def _build_client(
     base_url: str,
     temperature: float,
     max_tokens: int,
+    thinking: bool = True,
 ) -> BaseChatModel:
     """Build a chat client for the given model/endpoint.
 
     OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
     ``ChatOpenAI``, which supports structured output. Everything else uses
-    ``ChatNVIDIA``.
+    ``ChatNVIDIA``, where ``thinking=False`` turns a hybrid model's reasoning off.
     """
     if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
@@ -249,6 +256,9 @@ def _build_client(
         base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        model_kwargs=(
+            {} if thinking else {"chat_template_kwargs": {"enable_thinking": False}}
+        ),
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
@@ -289,7 +299,8 @@ def get_non_reasoning_llm_client(
 
     Uses ``NON_REASONING_API_KEY`` / ``NON_REASONING_ENDPOINT`` /
     ``NON_REASONING_MODEL`` so it can target a different endpoint than the
-    main agent model.
+    main agent model, and ``NON_REASONING_THINKING=off`` to turn a hybrid
+    model's reasoning off.
 
     Parameters
     ----------
@@ -305,6 +316,7 @@ def get_non_reasoning_llm_client(
         base_url=_NON_REASONING_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
+        thinking=NON_REASONING_THINKING.lower() != "off",
     )
     _remember_non_reasoning(client)
     return client
