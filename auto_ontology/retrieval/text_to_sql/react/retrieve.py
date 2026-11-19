@@ -580,12 +580,13 @@ def _join_lines(
 
 def _concept_lines(
     ctx: ToolContext, new_tables: list[dict]
-) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
+) -> list[tuple[str, set[tuple[str | None, str | None]], str]]:
     """One line per split entity a new table is part of, with every part.
 
     A Concept with several members is one entity whose fields are spread over
     their tables, so each part is joined on its own key column. The line
-    carries every member, so all of them count as shown.
+    carries every member, so all of them count as shown, and the Concept's id:
+    the caller records it as shown only if the line survives the limit.
     """
     if not new_tables:
         return []
@@ -594,14 +595,15 @@ def _concept_lines(
     except Exception:
         logger.warning("retrieve: concept lookup failed", exc_info=True)
         return []
-    lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    lines: list[tuple[str, set[tuple[str | None, str | None]], str]] = []
+    listed: set[str] = set()
     for table in new_tables:
         concept = concepts.get(str(table["id"]))
         if not concept or len(concept["members"]) < 2:
             continue
-        if concept["concept_id"] in ctx.shown_concepts:
+        if concept["concept_id"] in ctx.shown_concepts | listed:
             continue
-        ctx.shown_concepts.add(concept["concept_id"])
+        listed.add(concept["concept_id"])
         members = " + ".join(_qualified_member(m) for m in concept["members"])
         keys = [
             " = ".join(
@@ -620,6 +622,7 @@ def _concept_lines(
                     (m.get("schema_name"), m.get("table_name"))
                     for m in concept["members"]
                 },
+                concept["concept_id"],
             )
         )
     return lines
@@ -764,7 +767,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
         (new_blocks[str(t["id"])], own(t)) for t in new_tables
     ]
-    named += _concept_lines(ctx, new_tables)
+    concept_lines = _concept_lines(ctx, new_tables)
+    named += [(line, tables) for line, tables, _ in concept_lines]
     named += _join_lines(ctx, new_tables)
     if config.siblings_enabled():
         named += [
@@ -810,4 +814,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if block in result or short_blocks.get(block, "\0") in result:
             for schema, name in tables:
                 ctx.show_table(schema, name)
+    ctx.shown_concepts.update(
+        concept_id for line, _, concept_id in concept_lines if line in result
+    )
     return result

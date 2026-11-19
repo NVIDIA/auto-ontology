@@ -880,3 +880,35 @@ def test_a_lookup_copied_into_a_wide_table_is_not_a_sibling() -> None:
     }
 
     assert siblings.find_siblings(lookup, [wide]) == []
+
+
+def test_a_concept_the_limit_dropped_is_shown_by_a_later_search(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    members = [
+        {"table_id": "t-orders", "schema_name": "sales", "table_name": "orders"},
+        {"table_id": "t-customers", "schema_name": "crm", "table_name": "customers"},
+    ]
+    concept = {
+        "concept_id": "concept-1",
+        "concept_name": "Customer",
+        "members": members,
+        "keys": [],
+    }
+    monkeypatch.setattr(
+        tool,
+        "fetch_concept_members",
+        lambda ids: {i: concept for i in ids if i in {"t-orders", "t-customers"}},
+    )
+    limit = {"chars": 10}
+    monkeypatch.setattr(tool.config, "max_observation_chars", lambda: limit["chars"])
+    ctx = _ctx()
+
+    first = tool.retrieve(ctx, "how is revenue calculated")
+    assert "CONCEPT Customer" not in first
+    assert "concept-1" not in ctx.shown_concepts
+
+    limit["chars"] = 100_000
+    second = tool.retrieve(ctx, "customer status")
+    assert "CONCEPT Customer: sales.orders + crm.customers" in second
+    assert "concept-1" in ctx.shown_concepts
