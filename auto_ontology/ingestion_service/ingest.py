@@ -123,20 +123,24 @@ def run_ingest(connector: SQLDatabase) -> None:
 
     data_vdb = None
     rows_written = 0
-    for chunk in batch_embed_chunks(embed_rows, embed_params, label=database_name):
-        records = to_vdb_records(chunk)
-        if not records:
-            # Every row in the chunk came back without an embedding. Already
-            # logged as a warning by the embed step; nothing to write.
-            continue
-        if data_vdb is None:
-            # Reset lazily, on the first chunk that actually has something to
-            # write. Resetting up front would delete the live catalog and then
-            # spend minutes embedding, so a failed embed — a bad key, a dead
-            # endpoint — would leave retrieval with nothing instead of with the
-            # previous run's rows.
-            data_vdb = get_data_vdb(database_name=database_name, reset=True)
-        rows_written += data_vdb.run(records)
+    try:
+        for chunk in batch_embed_chunks(embed_rows, embed_params, label=database_name):
+            records = to_vdb_records(chunk)
+            if not records:
+                # Every row in the chunk came back without an embedding. Already
+                # logged as a warning by the embed step; nothing to write.
+                continue
+            if data_vdb is None:
+                # Reset lazily, on the first chunk that actually has something to
+                # write. Resetting up front would delete the live catalog and then
+                # spend minutes embedding, so a failed embed — a bad key, a dead
+                # endpoint — would leave retrieval with nothing instead of with the
+                # previous run's rows.
+                data_vdb = get_data_vdb(database_name=database_name, reset=True)
+            rows_written += data_vdb.run(records)
+    finally:
+        if data_vdb is not None:
+            data_vdb.close()
 
     if rows_written:
         logger.info("Tabular ingest result: %d rows written to pgvector", rows_written)
