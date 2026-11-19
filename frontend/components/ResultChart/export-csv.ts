@@ -5,7 +5,7 @@ import type { ParsedTable } from '@/lib/parseSqlResponse';
 import type { ChartCell, ChartSpec } from './types';
 
 /** Leading characters a spreadsheet may execute as a formula. */
-const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
+const FORMULA_TRIGGER = /^[=+\-@\t\r\n]/;
 
 /**
  * Serialize a cell to a CSV field: neutralize spreadsheet formula injection on
