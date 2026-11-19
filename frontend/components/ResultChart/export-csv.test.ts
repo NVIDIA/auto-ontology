@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
+import { parseSqlResponse } from '../../lib/parseSqlResponse';
 import { specToCsv, tableToCsv } from './export-csv';
 import type { ChartSpec } from './types';
 
@@ -37,6 +38,18 @@ describe('tableToCsv', () => {
 	it('keeps zero-padded codes as text', () => {
 		const { csv } = tableToCsv({ columns: ['zip'], rows: [{ zip: '007' }] }, 't');
 		expect(csv).toBe('zip\r\n007');
+	});
+
+	it('serializes a __proto__ column as its row value', () => {
+		const rows = JSON.parse('[{"__proto__":"x","a":"1"}]');
+		const { csv } = tableToCsv({ columns: ['__proto__', 'a'], rows }, 't');
+		expect(csv).toBe('__proto__,a\r\nx,1');
+	});
+
+	it('keeps a __proto__ column from a parsed SQL response', () => {
+		const table = parseSqlResponse('[{"__proto__":"x","a":"1"}]');
+		expect(table).not.toBeNull();
+		expect(tableToCsv(table!, 't').csv).toBe('__proto__,a\r\nx,1');
 	});
 
 	it('falls back to query-results when the title has no visible characters', () => {
