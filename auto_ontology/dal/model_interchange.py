@@ -1090,7 +1090,7 @@ def apply_import_model(
             document, id_map, created, skipped, embed_buffer, column_meta
         )
         if replace:
-            _delete_scoped_semantics_not_in_payload(document, live_db_ids)
+            _delete_scoped_semantics_not_in_payload(document, live_db_ids, id_map)
         _import_foreign_keys(document, id_map)
         _import_joins(document, id_map)
         _import_terms(document, id_map, created, skipped, embed_buffer)
@@ -1333,6 +1333,7 @@ def _import_joins(document: AutoOntologyModelDocument, id_map: dict[str, str]) -
 def _delete_scoped_semantics_not_in_payload(
     document: AutoOntologyModelDocument,
     live_db_ids: list[str],
+    id_map: dict[str, str],
 ) -> None:
     """Drop in-scope semantics the payload does not mention.
 
@@ -1343,6 +1344,10 @@ def _delete_scoped_semantics_not_in_payload(
     A Term is only deleted when **every** table representing it is inside the
     imported databases — the same all-or-nothing rule the reads use. A term
     shared with a database outside this import is that database's too.
+
+    A semantic FK is in scope when its column is, and is kept when the payload
+    names that column; it targets a Concept key, so deleting attributes never
+    removes it.
     """
     keep_terms = [term.id for term in document.semantic_layer.terms]
     keep_attrs = [
@@ -1428,6 +1433,21 @@ def _delete_scoped_semantics_not_in_payload(
             s.term.c.id.notin_(outside),
             s.term.c.source == SEMANTIC_SOURCE,
             _payload_identity(s.term).notin_(keep_terms or [""]),
+        )
+    )
+    keep_fk_columns = [
+        column_id
+        for fk in document.semantic_layer.semantic_fks
+        if (column_id := _remap_optional(id_map, fk.column_id))
+    ]
+    store().query_write(
+        s.column__semantic_fk.delete().where(
+            s.column__semantic_fk.c.column_id.in_(
+                select(s.catalog_column.c.id).where(
+                    s.catalog_column.c.table_id.in_(scoped_tables)
+                )
+            ),
+            s.column__semantic_fk.c.column_id.notin_(keep_fk_columns or [""]),
         )
     )
     delete_orphan_concepts(live_db_ids)

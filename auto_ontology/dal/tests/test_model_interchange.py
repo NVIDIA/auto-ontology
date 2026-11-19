@@ -657,6 +657,37 @@ def test_a_failed_import_leaves_nothing_behind(world) -> None:
 # --------------------------------------------------------------------------
 
 
+def _fk_columns(*column_ids: str) -> set[str]:
+    return {
+        row["column_id"]
+        for row in store().query_read(
+            select(s.column__semantic_fk.c.column_id).where(
+                s.column__semantic_fk.c.column_id.in_(column_ids)
+            )
+        )
+    }
+
+
+def test_replace_drops_only_the_in_scope_fks_the_payload_omits(world) -> None:
+    """The FK targets a Concept key, so no attribute delete cascades it away."""
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, database_id=other_db, name="public")
+    other_table = _add(s.catalog_table, schema_id=other_schema, name="elsewhere")
+    outside = _add(
+        s.catalog_column, table_id=other_table, name="order_ref", ordinal_position=1
+    )
+    _link(s.column__semantic_fk, column_id=outside, key_id=world.key)
+
+    kept = _document(world)
+    mi.apply_import_model(kept, replace=True)
+    assert _fk_columns(world.customer_ref, outside) == {world.customer_ref, outside}
+
+    dropped = _document(world)
+    dropped.semantic_layer.semantic_fks = []
+    mi.apply_import_model(dropped, replace=True)
+    assert _fk_columns(world.customer_ref, outside) == {outside}
+
+
 def test_replace_drops_a_term_the_payload_omits(world) -> None:
     document = _document(world)
     stale = _add(
