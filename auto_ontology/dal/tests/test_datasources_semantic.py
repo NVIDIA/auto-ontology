@@ -28,6 +28,7 @@ from sqlalchemy import select, update  # noqa: E402
 
 from auto_ontology.dal import datasources as d  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.tests.fk_links import link_semantic_fk  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import (  # noqa: E402
     SQL_ATTR_SOURCE_BRIDGE,
@@ -178,10 +179,11 @@ def test_tables_for_schema_counts_columns_and_terms(world) -> None:
     # A second, distinct Term via the SEMANTIC_FK route.
     fk_attribute = world.attribute("customer-ref")
     _link(
-        s.column__semantic_fk,
-        column_id=world.columns["customers.customer_id"],
+        s.column__has_attribute,
+        column_id=world.columns["tags.tag_id"],
         attribute_id=fk_attribute,
     )
+    link_semantic_fk(world.columns["customers.customer_id"], fk_attribute)
     _link(s.column_attribute__term, attribute_id=fk_attribute, term_id=other)
 
     rows = _by_name(d.fetch_tables_for_schema(world.schema))
@@ -406,15 +408,11 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     )
     customer_ref = world.attribute("customer-ref")
     _link(
-        s.column__semantic_fk,
-        column_id=world.columns["orders.customer_id"],
-        attribute_id=customer_ref,
-    )
-    _link(
         s.column__has_attribute,
         column_id=world.columns["customers.customer_id"],
         attribute_id=customer_ref,
     )
+    link_semantic_fk(world.columns["orders.customer_id"], customer_ref)
     rows = {
         r["name"]: r
         for r in d.fetch_tables_by_ids(
@@ -741,11 +739,7 @@ def test_a_semantic_fk_counts_as_a_foreign_key(world) -> None:
         column_id=world.columns["tags.tag_id"],
         attribute_id=attribute,
     )
-    _link(
-        s.column__semantic_fk,
-        column_id=world.columns["order_note.tag_ref"],
-        attribute_id=attribute,
-    )
+    link_semantic_fk(world.columns["order_note.tag_ref"], attribute)
 
     rows = {r["table_name"]: r for r in d.fetch_bridge_table_candidates(world.prefix)}
     assert "order_note" in rows

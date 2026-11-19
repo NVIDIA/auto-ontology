@@ -34,6 +34,7 @@ REL_IS_A = "IS_A"
 REL_ROLE = "ROLE"
 REL_REPRESENTS = "REPRESENTS"
 REL_SEMANTIC_FK = "SEMANTIC_FK"
+REL_SAME_CONCEPT = "SAME_CONCEPT"
 
 # Additional source value for SqlAttribute nodes generated from pure-FK
 # bridge (junction) tables. Sits alongside SQL_ATTR_SOURCE_MANUAL /

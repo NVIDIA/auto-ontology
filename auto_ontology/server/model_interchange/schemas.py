@@ -112,9 +112,33 @@ class ModelTerm(BaseModel):
     columns_attributes: list[ModelColumnAttribute] = Field(default_factory=list)
 
 
+class ModelConceptKey(BaseModel):
+    id: str
+    name: str = ""
+    column_ids: list[str] = Field(default_factory=list)
+
+
+class ModelConcept(BaseModel):
+    """Terms that are one real-world entity, and the keys identifying it."""
+
+    id: str
+    name: str = ""
+    description: str = ""
+    term_ids: list[str] = Field(default_factory=list)
+    keys: list[ModelConceptKey] = Field(default_factory=list)
+
+
 class ModelSemanticFk(BaseModel):
-    column_attribute_id: str
+    """``column_id`` references the Concept key ``concept_key_id``.
+
+    ``column_attribute_id`` is an attribute on one of the key's columns. It is
+    exported for readers that predate Concept keys, and is the key an import
+    falls back to when ``concept_key_id`` is absent or out of scope.
+    """
+
     column_id: str
+    concept_key_id: str = ""
+    column_attribute_id: str = ""
     use_in_join_paths: bool = True
 
 
@@ -144,6 +168,7 @@ class ModelCustomAnalysis(BaseModel):
 
 class ModelSemanticLayer(BaseModel):
     terms: list[ModelTerm] = Field(default_factory=list)
+    concepts: list[ModelConcept] = Field(default_factory=list)
     semantic_fks: list[ModelSemanticFk] = Field(default_factory=list)
     sql_attributes: ModelSqlAttributesBySource = Field(
         default_factory=ModelSqlAttributesBySource,

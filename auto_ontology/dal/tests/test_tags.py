@@ -59,6 +59,7 @@ from sqlalchemy import Select, select  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.tests.fk_links import link_semantic_fk  # noqa: E402
 from auto_ontology.dal.pii import (  # noqa: E402
     clear_values_of_pii_columns,
     fetch_attributes_of_pii_columns,
@@ -2051,11 +2052,22 @@ def test_an_attribute_without_a_term_is_not_tagged(tagged, sql_query_cleanup) ->
 
 def test_a_semantic_fk_alone_does_not_propagate(tagged) -> None:
     """The column only references the attribute; it is not an instance of it."""
-    tagged.link(
-        s.column__semantic_fk,
-        column_id=tagged.column,
-        attribute_id=tagged.column_attribute,
+    table_id = store().query_read(
+        select(s.catalog_column.c.table_id).where(
+            s.catalog_column.c.id == tagged.column
+        )
+    )[0]["table_id"]
+    owner = store().query_write(
+        s.catalog_column.insert()
+        .values(table_id=table_id, name="referenced_key")
+        .returning(s.catalog_column.c.id)
+    )[0]["id"]
+    store().query_write(
+        s.column__has_attribute.insert().values(
+            column_id=owner, attribute_id=tagged.column_attribute
+        )
     )
+    link_semantic_fk(tagged.column, tagged.column_attribute)
     tagged.label(column_id=tagged.column)
 
     assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
