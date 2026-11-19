@@ -5,6 +5,7 @@
 """Tests for LLM invocation helpers."""
 
 import contextlib
+import logging
 import threading
 import time
 from typing import Any
@@ -240,6 +241,148 @@ def test_non_reasoning_client_is_marked(monkeypatch: Any) -> None:
     assert llm_invoke._is_non_reasoning_client(_Binding(client))
     assert not llm_invoke._is_non_reasoning_client(object())
     assert not llm_invoke._is_non_reasoning_client(_Binding(object()))
+
+
+def test_non_reasoning_thinking_is_on_unless_turned_off(monkeypatch: Any) -> None:
+    built: list[dict] = []
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "nvapi-test")
+    monkeypatch.setattr(
+        llm_invoke, "_build_client", lambda **kwargs: built.append(kwargs) or object()
+    )
+
+    # Unset explicitly: the module read it at import, so a developer's own
+    # NON_REASONING_THINKING=off would otherwise decide the first call.
+    monkeypatch.setattr(llm_invoke, "NON_REASONING_THINKING", "")
+    llm_invoke.get_non_reasoning_llm_client()
+    monkeypatch.setattr(llm_invoke, "NON_REASONING_THINKING", "off")
+    llm_invoke.get_non_reasoning_llm_client()
+
+    assert [kwargs["thinking"] for kwargs in built] == [True, False]
+
+
+@pytest.mark.parametrize("setting", ["off", "OFF", " off ", "false", "0", "no"])
+def test_thinking_off_spellings(setting: str) -> None:
+    assert llm_invoke._thinking_enabled(setting) is False
+
+
+@pytest.mark.parametrize("setting", ["", "on", "true", "1", "yes"])
+def test_thinking_on_spellings(setting: str, caplog: Any) -> None:
+    with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
+        assert llm_invoke._thinking_enabled(setting) is True
+    assert not caplog.records
+
+
+def test_unrecognised_thinking_setting_warns_once(caplog: Any) -> None:
+    """A typo must not pass silently for a deliberate default, nor repeat on
+    every call: the ``_nr`` helpers build a client per call."""
+    llm_invoke._thinking_enabled.cache_clear()
+    with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
+        assert llm_invoke._thinking_enabled("of") is True
+        assert llm_invoke._thinking_enabled("of") is True
+    assert [r.getMessage() for r in caplog.records] == [
+        "NON_REASONING_THINKING='of' is not recognised; thinking stays on. "
+        "Use 'off' to turn it off."
+    ]
+
+
+class _CapturingSession:
+    """Stands in for the HTTP session ``ChatNVIDIA`` posts through, recording
+    each request body and answering with a minimal chat completion."""
+
+    def __init__(self) -> None:
+        self.bodies: list[dict] = []
+
+    def post(self, url: str, **kwargs: Any) -> Any:
+        self.bodies.append(kwargs["json"])
+        response = MagicMock(status_code=200, ok=True)
+        response.json.return_value = {
+            "id": "test",
+            "object": "chat.completion",
+            "model": kwargs["json"]["model"],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        return response
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def no_network(monkeypatch: Any) -> None:
+    """Fail any real HTTP request. A model the library does not know makes
+    ``ChatNVIDIA`` list a *hosted* endpoint's models when it is built, which is
+    why the unknown-model cases below use a self-hosted URL."""
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(f"unexpected network call: {args[1:3]}")
+
+    monkeypatch.setattr("requests.Session.request", refuse)
+
+
+def _sent_body(model: str, base_url: str, *, thinking: bool) -> dict:
+    """The request body one ``invoke`` puts on the wire."""
+    client = llm_invoke._build_client(
+        model=model,
+        api_key="nvapi-test",
+        base_url=base_url,
+        temperature=0.0,
+        max_tokens=16,
+        thinking=thinking,
+    )
+    session = _CapturingSession()
+    client._client.get_session_fn = lambda: session
+    client.invoke("hi")
+    (body,) = session.bodies
+    return body
+
+
+_SELF_HOSTED = "http://nim.test:8000/v1"
+_HOSTED = "https://integrate.api.nvidia.com/v1"
+
+
+def test_thinking_off_sends_the_nemotron_switch(no_network: None) -> None:
+    """Nemotron 3.5 is not in the library's model table; its chat template
+    reads ``enable_thinking``."""
+    body = _sent_body(
+        "nvidia/nemotron-3.5-lightning-30b-a3b", _SELF_HOSTED, thinking=False
+    )
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_thinking_off_uses_a_known_models_own_switch(no_network: None) -> None:
+    """DeepSeek v4 reads ``thinking``, not ``enable_thinking``; sending the
+    Nemotron field would leave its thinking on without a word."""
+    body = _sent_body("deepseek-ai/deepseek-v4-flash", _HOSTED, thinking=False)
+    assert body["chat_template_kwargs"] == {"thinking": False}
+
+
+def test_tag_switched_model_gets_no_field_and_a_warning(
+    no_network: None, caplog: Any
+) -> None:
+    """Llama 3.3 Nemotron Super turns thinking off with a ``detailed thinking
+    off`` system prompt; ``enable_thinking`` would be ignored, so the setting
+    would look applied while doing nothing."""
+    llm_invoke._warn_tag_switched.cache_clear()
+    with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
+        body = _sent_body(
+            "nvidia/llama-3.3-nemotron-super-49b-v1", _HOSTED, thinking=False
+        )
+    assert "chat_template_kwargs" not in body
+    assert "has no effect on nvidia/llama-3.3-nemotron-super-49b-v1" in caplog.text
+
+
+def test_thinking_on_sends_no_template_kwargs(no_network: None) -> None:
+    """Models without the switch must not receive the field."""
+    body = _sent_body(
+        "nvidia/nemotron-3.5-lightning-30b-a3b", _SELF_HOSTED, thinking=True
+    )
+    assert "chat_template_kwargs" not in body
 
 
 def test_endless_bound_chain_is_not_followed_forever() -> None:
