@@ -855,3 +855,61 @@ def test_a_single_connection_does_not_offer_another_databases_tables() -> None:
     assert tool._in_database(connected, {"database_name": "a"})
     assert not tool._in_database(connected, {"database_name": "gone"})
     assert tool._in_database(connected, {"name": "no_database_recorded"})
+
+
+# --------------------------------------------------------------------------
+# Certified definitions at answer time (#268)
+# --------------------------------------------------------------------------
+
+
+def test_certified_descriptions_and_definitions_are_marked(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orders = {
+        **ORDERS,
+        "description_certified": True,
+        "columns": [
+            {**c, "description_certified": c["name"] == "cust_ref"}
+            for c in ORDERS["columns"]
+        ],
+    }
+    monkeypatch.setitem(TABLES, "t-orders", orders)
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda *a, **k: [{**REVENUE, "certified": True}],
+    )
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert "TABLE sales.orders — [certified] One row per order" in text
+    assert "cust_ref INT — [certified] Who placed the order" in text
+    assert (
+        "ATTRIBUTE Revenue (of Order) — [certified] Money kept from paid orders" in text
+    )
+
+
+def test_a_certified_definition_comes_before_an_uncertified_one(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Search ranked the uncertified definition first; the reviewed one leads."""
+    gross = {**REVENUE, "id": "a-gross", "name": "Gross Revenue"}
+    net = {**REVENUE, "id": "a-net", "name": "Net Revenue", "certified": True}
+    monkeypatch.setattr(
+        tool, "_get_candidates_information", lambda *a, **k: [gross, net]
+    )
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.index("ATTRIBUTE Net Revenue") < text.index("ATTRIBUTE Gross Revenue")
+
+
+def test_the_certified_mark_is_not_part_of_a_definitions_name() -> None:
+    """The text before the dash is read back as the name elsewhere."""
+    block = tool._definition_block({**REVENUE, "certified": True})
+    no_description = tool._definition_block(
+        {**REVENUE, "description": "", "certified": True}
+    )
+
+    assert block.split("\n")[0].split(" — ")[0] == "ATTRIBUTE Revenue (of Order)"
+    assert no_description.split("\n")[0] == "ATTRIBUTE Revenue (of Order) — [certified]"

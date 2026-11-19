@@ -40,7 +40,9 @@ from sqlalchemy import values as sa_values
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
+    column_description_certified_expr,
     column_description_expr,
+    table_description_certified_expr,
     table_description_expr,
 )
 from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
@@ -1128,12 +1130,16 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
                 table_description_expr().label("description"),
+                table_description_certified_expr().label("description_certified"),
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
+                column_description_certified_expr().label(
+                    "column_description_certified"
+                ),
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
@@ -1160,6 +1166,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "id": row["id"],
                 "name": row["name"] or "",
                 "description": row["description"] or "",
+                # Whether that description is certified, by whichever source
+                # supplied it (the table's own, or its Term's).
+                "description_certified": bool(row["description_certified"]),
                 "database_name": row["database_name"] or "",
                 "schema_name": row["schema_name"] or "",
                 "label": "Table",
@@ -1179,6 +1188,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],
+                    "description_certified": bool(row["column_description_certified"]),
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
