@@ -26,6 +26,7 @@ from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.concepts import (  # noqa: E402
     ensure_column_key,
     ensure_term_concept,
+    fetch_column_key_id,
     fetch_table_concept_id,
     merge_concepts,
 )
@@ -1280,6 +1281,7 @@ def test_merge_semantic_fk_refuses_a_declared_fk_within_one_concept(world) -> No
         )
         is False
     )
+    assert fetch_column_key_id(world.columns["customers.code"]) is None
 
 
 def test_merge_semantic_fk_needs_a_concept_on_the_target_table(world) -> None:

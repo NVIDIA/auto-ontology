@@ -36,6 +36,7 @@ from auto_ontology.dal.concepts import (
     ensure_column_key,
     fetch_column_key_id,
     fetch_key_concept_id,
+    fetch_table_concept_id,
     semantic_fk_targets,
 )
 from auto_ontology.dal.datasources import fetch_col_table_contexts
@@ -727,12 +728,23 @@ def merge_semantic_fk_to_column(
         )
         return False
     with write_transaction():
+        if src_key_id is not None:
+            target_key_id = fetch_column_key_id(target_column_id)
+            if target_key_id is not None:
+                target_concept_id = fetch_key_concept_id(target_key_id)
+            else:
+                target_table_id = (
+                    fetch_col_table_contexts([target_column_id])
+                    .get(target_column_id, {})
+                    .get("table_id")
+                )
+                target_concept_id = (
+                    fetch_table_concept_id(target_table_id) if target_table_id else None
+                )
+            if target_concept_id == fetch_key_concept_id(src_key_id):
+                return False
         key_id = ensure_column_key(target_column_id)
         if key_id is None:
-            return False
-        if src_key_id is not None and fetch_key_concept_id(
-            src_key_id
-        ) == fetch_key_concept_id(key_id):
             return False
         store().query_write(
             insert(s.column__semantic_fk)
