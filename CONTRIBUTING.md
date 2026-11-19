@@ -93,8 +93,8 @@ change"`. CI runs `alembic check`.
 2. Keep each pull request to one logical change, and link the issue it fixes
    (`Fixes #123`).
 3. Add or update tests for the behavior you change.
-4. Give new files the NVIDIA copyright and SPDX license header used across the
-   repository. A test checks for it.
+4. New files must include the appropriate copyright and license header; see
+   [Copyright and license headers](#copyright-and-license-headers).
 5. Sign off every commit; see [Signing your work](#signing-your-work).
 6. Open the pull request, and describe what changed and how you tested it.
 
@@ -109,6 +109,15 @@ After you open it:
   pushed after an approval can require a fresh one.
 - **Skills:** changes under `skills/` are re-signed by a maintainer
   (`/nvskills-ci`) before merge.
+
+## Copyright and license headers
+
+Each required header must include an `SPDX-License-Identifier` line.
+
+NVIDIA-authored files must use the approved NVIDIA copyright and license header.
+For external contributions, retain or add attribution for the actual copyright
+owner(s); do not add NVIDIA’s copyright notice to work NVIDIA does not own. DCO
+sign-off does not transfer copyright ownership.
 
 ## Signing your work
 
