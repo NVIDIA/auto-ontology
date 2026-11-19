@@ -14,7 +14,7 @@ query must order by something unique.
 
 from __future__ import annotations
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, case, false, func, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.concepts import semantic_fk_attribute_links
@@ -65,6 +65,50 @@ def _attribute_description(column_id: ColumnElement, link_table) -> ColumnElemen
     )
 
 
+def _attribute_certified(column_id: ColumnElement, link_table) -> ColumnElement:
+    """``certified`` of the attribute :func:`_attribute_description` picks."""
+    attribute = s.column_attribute
+    return (
+        select(attribute.c.certified)
+        .select_from(
+            link_table.join(attribute, attribute.c.id == link_table.c.attribute_id)
+        )
+        .where(
+            link_table.c.column_id == column_id,
+            _non_blank(attribute.c.description).isnot(None),
+        )
+        .order_by(attribute.c.id)
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def column_description_certified_expr(column=s.catalog_column) -> ColumnElement:
+    """Whether the description :func:`column_description_expr` returns is
+    certified: the flag of whichever source supplied the text.
+
+    Follows the same fallback in the same order, so a column showing its
+    attribute's description reports that attribute's certification, not its
+    own unrelated flag. ``false`` when no source has a description.
+    """
+    return case(
+        (_non_blank(column.c.description).isnot(None), column.c.description_certified),
+        (
+            _attribute_description(column.c.id, s.column__has_attribute).isnot(None),
+            func.coalesce(
+                _attribute_certified(column.c.id, s.column__has_attribute), false()
+            ),
+        ),
+        (
+            _attribute_description(column.c.id, s.column__semantic_fk).isnot(None),
+            func.coalesce(
+                _attribute_certified(column.c.id, s.column__semantic_fk), false()
+            ),
+        ),
+        else_=false(),
+    )
+
+
 def column_description_expr(column=s.catalog_column) -> ColumnElement:
     """A column's description, falling back through its attributes.
 
@@ -107,3 +151,24 @@ def table_description_expr(table=s.catalog_table) -> ColumnElement:
         .scalar_subquery()
     )
     return func.coalesce(_non_blank(table.c.description), from_term)
+
+
+def table_description_certified_expr(table=s.catalog_table) -> ColumnElement:
+    """Whether the description :func:`table_description_expr` returns is
+    certified: the table's own flag, or the flag of the Term it falls back to.
+    """
+    term_certified = (
+        select(s.term.c.description_certified)
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
+        .where(
+            s.table__term.c.table_id == table.c.id,
+            _non_blank(s.term.c.description).isnot(None),
+        )
+        .order_by(s.term.c.id)
+        .limit(1)
+        .scalar_subquery()
+    )
+    return case(
+        (_non_blank(table.c.description).isnot(None), table.c.description_certified),
+        else_=func.coalesce(term_certified, false()),
+    )

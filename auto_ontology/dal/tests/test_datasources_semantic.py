@@ -814,3 +814,73 @@ def test_an_fk_pointing_outside_the_catalog_disqualifies(world) -> None:
     assert "tag_link" not in [
         r["table_name"] for r in d.fetch_bridge_table_candidates(world.prefix)
     ]
+
+
+# --------------------------------------------------------------------------
+# Certification of the description a table or column shows (#268)
+# --------------------------------------------------------------------------
+
+
+def _shown(world, table: str) -> dict:
+    [found] = d.fetch_tables_by_ids([world.tables[table]])
+    return found
+
+
+def test_a_tables_certification_is_its_own_when_it_has_a_description(world) -> None:
+    store().query_write(
+        update(s.catalog_table)
+        .where(s.catalog_table.c.id == world.tables["customers"])
+        .values(description_certified=True)
+    )
+
+    assert _shown(world, "customers")["description_certified"] is True
+
+
+def test_a_table_showing_its_terms_description_reports_the_terms_flag(world) -> None:
+    """``orders`` has no description, so it shows its Term's: the flag shown
+    must be the Term's, not the table's own unrelated one."""
+    term = world.term("Order", description="A purchase")
+    _link(s.table__term, table_id=world.tables["orders"], term_id=term)
+    assert _shown(world, "orders")["description_certified"] is False
+
+    store().query_write(
+        update(s.term).where(s.term.c.id == term).values(description_certified=True)
+    )
+
+    shown = _shown(world, "orders")
+    assert shown["description"] == "A purchase"
+    assert shown["description_certified"] is True
+
+
+def test_a_column_showing_its_attributes_description_reports_that_flag(
+    world,
+) -> None:
+    attribute = world.attribute("Total", description="Order total, tax included")
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["orders.total"],
+        attribute_id=attribute,
+    )
+    # The column's own flag is set but it has no description of its own, so
+    # it must not certify the attribute's text.
+    store().query_write(
+        update(s.catalog_column)
+        .where(s.catalog_column.c.id == world.columns["orders.total"])
+        .values(description_certified=True)
+    )
+
+    def total() -> dict:
+        return next(
+            c for c in _shown(world, "orders")["columns"] if c["name"] == "total"
+        )
+
+    assert total()["description"] == "Order total, tax included"
+    assert total()["description_certified"] is False
+
+    store().query_write(
+        update(s.column_attribute)
+        .where(s.column_attribute.c.id == attribute)
+        .values(certified=True)
+    )
+
+    assert total()["description_certified"] is True
