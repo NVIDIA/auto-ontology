@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ParsedTable } from '@/lib/parseSqlResponse';
 import type { ChartCell, ChartSpec } from './types';
 
 /** Leading characters a spreadsheet may execute as a formula. */
@@ -39,10 +40,10 @@ const VISIBLE_CHARACTER = /[\p{L}\p{N}]/u;
  * join controls matter for the same reason: Persian `می‌رود` only reads as one word
  * because of its U+200C, and dropping it changes the written form. A variation
  * selector is the opposite case -- its base character is not a letter, so it goes
- * with it -- and a title left with no letter or digit falls back to `chart`
+ * with it -- and a title left with no letter or digit falls back to `fallback`
  * rather than exporting a file whose name is invisible.
  */
-function toFilename(title: string): string {
+function toFilename(title: string, fallback = 'chart'): string {
 	const slug = title
 		.toLowerCase()
 		.trim()
@@ -50,7 +51,23 @@ function toFilename(title: string): string {
 		.replace(NOT_IN_FILENAME, '')
 		.replace(/[\s_]+/g, '-')
 		.replace(/^[\s\u200C\u200D-]+|[\s\u200C\u200D-]+$/gu, '');
-	return `${VISIBLE_CHARACTER.test(slug) ? slug : 'chart'}.csv`;
+	return `${VISIBLE_CHARACTER.test(slug) ? slug : fallback}.csv`;
+}
+
+/**
+ * Serialize rows to an RFC 4180 CSV: one header line, then each row's values
+ * read in `columns` order. `headers` and `columns` must be the same length.
+ */
+export function rowsToCsv(
+	headers: string[],
+	columns: string[],
+	rows: ReadonlyArray<Record<string, ChartCell>>,
+): string {
+	const lines = [headers.map(escapeField).join(',')];
+	for (const row of rows) {
+		lines.push(columns.map((key) => escapeField(row[key] ?? null)).join(','));
+	}
+	return lines.join('\r\n');
 }
 
 /**
@@ -61,13 +78,35 @@ function toFilename(title: string): string {
 export function specToCsv(spec: ChartSpec): { filename: string; csv: string } {
 	const columns = [spec.x.key, ...spec.series.map((s) => s.key)];
 	const headers = [spec.x.label ?? spec.x.key, ...spec.series.map((s) => s.label ?? s.key)];
+	return { filename: toFilename(spec.title), csv: rowsToCsv(headers, columns, spec.data) };
+}
 
-	const lines = [headers.map(escapeField).join(',')];
-	for (const row of spec.data) {
-		lines.push(columns.map((key) => escapeField(row[key] ?? null)).join(','));
-	}
+/**
+ * A cell becomes a number only when the conversion round-trips exactly, so a
+ * zero-padded code like `007` or an ID beyond float precision stays text.
+ */
+function toCell(text: string): ChartCell {
+	const value = Number(text);
+	return text !== '' && String(value) === text ? value : text;
+}
 
-	return { filename: toFilename(spec.title), csv: lines.join('\r\n') };
+/**
+ * Serialize a parsed query result to an RFC 4180 CSV. Every cell of a
+ * {@link ParsedTable} is a string, so numeric cells are converted back to
+ * numbers first; otherwise the formula guard would prefix every negative.
+ */
+export function tableToCsv(table: ParsedTable, title: string): { filename: string; csv: string } {
+	const rows = table.rows.map((row) => {
+		const out: Record<string, ChartCell> = {};
+		for (const col of table.columns) {
+			out[col] = toCell(row[col] ?? '');
+		}
+		return out;
+	});
+	return {
+		filename: toFilename(title, 'query-results'),
+		csv: rowsToCsv(table.columns, table.columns, rows),
+	};
 }
 
 /**
@@ -76,6 +115,11 @@ export function specToCsv(spec: ChartSpec): { filename: string; csv: string } {
  */
 export function downloadCsv(spec: ChartSpec): void {
 	const { filename, csv } = specToCsv(spec);
+	downloadCsvText(filename, csv);
+}
+
+/** Trigger a browser download of an already-serialized CSV. */
+export function downloadCsvText(filename: string, csv: string): void {
 	// Excel opens a BOM-less UTF-8 CSV in the legacy code page, which garbles
 	// every non-ASCII header and value. The byte-order mark is a property of the
 	// downloaded file, not of the RFC 4180 serialization, so it belongs here and
