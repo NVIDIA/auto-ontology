@@ -946,6 +946,28 @@ def test_certified_descriptions_and_definitions_are_marked(
     )
 
 
+def test_a_certified_definition_comes_before_the_tables(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a wide catalog the limit cuts what comes last, so a certified
+    definition placed after the tables was cut and never seen."""
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda *a, **k: [{**REVENUE, "certified": True}],
+    )
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.index("ATTRIBUTE Revenue") < text.index("TABLE sales.orders")
+
+
+def test_an_uncertified_definition_still_follows_the_tables(calls: dict) -> None:
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.index("TABLE sales.orders") < text.index("ATTRIBUTE Revenue")
+
+
 def test_a_certified_definition_comes_before_an_uncertified_one(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
