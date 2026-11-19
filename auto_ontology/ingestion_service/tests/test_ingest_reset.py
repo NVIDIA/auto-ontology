@@ -27,10 +27,14 @@ class _Connector:
 class _RecordingVdb:
     def __init__(self) -> None:
         self.written: list[Any] = []
+        self.closed = False
 
     def run(self, records: list) -> int:
         self.written.extend(records)
         return sum(len(batch) for batch in records)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _row(node_id: str, embedding: list[float] | None) -> dict:
@@ -116,3 +120,5 @@ def test_the_reset_waits_for_the_first_chunk_that_embedded(
         record["metadata"]["id"] for batch in resets[0].written for record in batch
     ]
     assert written == ["b"]
+    # Its pool is returned once the ingest is done (#553).
+    assert resets[0].closed
