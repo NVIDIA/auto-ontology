@@ -851,3 +851,32 @@ def test_resolve_sql_column_ids_returns_parser_column_ids(
         "col-1",
         "col-2",
     ]
+
+
+def test_flush_deletes_replaced_vectors_before_writing_fresh_ones(monkeypatch) -> None:
+    """#525: the store appends, so a changed row's old vector must go first."""
+    from auto_ontology.server.model_interchange import embed
+
+    calls: list[tuple[str, object]] = []
+
+    class FakeVDB:
+        def delete_by_id(self, node_id: str) -> int:
+            calls.append(("delete", node_id))
+            return 1
+
+    vdb = FakeVDB()
+    monkeypatch.setattr(embed, "resolve", lambda *_: "key")
+    monkeypatch.setattr(embed, "get_semantic_vdb", lambda: vdb)
+    monkeypatch.setattr(
+        embed,
+        "_embed_and_ingest_rows",
+        lambda rows, target: calls.append(("write", len(rows))) or len(rows),
+    )
+    buffer = embed.ImportEmbedBuffer(
+        semantic_rows=[{"metadata": {"id": "t1"}}],
+        replaced_semantic_ids={"t1"},
+    )
+
+    embed.flush_import_embeddings(buffer)
+
+    assert calls == [("delete", "t1"), ("write", 1)]

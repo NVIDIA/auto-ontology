@@ -34,6 +34,9 @@ class ImportEmbedBuffer:
 
     data_rows: list[dict[str, Any]] = field(default_factory=list)
     semantic_rows: list[dict[str, Any]] = field(default_factory=list)
+    # Live ids whose semantic rows the import changed: their stored vectors
+    # are deleted before the fresh rows are written, since the store appends.
+    replaced_semantic_ids: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -273,9 +276,14 @@ def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:
         result["data_rows"] = 0
 
     if buffer.semantic_rows:
+        semantic_vdb = get_semantic_vdb()
+        # After the import committed, so a rolled-back import never loses the
+        # vectors of rows it did not change.
+        for live_id in sorted(buffer.replaced_semantic_ids):
+            semantic_vdb.delete_by_id(live_id)
         result["semantic_rows"] = _embed_and_ingest_rows(
             buffer.semantic_rows,
-            get_semantic_vdb(),
+            semantic_vdb,
         )
     else:
         result["semantic_rows"] = 0

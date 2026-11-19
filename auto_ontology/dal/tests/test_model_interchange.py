@@ -805,3 +805,129 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
             mi.apply_import_model(document, replace=False)
     finally:
         _cleanup(f"{world.prefix}-copy")
+
+
+# --------------------------------------------------------------------------
+# #525 — replace=true applies edits to matched terms and column attributes
+# --------------------------------------------------------------------------
+
+
+def _term_row(term_id: str) -> dict:
+    return store().query_read(
+        select(s.term.c.name, s.term.c.description).where(s.term.c.id == term_id)
+    )[0]
+
+
+def _attribute_row(attr_id: str) -> dict:
+    return store().query_read(
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+        ).where(s.column_attribute.c.id == attr_id)
+    )[0]
+
+
+def _edited(world: World, **term_edits):
+    """Export, then edit the term and its attribute as a person would."""
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    for field, value in term_edits.items():
+        setattr(term, field, value)
+    term.columns_attributes[0].description = "the order's identifier, edited"
+    return document
+
+
+def test_replace_applies_edits_to_matched_terms_and_attributes(world) -> None:
+    """The issue's reproduction: export, edit descriptions, import with replace."""
+    summary = mi.apply_import_model(
+        _edited(world, description="a customer's purchase, edited"), replace=True
+    )
+
+    assert _term_row(world.term)["description"] == "a customer's purchase, edited"
+    assert (
+        _attribute_row(world.attribute)["description"]
+        == "the order's identifier, edited"
+    )
+    assert summary["updated"]["terms"] == 1
+    assert summary["updated"]["column_attributes"] == 1
+    assert summary["skipped"]["terms"] == 0
+    assert summary["conflicts"] == []
+
+
+def test_replace_keeps_certified_fields_and_reports_them(world) -> None:
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(description_certified=True)
+    )
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attribute)
+        .values(certified=True)
+    )
+
+    summary = mi.apply_import_model(
+        _edited(world, description="overwritten?"), replace=True
+    )
+
+    assert _term_row(world.term)["description"] == "a purchase"
+    assert _attribute_row(world.attribute)["description"] == "the identifier"
+    reported = {(c["entity"], c["field"], c["reason"]) for c in summary["conflicts"]}
+    assert reported == {
+        ("term", "description", "certified"),
+        ("column_attribute", "description", "certified"),
+    }
+    assert summary["updated"]["terms"] == 0
+
+
+def test_replace_renames_a_term_and_its_attributes_follow(world) -> None:
+    new_name = f"{world.prefix}-Purchase"
+
+    mi.apply_import_model(_edited(world, name=new_name), replace=True)
+
+    assert _term_row(world.term)["name"] == new_name
+    assert _attribute_row(world.attribute)["term_name"] == new_name
+
+
+def test_a_rename_onto_another_terms_name_is_reported_not_fatal(world) -> None:
+    taken = f"{world.prefix}-Taken"
+    _add(s.term, name=taken, source=SEMANTIC_SOURCE)
+
+    summary = mi.apply_import_model(_edited(world, name=taken), replace=True)
+
+    assert _term_row(world.term)["name"] == f"{world.prefix}-Order"
+    assert ("term", "name", "name in use") in {
+        (c["entity"], c["field"], c["reason"]) for c in summary["conflicts"]
+    }
+
+
+def test_an_additive_import_still_leaves_matched_rows_alone(world) -> None:
+    summary = mi.apply_import_model(
+        _edited(world, description="not applied without replace"), replace=False
+    )
+
+    assert _term_row(world.term)["description"] == "a purchase"
+    assert summary["skipped"]["terms"] == 1
+    assert summary["updated"]["terms"] == 0
+
+
+def test_an_identical_replace_import_updates_nothing(world) -> None:
+    summary = mi.apply_import_model(_document(world), replace=True)
+
+    assert sum(summary["updated"].values()) == 0
+    assert summary["skipped"]["terms"] == 1
+
+
+def test_replace_queues_changed_rows_for_reembedding(world) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(
+        _edited(world, description="re-embed me"), replace=True, embed_buffer=buffer
+    )
+
+    assert {world.term, world.attribute} <= buffer.replaced_semantic_ids
+    queued = {row["metadata"]["id"] for row in buffer.semantic_rows}
+    assert world.term in queued

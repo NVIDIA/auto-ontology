@@ -1082,6 +1082,10 @@ def apply_import_model(
         "custom_analyses": 0,
     }
     skipped: dict[str, int] = {key: 0 for key in created}
+    # ``replace`` only: matched rows that took the document's values, and the
+    # certified fields that kept theirs (#525).
+    updated: dict[str, int] = {key: 0 for key in created}
+    conflicts: list[dict[str, Any]] = []
     term_names = {term.id: term.name for term in document.semantic_layer.terms}
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
 
@@ -1093,9 +1097,26 @@ def apply_import_model(
             _delete_scoped_semantics_not_in_payload(document, live_db_ids, id_map)
         _import_foreign_keys(document, id_map)
         _import_joins(document, id_map)
-        _import_terms(document, id_map, created, skipped, embed_buffer)
+        _import_terms(
+            document,
+            id_map,
+            created,
+            skipped,
+            embed_buffer,
+            replace=replace,
+            updated=updated,
+            conflicts=conflicts,
+        )
         _import_column_attributes(
-            document, id_map, created, skipped, embed_buffer, column_meta
+            document,
+            id_map,
+            created,
+            skipped,
+            embed_buffer,
+            column_meta,
+            replace=replace,
+            updated=updated,
+            conflicts=conflicts,
         )
         _import_concepts(document, id_map)
         _import_semantic_fks(document, id_map)
@@ -1110,6 +1131,8 @@ def apply_import_model(
         "database_ids": live_db_ids,
         "created": created,
         "skipped": skipped,
+        "updated": updated,
+        "conflicts": conflicts,
         "replace": replace,
         "terms": len(document.semantic_layer.terms),
         "column_attributes": sum(
@@ -1453,12 +1476,233 @@ def _delete_scoped_semantics_not_in_payload(
     delete_orphan_concepts(live_db_ids)
 
 
+def _conflict(
+    conflicts: list[dict[str, Any]] | None,
+    entity: str,
+    live_id: str,
+    yaml_id: str,
+    field: str,
+    kept: Any,
+    document_value: Any,
+    reason: str,
+) -> None:
+    if conflicts is not None:
+        conflicts.append(
+            {
+                "entity": entity,
+                "id": live_id,
+                "yaml_id": yaml_id,
+                "field": field,
+                "kept": kept,
+                "document": document_value,
+                "reason": reason,
+            }
+        )
+
+
+def _update_matched_terms(
+    terms: list,
+    matched: dict[str, str],
+    conflicts: list[dict[str, Any]] | None,
+    embed_buffer: ImportEmbedBuffer | None,
+) -> set[str]:
+    """Give matched Terms the document's name and description (``replace``).
+
+    A certified field keeps its stored value and is reported in *conflicts*,
+    so a document cannot silently overwrite a person's certification. A rename
+    to a name another Term already uses is reported too, rather than failing
+    the whole import on the unique constraint. Returns the live ids changed.
+    """
+    # Here, not at module level: dal.terms imports from dal modules this one
+    # is imported by.
+    from auto_ontology.dal.terms import update_term
+
+    if not matched:
+        return set()
+    stored = {
+        row["id"]: row
+        for row in store().query_read(
+            select(
+                s.term.c.id,
+                s.term.c.name,
+                s.term.c.description,
+                s.term.c.name_certified,
+                s.term.c.description_certified,
+            ).where(s.term.c.id.in_(list(matched.values())))
+        )
+    }
+    changed: set[str] = set()
+    new_text: dict[str, tuple[str, str]] = {}
+    for term in terms:
+        live_id = matched.get(term.id)
+        row = stored.get(live_id) if live_id else None
+        if row is None:
+            continue
+        changes: dict[str, Any] = {}
+        for field, certified in (
+            ("name", "name_certified"),
+            ("description", "description_certified"),
+        ):
+            value = getattr(term, field)
+            if (value or "") == (row[field] or ""):
+                continue
+            if row[certified]:
+                _conflict(
+                    conflicts,
+                    "term",
+                    live_id,
+                    term.id,
+                    field,
+                    row[field],
+                    value,
+                    "certified",
+                )
+                continue
+            changes[field] = value
+        if "name" in changes and store().query_read(
+            select(s.term.c.id).where(
+                s.term.c.name == changes["name"],
+                s.term.c.source == SEMANTIC_SOURCE,
+                s.term.c.id != live_id,
+            )
+        ):
+            _conflict(
+                conflicts,
+                "term",
+                live_id,
+                term.id,
+                "name",
+                row["name"],
+                changes.pop("name"),
+                "name in use",
+            )
+        if not changes:
+            continue
+        # update_term also rewrites the denormalised term_name on the Term's
+        # ColumnAttributes, which a rename must keep in step.
+        update_term(live_id, **changes)
+        changed.add(live_id)
+        new_text[live_id] = (
+            changes.get("name", row["name"]),
+            changes.get("description", row["description"]) or "",
+        )
+
+    if embed_buffer is not None and new_text:
+        db_names = _database_names_for_terms(list(new_text))
+        for live_id, (name, description) in new_text.items():
+            embed_buffer.replaced_semantic_ids.add(live_id)
+            embed_buffer.semantic_rows.extend(
+                build_term_semantic_rows(
+                    database_name=db_names.get(live_id, ""),
+                    live_id=live_id,
+                    name=name,
+                    description=description,
+                )
+            )
+    return changed
+
+
+#: ColumnAttribute fields that copy the document's structure rather than a
+#: person's wording, so certification does not protect them.
+_ATTRIBUTE_STRUCTURE = ("term_name", "source_column", "table_id")
+
+
+def _update_matched_attributes(
+    matched: dict[str, tuple[str, dict[str, Any]]],
+    context: dict[str, dict[str, Any]],
+    conflicts: list[dict[str, Any]] | None,
+    embed_buffer: ImportEmbedBuffer | None,
+) -> set[str]:
+    """Give matched ColumnAttributes the document's values (``replace``).
+
+    ``name`` and ``description`` keep their stored values when the attribute
+    is certified, reported in *conflicts*. The denormalised ``term_name``,
+    ``source_column`` and ``table_id`` always follow the document, since the
+    import rewrites the links they copy. Returns the live ids changed.
+    """
+    if not matched:
+        return set()
+    stored = {
+        row["id"]: row
+        for row in store().query_read(
+            select(
+                s.column_attribute.c.id,
+                s.column_attribute.c.name,
+                s.column_attribute.c.description,
+                s.column_attribute.c.certified,
+                *(s.column_attribute.c[f] for f in _ATTRIBUTE_STRUCTURE),
+            ).where(s.column_attribute.c.id.in_([live for live, _ in matched.values()]))
+        )
+    }
+    changed: set[str] = set()
+    for yaml_id, (live_id, props) in matched.items():
+        row = stored.get(live_id)
+        if row is None:
+            continue
+        changes: dict[str, Any] = {}
+        for field in ("name", "description"):
+            value = props.get(field)
+            if (value or "") == (row[field] or ""):
+                continue
+            if row["certified"]:
+                _conflict(
+                    conflicts,
+                    "column_attribute",
+                    live_id,
+                    yaml_id,
+                    field,
+                    row[field],
+                    value,
+                    "certified",
+                )
+                continue
+            changes[field] = value
+        for field in _ATTRIBUTE_STRUCTURE:
+            if (props.get(field) or "") != (row[field] or ""):
+                changes[field] = props.get(field)
+        if not changes:
+            continue
+        store().query_write(
+            update(s.column_attribute)
+            .where(s.column_attribute.c.id == live_id)
+            .values(**changes)
+        )
+        changed.add(live_id)
+
+        ctx = context[yaml_id]
+        col_ctx = ctx["col_ctx"]
+        if embed_buffer is not None and col_ctx is not None:
+            merged = {**row, **changes}
+            embed_buffer.replaced_semantic_ids.add(live_id)
+            embed_buffer.semantic_rows.extend(
+                build_column_attribute_semantic_rows(
+                    database_name=col_ctx.database_name,
+                    live_id=live_id,
+                    name=merged["name"],
+                    description=merged["description"] or "",
+                    column_description=col_ctx.description,
+                    term_name=merged["term_name"],
+                    source_column=merged["source_column"],
+                    table_id=merged["table_id"],
+                    table_name=col_ctx.table_name,
+                    is_unique=col_ctx.is_unique,
+                    sample_values=col_ctx.sample_values,
+                    schema_name=col_ctx.schema_name,
+                )
+            )
+    return changed
+
+
 def _import_terms(
     document: AutoOntologyModelDocument,
     id_map: dict[str, str],
     created: dict[str, int],
     skipped: dict[str, int],
     embed_buffer: ImportEmbedBuffer | None,
+    *,
+    replace: bool = False,
+    updated: dict[str, int] | None = None,
+    conflicts: list[dict[str, Any]] | None = None,
 ) -> None:
     terms = document.semantic_layer.terms
     term_results = _resolve_entities_batch(
@@ -1476,6 +1720,17 @@ def _import_terms(
         ],
     )
 
+    matched = {
+        term.id: term_results[term.id][0]
+        for term in terms
+        if not term_results[term.id][1]
+    }
+    changed = (
+        _update_matched_terms(terms, matched, conflicts, embed_buffer)
+        if replace
+        else set()
+    )
+
     represents_rows: list[dict[str, Any]] = []
     newly_created: list[str] = []
     for term in terms:
@@ -1484,6 +1739,8 @@ def _import_terms(
         if was_created:
             created["terms"] += 1
             newly_created.append(live_term_id)
+        elif live_term_id in changed and updated is not None:
+            updated["terms"] += 1
         else:
             skipped["terms"] += 1
         # The payload is authoritative about which tables represent a term --
@@ -1539,6 +1796,10 @@ def _import_column_attributes(
     skipped: dict[str, int],
     embed_buffer: ImportEmbedBuffer | None,
     column_meta: dict[str, ColumnCatalogMeta],
+    *,
+    replace: bool = False,
+    updated: dict[str, int] | None = None,
+    conflicts: list[dict[str, Any]] | None = None,
 ) -> None:
     attr_items: list[tuple[str, dict[str, Any]]] = []
     context: dict[str, dict[str, Any]] = {}
@@ -1578,6 +1839,19 @@ def _import_column_attributes(
             }
 
     attr_results = _resolve_entities_batch(s.column_attribute, attr_items)
+    changed: set[str] = set()
+    if replace:
+        props_by_id = dict(attr_items)
+        changed = _update_matched_attributes(
+            {
+                attr_id: (live_id, props_by_id[attr_id])
+                for attr_id, (live_id, was_created) in attr_results.items()
+                if not was_created
+            },
+            context,
+            conflicts,
+            embed_buffer,
+        )
 
     has_attribute_rows: list[dict[str, Any]] = []
     property_of_rows: list[dict[str, Any]] = []
@@ -1585,7 +1859,12 @@ def _import_column_attributes(
         ctx = context[attr_id]
         attr, term, col_ctx = ctx["attr"], ctx["term"], ctx["col_ctx"]
         id_map[attr_id] = live_attr_id
-        (created if was_created else skipped)["column_attributes"] += 1
+        if was_created:
+            created["column_attributes"] += 1
+        elif live_attr_id in changed and updated is not None:
+            updated["column_attributes"] += 1
+        else:
+            skipped["column_attributes"] += 1
 
         has_attribute_rows.append(
             {
