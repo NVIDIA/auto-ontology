@@ -125,6 +125,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "sql_examples": list(payload.get("sql_examples") or []),
         "value_anchors": list(payload.get("value_anchors") or []),
         "shorten_answer": bool(payload.get("shorten_answer")),
+        "sql_conventions": bool(payload.get("sql_conventions")),
     }
     return state
 

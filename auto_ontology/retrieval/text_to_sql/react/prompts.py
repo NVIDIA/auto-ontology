@@ -62,8 +62,6 @@ stored values before filtering on them, and to test a draft.
 - submit: give your final query. It is checked and run; if it fails you get \
 the error and can keep working.
 
-Return exactly the requested output fields and no others.
-
 Aggregate, GROUP BY or LIMIT only when the question or its clarifications ask \
 for a total, a breakdown or a top-N. GROUP BY only the columns the question \
 asks to list or break down; do not add a key or id to it.
@@ -178,6 +176,25 @@ a row another aggregate still needs. Exclude it only when the derived value is \
 the only result and a NULL input would make it meaningless; if the question asks \
 to include rows with missing data, use ORDER BY ... DESC NULLS LAST so NULLs \
 never come first."""
+
+SQL_CONVENTION_RULES = """\
+SQL CONVENTIONS
+- Ranges are inclusive at both ends unless the question says otherwise. A period \
+of N units starting at X covers X through X+N-1.
+- Keep NULL groups: a GROUP BY over a nullable column still returns the NULL \
+group unless the question excludes it.
+- When rows tie at a rank cutoff and no LIMIT applies, return every tied row \
+rather than picking one arbitrarily.
+- Never round intermediate values. Round only the final output, and only when \
+the question asks for it.
+- When a cleaned, formatted or otherwise derived copy of a table exists (names \
+like cleaned_*, *_clean, *_formatted, or a copy with dates and categories already \
+broken out), read from it rather than re-deriving those values from the raw table.
+- A date function returns NULL for text it cannot parse (in SQLite, strftime() \
+and date()), and a filter over that NULL silently drops every row. When the \
+stored format is fixed width, prefer substr() on the raw text over parsing.
+- Never write WHERE <parsed expression> IS NOT NULL to clean data: if the parse \
+is wrong, that empties the table instead of failing loudly."""
 
 _SQL_EXAMPLES_GUIDANCE = """\
 Solved question/SQL pairs from OTHER databases, chosen because their wording \

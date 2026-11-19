@@ -113,12 +113,14 @@ def test_examples_anchors_and_short_answers_reach_the_episode(
             "sql_examples": examples,
             "value_anchors": anchors,
             "shorten_answer": True,
+            "sql_conventions": True,
         }
     )
 
     assert calls[0]["sql_examples"] == examples
     assert calls[0]["value_anchors"] == anchors
     assert calls[0]["shorten_answer"] is True
+    assert calls[0]["sql_conventions"] is True
 
 
 def test_no_answer_is_reported_as_unconstructable(

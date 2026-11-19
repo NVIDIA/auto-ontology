@@ -370,6 +370,21 @@ def test_short_answer_rules_reach_the_system_prompt(ctx: ToolContext) -> None:
     assert "OUTPUT SHAPE" not in model.seen[1][0].content
 
 
+def test_sql_conventions_reach_the_system_prompt(ctx: ToolContext) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    loop.run_episode(model, ctx, "q", sql_conventions=True)
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][0].content.endswith(f"\n\n{prompts.SQL_CONVENTION_RULES}")
+    assert "SQL CONVENTIONS" not in model.seen[1][0].content
+
+
 def test_a_prediction_episode_ignores_sql_shaping_inputs(ctx: ToolContext) -> None:
     model = ScriptedModel([AIMessage(content="no tools")] * 3)
 
@@ -381,9 +396,11 @@ def test_a_prediction_episode_ignores_sql_shaping_inputs(ctx: ToolContext) -> No
         value_anchors=_ANCHORS,
         sql_examples=_EXAMPLES,
         shorten_answer=True,
+        sql_conventions=True,
     )
 
     assert "OUTPUT SHAPE" not in model.seen[0][0].content
+    assert "SQL CONVENTIONS" not in model.seen[0][0].content
     assert model.seen[0][1].content == "QUESTION\nq\n"
 
 

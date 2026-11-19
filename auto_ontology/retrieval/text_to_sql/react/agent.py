@@ -96,6 +96,7 @@ class ReactSQLAgent(BaseAgent):
             sql_examples=state.get("sql_examples"),
             value_anchors=state.get("value_anchors"),
             shorten_answer=bool(state.get("shorten_answer")),
+            sql_conventions=bool(state.get("sql_conventions")),
         )
 
         for step in result.trajectory:

@@ -225,14 +225,15 @@ def run_episode(
     sql_examples: list[dict[str, str]] | None = None,
     value_anchors: list[dict[str, str]] | None = None,
     shorten_answer: bool = False,
+    sql_conventions: bool = False,
 ) -> EpisodeResult:
     """Run the model with *mode*'s tools until it answers or the budget ends.
 
     ``sql`` answers with ``submit``, ``predict`` with ``predict``, and ``auto``
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
-    *sql_examples*, *value_anchors* and *shorten_answer* shape a SQL answer, so
-    a ``predict`` episode ignores them.
+    *sql_examples*, *value_anchors*, *shorten_answer* and *sql_conventions*
+    shape a SQL answer, so a ``predict`` episode ignores them.
     """
     writes_sql = mode != EpisodeMode.PREDICT
     system_prompt = prompts.system_prompt_for(
@@ -247,6 +248,8 @@ def run_episode(
         system_prompt = f"{system_prompt}\n\n{dialect_rules}"
     if shorten_answer and writes_sql:
         system_prompt = f"{system_prompt}\n\n{prompts.SHORT_ANSWER_RULES}"
+    if sql_conventions and writes_sql:
+        system_prompt = f"{system_prompt}\n\n{prompts.SQL_CONVENTION_RULES}"
     user_message = prompts.user_message(
         question,
         evidence,

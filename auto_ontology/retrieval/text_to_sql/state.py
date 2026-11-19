@@ -51,6 +51,9 @@ class TextToSQLPayload(TypedDict):
     value_anchors: NotRequired[list[dict[str, str]]]
     # True for graders that compare result columns: adds strict output-shape rules.
     shorten_answer: NotRequired[bool]
+    # True to add the SQL conventions block (inclusive ranges, NULL groups, ties,
+    # rounding, derived tables, unparsable dates).
+    sql_conventions: NotRequired[bool]
 
 
 class AgentState(TypedDict):
@@ -74,6 +77,7 @@ class AgentState(TypedDict):
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
     shorten_answer: NotRequired[bool]
+    sql_conventions: NotRequired[bool]
     # Read by the entity-coverage pipeline, which shares this state type.
     domain_rules: NotRequired[list[dict[str, str]]]
     # User-curated Glossary definitions (the ``acronyms`` table), kept apart from
