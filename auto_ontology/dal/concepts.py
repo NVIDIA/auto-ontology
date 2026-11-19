@@ -123,6 +123,11 @@ def ensure_term_concept(term_id: str) -> str | None:
     for a Term that represents no table: there is no database to scope it to.
     """
     with write_transaction():
+        # Concurrent callers for one Term wait here, and the later one then
+        # finds the Concept the first created.
+        store().query_read(
+            select(s.term.c.id).where(s.term.c.id == term_id).with_for_update()
+        )
         existing = store().query_read(
             select(s.term__concept.c.concept_id).where(
                 s.term__concept.c.term_id == term_id
@@ -557,10 +562,13 @@ def fetch_concept_members(table_ids: Iterable[str]) -> dict[str, dict[str, Any]]
     concept_of = {
         row["table_id"]: row["concept_id"]
         for row in store().query_read(
-            select(s.table__term.c.table_id, s.term__concept.c.concept_id)
+            select(
+                s.table__term.c.table_id,
+                func.min(s.term__concept.c.concept_id).label("concept_id"),
+            )
             .join(s.term__concept, s.term__concept.c.term_id == s.table__term.c.term_id)
             .where(s.table__term.c.table_id.in_(ids))
-            .order_by(s.table__term.c.table_id, s.term__concept.c.concept_id)
+            .group_by(s.table__term.c.table_id)
         )
     }
     concept_ids = sorted(set(concept_of.values()))

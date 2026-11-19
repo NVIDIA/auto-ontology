@@ -11,8 +11,10 @@ the FK row that pointed at the absorbed key, and the key a recompile reuses.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import time
 import uuid
 
 import pytest
@@ -23,7 +25,7 @@ from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import concepts as c  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
-from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.session import store, write_transaction  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -176,6 +178,36 @@ def test_every_term_gets_its_own_concept_keyed_on_its_pk(split) -> None:
 def test_a_term_on_no_table_has_no_concept(world) -> None:
     term_id = _add(s.term, name=f"{world.prefix}-Loose", source=SEMANTIC_SOURCE)
     assert c.ensure_term_concept(term_id) is None
+
+
+def test_a_second_caller_waits_for_the_terms_first_concept(world) -> None:
+    """Without the Term lock both create a Concept and one fails on membership."""
+    world.table("customer", ("customer_id",), pk="customer_id")
+    term = world.term("Customer", "customer")
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with write_transaction():
+            first = c.ensure_term_concept(term)
+            second = pool.submit(c.ensure_term_concept, term)
+            time.sleep(0.5)
+            assert not second.done(), "the second caller must wait for the lock"
+        assert second.result(timeout=10) == first
+
+
+def test_members_and_key_writes_agree_on_a_tables_concept(world) -> None:
+    """A table representing two Terms resolves to one Concept everywhere."""
+    world.table("customer", ("customer_id",), pk="customer_id")
+    world.table("client", ("client_id",), pk="client_id")
+    for term, table in (("Customer", "customer"), ("Client", "client")):
+        c.ensure_term_concept(world.term(term, table))
+    table_id = world.tables["customer"]
+    store().query_write(
+        s.table__term.insert().values(table_id=table_id, term_id=world.terms["Client"])
+    )
+
+    members = c.fetch_concept_members([table_id])
+
+    assert members[table_id]["concept_id"] == c.fetch_table_concept_id(table_id)
 
 
 def test_a_repeating_column_cannot_be_a_key(world) -> None:
