@@ -265,6 +265,28 @@ def test_adjacent_tables_get_every_parallel_fk_default_first(world) -> None:
     ]
 
 
+def test_a_failed_key_label_lookup_keeps_the_routes(world, monkeypatch) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("orders")
+    world.column("orders", "customer_id")
+    world.references("orders.customer_id", "customer-id")
+
+    def fail(key_ids: set[str]) -> dict[str, str]:
+        raise RuntimeError("lookup failed")
+
+    monkeypatch.setattr(a, "_key_labels", fail)
+    routes = a.find_join_routes(
+        world.columns["orders.customer_id"], world.columns["customers.id"]
+    )
+
+    assert [
+        [(h["source_column"], h["target_column"], h["key"]) for h in route["hops"]]
+        for route in routes
+    ] == [[("customer_id", "id", "")]]
+
+
 def test_a_turned_off_fk_is_offered_directly_but_never_walked(world) -> None:
     """A longer route only crosses default edges; one hop offers every edge."""
     world.table("addresses", pk=["id"])

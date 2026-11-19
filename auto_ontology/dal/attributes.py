@@ -1192,7 +1192,16 @@ def find_join_routes(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     col_ids = list(dict.fromkeys(c for hop in all_hops for c in hop[:2]))
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
-    keys = _key_labels({hop[2] for hop in all_hops})
+    try:
+        keys = _key_labels({hop[2] for hop in all_hops})
+    except Exception:
+        logger.warning(
+            "find_join_routes: key label lookup failed for %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        keys = {}
 
     def describe(hop: JoinHop) -> dict:
         source_id, target_id, key_id = hop
