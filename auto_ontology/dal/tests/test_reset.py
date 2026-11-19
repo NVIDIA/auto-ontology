@@ -232,6 +232,52 @@ def test_a_term_shared_with_another_database_survives(world) -> None:
     assert _exists(s.catalog_column, warehouse.column)
 
 
+def test_a_shared_terms_concept_keeps_the_other_databases_keys(world) -> None:
+    """The Concept is scoped to one database, but its Term spans both.
+
+    Deleting it by database would cascade the other database's key column and
+    the FKs into that key; it goes only once no Term belongs to it.
+    """
+    _, make = world
+    shop, warehouse = make("shop"), make("warehouse")
+    shared = shop.term("Product")
+    _link(s.table__term, table_id=warehouse.table, term_id=shared)
+    concept = _add(s.concept, database_id=shop.id, name="Product")
+    _link(s.term__concept, term_id=shared, concept_id=concept)
+    key = _add(s.concept_key, concept_id=concept, name="id")
+    for database in (shop, warehouse):
+        _link(
+            s.concept_key__column,
+            key_id=key,
+            column_id=database.column,
+            table_id=database.table,
+        )
+    reference = _add(
+        s.catalog_column,
+        table_id=warehouse.table,
+        name="product_id",
+        ordinal_position=2,
+    )
+    _link(s.column__semantic_fk, column_id=reference, key_id=key)
+    own = _add(s.concept, database_id=shop.id, name="Order")
+    _link(s.term__concept, term_id=shop.term("Order"), concept_id=own)
+
+    r.delete_semantic_layer(shop.name)
+
+    assert _exists(s.concept, concept)
+    assert store().query_read(
+        select(s.concept_key__column.c.key_id).where(
+            s.concept_key__column.c.column_id == warehouse.column
+        )
+    )
+    assert store().query_read(
+        select(s.column__semantic_fk.c.key_id).where(
+            s.column__semantic_fk.c.column_id == reference
+        )
+    ) == [{"key_id": key}]
+    assert not _exists(s.concept, own)
+
+
 def test_an_analysis_spanning_two_databases_survives(world) -> None:
     """Same rule, reached through SQL rather than REPRESENTS."""
     _, make = world

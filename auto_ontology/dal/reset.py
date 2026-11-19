@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from sqlalchemy import delete, select, union
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.concepts import delete_orphan_concepts
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
 
@@ -71,6 +72,7 @@ def _delete_scoped_semantic(database_name: str) -> int:
 
     * a **TermFamily** through its schema;
     * a **Term** through the tables that represent it;
+    * a **Concept** through its Terms: it goes once none is left;
     * a **ColumnAttribute** through its ``table_id``;
     * a **SqlAttribute** and a **CustomAnalysis** through the tables their SQL
       references.
@@ -106,21 +108,6 @@ def _delete_scoped_semantic(database_name: str) -> int:
         )
     )
 
-    # Concept: scoped by database. Its member links and keys cascade with it.
-    deleted += len(
-        store().query_write(
-            delete(s.concept)
-            .where(
-                s.concept.c.database_id.in_(
-                    select(s.catalog_database.c.id).where(
-                        s.catalog_database.c.name == database_name
-                    )
-                )
-            )
-            .returning(s.concept.c.id)
-        )
-    )
-
     def only_ours(link_table, owner_column, table_column):
         """Rows whose links all land inside this database, and at least one does."""
         inside = (
@@ -144,6 +131,18 @@ def _delete_scoped_semantic(database_name: str) -> int:
     deleted += len(
         store().query_write(
             delete(s.term).where(s.term.c.id.in_(term_ids)).returning(s.term.c.id)
+        )
+    )
+
+    # Concept: deleted once no Term belongs to it. A Concept whose shared Term
+    # survives keeps its keys and the FKs into them, which other databases'
+    # tables may hold.
+    deleted += delete_orphan_concepts(
+        row["id"]
+        for row in store().query_read(
+            select(s.catalog_database.c.id).where(
+                s.catalog_database.c.name == database_name
+            )
         )
     )
 
