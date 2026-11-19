@@ -36,6 +36,17 @@ def test_extract_tables_and_columns_with_column() -> None:
     assert result.tables["s.t"].columns == {"col"}
 
 
+def test_extract_tables_and_columns_bare_columns_per_select() -> None:
+    """Without schemas, a bare column belongs to the one table its own SELECT reads."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t WHERE b IN (SELECT c FROM u) GROUP BY a HAVING COUNT(d) > 1",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"a", "b", "d"}
+    assert result.tables["u"].columns == {"c"}
+
+
 def test_extract_tables_and_columns_cte_virtual_tables_excluded() -> None:
     """CTE aliases must not be treated as real source tables."""
     result = extract_tables_and_columns(
