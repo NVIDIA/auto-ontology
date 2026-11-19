@@ -111,30 +111,35 @@ def _reembed(stale_by_table: dict[tuple[str, str], set[str]]) -> int:
     """Re-embed the deleted attribute vectors; best-effort, per table."""
     embedders: dict[str, SemanticEmbedder | None] = {}
     written = 0
-    for (database_name, table_id), attribute_ids in stale_by_table.items():
-        if database_name not in embedders:
-            embedders[database_name] = build_semantic_embedder(
-                database_name, reset=False
-            )
-        embedder = embedders[database_name]
-        if embedder is None:
-            logger.warning(
-                "No semantic embedder for %s — %d PII attribute(s) of table %s "
-                "are out of search until re-embedded",
-                database_name,
-                len(attribute_ids),
-                table_id,
-            )
-            continue
-        try:
-            written += _reembed_attributes(embedder, table_id, attribute_ids)
-        except Exception:
-            logger.warning(
-                "Could not re-embed the PII attributes of table %s — they are "
-                "out of search until re-embedded",
-                table_id,
-                exc_info=True,
-            )
+    try:
+        for (database_name, table_id), attribute_ids in stale_by_table.items():
+            if database_name not in embedders:
+                embedders[database_name] = build_semantic_embedder(
+                    database_name, reset=False
+                )
+            embedder = embedders[database_name]
+            if embedder is None:
+                logger.warning(
+                    "No semantic embedder for %s — %d PII attribute(s) of table %s "
+                    "are out of search until re-embedded",
+                    database_name,
+                    len(attribute_ids),
+                    table_id,
+                )
+                continue
+            try:
+                written += _reembed_attributes(embedder, table_id, attribute_ids)
+            except Exception:
+                logger.warning(
+                    "Could not re-embed the PII attributes of table %s — they are "
+                    "out of search until re-embedded",
+                    table_id,
+                    exc_info=True,
+                )
+    finally:
+        for embedder in embedders.values():
+            if embedder is not None:
+                embedder.close()
     return written
 
 

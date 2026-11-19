@@ -57,109 +57,116 @@ def _run_semantic_compilation(
 
     started = time.monotonic()
     embedder = build_semantic_embedder(database_name, reset=False)
-
-    logger.info("=" * 60)
-    logger.info(
-        "Semantic compilation (database=%r)",
-        database_name,
-    )
-    logger.info("=" * 60)
-
-    count = compile_semantic_layer(
-        database_name,
-        domain_summary=summary,
-        embedder=embedder,
-    )
-
-    logger.info("=" * 60)
-    logger.info("Semantic compilation finished — %d table visits", count)
-    logger.info("=" * 60)
-
-    # The stages below are the long tail — FK resolution alone has run
-    # past 300s on one database — and none of them is required for the Terms
-    # just written to be usable. A cancelled pass skips straight to the summary
-    # rather than spending minutes on work nobody is waiting for.
-    if is_cancelled():
+    try:
+        logger.info("=" * 60)
         logger.info(
-            "Semantic compilation cancelled (database=%r) — skipping the term "
-            "family, concept, FK, unmatched-FK, SqlAttribute, bridge-table and "
-            "attribute-description stages; "
-            "%d table(s) "
-            "compiled in %.1fs",
+            "Semantic compilation (database=%r)",
+            database_name,
+        )
+        logger.info("=" * 60)
+
+        count = compile_semantic_layer(
+            database_name,
+            domain_summary=summary,
+            embedder=embedder,
+        )
+
+        logger.info("=" * 60)
+        logger.info("Semantic compilation finished — %d table visits", count)
+        logger.info("=" * 60)
+
+        # The stages below are the long tail — FK resolution alone has run
+        # past 300s on one database — and none of them is required for the Terms
+        # just written to be usable. A cancelled pass skips straight to the summary
+        # rather than spending minutes on work nobody is waiting for.
+        if is_cancelled():
+            logger.info(
+                "Semantic compilation cancelled (database=%r) — skipping the term "
+                "family, concept, FK, unmatched-FK, SqlAttribute, bridge-table and "
+                "attribute-description stages; "
+                "%d table(s) "
+                "compiled in %.1fs",
+                database_name,
+                count,
+                time.monotonic() - started,
+            )
+            return count
+
+        logger.info("=" * 60)
+        logger.info("Resolving term families…")
+        logger.info("=" * 60)
+        family_count = resolve_term_families(database_name, embedder)
+        logger.info("Term families found: %d", family_count)
+
+        logger.info("=" * 60)
+        logger.info("Resolving concepts…")
+        logger.info("=" * 60)
+        concept_merges = resolve_concepts(database_name)
+        logger.info("Concept merges applied: %d", concept_merges)
+
+        logger.info("=" * 60)
+        logger.info("Resolving semantic FK edges…")
+        logger.info("=" * 60)
+        fk_count = resolve_semantic_fks(database_name)
+        logger.info("Semantic FK edges created: %d", fk_count)
+
+        logger.info("=" * 60)
+        logger.info("Attaching unmatched FK columns…")
+        logger.info("=" * 60)
+        unmatched_count = attach_unmatched_fk_columns(
+            database_name, embedder, domain_summary=summary
+        )
+        logger.info("Unmatched FK columns attached: %d", unmatched_count)
+
+        from auto_ontology.semantic.sql_attribute_suggester import (
+            suggest_sql_attributes,
+        )
+
+        logger.info("=" * 60)
+        logger.info("Suggesting SqlAttributes from query history…")
+        logger.info("=" * 60)
+        attr_count = suggest_sql_attributes(database_name)
+        logger.info("New SqlAttribute nodes written: %d", attr_count)
+
+        logger.info("=" * 60)
+        logger.info("Building bridge tables sql attributes")
+        logger.info("=" * 60)
+        bridge_table_count = build_bridge_tables_sql_attributes(database_name)
+        logger.info("Bridge tables built: %d", bridge_table_count)
+
+        logger.info("=" * 60)
+        logger.info("Describing ColumnAttributes…")
+        logger.info("=" * 60)
+        described_count = describe_column_attributes(database_name)
+        logger.info("ColumnAttributes described: %d", described_count)
+
+        # One line carrying every stage's result. Until now the last thing a
+        # completed compilation logged was the bridge-table count, which is a stage
+        # result and not a verdict — there was no way to tell a finished run from one
+        # that died after the bridge-table stage. Every stage above propagates its
+        # exceptions, so reaching this means every stage completed.
+        logger.info("=" * 60)
+        logger.info(
+            "Semantic calculation finished successfully (database=%r) — "
+            "%d table(s), %d term family(ies), %d semantic FK edge(s), "
+            "%d unmatched FK column(s) attached, "
+            "%d SqlAttribute(s), %d bridge table(s), "
+            "%d ColumnAttribute(s) described in %.1fs",
             database_name,
             count,
+            family_count,
+            fk_count,
+            unmatched_count,
+            attr_count,
+            bridge_table_count,
+            described_count,
             time.monotonic() - started,
         )
+        logger.info("=" * 60)
+
         return count
-
-    logger.info("=" * 60)
-    logger.info("Resolving term families…")
-    logger.info("=" * 60)
-    family_count = resolve_term_families(database_name, embedder)
-    logger.info("Term families found: %d", family_count)
-
-    logger.info("=" * 60)
-    logger.info("Resolving concepts…")
-    logger.info("=" * 60)
-    concept_merges = resolve_concepts(database_name)
-    logger.info("Concept merges applied: %d", concept_merges)
-
-    logger.info("=" * 60)
-    logger.info("Resolving semantic FK edges…")
-    logger.info("=" * 60)
-    fk_count = resolve_semantic_fks(database_name)
-    logger.info("Semantic FK edges created: %d", fk_count)
-
-    logger.info("=" * 60)
-    logger.info("Attaching unmatched FK columns…")
-    logger.info("=" * 60)
-    unmatched_count = attach_unmatched_fk_columns(
-        database_name, embedder, domain_summary=summary
-    )
-    logger.info("Unmatched FK columns attached: %d", unmatched_count)
-
-    from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
-
-    logger.info("=" * 60)
-    logger.info("Suggesting SqlAttributes from query history…")
-    logger.info("=" * 60)
-    attr_count = suggest_sql_attributes(database_name)
-    logger.info("New SqlAttribute nodes written: %d", attr_count)
-
-    logger.info("=" * 60)
-    logger.info("Building bridge tables sql attributes")
-    logger.info("=" * 60)
-    bridge_table_count = build_bridge_tables_sql_attributes(database_name)
-    logger.info("Bridge tables built: %d", bridge_table_count)
-
-    logger.info("=" * 60)
-    logger.info("Describing ColumnAttributes…")
-    logger.info("=" * 60)
-    described_count = describe_column_attributes(database_name)
-    logger.info("ColumnAttributes described: %d", described_count)
-
-    # One line carrying every stage's result. Until now the last thing a
-    # completed compilation logged was the bridge-table count, which is a stage
-    # result and not a verdict — there was no way to tell a finished run from one
-    # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means every stage completed.
-    logger.info("=" * 60)
-    logger.info(
-        "Semantic calculation finished successfully (database=%r) — "
-        "%d table(s), %d term family(ies), %d semantic FK edge(s), "
-        "%d unmatched FK column(s) attached, "
-        "%d SqlAttribute(s), %d bridge table(s), "
-        "%d ColumnAttribute(s) described in %.1fs",
-        database_name,
-        count,
-        family_count,
-        fk_count,
-        unmatched_count,
-        attr_count,
-        bridge_table_count,
-        described_count,
-        time.monotonic() - started,
-    )
-    logger.info("=" * 60)
-
-    return count
+    finally:
+        # One store per database compiled; close it so a multi-database build
+        # doesn't keep every database's pool open (#553).
+        if embedder is not None:
+            embedder.close()

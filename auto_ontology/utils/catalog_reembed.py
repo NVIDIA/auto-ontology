@@ -61,7 +61,9 @@ def refresh_catalog_embeddings(node_ids: list[str]) -> None:
     # Embedded before anything is deleted, so a failed embed leaves the old rows.
     rows = embed_rows(records, get_embed_params(), what="tabular")
 
-    vdb = get_data_vdb()
-    for nid in unique_ids:
-        vdb.delete_by_id(nid)
-    write_embedded_rows(vdb, rows)
+    # Called once per table during a build, from worker threads. An unclosed
+    # store keeps its pool's connections open, so close it here (#553).
+    with get_data_vdb() as vdb:
+        for nid in unique_ids:
+            vdb.delete_by_id(nid)
+        write_embedded_rows(vdb, rows)
