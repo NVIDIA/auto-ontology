@@ -100,9 +100,12 @@ def column_description_certified_expr(column=s.catalog_column) -> ColumnElement:
             ),
         ),
         (
-            _attribute_description(column.c.id, s.column__semantic_fk).isnot(None),
+            _attribute_description(column.c.id, semantic_fk_attribute_links()).isnot(
+                None
+            ),
             func.coalesce(
-                _attribute_certified(column.c.id, s.column__semantic_fk), false()
+                _attribute_certified(column.c.id, semantic_fk_attribute_links()),
+                false(),
             ),
         ),
         else_=false(),
