@@ -24,6 +24,7 @@ from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
+    resolve_sources,
     get_standalone_question,
 )
 
@@ -42,6 +43,8 @@ def _tool_thought(call: dict[str, Any]) -> str:
     name = call.get("name")
     if name == ToolName.RETRIEVE and args.get("purpose") == "information":
         return f"Looking up the catalog: {args.get('query') or 'everything'}"
+    if name == ToolName.RETRIEVE and args.get("purpose") == "conversation":
+        return f"Looking through past conversations: {args.get('query', '')}"
     if name == ToolName.RETRIEVE:
         return f"Searching for: {args.get('query', '')}"
     if name == ToolName.RUN_SQL and str(args.get("final")).lower() != "true":
@@ -51,7 +54,7 @@ def _tool_thought(call: dict[str, Any]) -> str:
     if name == ToolName.GREP:
         return f"Searching a saved result for: {args.get('pattern', '')}"
     if name == ToolName.SUBMIT and not str(args.get("sql") or "").strip():
-        return "Answering an information question."
+        return "Answering from what is recorded, without a query."
     return "Submitting the final query."
 
 
@@ -62,17 +65,28 @@ class ReactSQLAgent(BaseAgent):
         super().__init__("react_sql_agent", failure_decision="unconstructable")
 
     def validate_input(self, state: AgentState) -> bool:
-        return bool(state.get("initial_question")) and bool(state.get("connectors"))
+        # Connectors only when there is querying to do. An episode that answers
+        # from the catalog or from past conversations needs no warehouse, which
+        # is the only way a database that holds transcripts and no tables can
+        # be asked anything at all.
+        if not state.get("initial_question"):
+            return False
+        return (
+            bool(state.get("connectors")) or not resolve_sources(state)["calculation"]
+        )
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = dict(state.get("path_state") or {})
+        sources = resolve_sources(state)
         ctx = ToolContext(
             retriever=state.get("semantic_retriever") or state.get("data_retriever"),
             data_retriever=state.get("data_retriever"),
             connectors=list(state.get("connectors") or []),
             database_name=path_state.get("target_db"),
             numeric_type_alignment=bool(state.get("numeric_type_alignment")),
-            information_answers=not state.get("calculation_only"),
+            calculation_answers=sources["calculation"],
+            information_answers=sources["information"],
+            conversation_answers=sources["conversation"],
             question=get_standalone_question(state),
             prediction_llm=state.get("llm"),
             custom_prompts=state.get("custom_prompts") or "",

@@ -130,6 +130,15 @@ _CLOSING = (
 #: still led with the list; the gold is that the transcript does not say, and
 #: the answer scored 0.0. A reader that knows what a tag means still has to be
 #: told that the honest answer is sometimes nothing.
+#:
+#: A clause telling the reader to prefer the user's own statement over a
+#: [proposed] one was tried here and removed. It was aimed at the interval
+#: between scheduling a meeting and the start of a testing period, where the
+#: reader was thought to be following a schedule the assistant proposed. It was
+#: not: it reads the user's own sentence and takes "completion by April 5 to
+#: allow two weeks for testing" as two weeks *before* that date. The clause
+#: changed temporal reasoning by 0.000 over four rounds and is not worth the
+#: dilution of the sentence that carries abstention.
 _UNREALISED = {
     "proposed": (
         "[proposed] was suggested and never confirmed as done, so if the "

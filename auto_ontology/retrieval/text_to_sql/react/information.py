@@ -43,8 +43,6 @@ from auto_ontology.retrieval.text_to_sql.react.retrieve import (
 )
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_TERM
 
-PURPOSES = ("sql", "information")
-
 _DESCRIPTION_CHARS = 200
 _SQL_CHARS = 600
 #: Terms shown with their attributes and definitions; the rest get one line.
