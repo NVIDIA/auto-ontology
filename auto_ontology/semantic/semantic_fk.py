@@ -224,68 +224,74 @@ def _resolve_semantic_fks(database_name: str) -> int:
             len(llm_queue),
         )
         return declared_written
-    keys: _KeyIndex | None = None
-    if is_semantic_fk_db_query_prevented():
-        logger.info(
-            "resolve_semantic_fks: PREVENT_SEMANTIC_FK_DB_QUERIES is set — "
-            "inferred FKs are neither confirmed by values nor validated by a join"
-        )
-    else:
-        connector = _resolve_connector(database_name)
-        if connector is not None:
-            keys = _KeyIndex(database_name, connector)
-
-    families = _Families(fetch_table_families(database_name))
-    inferred_written = 0
-
-    def _resolve_one(index: int, col: dict[str, Any]) -> bool:
-        _log_start(index, col)
-        try:
-            attr_id = _resolve_via_vdb(col, retriever, database_name, keys, families)
-            if (
-                attr_id
-                and keys is not None
-                and not _join_returns_rows(keys, col, attr_id)
-            ):
-                return False
-            # The VDB where-filter already scopes hits to database_name, but
-            # it's a query-time filter over a collection shared by every
-            # ingested database, not physical isolation -- the same shape of
-            # mechanism that let Term nodes leak across databases elsewhere.
-            # merge_semantic_fk verifies against the catalog before writing
-            # rather than trust the filter alone, and logs its own rejection.
-            if attr_id and merge_semantic_fk(col["id"], attr_id):
-                logger.debug(
-                    "resolve_semantic_fks [resolved]: %s.%s → attr %s",
-                    col.get("table_name"),
-                    col.get("name"),
-                    attr_id,
-                )
-                return True
-        except Exception:
-            logger.exception(
-                "resolve_semantic_fks [llm]: unexpected error for column %s",
-                col.get("id"),
+    try:
+        keys: _KeyIndex | None = None
+        if is_semantic_fk_db_query_prevented():
+            logger.info(
+                "resolve_semantic_fks: PREVENT_SEMANTIC_FK_DB_QUERIES is set — "
+                "inferred FKs are neither confirmed by values nor validated by a join"
             )
-        return False
+        else:
+            connector = _resolve_connector(database_name)
+            if connector is not None:
+                keys = _KeyIndex(database_name, connector)
 
-    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futures = {
-            pool.submit(_resolve_one, index, col): col for index, col in llm_queue
-        }
-        for future in as_completed(futures):
-            if future.result():
-                inferred_written += 1
+        families = _Families(fetch_table_families(database_name))
+        inferred_written = 0
 
-    total = declared_written + inferred_written
-    logger.info(
-        "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
-        "SEMANTIC_FK edge(s)",
-        declared_written,
-        inferred_written,
-        total,
-    )
-    return total
+        def _resolve_one(index: int, col: dict[str, Any]) -> bool:
+            _log_start(index, col)
+            try:
+                attr_id = _resolve_via_vdb(
+                    col, retriever, database_name, keys, families
+                )
+                if (
+                    attr_id
+                    and keys is not None
+                    and not _join_returns_rows(keys, col, attr_id)
+                ):
+                    return False
+                # The VDB where-filter already scopes hits to database_name, but
+                # it's a query-time filter over a collection shared by every
+                # ingested database, not physical isolation -- the same shape of
+                # mechanism that let Term nodes leak across databases elsewhere.
+                # merge_semantic_fk verifies against the catalog before writing
+                # rather than trust the filter alone, and logs its own rejection.
+                if attr_id and merge_semantic_fk(col["id"], attr_id):
+                    logger.debug(
+                        "resolve_semantic_fks [resolved]: %s.%s → attr %s",
+                        col.get("table_name"),
+                        col.get("name"),
+                        attr_id,
+                    )
+                    return True
+            except Exception:
+                logger.exception(
+                    "resolve_semantic_fks [llm]: unexpected error for column %s",
+                    col.get("id"),
+                )
+            return False
+
+        with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+            futures = {
+                pool.submit(_resolve_one, index, col): col for index, col in llm_queue
+            }
+            for future in as_completed(futures):
+                if future.result():
+                    inferred_written += 1
+
+        total = declared_written + inferred_written
+        logger.info(
+            "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
+            "SEMANTIC_FK edge(s)",
+            declared_written,
+            inferred_written,
+            total,
+        )
+        return total
+    finally:
+        # One store per database resolved; see #553.
+        retriever.vdb_kwargs["vdb"].close()
 
 
 def select_semantic_fk_join_defaults(database_name: str) -> int:
