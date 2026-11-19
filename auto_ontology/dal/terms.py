@@ -379,6 +379,11 @@ def update_term(
         if touch:
             values["modified"] = func.now()
             values["modified_by"] = modified_by
+            # A person who writes or certifies the description has replaced
+            # compilation's placeholder with meaning.
+            if description is not None or description_certified:
+                values["generation_status"] = "generated"
+                values["generation_note"] = None
         rows = store().query_write(
             update(s.term)
             .where(s.term.c.id == term_id)
@@ -420,6 +425,7 @@ def upsert_table_term(
     description: str,
     table_id: str,
     synonyms: list[str] | None = None,
+    fallback_reason: str | None = None,
 ) -> tuple[str, str] | None:
     """Upsert a compilation Term owned by one table.
 
@@ -427,7 +433,15 @@ def upsert_table_term(
     are qualified with the table's full catalog identity, keeping the global
     ``(name, source)`` constraint and name-based attribute lookups unambiguous.
     Returns ``(term_id, persisted_name)``, or ``None`` for a missing table.
+
+    *fallback_reason* marks the Term as a deterministic placeholder and records
+    why. Without it the Term is stored as ``generated``, so a later compile that
+    gets a real proposal clears an earlier placeholder.
     """
+    generation = {
+        "generation_status": "fallback" if fallback_reason else "generated",
+        "generation_note": fallback_reason,
+    }
     with write_transaction():
         tables = store().query_read(
             select(
@@ -490,7 +504,11 @@ def upsert_table_term(
                 store().query_write(
                     update(s.term)
                     .where(s.term.c.id == term_id)
-                    .values(description=description, synonyms=synonyms or [])
+                    .values(
+                        description=description,
+                        synonyms=synonyms or [],
+                        **generation,
+                    )
                 )
                 return term_id, candidate_name
             if existing:
@@ -503,6 +521,7 @@ def upsert_table_term(
                     source=SEMANTIC_SOURCE,
                     description=description,
                     synonyms=synonyms or [],
+                    **generation,
                 )
                 .on_conflict_do_nothing(constraint="uq_term_name_source")
                 .returning(s.term.c.id)

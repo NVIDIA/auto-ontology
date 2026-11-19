@@ -478,10 +478,25 @@ term = Table(
     Column("synonyms", ARRAY(Text), nullable=True),
     _certified("name_certified"),
     _certified("description_certified"),
+    # Whether compilation's model produced this Term, or a deterministic
+    # placeholder stood in when the model step failed (#533). A placeholder is
+    # the table's name and a template description, not meaning, so it must not
+    # pass for one. ``generation_note`` says why the placeholder was used.
+    Column(
+        "generation_status",
+        Text,
+        nullable=False,
+        server_default=text("'generated'"),
+    ),
+    Column("generation_note", Text, nullable=True),
     _owner_id(),
     *_edited(),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
+    CheckConstraint(
+        "generation_status IN ('generated', 'fallback')",
+        name="generation_status_value",
+    ),
 )
 
 # REPRESENTS: Table -> Term.

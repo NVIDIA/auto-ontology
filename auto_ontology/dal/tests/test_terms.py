@@ -495,6 +495,106 @@ def test_upsert_table_term_writes_nothing_when_the_table_is_missing() -> None:
     assert t.upsert_table_term("Ghost", "x", "no-such-table") is None
 
 
+def _generation(term_id: str) -> tuple[str, str | None]:
+    row = store().query_read(
+        select(s.term.c.generation_status, s.term.c.generation_note).where(
+            s.term.c.id == term_id
+        )
+    )[0]
+    return row["generation_status"], row["generation_note"]
+
+
+def test_a_placeholder_term_is_stored_as_a_fallback_with_its_reason(world) -> None:
+    """#533: a placeholder reads like any Term, so the row must say what it is."""
+    world.table("orders")
+
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Orders",
+        "Business entity represented by table orders",
+        world.tables["orders"],
+        fallback_reason="the model returned no structured result",
+    )
+
+    assert _generation(term_id) == (
+        "fallback",
+        "the model returned no structured result",
+    )
+
+
+def test_a_later_real_proposal_clears_the_placeholder(world) -> None:
+    world.table("orders")
+    name = f"{world.prefix}-Orders"
+    term_id, _ = t.upsert_table_term(
+        name, "placeholder", world.tables["orders"], fallback_reason="model failed"
+    )
+
+    again = t.upsert_table_term(
+        name, "An order placed by a customer", world.tables["orders"]
+    )
+
+    assert again[0] == term_id
+    assert _generation(term_id) == ("generated", None)
+
+
+def test_a_person_writing_the_description_clears_the_placeholder(world) -> None:
+    world.table("orders")
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Orders",
+        "placeholder",
+        world.tables["orders"],
+        fallback_reason="x",
+    )
+
+    t.update_term(term_id, description="An order placed by a customer", touch=True)
+
+    assert _generation(term_id) == ("generated", None)
+
+
+def test_a_person_certifying_the_description_clears_the_placeholder(world) -> None:
+    world.table("orders")
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Orders",
+        "placeholder",
+        world.tables["orders"],
+        fallback_reason="x",
+    )
+
+    t.update_term(term_id, description_certified=True, touch=True)
+
+    assert _generation(term_id) == ("generated", None)
+
+
+def test_compilation_updates_and_name_edits_keep_the_placeholder(world) -> None:
+    """Only a person replacing the description replaces the placeholder: an
+    update from compilation (no ``touch``) or a name-only edit leaves it."""
+    world.table("orders")
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Orders",
+        "placeholder",
+        world.tables["orders"],
+        fallback_reason="x",
+    )
+
+    t.update_term(term_id, description="still a template")
+    t.update_term(term_id, name_certified=True, touch=True)
+
+    assert _generation(term_id) == ("fallback", "x")
+
+
+def test_generation_status_accepts_only_known_values(world) -> None:
+    world.table("orders")
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Orders", "d", world.tables["orders"]
+    )
+
+    with pytest.raises(Exception, match="generation_status_value"):
+        store().query_write(
+            s.term.update()
+            .where(s.term.c.id == term_id)
+            .values(generation_status="maybe")
+        )
+
+
 # --------------------------------------------------------------------------
 # Term detail
 # --------------------------------------------------------------------------
