@@ -28,11 +28,18 @@ describe('tableToCsv', () => {
 		const { csv } = tableToCsv(
 			{
 				columns: ['v'],
-				rows: [{ v: '=SUM(A1)' }, { v: '+1+1' }, { v: '@cmd' }, { v: '-x' }, { v: '-5' }],
+				rows: [
+					{ v: '=SUM(A1)' },
+					{ v: '+1+1' },
+					{ v: '@cmd' },
+					{ v: '-x' },
+					{ v: '-5' },
+					{ v: '\n=1' },
+				],
 			},
 			't',
 		);
-		expect(csv).toBe("v\r\n'=SUM(A1)\r\n'+1+1\r\n'@cmd\r\n'-x\r\n-5");
+		expect(csv).toBe("v\r\n'=SUM(A1)\r\n'+1+1\r\n'@cmd\r\n'-x\r\n-5\r\n\"'\n=1\"");
 	});
 
 	it('keeps zero-padded codes as text', () => {
