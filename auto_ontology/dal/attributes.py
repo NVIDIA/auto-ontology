@@ -79,8 +79,10 @@ def merge_column_attribute(
     below refuse rather than create an attribute that dangles.
 
     ``description`` is coalesced, not assigned: a merge that has nothing to say
-    about the description must not erase a curated one. ``datatype`` *is*
-    assigned, as before — it describes the column, not the human's opinion of it.
+    about the description must not erase a curated one. A certified attribute
+    keeps its description outright, so recompiling its table cannot replace
+    meaning a person reviewed (#259). ``datatype`` *is* assigned, as before — it
+    describes the column, not the human's opinion of it.
     """
     column = store().query_read(
         select(s.catalog_column.c.id).where(
@@ -118,9 +120,15 @@ def merge_column_attribute(
                 constraint="uq_column_attribute_merge_key",
                 set_={
                     "datatype": statement.excluded.datatype,
-                    "description": func.coalesce(
-                        statement.excluded.description,
-                        s.column_attribute.c.description,
+                    "description": case(
+                        (
+                            s.column_attribute.c.certified,
+                            s.column_attribute.c.description,
+                        ),
+                        else_=func.coalesce(
+                            statement.excluded.description,
+                            s.column_attribute.c.description,
+                        ),
                     ),
                 },
             ).returning(s.column_attribute.c.id)
