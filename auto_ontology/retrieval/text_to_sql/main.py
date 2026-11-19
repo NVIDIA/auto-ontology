@@ -18,7 +18,8 @@ from auto_ontology.retrieval.text_to_sql.react.config import prediction_enabled
 from auto_ontology.retrieval.text_to_sql.react.prompts import custom_prompts_section
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
-    TextToSQLPayload,
+    AgentRequest,
+    resolve_sources,
 )
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
@@ -58,18 +59,30 @@ except (ValueError, EnvironmentError) as e:
 steps = create_steps()
 
 
-def _build_state(payload: TextToSQLPayload) -> AgentState:
-    connectors = payload.get("connectors", [])
-    if not connectors:
+def _build_state(payload: AgentRequest) -> AgentState:
+    sources = resolve_sources(payload)
+    if not any(sources.values()):
         raise ValueError(
-            "TextToSQLPayload is missing required 'connectors'. "
-            "Provide a non-empty list of database connectors, each with a valid 'dialect' attribute."
+            "AgentRequest turns off calculation, information and "
+            "conversation, which leaves the agent nothing it may do. Switch at "
+            "least one on."
+        )
+
+    connectors = payload.get("connectors", [])
+    # Only querying needs a warehouse. Without that exemption a database that
+    # holds transcripts and no tables could not be asked anything, which is the
+    # case conversation search exists for.
+    if not connectors and sources["calculation"]:
+        raise ValueError(
+            "AgentRequest is missing required 'connectors'. "
+            "Provide a non-empty list of database connectors, each with a valid 'dialect' attribute, "
+            "or set calculation=False to answer without querying."
         )
 
     data_retriever = payload.get("data_retriever")
     if data_retriever is None:
         raise ValueError(
-            "TextToSQLPayload is missing required 'data_retriever' (auto_ontology.utils.retriever.Retriever "
+            "AgentRequest is missing required 'data_retriever' (auto_ontology.utils.retriever.Retriever "
             "instance). Construct a Retriever once at startup and pass it in the payload."
         )
     semantic_retriever = payload.get("semantic_retriever")
@@ -111,6 +124,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "initial_question": submitted_question,
         "evidence": payload.get("evidence") or "",
         "numeric_type_alignment": payload.get("numeric_type_alignment", False),
+        "calculation": sources["calculation"],
+        "information": sources["information"],
+        "conversation": sources["conversation"],
         "calculation_only": bool(payload.get("calculation_only")),
         "connectors": connectors,
         "messages": [HumanMessage(content=processing_question)],
@@ -200,7 +216,7 @@ def _extract_partial_answer(final_state: dict) -> dict:
 
 
 def stream_agent_response(
-    payload: TextToSQLPayload,
+    payload: AgentRequest,
 ) -> Generator[dict, None, None]:
     """Yield two ``{"type": "step", "node": ..., "phase": ...}`` events per
     node — ``"start"`` as it begins (so a client can label the work in
@@ -276,7 +292,7 @@ def stream_agent_response(
         }
 
 
-def get_agent_response(payload: TextToSQLPayload) -> dict:
+def get_agent_response(payload: AgentRequest) -> dict:
     """Non-streaming convenience wrapper around ``stream_agent_response``."""
     for event in stream_agent_response(payload):
         if event["type"] == "result":
@@ -290,7 +306,7 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
-def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
+def get_agent_response_with_state(payload: AgentRequest) -> dict:
     """Like get_agent_response but also returns path_state in the result under key 'path_state'."""
     # Required by auto_ontology/retrieval/interactive/coordinator.py to persist path_state across turns/phases.
     state = _build_state(payload)

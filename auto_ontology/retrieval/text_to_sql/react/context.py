@@ -54,6 +54,15 @@ class ToolContext:
     ``information_retrieved`` records that ``retrieve`` showed the information
     view, which such an answer has to come from; a SQL-view search does not count.
 
+    ``conversation_answers`` is the same switch for a third source, this
+    database's past conversations, and off by default because most databases
+    have none. ``conversation_retrieved`` is its half of the same evidence
+    rule: an answer that cites a past conversation has to have searched one.
+
+    ``calculation_answers`` is whether querying the data is on the table at
+    all. Off, no ``run_sql`` is offered and ``connectors`` may be empty -- the
+    state a database holding transcripts and no tables is in.
+
     ``cost_status`` is for callers that charge for queries: it returns what the
     model has left to spend and what each action costs, read fresh each time
     because every query changes it. ``None`` when queries are free.
@@ -66,8 +75,11 @@ class ToolContext:
     database_name: str | None = None
     data_retriever: Any = None
     numeric_type_alignment: bool = False
+    calculation_answers: bool = True
     information_answers: bool = False
     information_retrieved: bool = False
+    conversation_answers: bool = False
+    conversation_retrieved: bool = False
     question: str = ""
     prediction_llm: Any = None
     custom_prompts: str = ""

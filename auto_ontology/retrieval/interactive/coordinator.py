@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Union
 
-# NOTE: get_agent_response_with_state and TextToSQLPayload are imported lazily
+# NOTE: get_agent_response_with_state and AgentRequest are imported lazily
 # inside _run_sql_generation to avoid triggering LLM client initialisation at
 # import time (which requires NVIDIA_API_KEY to be set).
 from concurrent.futures import ThreadPoolExecutor
@@ -236,7 +236,7 @@ def _format_user_clarifications(session: InteractiveSessionState) -> str:
 def _run_sql_generation(session: InteractiveSessionState) -> str:
     """Call Auto Ontology and persist the returned path_state back to session."""
     from auto_ontology.retrieval.text_to_sql.main import get_agent_response_with_state
-    from auto_ontology.retrieval.text_to_sql.state import TextToSQLPayload
+    from auto_ontology.retrieval.text_to_sql.state import AgentRequest
 
     # For debug turns that skip clarification, run grounding now to get KB context.
     # For normal turns, cumulative_grounded_knowledge already has everything from clarification.
@@ -370,7 +370,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     if evidence:
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
 
-    payload: TextToSQLPayload = {
+    payload: AgentRequest = {
         "question": question,
         "evidence": evidence,
         "data_retriever": session.data_retriever,

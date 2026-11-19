@@ -182,3 +182,55 @@ def test_build_state_propagates_calculation_only(
     main_module: ModuleType, extra: dict, expected: bool
 ) -> None:
     assert _state_with(main_module, **extra)["calculation_only"] is expected
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [({}, True), ({"information": True}, True), ({"information": False}, False)],
+)
+def test_build_state_propagates_information(
+    main_module: ModuleType, extra: dict, expected: bool
+) -> None:
+    assert _state_with(main_module, **extra)["information"] is expected
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [({}, False), ({"conversation": True}, True), ({"conversation": False}, False)],
+)
+def test_build_state_propagates_conversation(
+    main_module: ModuleType, extra: dict, expected: bool
+) -> None:
+    assert _state_with(main_module, **extra)["conversation"] is expected
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [({}, True), ({"calculation": True}, True), ({"calculation": False}, False)],
+)
+def test_build_state_propagates_calculation(
+    main_module: ModuleType, extra: dict, expected: bool
+) -> None:
+    assert _state_with(main_module, **extra)["calculation"] is expected
+
+
+def test_connectors_are_required_only_when_there_is_querying_to_do(
+    main_module: ModuleType,
+) -> None:
+    # A database that holds transcripts and no tables has no connector, and
+    # refusing it would be refusing the case conversation search exists for.
+    with pytest.raises(ValueError, match="missing required 'connectors'"):
+        _state_with(main_module, connectors=[])
+
+    state = _state_with(
+        main_module, connectors=[], calculation=False, conversation=True
+    )
+
+    assert state["calculation"] is False
+
+
+def test_an_episode_allowed_to_do_nothing_is_refused(main_module: ModuleType) -> None:
+    with pytest.raises(ValueError, match="nothing it may do"):
+        _state_with(
+            main_module, calculation=False, information=False, conversation=False
+        )

@@ -925,3 +925,163 @@ def test_retries_end_and_the_episode_gives_up(
     assert result.reason == "model_error"
     assert len(model.seen) == 3
     assert len(sleeps) == 2
+
+
+@pytest.fixture
+def conversation_ctx(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> ToolContext:
+    monkeypatch.setattr(
+        loop, "conversation", lambda _ctx, query: f"TURN 14 (for {query})"
+    )
+    ctx.conversation_answers = True
+    return ctx
+
+
+def test_the_conversation_purpose_appears_only_when_it_is_switched_on() -> None:
+    def purpose(**flags: bool) -> list[str] | None:
+        retrieve = prompts.tools_for(EpisodeMode.SQL, **flags)[0]
+        found = retrieve["function"]["parameters"]["properties"].get("purpose")
+        return found["enum"] if found else None
+
+    assert purpose() is None
+    assert purpose(information_answers=True) == ["sql", "information"]
+    assert purpose(conversation_answers=True) == ["sql", "conversation"]
+    assert purpose(information_answers=True, conversation_answers=True) == [
+        "sql",
+        "information",
+        "conversation",
+    ]
+
+
+def test_a_conversation_search_reaches_the_conversation_view(
+    conversation_ctx: ToolContext,
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="rate limit", purpose="conversation")),
+            _reply(call("submit", "2", response="The cap was raised to 4,800.")),
+        ]
+    )
+
+    result = loop.run_episode(model, conversation_ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0] == "TURN 14 (for rate limit)"
+    assert conversation_ctx.conversation_retrieved is True
+
+
+def test_the_purpose_is_ignored_when_conversations_are_off(ctx: ToolContext) -> None:
+    # Not an error: an off source is one the model was never offered, so the
+    # call falls back to the SQL view rather than spending a turn on a refusal.
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="rate limit", purpose="conversation")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0] == "TABLE orders (for rate limit)"
+    assert ctx.conversation_retrieved is False
+
+
+def test_a_conversation_answer_needs_a_conversation_search_first(
+    conversation_ctx: ToolContext,
+) -> None:
+    # Otherwise the model searches, finds the answer, and is refused permission
+    # to say it -- or worse, says it without having searched at all.
+    refused, submission = loop.submit(conversation_ctx, "", response="4,800.")
+    assert submission is None
+    assert "past conversations (purpose=conversation)" in refused
+
+    loop._retrieve(conversation_ctx, "rate limit", None, "conversation")
+    observation, submission = loop.submit(conversation_ctx, "", response="4,800.")
+
+    assert observation == "Accepted."
+    assert submission is not None and submission.sql == ""
+
+
+def test_the_prompt_names_conversations_only_when_they_are_on() -> None:
+    off = prompts.system_prompt_for(EpisodeMode.SQL, "mysql", information_answers=True)
+    on = prompts.system_prompt_for(
+        EpisodeMode.SQL, "mysql", information_answers=True, conversation_answers=True
+    )
+
+    assert "purpose=conversation" not in off
+    assert "purpose=conversation" in on
+    # The catalog wording an existing deployment was measured on is unchanged.
+    assert on.startswith(off[: off.index("\n\nYou start with no schema.")])
+
+
+def test_conversations_alone_still_allow_an_answer_in_words() -> None:
+    prompt = prompts.system_prompt_for(
+        EpisodeMode.SQL, "mysql", conversation_answers=True
+    )
+
+    assert "sql empty" in prompt
+    # The catalog view is not described, because it is not offered.
+    assert 'kinds=["term"]' not in prompt
+
+
+def test_no_calculation_offers_no_way_to_run_a_query() -> None:
+    # A tool that can only fail is worse than an absent one: the model spends
+    # turns discovering that.
+    tools = prompts.tools_for(
+        EpisodeMode.SQL, calculation_answers=False, conversation_answers=True
+    )
+
+    assert [t["function"]["name"] for t in tools] == ["retrieve", "submit"]
+    retrieve = tools[0]["function"]["parameters"]["properties"]
+    assert retrieve["purpose"]["enum"] == ["conversation"]
+    assert prompts.tools_for(
+        EpisodeMode.SQL,
+        last_turn=True,
+        calculation_answers=False,
+        conversation_answers=True,
+    ) == [tools[-1]]
+
+
+def test_no_calculation_gets_a_prompt_that_is_not_about_queries() -> None:
+    prompt = prompts.system_prompt_for(
+        EpisodeMode.SQL, "mysql", calculation_answers=False, conversation_answers=True
+    )
+
+    assert "GROUP BY" not in prompt
+    assert "purpose=conversation" in prompt
+    # The catalog view is not described, because it is not offered.
+    assert "purpose=information" not in prompt
+    assert (
+        prompts.nudge_for(EpisodeMode.SQL, calculation_answers=False)
+        == prompts.NO_SQL_NUDGE
+    )
+
+
+def test_a_conversation_only_episode_answers_without_a_warehouse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The state a database holding transcripts and no tables is in. Nothing
+    # here has a connector, and the episode still reaches an answer.
+    monkeypatch.setattr(
+        loop, "conversation", lambda _ctx, query: f"TURN 14 (for {query})"
+    )
+    ctx = ToolContext(
+        retriever=None,
+        connectors=[],
+        database_name="beam",
+        calculation_answers=False,
+        conversation_answers=True,
+    )
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="rate limit", purpose="conversation")),
+            _reply(call("submit", "2", response="The cap was raised to 4,800.")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "what cap did we agree?")
+
+    assert result.reason == "submitted"
+    assert result.submission is not None
+    assert result.submission.sql == ""
+    assert result.submission.response == "The cap was raised to 4,800."
