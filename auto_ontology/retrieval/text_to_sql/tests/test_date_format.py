@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from auto_ontology.semantic.date_format import infer_date_format, is_date_type
@@ -167,9 +169,38 @@ def test_a_narrow_component_is_not_widened_by_a_two_digit_value() -> None:
     A column storing unpadded dates still holds days past the ninth, so the widest
     value says nothing about padding and the narrowest decides it. Reading the
     ``13`` as evidence of padding reported ``DD/M/YY`` for a column storing
-    ``D/M/YY``, and a model writing ``04/04/20`` for it matches nothing.
+    ``M/D/YY`` -- the silent empty-result case this module exists to prevent.
     """
     assert infer_date_format(["4/4/20", "13/6/20"]) == "D/M/YY"
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (["5/31/18", "6/1/18", "12/31/20", "1/5/19", "10/2/19"], "M/D/YY"),
+        (["5/31/18", "6/1/18", "1/5/19"], "M/D/YY"),
+        (["15.03.2024", "1.3.2024"], "D.M.YYYY"),
+        (["2024년 3월 15일", "2024년 12월 1일"], "YYYY년 M월 D일"),
+    ],
+)
+def test_a_column_holding_both_widths_stays_unpadded(
+    values: list[str], expected: str
+) -> None:
+    """A realistic unpadded column mixes one- and two-digit components.
+    Days run to 31 and months to 12, so every such column has a two-digit value and
+    the widest one always looks padded. Samples that hold only single-digit values,
+    which is what the dotted and East Asian tests used, could not catch it.
+    """
+    assert infer_date_format(values) == expected
+
+
+def test_a_lowercase_separator_keeps_the_widths_it_carries() -> None:
+    """``strptime`` matches the ``T`` separator whatever its case.
+    The alignment regex did not, so ``t`` left the sample unaligned, every measured
+    width was dropped and a column storing three fractional digits was reported as
+    ``.f`` -- a notation describing a different stored width.
+    """
+    assert infer_date_format(["2010-07-19t19:39:07.123"]) == "YYYY-MM-DDTHH:MM:SS.fff"
 
 
 def test_repeated_whitespace_keeps_the_widths_it_measures() -> None:
@@ -179,6 +210,31 @@ def test_repeated_whitespace_keeps_the_widths_it_measures() -> None:
     value holding three digits.
     """
     assert infer_date_format(["2010-07-19  19:39:07.123"]) == "YYYY-MM-DD HH:MM:SS.fff"
+
+
+def test_a_space_padded_day_keeps_the_fraction_width() -> None:
+    """``strptime`` reads ``%d`` space-padded, so ``2010-07- 9`` is a valid sample.
+
+    Without that alternative the alignment failed, every width measured for the
+    value was dropped, and the notation said ``.f`` for a column storing three
+    fractional digits -- a notation that describes a different stored width.
+    """
+    assert infer_date_format(["2010-07- 9 19:39:07.123"]) == "YYYY-MM-DD HH:MM:SS.fff"
+
+
+def test_a_space_padded_hour_is_measured_when_strptime_reads_it() -> None:
+    """Python 3.13 reads ``%H`` space-padded where 3.12 refuses it.
+
+    Where the running interpreter accepts the sample the alignment has to measure
+    the hour like any other, and where it refuses the value is not this format.
+    """
+    value = "2010-07-09T 9:00:00"
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        assert infer_date_format([value]) is None
+    else:
+        assert infer_date_format([value]) == "YYYY-MM-DDTHH:MM:SS"
 
 
 def test_a_compact_date_keeps_the_component_boundaries_strptime_uses() -> None:
