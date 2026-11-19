@@ -5,6 +5,8 @@
 
 import type { FC } from 'react';
 import { ChevronDown, ChevronUp, Download } from '@/adapters/ui/icons';
+import { Button } from '@/common/Button';
+import { ButtonTheme, Size } from '@/enums/button';
 import { downloadCsv } from './export-csv';
 import type { ChartSpec } from './types';
 
@@ -16,9 +18,10 @@ export const ChartToolbar: FC<{
 	onToggleData: () => void;
 }> = ({ spec, dataOpen, dataId, onToggleData }) => (
 	<div className="result-chart-toolbar">
-		<button
-			type="button"
-			className="result-chart-tool"
+		<Button
+			theme={ButtonTheme.Secondary}
+			size={Size.SMALL}
+			iconPosition="left"
 			aria-expanded={dataOpen}
 			aria-controls={dataOpen ? dataId : undefined}
 			onClick={onToggleData}
@@ -29,15 +32,18 @@ export const ChartToolbar: FC<{
 				<ChevronDown className="h-3.5 w-3.5" />
 			)}
 			{dataOpen ? 'Hide data' : 'Show data'}
-		</button>
-		<button
-			type="button"
-			className="result-chart-tool ml-auto"
-			title="Download the Chart Data as CSV"
-			onClick={() => downloadCsv(spec)}
-		>
-			<Download className="h-3.5 w-3.5" />
-			CSV
-		</button>
+		</Button>
+		<div className="ml-auto">
+			<Button
+				theme={ButtonTheme.Secondary}
+				size={Size.SMALL}
+				iconPosition="left"
+				title="Download the Chart Data as CSV"
+				onClick={() => downloadCsv(spec)}
+			>
+				<Download className="h-3.5 w-3.5" />
+				CSV
+			</Button>
+		</div>
 	</div>
 );

@@ -6,7 +6,8 @@
 
 import { useMemo } from 'react';
 import type { ChatMessage } from '@/types/chat';
-import { CopyButton } from '@/common/Button';
+import { Button, CopyButton } from '@/common/Button';
+import { ButtonTheme, Size } from '@/enums/button';
 import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
 import { SqlBlock } from '@/common/SqlBlock';
@@ -46,15 +47,16 @@ const QueryResultsSection = ({
 				Query results
 			</span>
 			{parsedTable && (
-				<button
-					type="button"
+				<Button
+					theme={ButtonTheme.Secondary}
+					size={Size.SMALL}
+					iconPosition="left"
 					title="Download the Query Results as CSV"
 					onClick={() => exportTable(parsedTable, timestamp)}
-					className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-secondary hover:bg-zinc-200 hover:text-heading dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
 				>
 					<Download className="h-3.5 w-3.5" />
 					CSV
-				</button>
+				</Button>
 			)}
 		</div>
 		{!sqlResponse && <p className="text-xs italic text-secondary dark:text-zinc-500">null</p>}
