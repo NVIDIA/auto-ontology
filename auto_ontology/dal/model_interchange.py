@@ -1037,32 +1037,6 @@ def _term_database_names(term_ids: list[str]) -> dict[str, list[str]]:
     return names
 
 
-def _table_places(table_ids: list[str]) -> dict[str, tuple[str, str]]:
-    """Each table's ``(database name, schema name)``."""
-    if not table_ids:
-        return {}
-    return {
-        row["id"]: (row["database_name"], row["schema_name"])
-        for row in store().query_read(
-            select(
-                s.catalog_table.c.id,
-                s.catalog_schema.c.name.label("schema_name"),
-                s.catalog_database.c.name.label("database_name"),
-            )
-            .select_from(
-                s.catalog_table.join(
-                    s.catalog_schema,
-                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
-                ).join(
-                    s.catalog_database,
-                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
-                )
-            )
-            .where(s.catalog_table.c.id.in_(sorted(set(table_ids))))
-        )
-    }
-
-
 def _database_names_for_columns(column_ids: list[str]) -> dict[str, str]:
     if not column_ids:
         return {}
@@ -1190,7 +1164,10 @@ def apply_import_model(
         _import_custom_analyses(
             document, id_map, created, skipped, embed_buffer, schema_cache
         )
-        _queue_renamed_term_dependents(renamed_terms, embed_buffer)
+        _mark_renamed_term_dependents(renamed_terms, embed_buffer)
+
+    if embed_buffer is not None:
+        _queue_replacement_rows(embed_buffer)
 
     summary: dict[str, Any] = {
         "database_ids": live_db_ids,
@@ -1657,21 +1634,8 @@ def _update_matched_terms(
             changes.get("description", row["description"]) or "",
         )
 
-    if embed_buffer is not None and new_text:
-        db_names = _term_database_names(list(new_text))
-        for live_id, (name, description) in new_text.items():
-            embed_buffer.replaced_semantic_ids.add(live_id)
-            # A Term represented in several databases has a vector in each,
-            # and the flush deletes by id, so every copy is rebuilt.
-            for database_name in db_names.get(live_id) or [""]:
-                embed_buffer.semantic_rows.extend(
-                    build_term_semantic_rows(
-                        database_name=database_name,
-                        live_id=live_id,
-                        name=name,
-                        description=description,
-                    )
-                )
+    if embed_buffer is not None:
+        embed_buffer.replaced_semantic_ids.update(new_text)
     return changed
 
 
@@ -1789,103 +1753,156 @@ def _update_matched_attributes(
                 )
             )
         changed.add(live_id)
-
-        ctx = context[yaml_id]
-        col_ctx = ctx["col_ctx"]
-        if (
-            (changes or term_renamed)
-            and embed_buffer is not None
-            and col_ctx is not None
-        ):
-            merged = {**row, **changes}
+        if (changes or term_renamed) and embed_buffer is not None:
             embed_buffer.replaced_semantic_ids.add(live_id)
-            embed_buffer.semantic_rows.extend(
-                build_column_attribute_semantic_rows(
-                    database_name=col_ctx.database_name,
-                    live_id=live_id,
-                    name=merged["name"],
-                    description=merged["description"] or "",
-                    column_description=col_ctx.description,
-                    term_name=merged["term_name"],
-                    source_column=merged["source_column"],
-                    table_id=merged["table_id"],
-                    table_name=col_ctx.table_name,
-                    is_unique=col_ctx.is_unique,
-                    sample_values=col_ctx.sample_values,
-                    schema_name=col_ctx.schema_name,
-                )
-            )
     return changed
 
 
-def _queue_renamed_term_dependents(
+def _mark_renamed_term_dependents(
     renamed_terms: set[str], embed_buffer: ImportEmbedBuffer | None
 ) -> None:
-    """Re-embed what carries a renamed Term's name but the document left out.
+    """Mark for re-embedding everything that carries a renamed Term's name.
 
-    ``update_term`` rewrites ``term_name`` on every one of the Term's
-    ColumnAttributes, including those in databases a scoped document doesn't
-    cover, and its SqlAttributes embed the name through their link. Anything
-    the import already queued is skipped.
+    ``update_term`` rewrites ``term_name`` on all of the Term's
+    ColumnAttributes, including those a database-scoped document leaves out,
+    and its SqlAttributes embed the name through their link. Rows this import
+    created already carry the new name.
     """
     if embed_buffer is None or not renamed_terms:
         return
-    # Here, not at module level, for the same import cycle as update_term.
-    from auto_ontology.dal.terms import fetch_term_and_column_attributes_for_embedding
+    created_now = {row["metadata"].get("id") for row in embed_buffer.semantic_rows}
+    for link in (s.column_attribute__term, s.sql_attribute__term):
+        for row in store().query_read(
+            select(link.c.attribute_id).where(link.c.term_id.in_(sorted(renamed_terms)))
+        ):
+            if row["attribute_id"] not in created_now:
+                embed_buffer.replaced_semantic_ids.add(row["attribute_id"])
 
-    queued = set(embed_buffer.replaced_semantic_ids) | {
-        row["metadata"].get("id") for row in embed_buffer.semantic_rows
-    }
-    for term_id in sorted(renamed_terms):
-        term, attrs = fetch_term_and_column_attributes_for_embedding(term_id)
-        if term is None:
-            continue
-        pending: dict[str, dict[str, Any]] = {}
-        for attr in attrs:
-            if attr["id"] not in queued:
-                pending.setdefault(attr["id"], attr)
-        places = _table_places(
-            [a["table_id"] for a in pending.values() if a["table_id"]]
+
+def _queue_replacement_rows(embed_buffer: ImportEmbedBuffer) -> None:
+    """Build the replaced entities' vectors from what the import committed.
+
+    The flush deletes a replaced id's vectors in every database, so each entity
+    gets a row for every database it belongs to now: a Term for each database
+    it represents a table in, a ColumnAttribute for each database it has a
+    column in, and a SqlAttribute for its Terms' databases. Reading committed
+    rows rather than the document keeps representation moves, rejected
+    renames, and links outside a scoped document in step. An id nothing could
+    be built for keeps its vectors.
+    """
+    ids = sorted(embed_buffer.replaced_semantic_ids)
+    if not ids:
+        return
+    rows = embed_buffer.semantic_rows
+    built: set[str] = set()
+
+    terms = store().query_read(
+        select(s.term.c.id, s.term.c.name, s.term.c.description).where(
+            s.term.c.id.in_(ids)
         )
-        for attr_id, attr in pending.items():
-            database_name, schema_name = places.get(
-                attr["table_id"], (term.get("database_name") or "", "")
-            )
-            queued.add(attr_id)
-            embed_buffer.replaced_semantic_ids.add(attr_id)
-            embed_buffer.semantic_rows.extend(
-                build_column_attribute_semantic_rows(
+    )
+    term_places = _term_database_names([t["id"] for t in terms])
+    for term in terms:
+        for database_name in term_places.get(term["id"]) or [""]:
+            rows.extend(
+                build_term_semantic_rows(
                     database_name=database_name,
-                    live_id=attr_id,
-                    name=attr["name"],
-                    description=attr["description"] or "",
-                    column_description=attr["column_description"] or "",
-                    term_name=attr["term_name"],
-                    source_column=attr["source_column"],
-                    table_id=attr["table_id"] or "",
-                    table_name=attr["table_name"] or "",
-                    is_unique=bool(attr["is_unique"]),
-                    sample_values=attr["sample_values"],
-                    schema_name=schema_name,
+                    live_id=term["id"],
+                    name=term["name"],
+                    description=term["description"] or "",
                 )
             )
-    database_names = _database_names_for_terms(sorted(renamed_terms))
+        built.add(term["id"])
+
+    # One row per database an attribute has a column in, from its own source
+    # column where that database holds it.
+    attribute, column, table = s.column_attribute, s.catalog_column, s.catalog_table
+    contexts = store().query_read(
+        select(
+            attribute.c.id,
+            attribute.c.name,
+            attribute.c.description,
+            attribute.c.term_name,
+            attribute.c.source_column,
+            attribute.c.table_id.label("own_table_id"),
+            column.c.id.label("column_id"),
+            column.c.name.label("column_name"),
+            column.c.description.label("column_description"),
+            column.c.sample_values,
+            column.c.is_unique,
+            table.c.id.label("table_id"),
+            table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_database.c.name.label("database_name"),
+        )
+        .select_from(
+            attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == attribute.c.id,
+            )
+            .join(column, column.c.id == s.column__has_attribute.c.column_id)
+            .join(table, table.c.id == column.c.table_id)
+            .join(s.catalog_schema, s.catalog_schema.c.id == table.c.schema_id)
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(attribute.c.id.in_(ids))
+    )
+    contexts.sort(
+        key=lambda c: (
+            c["id"],
+            c["database_name"],
+            (c["table_id"], c["column_name"])
+            != (c["own_table_id"], c["source_column"]),
+            c["column_id"],
+        )
+    )
+    placed: set[tuple[str, str]] = set()
+    for ctx in contexts:
+        if (ctx["id"], ctx["database_name"]) in placed:
+            continue
+        placed.add((ctx["id"], ctx["database_name"]))
+        rows.extend(
+            build_column_attribute_semantic_rows(
+                database_name=ctx["database_name"],
+                live_id=ctx["id"],
+                name=ctx["name"],
+                description=ctx["description"] or "",
+                column_description=ctx["column_description"] or "",
+                term_name=ctx["term_name"],
+                source_column=ctx["column_name"],
+                table_id=ctx["table_id"],
+                table_name=ctx["table_name"],
+                is_unique=bool(ctx["is_unique"]),
+                sample_values=ctx["sample_values"],
+                schema_name=ctx["schema_name"],
+            )
+        )
+        built.add(ctx["id"])
+
+    remaining = [i for i in ids if i not in built]
+    sql_terms: dict[str, list[str]] = {}
     for row in store().query_read(
         select(
             s.sql_attribute__term.c.attribute_id, s.sql_attribute__term.c.term_id
-        ).where(s.sql_attribute__term.c.term_id.in_(sorted(renamed_terms)))
+        ).where(s.sql_attribute__term.c.attribute_id.in_(remaining))
     ):
-        attr_id = row["attribute_id"]
-        if attr_id in queued:
-            continue
+        sql_terms.setdefault(row["attribute_id"], []).append(row["term_id"])
+    sql_places = _term_database_names(
+        sorted({t for ts in sql_terms.values() for t in ts})
+    )
+    for attr_id, term_ids in sql_terms.items():
         docs = fetch_sql_attribute_docs(attr_id)
         if not docs:
             continue
-        queued.add(attr_id)
-        embed_buffer.replaced_semantic_ids.add(attr_id)
-        embed_buffer.semantic_rows.extend(
-            build_sql_attribute_rows_from_docs(docs, database_names.get(row["term_id"]))
-        )
+        places = list(dict.fromkeys(p for t in term_ids for p in sql_places.get(t, [])))
+        for database_name in places or [None]:
+            rows.extend(build_sql_attribute_rows_from_docs(docs, database_name))
+        built.add(attr_id)
+
+    embed_buffer.replaced_semantic_ids.intersection_update(built)
 
 
 def _import_terms(

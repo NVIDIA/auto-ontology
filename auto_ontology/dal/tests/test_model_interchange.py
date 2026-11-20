@@ -1234,3 +1234,66 @@ def test_a_created_sql_attribute_embeds_the_name_the_term_kept(world: World) -> 
         r["text"] for r in buffer.semantic_rows if r["text"].startswith("sql_attribute")
     ]
     assert texts and all(f"term: {world.prefix}-Order," in t for t in texts)
+
+
+def test_a_term_moved_to_another_database_is_rebuilt_there(world: World) -> None:
+    """The vectors follow the representation the import commits, not the one
+    the Term had when its description changed."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, _ = _other_database_column(world)
+    other_db = store().query_read(
+        select(s.catalog_database.c.id).where(
+            s.catalog_database.c.name == f"{world.prefix}-other"
+        )
+    )[0]["id"]
+    rows = mi.fetch_export_rows([world.database, other_db])
+    document = mi.assemble_export_document(
+        rows,
+        dialect_by_db_name={
+            world.prefix: "postgres",
+            f"{world.prefix}-other": "postgres",
+        },
+        sql_column_resolver=lambda sql, database_name: [],
+    )
+    term = document.semantic_layer.terms[0]
+    term.represents = [other_table]
+    term.description = "a returned order"
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    represented = {
+        row["table_id"]
+        for row in store().query_read(
+            select(s.table__term.c.table_id).where(
+                s.table__term.c.term_id == world.term
+            )
+        )
+    }
+    assert represented == {other_table}
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
+        f"{world.prefix}-other"
+    }
+
+
+def test_a_rename_rebuilds_an_attribute_in_each_of_its_databases(world: World) -> None:
+    """One attribute with columns in two databases has a vector in each; a
+    scoped rename must rebuild both, since the flush deletes by id."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    _, other_column = _other_database_column(world)
+    _link(s.column__has_attribute, column_id=other_column, attribute_id=world.attribute)
+    document = _document(world)
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    rows = _queued(buffer, world.attribute)
+    assert {r["metadata"]["database_name"] for r in rows} == {
+        world.prefix,
+        f"{world.prefix}-other",
+    }
+    assert all(new_name in r["text"] for r in rows)
