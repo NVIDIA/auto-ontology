@@ -497,7 +497,16 @@ def upsert_table_term(
                 store().query_write(
                     update(s.term)
                     .where(s.term.c.id == term_id)
-                    .values(description=description, synonyms=synonyms or [])
+                    .values(
+                        # A certified description is a person's reviewed
+                        # meaning; recompiling the table must not replace it
+                        # (#259). Synonyms carry no certification flag.
+                        description=case(
+                            (s.term.c.description_certified, s.term.c.description),
+                            else_=literal(description, String),
+                        ),
+                        synonyms=synonyms or [],
+                    )
                 )
                 ensure_term_concept(term_id)
                 return term_id, candidate_name
