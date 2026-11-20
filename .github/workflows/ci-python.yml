@@ -242,7 +242,10 @@ jobs:
 
       # Every `age` test must run here: a skip means the server lost the
       # extension or the schema, and the job would prove nothing.
+      # `shell: bash` runs with `-o pipefail`, so a failing pytest still fails
+      # the step through `tee`.
       - name: Run the AGE tests, failing on any skip
+        shell: bash
         run: |
           uv run --no-sync pytest auto_ontology -q -rs -m age | tee age-tests.log
           if grep -q '^SKIPPED' age-tests.log; then

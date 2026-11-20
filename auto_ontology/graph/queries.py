@@ -9,19 +9,23 @@ only, and rolled back. Vertices and edges are reported by their **Postgres
 ids** (the ``id`` property every vertex carries), never by AGE's internal
 graph ids, so a caller can take any id straight to the REST API.
 
-The neighbourhood walk is a breadth-first expansion, one Cypher statement per
-hop, rather than a single variable-length ``MATCH``. A variable-length pattern
-enumerates *paths*, and around a Term that represents a wide table the number
-of paths grows with the product of the fan-outs at each hop; expanding the
-frontier once per hop costs the number of edges actually touched. Each hop
-asks the database for at most the vertices the cap still has room for (plus
-one, to know whether it cut anything), so a hub's fan-out never reaches
-Python.
+The neighbourhood walk is a breadth-first expansion, one hop at a time,
+rather than a single variable-length ``MATCH``: a variable-length pattern
+enumerates *paths*, which grow with the product of the fan-outs at each hop.
+
+Each hop is plain SQL over AGE's own storage rather than Cypher. AGE plans an
+undirected ``MATCH (a)-[]-(b)`` with ``b`` unbound as a scan of every vertex
+table joined to the edges, so its cost follows the size of the graph. The
+edge tables carry ``start_id``/``end_id`` indexes (created by the sync), and
+reading ``_ag_label_edge`` through them costs the index entries of the
+frontier's own edges. A hop reads those ids only, keeps at most the vertices
+the cap still has room for (plus one, to know whether it cut anything), and
+fetches labels and properties for the kept vertices alone.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
+import json
 from typing import Any
 
 from sqlalchemy.engine import Engine
@@ -51,7 +55,7 @@ def _vertex(label: str, props: dict[str, Any]) -> dict[str, Any]:
 def graph_status(engine: Engine | None = None, *, graph: str | None = None) -> dict:
     """Whether the graph exists, and how many vertices and edges each label has."""
     graph = graph or age.graph_name()
-    with age.read_transaction(_engine(engine)) as conn:
+    with age.read_transaction(_engine(engine), graph) as conn:
         if not age.graph_exists(conn, graph):
             return {
                 "graph": graph,
@@ -90,23 +94,63 @@ def graph_status(engine: Engine | None = None, *, graph: str | None = None) -> d
     }
 
 
-#: The not-yet-seen neighbours of a frontier, at most ``{limit}`` of them, so a
-#: hub with thousands of links costs the cap, not its fan-out.
-_NEW_NEIGHBOURS = (
-    "UNWIND $ids AS i "
-    "MATCH (a:{label} {{id: i}})-[]-(b) "
-    "WHERE NOT b.id IN $known "
-    "RETURN DISTINCT b.id, label(b), properties(b) "
-    "ORDER BY b.id LIMIT {limit}"
-)
+_NEIGHBOUR_IDS = """
+SELECT n.other::text FROM (
+    SELECT end_id AS other FROM {g}._ag_label_edge
+     WHERE start_id = ANY(%(frontier)s::text[]::graphid[])
+    UNION
+    SELECT start_id FROM {g}._ag_label_edge
+     WHERE end_id = ANY(%(frontier)s::text[]::graphid[])
+) n
+WHERE n.other <> ALL(%(known)s::text[]::graphid[])
+ORDER BY n.other
+LIMIT %(limit)s
+"""
 
-#: The edges from a frontier to vertices the walk kept.
-_KEPT_EDGES = (
-    "UNWIND $ids AS i "
-    "MATCH (a:{label} {{id: i}})-[e]-(b) "
-    "WHERE b.id IN $kept "
-    "RETURN a.id, label(e), start_id(e) = id(a), properties(e), b.id"
-)
+_VERTICES = """
+SELECT v.id::text, l.name, v.properties::text
+  FROM {g}._ag_label_vertex v
+  JOIN ag_catalog.ag_label l ON l.relation = v.tableoid
+ WHERE v.id = ANY(%(ids)s::text[]::graphid[])
+"""
+
+_KEPT_EDGES = """
+SELECT e.start_id::text, e.end_id::text, l.name, e.properties::text
+  FROM {g}._ag_label_edge e
+  JOIN ag_catalog.ag_label l ON l.relation = e.tableoid
+ WHERE (e.start_id = ANY(%(frontier)s::text[]::graphid[])
+        AND e.end_id = ANY(%(kept)s::text[]::graphid[]))
+    OR (e.end_id = ANY(%(frontier)s::text[]::graphid[])
+        AND e.start_id = ANY(%(kept)s::text[]::graphid[]))
+"""
+
+
+def _collect_kept_edges(
+    conn: Any,
+    g: str,
+    frontier: list[str],
+    nodes: dict[str, dict[str, Any]],
+    edges: dict[tuple[str, str, str], dict[str, Any]],
+) -> None:
+    """Add the edges between *frontier* and any kept vertex, without expanding."""
+    if not frontier:
+        return
+    rows = conn.exec_driver_sql(
+        _KEPT_EDGES.format(g=g), {"frontier": frontier, "kept": list(nodes)}
+    )
+    for start, end, rel, props in rows:
+        source, target = nodes[start], nodes[end]
+        edges.setdefault(
+            (rel, start, end),
+            {
+                "type": rel,
+                "source": source["id"],
+                "source_label": source["label"],
+                "target": target["id"],
+                "target_label": target["label"],
+                "properties": age.parse_agtype(props) or {},
+            },
+        )
 
 
 def term_neighborhood(
@@ -121,77 +165,73 @@ def term_neighborhood(
 
     Returns ``None`` when the Term is not in the graph. ``truncated`` is set
     when *max_nodes* stopped the walk early, so a caller knows the picture is
-    partial rather than complete.
+    partial rather than complete. Every edge between two returned vertices is
+    included.
+
+    A vertex is identified by its id *and* label (a Concept shares its id with
+    the Term it was created from), so each edge names both labels too.
     """
     if not 1 <= depth <= MAX_DEPTH:
         raise ValueError(f"depth must be between 1 and {MAX_DEPTH}")
     if not 1 <= max_nodes <= MAX_NODES:
         raise ValueError(f"max_nodes must be between 1 and {MAX_NODES}")
     graph = graph or age.graph_name()
+    g = age.quoted_graph(graph)
 
-    with age.read_transaction(_engine(engine)) as conn:
+    with age.read_transaction(_engine(engine), graph) as conn:
         if not age.graph_exists(conn, graph):
             raise age.GraphNotBuilt(
                 f"graph {graph!r} has not been built; run "
                 "`python -m auto_ontology.graph sync`"
             )
-        start = age.cypher(
-            conn,
-            graph,
-            f"MATCH (t:{LABEL_TERM} {{id: $id}}) RETURN properties(t)",
-            {"id": term_id},
-            columns=("props",),
-        )
-        if not start:
+        start = conn.exec_driver_sql(
+            f'SELECT v.id::text, v.properties::text FROM {g}."{LABEL_TERM}" v '
+            "WHERE v.properties @> %(match)s::agtype",
+            {"match": json.dumps({"id": term_id})},
+        ).first()
+        if start is None:
             return None
 
-        nodes: dict[str, dict[str, Any]] = {term_id: _vertex(LABEL_TERM, start[0][0])}
+        start_gid, start_props = start
+        # Keyed by AGE graph id, which is unique where the Postgres id is not.
+        nodes: dict[str, dict[str, Any]] = {
+            start_gid: _vertex(LABEL_TERM, age.parse_agtype(start_props))
+        }
         edges: dict[tuple[str, str, str], dict[str, Any]] = {}
-        frontier: dict[str, list[str]] = {LABEL_TERM: [term_id]}
+        frontier = [start_gid]
         truncated = False
 
         for _ in range(depth):
-            next_frontier: dict[str, list[str]] = defaultdict(list)
-            for label, ids in frontier.items():
-                # One more than the room left: an extra row means the cap cut
-                # the walk short.
-                room = max_nodes - len(nodes)
-                rows = age.cypher(
-                    conn,
-                    graph,
-                    _NEW_NEIGHBOURS.format(label=age.identifier(label), limit=room + 1),
-                    {"ids": ids, "known": list(nodes)},
-                    columns=("bid", "blabel", "bprops"),
+            room = max_nodes - len(nodes)
+            found = [
+                gid
+                for (gid,) in conn.exec_driver_sql(
+                    _NEIGHBOUR_IDS.format(g=g),
+                    {
+                        "frontier": frontier,
+                        "known": list(nodes),
+                        "limit": room + 1,
+                    },
                 )
-                if len(rows) > room:
-                    truncated = True
-                for b_id, b_label, b_props in rows[:room]:
-                    nodes[b_id] = _vertex(b_label, b_props)
-                    next_frontier[b_label].append(b_id)
+            ]
+            if len(found) > room:
+                truncated = True
+            kept = found[:room]
+            if kept:
+                for gid, label, props in conn.exec_driver_sql(
+                    _VERTICES.format(g=g), {"ids": kept}
+                ):
+                    nodes[gid] = _vertex(label, age.parse_agtype(props))
             # Edges are read once the hop's vertices are settled, so every edge
             # between two kept vertices is reported and none to a dropped one.
-            for label, ids in frontier.items():
-                rows = age.cypher(
-                    conn,
-                    graph,
-                    _KEPT_EDGES.format(label=age.identifier(label)),
-                    {"ids": ids, "kept": list(nodes)},
-                    columns=("a", "rel", "outgoing", "eprops", "bid"),
-                )
-                for a_id, rel, outgoing, eprops, b_id in rows:
-                    source, target = (a_id, b_id) if outgoing else (b_id, a_id)
-                    edges.setdefault(
-                        (rel, source, target),
-                        {
-                            "type": rel,
-                            "source": source,
-                            "target": target,
-                            "properties": eprops,
-                        },
-                    )
-            frontier = next_frontier
+            _collect_kept_edges(conn, g, frontier, nodes, edges)
+            frontier = kept
             if not frontier:
                 break
+        # The last hop's vertices are not expanded, but edges among kept
+        # vertices that start there (a Tag on both a Term and its Table)
+        # still belong to the picture.
+        _collect_kept_edges(conn, g, frontier, nodes, edges)
 
     return {
         "term_id": term_id,
@@ -212,7 +252,7 @@ def run_cypher(
 ) -> list[tuple[Any, ...]]:
     """Run an arbitrary Cypher read for operators (the CLI), never writes."""
     graph = graph or age.graph_name()
-    with age.read_transaction(_engine(engine)) as conn:
+    with age.read_transaction(_engine(engine), graph) as conn:
         if not age.graph_exists(conn, graph):
             raise age.GraphNotBuilt(f"graph {graph!r} has not been built")
         return age.cypher(conn, graph, query, params, columns)

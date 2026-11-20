@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 
@@ -165,6 +168,13 @@ def seeded() -> Iterator[dict[str, str]]:
             },
         ),
         (s.term__concept, {"term_id": ids["cust_term"], "concept_id": ids["concept"]}),
+        # Compilation creates a Concept with its Term's id, so two vertices share
+        # one Postgres id and differ by label.
+        (
+            s.concept,
+            {"id": ids["term"], "database_id": ids["db"], "name": f"{p} Order"},
+        ),
+        (s.term__concept, {"term_id": ids["term"], "concept_id": ids["term"]}),
         (
             s.column__foreign_key,
             {"source_column_id": ids["o_cust"], "target_column_id": ids["c_id"]},
@@ -212,6 +222,9 @@ def seeded() -> Iterator[dict[str, str]]:
             {"attribute_id": ids["sql_attr"], "term_id": ids["term"]},
         ),
         (s.tag_target, {"tag_id": ids["tag"], "term_id": ids["term"]}),
+        # The same tag on the Term's own table: a triangle a depth-1 walk from
+        # the Term must still report in full.
+        (s.tag_target, {"tag_id": ids["tag"], "table_id": ids["orders"]}),
         (s.zone_target, {"zone_id": ids["zone"], "table_id": ids["orders"]}),
     ]
     with get_engine().begin() as conn:
@@ -322,6 +335,12 @@ def test_neighborhood_walks_from_a_term(graph: str, seeded: dict[str, str]) -> N
         "target": seeded["term"],
     } in [{k: e[k] for k in ("type", "source", "target")} for e in one["edges"]]
     assert one["truncated"] is False
+    # Both depth-1 neighbours carry the same tag: the edge between them counts.
+    assert {
+        "type": "TAGGED",
+        "source": seeded["tag"],
+        "target": seeded["orders"],
+    } in [{k: e[k] for k in ("type", "source", "target")} for e in one["edges"]]
 
     # Two terms linked through a table join, the hop chain the exploration API
     # describes: Term <-REPRESENTS- Table -JOIN-> Table -REPRESENTS-> Term.
@@ -343,6 +362,27 @@ def test_the_node_cap_bounds_the_walk_and_its_edges(
     assert [n["id"] for n in only["nodes"]] == [seeded["term"]]
     assert only["edges"] == []
     assert only["truncated"] is True
+
+
+def test_a_concept_sharing_its_terms_id_is_its_own_vertex(
+    graph: str, seeded: dict[str, str]
+) -> None:
+    one = queries.term_neighborhood(seeded["term"], depth=1, graph=graph)
+    assert one is not None
+    vertices = [(n["label"], n["id"]) for n in one["nodes"]]
+    assert ("Term", seeded["term"]) in vertices
+    assert ("Concept", seeded["term"]) in vertices
+    assert len(vertices) == len(set(vertices))
+    assert {
+        "type": "MEMBER_OF",
+        "source": seeded["term"],
+        "source_label": "Term",
+        "target": seeded["term"],
+        "target_label": "Concept",
+    } in [
+        {k: e[k] for k in ("type", "source", "source_label", "target", "target_label")}
+        for e in one["edges"]
+    ]
 
 
 def test_unknown_term_is_none(graph: str) -> None:
@@ -367,9 +407,129 @@ def test_resync_replaces_rather_than_duplicates(
         "MATCH (t:Term {id: $id}) RETURN count(t)", {"id": seeded["term"]}, graph=graph
     )
     assert rows == [(1,)]
+
+
+def _graphs_named_like(prefix: str) -> set[str]:
     with get_engine().connect() as conn:
         age.prepare(conn)
-        assert not age.graph_exists(conn, projection.staging_name(graph))
+        rows = conn.exec_driver_sql(
+            "SELECT name FROM ag_catalog.ag_graph WHERE name LIKE %s",
+            (prefix.replace("_", "\\_") + "%",),
+        ).all()
+    return {name for (name,) in rows}
+
+
+def _drop_graph(name: str) -> None:
+    with get_engine().begin() as conn:
+        age.prepare(conn)
+        conn.exec_driver_sql("SELECT drop_graph(%s, true)", (name,))
+
+
+def test_a_rebuild_leaves_other_graphs_alone(graph: str) -> None:
+    """A graph named like a staging graph is someone else's: kept, untouched."""
+    neighbour = f"{graph}_next"
+    with get_engine().begin() as conn:
+        age.prepare(conn)
+        conn.exec_driver_sql("SELECT create_graph(%s)", (neighbour,))
+    try:
+        before = _graphs_named_like(graph)
+        projection.sync_graph(graph=graph)
+        assert _graphs_named_like(graph) == before
+    finally:
+        _drop_graph(neighbour)
+
+
+def test_the_longest_configured_name_rebuilds(seeded: dict[str, str]) -> None:
+    name = f"ao_long_{uuid.uuid4().hex[:8]}".ljust(58, "x")
+    assert len(name) == 58
+    try:
+        report = projection.sync_graph(graph=name)
+        assert report.vertices["Term"] >= 2
+        assert queries.graph_status(graph=name)["built"] is True
+    finally:
+        _drop_graph(name)
+
+
+def _sessions_waiting_on_locks() -> int:
+    with get_engine().connect() as conn:
+        (count,) = conn.exec_driver_sql(
+            "SELECT count(*) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+        ).one()
+    return int(count)
+
+
+def _wait_for_lock_waiters(at_least: int, timeout: float = 15.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _sessions_waiting_on_locks() >= at_least:
+            return
+        time.sleep(0.05)
+
+
+def test_readers_during_the_swap_finish_without_errors(
+    graph: str, seeded: dict[str, str]
+) -> None:
+    """A reader already inside the old graph, a rebuild, and readers that
+    arrive while the rebuild waits to swap: all finish, none errors.
+
+    The in-flight reader keeps its snapshot of the old graph; the rebuild's
+    drop waits for it; readers that arrive meanwhile wait behind the drop and
+    then read the new graph.
+    """
+    errors: list[BaseException] = []
+    results: dict[str, Any] = {}
+    reading = threading.Event()
+    release = threading.Event()
+
+    def guarded(name: str, work: Callable[[], Any]) -> threading.Thread:
+        def run() -> None:
+            try:
+                results[name] = work()
+            except BaseException as exc:  # noqa: BLE001 — collected and asserted
+                errors.append(exc)
+
+        thread = threading.Thread(target=run, name=name, daemon=True)
+        thread.start()
+        return thread
+
+    def in_flight() -> tuple[Any, Any]:
+        with age.read_transaction(get_engine(), graph) as conn:
+            count = "MATCH (t:Term) RETURN count(t)"
+            first = age.cypher(conn, graph, count)
+            reading.set()
+            release.wait(30)
+            return first, age.cypher(conn, graph, count)
+
+    def new_reader() -> int:
+        found = queries.term_neighborhood(seeded["term"], depth=2, graph=graph)
+        assert found is not None
+        return len(found["nodes"])
+
+    expected = queries.term_neighborhood(seeded["term"], depth=2, graph=graph)
+    assert expected is not None
+    threads = [guarded("in_flight", in_flight)]
+    assert reading.wait(15)
+    threads.append(guarded("sync", lambda: projection.sync_graph(graph=graph)))
+    _wait_for_lock_waiters(1)
+    threads += [guarded(f"reader{i}", new_reader) for i in range(2)]
+    _wait_for_lock_waiters(2)
+    release.set()
+    for thread in threads:
+        thread.join(60)
+
+    assert not [thread.name for thread in threads if thread.is_alive()]
+    assert not errors, errors
+    first, second = results["in_flight"]
+    assert first == second
+    assert results["reader0"] == results["reader1"] == len(expected["nodes"])
+
+
+def test_a_nonpositive_batch_size_keeps_the_active_graph(graph: str) -> None:
+    before = queries.graph_status(graph=graph)
+    with pytest.raises(ValueError, match="batch_size"):
+        projection.sync_graph(graph=graph, batch_size=0)
+    assert queries.graph_status(graph=graph) == before
 
 
 def test_missing_graph_is_reported(seeded: dict[str, str]) -> None:

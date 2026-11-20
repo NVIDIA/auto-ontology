@@ -42,7 +42,12 @@ class GraphStatusResponse(ApiModel):
 
 
 class GraphNode(ApiModel):
-    id: str = Field(description="The object's Auto Ontology id.")
+    id: str = Field(
+        description=(
+            "The object's Auto Ontology id. Unique together with label: a "
+            "Concept shares its id with the Term it was created from."
+        )
+    )
     label: str = Field(description="Term, Table, Column, ColumnAttribute, ...")
     properties: dict[str, Any] = Field(default_factory=dict)
 
@@ -50,7 +55,9 @@ class GraphNode(ApiModel):
 class GraphEdge(ApiModel):
     type: str = Field(description="REPRESENTS, CONTAINS, PROPERTY_OF, ...")
     source: str
+    source_label: str = Field(description="Label of the source vertex.")
     target: str
+    target_label: str = Field(description="Label of the target vertex.")
     properties: dict[str, Any] = Field(default_factory=dict)
 
 

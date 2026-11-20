@@ -39,9 +39,12 @@ ENABLED_ENV = "AGE_GRAPH_ENABLED"
 GRAPH_NAME_ENV = "AGE_GRAPH_NAME"
 DEFAULT_GRAPH_NAME = "auto_ontology"
 
-#: At most 58 characters, so the rebuild's ``<name>_next`` staging graph still
-#: fits Postgres' 63-character identifier limit.
+#: At most 58 characters, so the rebuild's ``<name>_<4 hex>`` staging graph
+#: still fits Postgres' 63-character identifier limit.
 _GRAPH_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,57}$")
+#: Any graph name this module may splice into a statement: a configured name
+#: or the rebuild's staging name, up to Postgres' 63 characters.
+_ANY_GRAPH_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _DOLLAR_TAG = "$cypher$"
 
@@ -68,6 +71,13 @@ def graph_name() -> str:
             "(lowercase letters, digits and underscores, starting with a letter)"
         )
     return name
+
+
+def quoted_graph(graph: str) -> str:
+    """*graph* as a quoted schema name, checked before it is written into SQL."""
+    if not _ANY_GRAPH_NAME.match(graph):
+        raise ValueError(f"{graph!r} is not a valid graph name")
+    return f'"{graph}"'
 
 
 def identifier(value: str) -> str:
@@ -125,9 +135,37 @@ def graph_exists(conn: Connection, name: str) -> bool:
     return row is not None
 
 
+def _graph_lock_key(graph: str) -> str:
+    return f"auto_ontology.graph:{graph}"
+
+
+def lock_graph_for_reading(conn: Connection, graph: str) -> None:
+    """Hold *graph* against a swap until this transaction ends.
+
+    A shared transaction-level advisory lock. A rebuild takes the exclusive
+    one (:func:`lock_graph_for_swap`) just before it drops the old graph, so a
+    reader that arrives during the swap waits here, before it has looked the
+    graph up, and then reads the new one. Without it the reader resolves the
+    old graph, waits on its tables, and fails once they are gone.
+    """
+    conn.exec_driver_sql(
+        "SELECT pg_advisory_xact_lock_shared(hashtext(%s))", (_graph_lock_key(graph),)
+    )
+
+
+def lock_graph_for_swap(conn: Connection, graph: str) -> None:
+    """Wait for *graph*'s current readers, and hold new ones until commit."""
+    conn.exec_driver_sql(
+        "SELECT pg_advisory_xact_lock(hashtext(%s))", (_graph_lock_key(graph),)
+    )
+
+
 @contextmanager
-def read_transaction(engine: Engine) -> Iterator[Connection]:
+def read_transaction(engine: Engine, graph: str | None = None) -> Iterator[Connection]:
     """A read-only transaction that is always rolled back.
+
+    With *graph*, the transaction first takes that graph's read lock
+    (:func:`lock_graph_for_reading`), so a rebuild cannot swap it mid-read.
 
     ``READ ONLY`` makes Postgres refuse a Cypher ``CREATE``/``SET``/``DELETE``
     (AGE writes through the executor, which the flag guards), and the rollback
@@ -139,6 +177,8 @@ def read_transaction(engine: Engine) -> Iterator[Connection]:
             conn.exec_driver_sql("SET TRANSACTION READ ONLY")
             prepare(conn)
             require_extension(conn)
+            if graph is not None:
+                lock_graph_for_reading(conn, graph)
             yield conn
         finally:
             trans.rollback()
@@ -167,7 +207,7 @@ def cypher(
     """Run one Cypher statement and return its rows, each value parsed."""
     if _DOLLAR_TAG in query:
         raise ValueError(f"Cypher text may not contain {_DOLLAR_TAG}")
-    if not _GRAPH_NAME.match(graph):
+    if not _ANY_GRAPH_NAME.match(graph):
         raise ValueError(f"{graph!r} is not a valid graph name")
     projection = ", ".join(f"{identifier(c)} agtype" for c in columns)
     if params is None:

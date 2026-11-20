@@ -66,13 +66,15 @@ Statement-tier rows (`sql_query`) are left out.
 ## Keeping it current
 
 A sync rebuilds the graph in one `REPEATABLE READ` transaction, so the graph
-matches a single snapshot of the catalog. It loads a staging graph
-(`<name>_next`) first and only then drops the active graph and renames the
-staging graph into its place. Readers keep reading the old graph while the new
-one loads; a read that arrives during the final drop and rename waits until the
-transaction commits, because dropping a graph holds its tables' locks until
-then. Graph names are limited to 58 characters so the staging name still fits
-Postgres' identifier limit. It runs:
+matches a single snapshot of the catalog. It loads a staging graph of its own
+(`<name>_<4 hex>`, drawn until no graph has that name, so a rebuild never
+touches a graph it did not create) and only then drops the active graph and
+renames the staging graph into its place. Readers keep reading the old graph
+while the new one loads. Reads hold a shared advisory lock on the graph and the
+swap takes the exclusive one, so the swap waits for reads in progress, and a
+read that arrives during the swap waits for the commit and then reads the new
+graph. Graph names are limited to 58 characters so the staging name still fits
+Postgres' identifier limit, and `--batch-size` must be at least 1. It runs:
 
 - automatically at the end of every semantic compilation pass, after tag rules
   are re-applied, when `AGE_GRAPH_ENABLED` is set. A failed sync is logged and
@@ -96,9 +98,16 @@ after the next sync.
 The CLI `query` command and every read run in a `READ ONLY` transaction that is
 rolled back, so a Cypher `CREATE` is refused. REST and MCP do not accept Cypher;
 the neighbourhood walk is fixed server-side, one hop per statement, and stops at
-`max_nodes` with `truncated: true`. Each hop asks the database for no more new
-vertices than the cap still allows, so a hub with many links costs the cap, not
-its fan-out.
+`max_nodes` with `truncated: true`. Each hop is SQL over AGE's storage tables
+through the `start_id`/`end_id` indexes the sync creates, rather than a Cypher
+`MATCH (a)-[]-(b)`, which AGE plans as a scan of every vertex table. A hop reads
+the ids of the frontier's edges, keeps no more new vertices than the cap still
+allows, and fetches properties for those alone; edges between returned
+vertices, the last hop's included, are all reported.
+
+A vertex is identified by its `id` and `label` together: a Concept shares its
+`id` with the Term it was created from. Edges in the neighbourhood carry
+`source_label` and `target_label` for the same reason.
 
 Both REST routes answer 503 while `AGE_GRAPH_ENABLED` is unset, or while the
 server has no AGE extension (reads never create it; the first sync does).

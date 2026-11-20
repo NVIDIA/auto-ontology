@@ -21,6 +21,7 @@ edges in 5.1s without it, 0.02s with it).
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -121,14 +122,20 @@ def create_edges_statement(spec: EdgeSpec) -> str:
     )
 
 
-def staging_name(graph: str) -> str:
-    """The graph a rebuild loads into before it replaces *graph*."""
-    return f"{graph}_next"
+def new_staging_name(conn: Connection, graph: str) -> str:
+    """A graph name for this rebuild to load into, owned by it alone.
+
+    ``<graph>_<4 hex>``, drawn until no graph has that name, so a rebuild
+    never takes over (or drops) a graph someone else created. The rebuild's
+    transaction creates it, and a rollback removes it again.
+    """
+    while True:
+        name = f"{graph}_{secrets.token_hex(2)}"
+        if not age.graph_exists(conn, name):
+            return name
 
 
 def _create_schema(conn: Connection, graph: str) -> None:
-    if age.graph_exists(conn, graph):
-        conn.exec_driver_sql("SELECT drop_graph(%s, true)", (graph,))
     conn.exec_driver_sql("SELECT create_graph(%s)", (graph,))
     for spec in NODES:
         conn.exec_driver_sql("SELECT create_vlabel(%s, %s)", (graph, spec.label))
@@ -166,14 +173,18 @@ def sync_graph(
 ) -> SyncReport:
     """Rebuild the graph from Postgres in one transaction and report counts.
 
-    The rebuild loads a separate staging graph and only then replaces the
-    active one (drop, then ``alter_graph`` rename), so readers keep reading
-    the old graph while the new one loads. They wait only for the swap at the
+    The rebuild loads a staging graph of its own (:func:`new_staging_name`)
+    and only then replaces the active one (drop, then ``alter_graph``
+    rename), so readers keep reading the old graph while the new one loads. They wait only for the swap at the
     end, which holds the dropped graph's locks until commit.
 
     Every source read runs in one ``REPEATABLE READ`` snapshot, so the graph
     matches one moment of the catalog even when writes commit mid-rebuild.
     """
+    if batch_size < 1:
+        # Checked before any database work: with no batches every load writes
+        # nothing, and the swap would replace the graph with an empty one.
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
     if engine is None:
         from auto_ontology.dal.session import get_engine
 
@@ -182,13 +193,13 @@ def sync_graph(
     report = SyncReport(graph=graph)
     started = time.monotonic()
 
-    staging = staging_name(graph)
     with (
         engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn,
         conn.begin(),
     ):
         age.ensure_extension(conn)
         age.prepare(conn)
+        staging = new_staging_name(conn, graph)
         _create_schema(conn, staging)
         for spec in NODES:
             rows = vertex_rows(conn, spec)
@@ -206,6 +217,10 @@ def sync_graph(
             )
             report.edges[spec.label] = report.edges.get(spec.label, 0) + written
             report.unmatched_edges += len(rows) - written
+        # Readers hold the graph's shared lock for their whole transaction;
+        # this waits for them, and makes readers that arrive now wait for the
+        # commit and then read the new graph.
+        age.lock_graph_for_swap(conn, graph)
         if age.graph_exists(conn, graph):
             conn.exec_driver_sql("SELECT drop_graph(%s, true)", (graph,))
         conn.exec_driver_sql("SELECT alter_graph(%s, 'RENAME', %s)", (staging, graph))

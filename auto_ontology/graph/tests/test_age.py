@@ -139,3 +139,41 @@ def test_prepare_keeps_the_dal_schema_ahead_of_the_role_schema() -> None:
     statements = [c.args[0] for c in conn.exec_driver_sql.call_args_list]
     assert "SET LOCAL search_path = ag_catalog, public" in statements
     assert not any("$user" in sql for sql in statements)
+
+
+@pytest.mark.parametrize("size", [0, -1])
+def test_sync_refuses_a_nonpositive_batch_size_before_touching_the_database(
+    size: int,
+) -> None:
+    engine = MagicMock()
+    with pytest.raises(ValueError, match="batch_size"):
+        projection.sync_graph(engine, graph="g", batch_size=size)
+    engine.connect.assert_not_called()
+
+
+def test_the_cli_refuses_a_nonpositive_batch_size() -> None:
+    from auto_ontology.graph.__main__ import main
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["sync", "--batch-size", "0"])
+    assert exit_info.value.code == 2
+
+
+def test_cypher_accepts_a_staging_name_up_to_63_characters() -> None:
+    conn = MagicMock()
+    conn.exec_driver_sql.return_value = []
+    age.cypher(conn, "g" * 63, "RETURN 1")
+    with pytest.raises(ValueError):
+        age.cypher(conn, "g" * 64, "RETURN 1")
+
+
+def test_a_staging_name_is_new_and_fits() -> None:
+    conn = MagicMock()
+    taken = iter([True, False])
+    conn.exec_driver_sql.return_value.first.side_effect = lambda: (
+        (1,) if next(taken) else None
+    )
+    name = projection.new_staging_name(conn, "x" * 58)
+    assert name.startswith("x" * 58 + "_")
+    assert len(name) == 63
+    assert conn.exec_driver_sql.call_count == 2

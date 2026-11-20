@@ -31,6 +31,13 @@ def _print(value: object) -> None:
     sys.stdout.write("\n")
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m auto_ontology.graph",
@@ -45,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sync = sub.add_parser("sync", help="Rebuild the graph from Postgres.")
-    sync.add_argument("--batch-size", type=int, default=1000)
+    sync.add_argument("--batch-size", type=_positive_int, default=1000)
 
     sub.add_parser("status", help="Show vertex and edge counts per label.")
 

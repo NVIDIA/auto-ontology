@@ -2372,8 +2372,18 @@
             "title": "Source",
             "type": "string"
           },
+          "source_label": {
+            "description": "Label of the source vertex.",
+            "title": "Source Label",
+            "type": "string"
+          },
           "target": {
             "title": "Target",
+            "type": "string"
+          },
+          "target_label": {
+            "description": "Label of the target vertex.",
+            "title": "Target Label",
             "type": "string"
           },
           "type": {
@@ -2385,7 +2395,9 @@
         "required": [
           "type",
           "source",
-          "target"
+          "source_label",
+          "target",
+          "target_label"
         ],
         "title": "GraphEdge",
         "type": "object"
@@ -2421,7 +2433,7 @@
         "additionalProperties": true,
         "properties": {
           "id": {
-            "description": "The object's Auto Ontology id.",
+            "description": "The object's Auto Ontology id. Unique together with label: a Concept shares its id with the Term it was created from.",
             "title": "Id",
             "type": "string"
           },
