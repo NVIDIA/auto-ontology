@@ -360,6 +360,23 @@ def test_a_spent_search_budget_still_returns_the_queued_routes() -> None:
     ]
 
 
+def test_a_spent_search_budget_with_nothing_queued_returns_a_shortest_route() -> None:
+    # a - x_i - y_j - z - b: every a-x-y bound beats every a-x-y-z bound, so
+    # the budget runs out before any route reaches z and nothing finished is
+    # queued. A four-hop route still exists and must come back.
+    width = 101
+    edges: list[Edge] = []
+    for i in range(width):
+        edges.append(("a", f"x{i}_id", f"x{i:03}", "id"))
+        for j in range(width):
+            edges.append((f"x{i:03}", f"y{j}_id", f"y{j:03}", "id"))
+    for j in range(width):
+        edges.append((f"y{j:03}", "z_id", "z", "id"))
+    edges.append(("z", "b_id", "b", "id"))
+    ranked = rank_routes(build(edges), "a", "b", k=3)
+    assert [names_of(route) for route in ranked] == [["a", "x000", "y000", "z", "b"]]
+
+
 def test_a_dense_schema_still_answers_quickly() -> None:
     tables = [f"t{i:02}" for i in range(40)]
     edges = [(a, f"{b}_id", b, "id") for a, b in itertools.combinations(tables, 2)]

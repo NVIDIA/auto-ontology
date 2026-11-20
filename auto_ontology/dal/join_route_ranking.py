@@ -59,7 +59,8 @@ are expanded only when that sequence finishes, and only the first *k* by
 column name. :data:`MAX_SEARCH_STATES` caps the partial routes the search
 expands, so a dense schema cannot turn one prompt into a combinatorial walk;
 only a search that hits it can miss a better route. When it does, the
-finished routes already queued are still ranked and returned.
+finished routes already queued are still ranked and returned, and if none is
+queued, one shortest route is returned so a reachable table never yields none.
 """
 
 from __future__ import annotations
@@ -269,6 +270,29 @@ def rank_routes(
                     lifted,
                 ),
             )
+
+    if spent and not found:
+        # The budget ran out before any route finished. A route exists (the
+        # anchor reaches dest), so return the shortest one rather than none:
+        # step to the first-named table one hop closer each time, which never
+        # revisits a table because the distance strictly falls.
+        route = (anchor,)
+        while route[-1] != dest:
+            route += (
+                min(
+                    (
+                        t
+                        for t in steps[route[-1]]
+                        if distance[t] == distance[route[-1]] - 1
+                    ),
+                    key=lambda t: (names.get(t, t), t),
+                ),
+            )
+        lifts = sum(t in boosted for t in route[1:-1])
+        reliability, score = finished_score(route, lifts)
+        choices = [steps[a][b] for a, b in itertools.pairwise(route)]
+        for hops in itertools.islice(itertools.product(*choices), k):
+            found.append(RankedRoute(route, tuple(hops), reliability, score))
 
     found = [
         RankedRoute(r.tables, r.hops, round(r.reliability, 6), round(r.score, 6))
