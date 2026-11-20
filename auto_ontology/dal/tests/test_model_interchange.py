@@ -1085,3 +1085,152 @@ def test_a_scoped_import_keeps_links_to_other_databases(world: World) -> None:
 
     assert _attribute_columns(world.attribute) == {world.order_id, other_column}
     assert summary["updated"]["column_attributes"] == 0
+
+
+def _other_database_column(world: World) -> tuple[str, str]:
+    """A table and column in a second database, which the world's Term also
+    represents. Named under the world's prefix so the fixture cleans it up."""
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, database_id=other_db, name="sales")
+    other_table = _add(s.catalog_table, schema_id=other_schema, name="returns")
+    other_column = _add(
+        s.catalog_column,
+        table_id=other_table,
+        name="order_id",
+        data_type="integer",
+        ordinal_position=1,
+        is_nullable=True,
+    )
+    return other_table, other_column
+
+
+def _queued(buffer, live_id: str) -> list[dict]:
+    return [r for r in buffer.semantic_rows if r["metadata"].get("id") == live_id]
+
+
+def test_a_shared_terms_vector_is_rebuilt_in_every_database(world: World) -> None:
+    """The flush deletes a replaced Term's vectors by id, which removes the
+    copy in every database it represents, so each copy must be rebuilt."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, _ = _other_database_column(world)
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    document = _document(world)
+    document.semantic_layer.terms[0].description = "an order a customer placed"
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert world.term in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
+        world.prefix,
+        f"{world.prefix}-other",
+    }
+
+
+def test_a_rename_reembeds_attributes_outside_the_document(world: World) -> None:
+    """A database-scoped document leaves out the shared Term's attribute in
+    the other database, but the rename rewrote its term_name too."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, other_column = _other_database_column(world)
+    outside = _add(
+        s.column_attribute,
+        name=f"{world.prefix}-returned-order",
+        description="the returned order",
+        source_column="order_id",
+        term_name=f"{world.prefix}-Order",
+        table_id=other_table,
+    )
+    _link(s.column__has_attribute, column_id=other_column, attribute_id=outside)
+    _link(s.column_attribute__term, attribute_id=outside, term_id=world.term)
+    document = _document(world)
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert outside in buffer.replaced_semantic_ids
+    rows = _queued(buffer, outside)
+    assert rows and all(new_name in r["text"] for r in rows)
+    assert {r["metadata"]["database_name"] for r in rows} == {f"{world.prefix}-other"}
+
+
+def test_a_rename_reembeds_the_terms_sql_attributes(world: World) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+    from auto_ontology.server.model_interchange.schemas import ModelSqlAttribute
+
+    document = _document(world)
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-order-count",
+            name=f"{world.prefix}-order-count",
+            description="orders placed",
+            sql="SELECT COUNT(*) FROM public.orders",
+            term_id=document.semantic_layer.terms[0].id,
+        )
+    )
+    mi.apply_import_model(document, replace=True)
+    sql_attr = store().query_read(
+        select(s.sql_attribute.c.id).where(
+            s.sql_attribute.c.name == f"{world.prefix}-order-count"
+        )
+    )[0]["id"]
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert sql_attr in buffer.replaced_semantic_ids
+    rows = _queued(buffer, sql_attr)
+    assert len(rows) == 1 and f"term: {new_name}" in rows[0]["text"]
+
+
+def test_a_move_to_a_column_named_like_the_old_one_replaces_the_link(
+    world: World,
+) -> None:
+    """The document gives the new column the old one's name, so source_column
+    doesn't change; the live column ids still decide which link goes."""
+    document = _document(world)
+    document.semantic_layer.terms[0].columns_attributes[
+        0
+    ].column_id = world.customer_ref
+    for database in document.data_layer.databases:
+        for schema in database.schemas:
+            for table in schema.tables:
+                for column in table.columns:
+                    if column.id == world.customer_ref:
+                        column.name = "id"
+
+    mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.customer_ref}
+
+
+def test_a_created_sql_attribute_embeds_the_name_the_term_kept(world: World) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+    from auto_ontology.server.model_interchange.schemas import ModelSqlAttribute
+
+    store().query_write(
+        s.term.update().where(s.term.c.id == world.term).values(name_certified=True)
+    )
+    document = _document(world)
+    document.semantic_layer.terms[0].name = f"{world.prefix}-Rejected"
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-order-count",
+            name=f"{world.prefix}-order-count",
+            sql="SELECT COUNT(*) FROM public.orders",
+            term_id=document.semantic_layer.terms[0].id,
+        )
+    )
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    texts = [
+        r["text"] for r in buffer.semantic_rows if r["text"].startswith("sql_attribute")
+    ]
+    assert texts and all(f"term: {world.prefix}-Order," in t for t in texts)

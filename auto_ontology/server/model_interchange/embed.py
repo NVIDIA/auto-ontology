@@ -197,6 +197,13 @@ def build_sql_attribute_semantic_row(
     )
 
 
+def build_sql_attribute_rows_from_docs(
+    docs: list[dict[str, Any]], database_name: str | None
+) -> list[dict[str, Any]]:
+    """Embed rows for SqlAttribute docs as ``fetch_sql_attribute_docs`` returns them."""
+    return [_doc_to_embed_row(doc, database_name) for doc in docs]
+
+
 def build_custom_analysis_semantic_row(
     *,
     live_id: str,

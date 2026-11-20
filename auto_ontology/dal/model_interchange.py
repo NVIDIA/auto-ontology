@@ -41,7 +41,11 @@ from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.dal.sql_attributes import detach_existing_sql_edges, link_to_term
+from auto_ontology.dal.sql_attributes import (
+    detach_existing_sql_edges,
+    fetch_sql_attribute_docs,
+    link_to_term,
+)
 from auto_ontology.semantic.constants import (
     SEMANTIC_SOURCE,
     SQL_ATTR_SOURCE_BRIDGE,
@@ -55,6 +59,7 @@ from auto_ontology.server.model_interchange.embed import (
     build_column_attribute_semantic_rows,
     build_column_data_row,
     build_custom_analysis_semantic_row,
+    build_sql_attribute_rows_from_docs,
     build_sql_attribute_semantic_row,
     build_table_data_row,
     build_term_semantic_rows,
@@ -997,9 +1002,15 @@ def _remap_optional(id_map: dict[str, str], yaml_id: str) -> str | None:
 
 
 def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
+    """The first database each Term represents a table in, by database id."""
+    return {term: names[0] for term, names in _term_database_names(term_ids).items()}
+
+
+def _term_database_names(term_ids: list[str]) -> dict[str, list[str]]:
+    """Every database each Term represents a table in, ordered by database id."""
     if not term_ids:
         return {}
-    names: dict[str, str] = {}
+    names: dict[str, list[str]] = {}
     for row in store().query_read(
         select(
             s.table__term.c.term_id,
@@ -1020,8 +1031,36 @@ def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
         .where(s.table__term.c.term_id.in_(term_ids))
         .order_by(s.catalog_database.c.id)
     ):
-        names.setdefault(row["term_id"], row["database_name"])
+        found = names.setdefault(row["term_id"], [])
+        if row["database_name"] not in found:
+            found.append(row["database_name"])
     return names
+
+
+def _table_places(table_ids: list[str]) -> dict[str, tuple[str, str]]:
+    """Each table's ``(database name, schema name)``."""
+    if not table_ids:
+        return {}
+    return {
+        row["id"]: (row["database_name"], row["schema_name"])
+        for row in store().query_read(
+            select(
+                s.catalog_table.c.id,
+                s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_database.c.name.label("database_name"),
+            )
+            .select_from(
+                s.catalog_table.join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                ).join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
+            )
+            .where(s.catalog_table.c.id.in_(sorted(set(table_ids))))
+        )
+    }
 
 
 def _database_names_for_columns(column_ids: list[str]) -> dict[str, str]:
@@ -1125,12 +1164,33 @@ def apply_import_model(
         )
         _import_concepts(document, id_map)
         _import_semantic_fks(document, id_map)
+        # Created SqlAttributes embed the name each Term kept, which differs
+        # from the document's when a rename was rejected.
+        stored_names = {
+            row["id"]: row["name"]
+            for row in store().query_read(
+                select(s.term.c.id, s.term.c.name).where(
+                    s.term.c.id.in_(
+                        [
+                            id_map[term.id]
+                            for term in document.semantic_layer.terms
+                            if term.id in id_map
+                        ]
+                    )
+                )
+            )
+        }
+        term_names = {
+            term.id: stored_names.get(id_map.get(term.id, ""), term.name)
+            for term in document.semantic_layer.terms
+        }
         _import_sql_attributes(
             document, id_map, created, skipped, embed_buffer, term_names, schema_cache
         )
         _import_custom_analyses(
             document, id_map, created, skipped, embed_buffer, schema_cache
         )
+        _queue_renamed_term_dependents(renamed_terms, embed_buffer)
 
     summary: dict[str, Any] = {
         "database_ids": live_db_ids,
@@ -1521,7 +1581,9 @@ def _update_matched_terms(
     """
     # Here, not at module level: dal.terms imports from dal modules this one
     # is imported by.
-    from auto_ontology.dal.terms import update_term
+    from auto_ontology.dal.terms import (
+        update_term,
+    )
 
     if not matched:
         return set()
@@ -1596,17 +1658,20 @@ def _update_matched_terms(
         )
 
     if embed_buffer is not None and new_text:
-        db_names = _database_names_for_terms(list(new_text))
+        db_names = _term_database_names(list(new_text))
         for live_id, (name, description) in new_text.items():
             embed_buffer.replaced_semantic_ids.add(live_id)
-            embed_buffer.semantic_rows.extend(
-                build_term_semantic_rows(
-                    database_name=db_names.get(live_id, ""),
-                    live_id=live_id,
-                    name=name,
-                    description=description,
+            # A Term represented in several databases has a vector in each,
+            # and the flush deletes by id, so every copy is rebuilt.
+            for database_name in db_names.get(live_id) or [""]:
+                embed_buffer.semantic_rows.extend(
+                    build_term_semantic_rows(
+                        database_name=database_name,
+                        live_id=live_id,
+                        name=name,
+                        description=description,
+                    )
                 )
-            )
     return changed
 
 
@@ -1751,6 +1816,76 @@ def _update_matched_attributes(
                 )
             )
     return changed
+
+
+def _queue_renamed_term_dependents(
+    renamed_terms: set[str], embed_buffer: ImportEmbedBuffer | None
+) -> None:
+    """Re-embed what carries a renamed Term's name but the document left out.
+
+    ``update_term`` rewrites ``term_name`` on every one of the Term's
+    ColumnAttributes, including those in databases a scoped document doesn't
+    cover, and its SqlAttributes embed the name through their link. Anything
+    the import already queued is skipped.
+    """
+    if embed_buffer is None or not renamed_terms:
+        return
+    # Here, not at module level, for the same import cycle as update_term.
+    from auto_ontology.dal.terms import fetch_term_and_column_attributes_for_embedding
+
+    queued = set(embed_buffer.replaced_semantic_ids) | {
+        row["metadata"].get("id") for row in embed_buffer.semantic_rows
+    }
+    for term_id in sorted(renamed_terms):
+        term, attrs = fetch_term_and_column_attributes_for_embedding(term_id)
+        if term is None:
+            continue
+        pending: dict[str, dict[str, Any]] = {}
+        for attr in attrs:
+            if attr["id"] not in queued:
+                pending.setdefault(attr["id"], attr)
+        places = _table_places(
+            [a["table_id"] for a in pending.values() if a["table_id"]]
+        )
+        for attr_id, attr in pending.items():
+            database_name, schema_name = places.get(
+                attr["table_id"], (term.get("database_name") or "", "")
+            )
+            queued.add(attr_id)
+            embed_buffer.replaced_semantic_ids.add(attr_id)
+            embed_buffer.semantic_rows.extend(
+                build_column_attribute_semantic_rows(
+                    database_name=database_name,
+                    live_id=attr_id,
+                    name=attr["name"],
+                    description=attr["description"] or "",
+                    column_description=attr["column_description"] or "",
+                    term_name=attr["term_name"],
+                    source_column=attr["source_column"],
+                    table_id=attr["table_id"] or "",
+                    table_name=attr["table_name"] or "",
+                    is_unique=bool(attr["is_unique"]),
+                    sample_values=attr["sample_values"],
+                    schema_name=schema_name,
+                )
+            )
+    database_names = _database_names_for_terms(sorted(renamed_terms))
+    for row in store().query_read(
+        select(
+            s.sql_attribute__term.c.attribute_id, s.sql_attribute__term.c.term_id
+        ).where(s.sql_attribute__term.c.term_id.in_(sorted(renamed_terms)))
+    ):
+        attr_id = row["attribute_id"]
+        if attr_id in queued:
+            continue
+        docs = fetch_sql_attribute_docs(attr_id)
+        if not docs:
+            continue
+        queued.add(attr_id)
+        embed_buffer.replaced_semantic_ids.add(attr_id)
+        embed_buffer.semantic_rows.extend(
+            build_sql_attribute_rows_from_docs(docs, database_names.get(row["term_id"]))
+        )
 
 
 def _import_terms(
