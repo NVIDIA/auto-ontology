@@ -1663,8 +1663,9 @@ def _update_matched_attributes(
     import rewrites the links they copy. A shared attribute keeps its stored
     source when that column is still among its declared ones. Of the columns
     the document describes (*scope_columns*), it loses the links the document
-    no longer declares; links to other columns stay. A restored link counts as
-    a change without re-embedding. Returns the live ids changed.
+    no longer declares; links to other columns stay. A removed or restored
+    link counts as a change and re-embeds, so each database's vector follows
+    the links. Returns the live ids changed.
     """
     if not matched:
         return set()
@@ -1753,7 +1754,9 @@ def _update_matched_attributes(
                 )
             )
         changed.add(live_id)
-        if (changes or term_renamed) and embed_buffer is not None:
+        if embed_buffer is not None and (
+            changes or term_renamed or obsolete or restored
+        ):
             embed_buffer.replaced_semantic_ids.add(live_id)
     return changed
 
@@ -1804,15 +1807,15 @@ def _queue_replacement_rows(embed_buffer: ImportEmbedBuffer) -> None:
     term_places = _term_database_names([t["id"] for t in terms])
     for term in terms:
         for database_name in term_places.get(term["id"]) or [""]:
-            rows.extend(
-                build_term_semantic_rows(
-                    database_name=database_name,
-                    live_id=term["id"],
-                    name=term["name"],
-                    description=term["description"] or "",
-                )
+            new = build_term_semantic_rows(
+                database_name=database_name,
+                live_id=term["id"],
+                name=term["name"],
+                description=term["description"] or "",
             )
-        built.add(term["id"])
+            rows.extend(new)
+            if new:
+                built.add(term["id"])
 
     # One row per database an attribute has a column in, from its own source
     # column where that database holds it.
@@ -1864,23 +1867,23 @@ def _queue_replacement_rows(embed_buffer: ImportEmbedBuffer) -> None:
         if (ctx["id"], ctx["database_name"]) in placed:
             continue
         placed.add((ctx["id"], ctx["database_name"]))
-        rows.extend(
-            build_column_attribute_semantic_rows(
-                database_name=ctx["database_name"],
-                live_id=ctx["id"],
-                name=ctx["name"],
-                description=ctx["description"] or "",
-                column_description=ctx["column_description"] or "",
-                term_name=ctx["term_name"],
-                source_column=ctx["column_name"],
-                table_id=ctx["table_id"],
-                table_name=ctx["table_name"],
-                is_unique=bool(ctx["is_unique"]),
-                sample_values=ctx["sample_values"],
-                schema_name=ctx["schema_name"],
-            )
+        new = build_column_attribute_semantic_rows(
+            database_name=ctx["database_name"],
+            live_id=ctx["id"],
+            name=ctx["name"],
+            description=ctx["description"] or "",
+            column_description=ctx["column_description"] or "",
+            term_name=ctx["term_name"],
+            source_column=ctx["column_name"],
+            table_id=ctx["table_id"],
+            table_name=ctx["table_name"],
+            is_unique=bool(ctx["is_unique"]),
+            sample_values=ctx["sample_values"],
+            schema_name=ctx["schema_name"],
         )
-        built.add(ctx["id"])
+        rows.extend(new)
+        if new:
+            built.add(ctx["id"])
 
     remaining = [i for i in ids if i not in built]
     sql_terms: dict[str, list[str]] = {}
@@ -1899,8 +1902,10 @@ def _queue_replacement_rows(embed_buffer: ImportEmbedBuffer) -> None:
             continue
         places = list(dict.fromkeys(p for t in term_ids for p in sql_places.get(t, [])))
         for database_name in places or [None]:
-            rows.extend(build_sql_attribute_rows_from_docs(docs, database_name))
-        built.add(attr_id)
+            new = build_sql_attribute_rows_from_docs(docs, database_name)
+            rows.extend(new)
+            if new:
+                built.add(attr_id)
 
     embed_buffer.replaced_semantic_ids.intersection_update(built)
 
@@ -1944,6 +1949,14 @@ def _import_terms(
         else set()
     )
 
+    # A Term has a vector in each database it represents a table in, so a
+    # representation change that moves it between databases re-embeds it.
+    track_placement = replace and embed_buffer is not None
+    matched_ids = [
+        live for live, was_created in term_results.values() if not was_created
+    ]
+    placed_before = _term_database_names(matched_ids) if track_placement else {}
+
     represents_rows: list[dict[str, Any]] = []
     newly_created: list[str] = []
     for term in terms:
@@ -1985,6 +1998,13 @@ def _import_terms(
                 continue
             represents_rows.append({"term_id": live_term_id, "table_id": live_table_id})
     _link(s.table__term, represents_rows)
+    if track_placement:
+        placed_after = _term_database_names(matched_ids)
+        embed_buffer.replaced_semantic_ids.update(
+            live
+            for live in matched_ids
+            if set(placed_before.get(live, [])) != set(placed_after.get(live, []))
+        )
 
     if embed_buffer is not None and newly_created:
         db_names = _database_names_for_terms(newly_created)

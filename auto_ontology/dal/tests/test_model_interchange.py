@@ -1054,14 +1054,19 @@ def test_every_declared_column_is_linked(world: World) -> None:
 
 
 def test_a_link_the_document_drops_is_removed(world: World) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
     document = _shared_attribute_document(world)
     declarations = document.semantic_layer.terms[0].columns_attributes
     del declarations[1]
+    buffer = ImportEmbedBuffer()
 
-    summary = mi.apply_import_model(document, replace=True)
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
 
     assert _attribute_columns(world.attribute) == {world.order_id}
     assert summary["updated"]["column_attributes"] == 1
+    # The vectors follow the links, so a removed link re-embeds.
+    assert world.attribute in buffer.replaced_semantic_ids
 
 
 def test_a_scoped_import_keeps_links_to_other_databases(world: World) -> None:
@@ -1272,6 +1277,7 @@ def test_a_term_moved_to_another_database_is_rebuilt_there(world: World) -> None
         )
     }
     assert represented == {other_table}
+    assert world.term in buffer.replaced_semantic_ids
     assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
         f"{world.prefix}-other"
     }
@@ -1292,8 +1298,65 @@ def test_a_rename_rebuilds_an_attribute_in_each_of_its_databases(world: World) -
     mi.apply_import_model(document, replace=True, embed_buffer=buffer)
 
     rows = _queued(buffer, world.attribute)
+    assert world.attribute in buffer.replaced_semantic_ids
     assert {r["metadata"]["database_name"] for r in rows} == {
         world.prefix,
         f"{world.prefix}-other",
     }
     assert all(new_name in r["text"] for r in rows)
+
+
+def test_a_term_leaving_a_database_is_reembedded(world: World) -> None:
+    """Only the representation changes, but the Term's vector in the database
+    it left must go, so the move alone re-embeds it."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, _ = _other_database_column(world)
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    other_db = store().query_read(
+        select(s.catalog_database.c.id).where(
+            s.catalog_database.c.name == f"{world.prefix}-other"
+        )
+    )[0]["id"]
+    rows = mi.fetch_export_rows([world.database, other_db])
+    document = mi.assemble_export_document(
+        rows,
+        dialect_by_db_name={
+            world.prefix: "postgres",
+            f"{world.prefix}-other": "postgres",
+        },
+        sql_column_resolver=lambda sql, database_name: [],
+    )
+    document.semantic_layer.terms[0].represents = [world.orders]
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert world.term in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
+        world.prefix
+    }
+
+    again = ImportEmbedBuffer()
+    mi.apply_import_model(document, replace=True, embed_buffer=again)
+    assert world.term not in again.replaced_semantic_ids
+
+
+def test_an_entity_with_no_buildable_vector_keeps_its_old_one(world: World) -> None:
+    """An attribute with no name builds no vector; replacing would delete its
+    old one and write nothing."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attribute)
+        .values(name="")
+    )
+    document = _document(world)
+    document.semantic_layer.terms[0].name = f"{world.prefix}-Purchase"
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert world.term in buffer.replaced_semantic_ids
+    assert world.attribute not in buffer.replaced_semantic_ids
