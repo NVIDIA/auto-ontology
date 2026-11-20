@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterator
 
 import psycopg
 import pytest
@@ -17,12 +18,12 @@ from auto_ontology.vdb.postgres import PostgresVDB
 
 
 @pytest.fixture
-def vdb():
+def vdb() -> Iterator[PostgresVDB]:
     """A collection with the promoted ``database_name`` column."""
     name = f"scoped_{uuid.uuid4().hex[:8]}"
     try:
         conn = psycopg.connect(get_postgres_connection_string(), connect_timeout=3)
-    except Exception as exc:  # noqa: BLE001 -- no database, nothing to assert
+    except psycopg.OperationalError as exc:  # no database, nothing to assert
         pytest.skip(f"postgres not reachable: {exc}")
     rows = [
         ("t-shared", "shop"),

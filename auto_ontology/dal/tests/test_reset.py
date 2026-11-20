@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable, Collection
 from contextlib import contextmanager
 
 import pytest
@@ -87,7 +88,9 @@ class _StubVdb:
     def metadata_ids_for_database(self, database_name: str) -> list[str]:
         return list(self.vector_ids)
 
-    def delete_by_database_keeping(self, database_name: str, keep_ids) -> list[str]:
+    def delete_by_database_keeping(
+        self, database_name: str, keep_ids: Collection[str]
+    ) -> list[str]:
         self.deleted_databases.append(database_name)
         self.kept.append(set(keep_ids))
         return [i for i in self.vector_ids if i not in keep_ids]
@@ -243,7 +246,9 @@ def test_a_term_shared_with_another_database_survives(world) -> None:
     assert _exists(s.catalog_column, warehouse.column)
 
 
-def test_a_shared_terms_vector_survives_the_scoped_reset(world, stub_vdbs) -> None:
+def test_a_shared_terms_vector_survives_the_scoped_reset(
+    world: tuple[str, Callable[[str], Database]], stub_vdbs: dict[str, _StubVdb]
+) -> None:
     """#499: the shared Term survives, so its vector must too. Deleting every
     vector the database tagged left the Term unsearchable, and recompiling
     never restored it because its table still had a Term."""
@@ -260,7 +265,7 @@ def test_a_shared_terms_vector_survives_the_scoped_reset(world, stub_vdbs) -> No
 
 
 def test_with_nothing_shared_every_vector_of_the_database_goes(
-    world, stub_vdbs
+    world: tuple[str, Callable[[str], Database]], stub_vdbs: dict[str, _StubVdb]
 ) -> None:
     _, make = world
     shop = make("shop")
