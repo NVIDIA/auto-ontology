@@ -169,8 +169,10 @@ jobs:
 
       # `-p no:randomly` is not set and no `-x`: the point of this job is the
       # whole picture, including how many of the fixture-backed tests ran.
+      # `-m "not age"`: the AGE projection tests need an Apache AGE server and
+      # run in the `age-tests` job below instead of skipping here.
       - name: Run the test suite
-        run: uv run --no-sync pytest auto_ontology dev_tools -q --durations=10
+        run: uv run --no-sync pytest auto_ontology dev_tools -q -m "not age" --durations=10
 
       # A skip guard naming the wrong dependency turns a suite off silently and
       # still reports green -- which is how the golden replay and the live
@@ -178,14 +180,72 @@ jobs:
       # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) may skip here.
       - name: Fail if the fixture-backed tests silently skipped
         run: |
-          skipped=$(uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
+          skipped=$(uv run --no-sync pytest auto_ontology dev_tools -q -rs -m "not age" 2>/dev/null \
             | grep -c '^SKIPPED' || true)
           echo "skipped: $skipped"
           if [ "$skipped" -gt 2 ]; then
             echo "::error::$skipped tests skipped; expected at most 2 (live" \
                  "Databricks and MySQL). A fixture is probably unreachable, so" \
                  "this run proved less than it appears to."
-            uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
+            uv run --no-sync pytest auto_ontology dev_tools -q -rs -m "not age" 2>/dev/null \
               | grep '^SKIPPED' || true
+            exit 1
+          fi
+
+  age-tests:
+    name: Pytest (Apache AGE graph projection)
+    runs-on: ubuntu-latest
+
+    # The optional AGE projection (docs/age-graph.md) needs the `age`
+    # extension, which the pgvector image above does not ship. Pinned to the
+    # tag the docs use for local runs. Nothing in the Auto Ontology schema
+    # needs `vector`, so `alembic upgrade head` works on this image as is.
+    services:
+      postgres:
+        image: apache/age:release_PG16_1.6.0
+        env:
+          POSTGRES_USER: auto_ontology
+          POSTGRES_PASSWORD: auto_ontology
+          POSTGRES_DB: auto_ontology
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auto_ontology -d auto_ontology"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: auto_ontology
+      POSTGRES_PASSWORD: auto_ontology
+      POSTGRES_DATABASE: auto_ontology
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Migrate the Auto Ontology schema
+        run: uv run --no-sync alembic upgrade head
+
+      # Every `age` test must run here: a skip means the server lost the
+      # extension or the schema, and the job would prove nothing.
+      - name: Run the AGE tests, failing on any skip
+        run: |
+          uv run --no-sync pytest auto_ontology -q -rs -m age | tee age-tests.log
+          if grep -q '^SKIPPED' age-tests.log; then
+            echo "::error::AGE tests skipped on the apache/age service; see the SKIPPED lines above."
             exit 1
           fi

@@ -125,3 +125,6 @@ pythonpath = ["."]
 # of this suite: pythonpath = ["."] would otherwise make the mcp/ directory
 # shadow the installed mcp SDK as a namespace package.
 addopts = "--import-mode=importlib --ignore=mcp"
+markers = [
+    "age: needs a Postgres server with Apache AGE; the main CI job deselects it and the AGE job runs it",
+]
