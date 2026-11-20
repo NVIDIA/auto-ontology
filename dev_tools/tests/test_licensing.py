@@ -92,8 +92,8 @@ def test_every_source_file_has_an_spdx_header() -> None:
         if "SPDX-License-Identifier" not in head:
             missing.append(path)
     assert not missing, (
-        "Add the NVIDIA SPDX header (see CONTRIBUTING.md) to:\n  "
-        + "\n  ".join(missing)
+        "Add a copyright and license header with an SPDX-License-Identifier line "
+        "(see CONTRIBUTING.md) to:\n  " + "\n  ".join(missing)
     )
 
 

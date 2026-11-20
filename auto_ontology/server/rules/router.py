@@ -364,6 +364,7 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
         except ValueError as exc:
             raise _name_conflict(exc) from exc
         rule_service.label_targets(rule_id=rule_id, tag_ids=tags, targets=targets)
+    rule_service.withhold_pii_of_targets(targets)
     return {"data": {"id": rule_id}}
 
 

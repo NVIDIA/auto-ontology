@@ -93,6 +93,9 @@ class ReactSQLAgent(BaseAgent):
             dialect=getattr(connector, "dialect", None),
             mode=episode_mode(state.get("prediction_override")),
             custom_prompts=state.get("custom_prompts"),
+            sql_examples=state.get("sql_examples"),
+            value_anchors=state.get("value_anchors"),
+            shorten_answer=bool(state.get("shorten_answer")),
         )
 
         for step in result.trajectory:

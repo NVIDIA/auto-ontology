@@ -51,6 +51,7 @@
   },
   "datasources": {
     "apply_metadata_batch": "(database_name: 'str', table_rows: 'list[dict]', column_rows: 'list[dict]') -> 'None'",
+    "clear_column_values": "(table_id: 'str', column_names: 'Sequence[str]') -> 'None'",
     "count_columns_for_table": "(table_id: 'str') -> 'int'",
     "fetch_all_schema_ids": "() -> 'list[str]'",
     "fetch_all_tables_without_term": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
@@ -130,7 +131,10 @@
     "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'"
   },
   "pii": {
+    "clear_values_of_pii_columns": "(column_ids: 'list[str] | None' = None) -> 'int'",
+    "fetch_attributes_of_pii_columns": "(column_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
     "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'",
+    "pii_tagged_column_ids": "(column_ids: 'list[str]') -> 'set[str]'",
     "realign_sql_attribute_pii": "(attr_id: 'str', tag_id: 'str | None') -> 'bool'",
     "tag_attributes_of_tagged_columns": "(tag_id: 'str') -> 'tuple[int, int]'",
     "untag_attributes_of_column": "(column_id: 'str', tag_id: 'str') -> 'None'",

@@ -24,6 +24,7 @@ from sqlalchemy import select  # noqa: E402
 from auto_ontology.dal import attributes as a  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.tags import PII_TAG_NAME, get_or_create_tag  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -934,6 +935,24 @@ def test_value_key_candidates_are_unique_attribute_owners(world) -> None:
         "table_name": "customers",
         "schema_name": "public",
     }
+
+
+def test_value_key_candidates_exclude_pii_tagged_columns(world) -> None:
+    world.table("customers")
+    world.column("customers", "id", 1)
+    world.column("customers", "email", 2)
+    world.attribute("customer-id", owner="customers.id")
+    world.attribute("customer-email", owner="customers.email")
+    _mark_unique("customers.id", world, None)
+    _mark_unique("customers.email", world, None)
+    pii_tag = get_or_create_tag(name=PII_TAG_NAME)
+    _link(
+        s.tag_target, tag_id=pii_tag["id"], column_id=world.columns["customers.email"]
+    )
+
+    rows = a.fetch_value_key_candidates(f"{world.prefix}-shopdb")
+
+    assert [row["column_name"] for row in rows] == ["id"]
 
 
 def test_value_key_candidates_scope_to_one_database(world) -> None:

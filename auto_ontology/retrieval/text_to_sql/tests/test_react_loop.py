@@ -263,6 +263,130 @@ def test_custom_prompts_reach_the_system_prompt(ctx: ToolContext) -> None:
     assert model.seen[0][0].content.endswith("\n\nORGANIZATION INSTRUCTIONS\nUse USD.")
 
 
+_ANCHORS = [
+    {
+        "phrase": "active",
+        "tbl": "customers",
+        "col": "status",
+        "stored_value": "ACTIVE",
+        "n_rows": "2",
+    },
+    {"phrase": "gold tier", "kind": "absent"},
+]
+
+_EXAMPLES = [
+    {
+        "question": "How many churned users?",
+        "evidence": "churned means state = 'C'",
+        "sql": "SELECT COUNT(*)\n  FROM users WHERE state = 'C'",
+        "db": "telecom",
+    },
+    {"question": "No SQL here", "sql": "  "},
+]
+
+
+def test_value_anchors_and_sql_examples_follow_the_evidence(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(
+        model,
+        ctx,
+        "q",
+        evidence="revenue is amount - discount",
+        value_anchors=_ANCHORS,
+        sql_examples=_EXAMPLES,
+    )
+
+    user = model.seen[0][1].content
+    evidence_at = user.index("EVIDENCE\nrevenue is amount - discount")
+    anchors_at = user.index("VERIFIED DATABASE VALUES")
+    examples_at = user.index("REFERENCE QUERY PATTERNS")
+    assert evidence_at < anchors_at < examples_at
+    assert '- "active": customers."status" = \'ACTIVE\' — 2 rows' in user
+    assert 'stored NOWHERE in this database: "gold tier".' in user
+    assert "Never filter on a phrase listed as stored nowhere" in user
+    assert "1. [source database: telecom]" in user
+    assert "   Evidence: churned means state = 'C'" in user
+    assert "   SQL: SELECT COUNT(*) FROM users WHERE state = 'C'" in user
+    assert "No SQL here" not in user
+
+
+def test_without_anchors_or_examples_the_user_message_is_unchanged(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q", value_anchors=[], sql_examples=[])
+
+    assert model.seen[0][1].content == prompts.user_message("q", None)
+    assert model.seen[0][1].content == "QUESTION\nq\n"
+
+
+def test_row_counts_are_dropped_between_columns_of_one_table() -> None:
+    section = prompts.value_anchors_section(
+        [
+            {
+                "phrase": "San Jose",
+                "tbl": "schools",
+                "col": "City",
+                "stored_value": "San Jose",
+                "n_rows": "5",
+            },
+            {
+                "phrase": "San Jose",
+                "tbl": "schools",
+                "col": "MailCity",
+                "stored_value": "San Jose",
+                "n_rows": "9",
+                "description": "mailing city",
+                "kind": "contains",
+            },
+        ]
+    )
+
+    assert '- "San Jose": schools."City" = \'San Jose\'\n' in section
+    assert (
+        '- "San Jose": schools."MailCity" (mailing city) contains it inside '
+        "values such as 'San Jose'"
+    ) in section
+    assert "rows" not in section.split("Use these")[0]
+    assert "stored nowhere" not in section
+
+
+def test_short_answer_rules_reach_the_system_prompt(ctx: ToolContext) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    loop.run_episode(model, ctx, "q", shorten_answer=True)
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][0].content.endswith(f"\n\n{prompts.SHORT_ANSWER_RULES}")
+    assert "OUTPUT SHAPE" not in model.seen[1][0].content
+
+
+def test_a_prediction_episode_ignores_sql_shaping_inputs(ctx: ToolContext) -> None:
+    model = ScriptedModel([AIMessage(content="no tools")] * 3)
+
+    loop.run_episode(
+        model,
+        ctx,
+        "q",
+        mode=EpisodeMode.PREDICT,
+        value_anchors=_ANCHORS,
+        sql_examples=_EXAMPLES,
+        shorten_answer=True,
+    )
+
+    assert "OUTPUT SHAPE" not in model.seen[0][0].content
+    assert model.seen[0][1].content == "QUESTION\nq\n"
+
+
 @pytest.mark.parametrize("dialect", ["mysql", "sqlite", "oracle"])
 def test_dialect_rules_reach_the_model(ctx: ToolContext, dialect: str) -> None:
     model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
