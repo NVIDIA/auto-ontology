@@ -225,16 +225,19 @@ def test_a_space_padded_day_keeps_the_fraction_width() -> None:
 def test_a_space_padded_hour_is_measured_when_strptime_reads_it() -> None:
     """Python 3.13 reads ``%H`` space-padded where 3.12 refuses it.
 
-    Where the running interpreter accepts the sample the alignment has to measure
-    the hour like any other, and where it refuses the value is not this format.
+    Where the running interpreter accepts the sample the hour has to be measured
+    like any other component, and the fraction is what shows it: with no measured
+    widths every component keeps its padded spelling, so a value holding three
+    digits would still be reported ``.f`` -- the notation this test exists to
+    prevent.
     """
-    value = "2010-07-09T 9:00:00"
+    value = "2010-07-09T 9:00:00.123"
     try:
-        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f")
     except ValueError:
         assert infer_date_format([value]) is None
     else:
-        assert infer_date_format([value]) == "YYYY-MM-DDTHH:MM:SS"
+        assert infer_date_format([value]) == "YYYY-MM-DDTHH:MM:SS.fff"
 
 
 def test_a_compact_date_keeps_the_component_boundaries_strptime_uses() -> None:
