@@ -456,3 +456,80 @@ def test_first_attempt_success_does_not_sleep() -> None:
 
     assert result is not None and not result.empty
     assert slept == []
+
+
+# ---------------------------------------------------------------------------
+# Texts the endpoint rejects
+# ---------------------------------------------------------------------------
+
+
+def _rejecting(*bad: str, status: int = 422) -> Handler:
+    """Embed every request unless it carries one of *bad*; refuse those whole."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if any(text in bad for text in json.loads(request.content)["input"]):
+            return httpx.Response(status, json={"error": "input rejected"})
+        return _ok(request)
+
+    return handler
+
+
+def test_a_rejected_text_loses_only_its_own_row(
+    endpoint, caplog: pytest.LogCaptureFixture
+) -> None:
+    seen = endpoint(_rejecting("bad"))
+    rows = _rows("a", "b", "bad", "c", "d", "e", "f", "g")
+
+    with caplog.at_level(logging.WARNING):
+        out = _embed_frame(pd.DataFrame(rows), _params())
+
+    embedded = [m["id"] for m in out["metadata"] if m.get("embedding")]
+    assert embedded == ["a", "b", "c", "d", "e", "f", "g"]
+    assert "embed_error" not in out.attrs
+    # The chunk, a probe, then halves down to the one text: 1 + 1 + 2 * log2(8).
+    assert len(seen) <= 8
+    text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "bad" in text and "422" in text
+
+
+def test_a_rejected_text_does_not_cost_its_chunk_in_batch_embed(endpoint) -> None:
+    endpoint(_rejecting("bad"))
+
+    out = batch_embed(_rows("a", "bad", "c"), _params())
+
+    assert [bool(m.get("embedding")) for m in out["metadata"]] == [True, False, True]
+
+
+def test_a_request_wide_rejection_still_fails_the_chunk_at_once(endpoint) -> None:
+    # Every request refused, the probe included: the request itself is wrong,
+    # so the chunk fails as before instead of being split text by text.
+    seen = endpoint(lambda request: httpx.Response(422, json={"error": "bad field"}))
+
+    out = _embed_frame(pd.DataFrame(_rows(*"abcdefgh")), _params())
+
+    assert not any(m.get("embedding") for m in out["metadata"])
+    assert "422" in out.attrs["embed_error"]
+    assert out.attrs["embed_error_fatal"] is True
+    assert len(seen) == 2
+
+
+def test_a_chunk_with_many_rejected_texts_fails_whole(
+    endpoint, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(embedding, "_MAX_REJECTED_PER_CHUNK", 1)
+    endpoint(_rejecting("x", "y"))
+
+    out = _embed_frame(pd.DataFrame(_rows("a", "x", "b", "y")), _params())
+
+    assert not any(m.get("embedding") for m in out["metadata"])
+    assert out.attrs["embed_error_fatal"] is True
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_auth_and_path_errors_are_not_split(endpoint, status: int) -> None:
+    seen = endpoint(lambda request: httpx.Response(status, json={"error": "no"}))
+
+    out = _embed_frame(pd.DataFrame(_rows(*"abcd")), _params())
+
+    assert out.attrs["embed_error_fatal"] is True
+    assert len(seen) == 1
