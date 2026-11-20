@@ -6056,8 +6056,28 @@
     },
     "/api/semantic-compilation/reset": {
       "post": {
-        "description": "semanticCompilationApi.reset — delete every database's compiled semantic\nlayer. Destructive, so it sits behind `manage` rather than the `read` tier\nthat may view the toggle.",
+        "description": "semanticCompilationApi.reset — delete the compiled semantic layer. Scoped to\none database when `database_name` is given, every database otherwise.\nDestructive, so it sits behind `manage` rather than the `read` tier that\nmay view the toggle.",
         "operationId": "post_api_semantic_compilation_reset",
+        "parameters": [
+          {
+            "description": "Reset only this database's semantic layer. Omit to reset every database.",
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Reset only this database's semantic layer. Omit to reset every database.",
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "202": {
             "content": {
@@ -6074,9 +6094,19 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
-        "summary": "semanticCompilationApi.reset — delete every database's compiled semantic layer.",
+        "summary": "semanticCompilationApi.reset — delete the compiled semantic layer.",
         "tags": ["semantic-compilation"],
         "security": [
           {
