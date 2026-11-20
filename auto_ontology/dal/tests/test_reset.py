@@ -80,6 +80,7 @@ class _StubVdb:
     def __init__(self) -> None:
         self.deleted_all = 0
         self.deleted_databases: list[str] = []
+        self.closed = 0
 
     def delete_all(self) -> int:
         self.deleted_all += 1
@@ -88,6 +89,12 @@ class _StubVdb:
     def delete_by_database(self, database_name: str) -> list[str]:
         self.deleted_databases.append(database_name)
         return ["a", "b", "c"]
+
+    def __enter__(self) -> "_StubVdb":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.closed += 1
 
 
 @pytest.fixture(autouse=True)
@@ -447,6 +454,9 @@ def test_the_result_reports_pgvector_rows_from_both_layers(world, stub_vdbs) -> 
     assert result.semantic_rows == 3
     assert stub_vdbs["data"].deleted_databases == [shop.name]
     assert stub_vdbs["semantic"].deleted_databases == [shop.name]
+    # Each store is closed after its delete, so a reset doesn't keep a pool open.
+    assert stub_vdbs["data"].closed == 1
+    assert stub_vdbs["semantic"].closed == 1
 
 
 def test_an_unscoped_reset_clears_both_collections(world, stub_vdbs) -> None:

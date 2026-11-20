@@ -100,6 +100,10 @@ class SemanticEmbedder:
         """Embed only ColumnAttribute rows, without rewriting the parent Term row."""
         return self.embed_term({}, attrs)
 
+    def close(self) -> None:
+        """Release the VDB's connection pool; see :meth:`PostgresVDB.close`."""
+        self.vdb.close()
+
 
 def build_semantic_embedder(
     database_name: str,

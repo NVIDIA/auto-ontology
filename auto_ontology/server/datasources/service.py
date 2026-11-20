@@ -171,8 +171,11 @@ def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:
         embedder = build_semantic_embedder(term.get("database_name") or "", reset=False)
         if embedder is None:
             return
-        for attr in attrs:
-            attr_id = attr.get("id")
-            if attr_id:
-                embedder.vdb.delete_by_id(attr_id)
-        embedder.embed_column_attributes(attrs)
+        try:
+            for attr in attrs:
+                attr_id = attr.get("id")
+                if attr_id:
+                    embedder.vdb.delete_by_id(attr_id)
+            embedder.embed_column_attributes(attrs)
+        finally:
+            embedder.close()
