@@ -172,6 +172,10 @@ class PostgresVDB:
         self.embeddings: Embeddings = kwargs.get("embeddings") or _UnusableEmbeddings()
 
         self._engine: Optional[PGEngine] = None
+        # Workers can share one store (semantic FK resolution does), and two of
+        # them reaching _get_engine together would each build a pool; close()
+        # disposes only the one kept, so the other would stay open (#553).
+        self._engine_lock = threading.Lock()
         self._store: Optional[PGVectorStore] = None
         self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
         # Resetting the database embeddings prior to ingestion
@@ -192,29 +196,32 @@ class PostgresVDB:
     # ------------------------------------------------------------------
 
     def _get_engine(self) -> PGEngine:
-        if self._engine is None:
-            # from_connection_string forwards **kwargs to create_async_engine.
-            # Passing none leaves SQLAlchemy's default pool_size=5, the ceiling
-            # every concurrent retrieval shares: at 12 concurrent questions a
-            # small share of retrievals found it full. Raising it did not move
-            # wall clock -- the queries were not what those callers were waiting
-            # on -- so the default is set to clear the ceiling, not for headroom
-            # nothing used.
-            #
-            # Budget connections before raising these. Auto Ontology opens two of these
-            # stores (data and semantic), each able to reach
-            # pool_size + max_overflow, and the catalog pool in auto_ontology.dal.session
-            # is separate and not covered by AUTO_ONTOLOGY_PG_POOL_SIZE.
-            self._engine = PGEngine.from_connection_string(
-                _to_async_url(self.connection_string),
-                pool_size=int(os.environ.get("AUTO_ONTOLOGY_VDB_POOL_SIZE", "10")),
-                max_overflow=int(
-                    os.environ.get("AUTO_ONTOLOGY_VDB_MAX_OVERFLOW", "10")
-                ),
-                pool_pre_ping=True,
-            )
-            _instrument_engine(self._engine)
-        return self._engine
+        if self._engine is not None:
+            return self._engine
+        with self._engine_lock:
+            if self._engine is None:
+                # from_connection_string forwards **kwargs to create_async_engine.
+                # Passing none leaves SQLAlchemy's default pool_size=5, the ceiling
+                # every concurrent retrieval shares: at 12 concurrent questions a
+                # small share of retrievals found it full. Raising it did not move
+                # wall clock -- the queries were not what those callers were waiting
+                # on -- so the default is set to clear the ceiling, not for headroom
+                # nothing used.
+                #
+                # Budget connections before raising these. Auto Ontology opens two of these
+                # stores (data and semantic), each able to reach
+                # pool_size + max_overflow, and the catalog pool in auto_ontology.dal.session
+                # is separate and not covered by AUTO_ONTOLOGY_PG_POOL_SIZE.
+                self._engine = PGEngine.from_connection_string(
+                    _to_async_url(self.connection_string),
+                    pool_size=int(os.environ.get("AUTO_ONTOLOGY_VDB_POOL_SIZE", "10")),
+                    max_overflow=int(
+                        os.environ.get("AUTO_ONTOLOGY_VDB_MAX_OVERFLOW", "10")
+                    ),
+                    pool_pre_ping=True,
+                )
+                _instrument_engine(self._engine)
+            return self._engine
 
     def _table_exists(self) -> bool:
         with psycopg.connect(self.connection_string) as conn:
