@@ -1621,13 +1621,19 @@ def _update_matched_attributes(
     conflicts: list[dict[str, Any]] | None,
     embed_buffer: ImportEmbedBuffer | None,
     renamed_terms: set[str] | None = None,
+    *,
+    declared_columns: dict[str, list[str]] | None = None,
+    declared_sources: dict[str, set[tuple[str, str]]] | None = None,
 ) -> set[str]:
     """Give matched ColumnAttributes the document's values (``replace``).
 
     ``name`` and ``description`` keep their stored values when the attribute
     is certified, reported in *conflicts*. The denormalised ``term_name``,
     ``source_column`` and ``table_id`` always follow the document, since the
-    import rewrites the links they copy. Returns the live ids changed.
+    import rewrites the links they copy. A shared attribute keeps its stored
+    source when that column is still among its declared ones, and loses only
+    the column links the document no longer declares. Returns the live ids
+    changed.
     """
     if not matched:
         return set()
@@ -1643,6 +1649,17 @@ def _update_matched_attributes(
             ).where(s.column_attribute.c.id.in_([live for live, _ in matched.values()]))
         )
     }
+    stored_links: dict[str, set[str]] = {}
+    for link in store().query_read(
+        select(
+            s.column__has_attribute.c.attribute_id, s.column__has_attribute.c.column_id
+        ).where(
+            s.column__has_attribute.c.attribute_id.in_(
+                [live for live, _ in matched.values()]
+            )
+        )
+    ):
+        stored_links.setdefault(link["attribute_id"], set()).add(link["column_id"])
     changed: set[str] = set()
     for yaml_id, (live_id, props) in matched.items():
         row = stored.get(live_id)
@@ -1666,13 +1683,22 @@ def _update_matched_attributes(
                 )
                 continue
             changes[field] = value
+        still_declared = (row["source_column"] or "", row["table_id"] or "") in (
+            (declared_sources or {}).get(yaml_id, set())
+        )
         for field in _ATTRIBUTE_STRUCTURE:
+            if still_declared and field in ("source_column", "table_id"):
+                continue
             if (props.get(field) or "") != (row[field] or ""):
                 changes[field] = props.get(field)
+        declared = (declared_columns or {}).get(yaml_id)
+        obsolete = (
+            stored_links.get(live_id, set()) - set(declared) if declared else set()
+        )
         # Renaming the Term already rewrote term_name here, so nothing above
         # differs, but the vector still embeds the old name.
         term_renamed = context[yaml_id]["live_term_id"] in (renamed_terms or set())
-        if not changes and not term_renamed:
+        if not changes and not term_renamed and not obsolete:
             continue
         if changes:
             store().query_write(
@@ -1680,12 +1706,13 @@ def _update_matched_attributes(
                 .where(s.column_attribute.c.id == live_id)
                 .values(**changes)
             )
-        # A moved attribute keeps only its new links: the import re-links it
-        # afterwards, and inserting alone would leave the old ones standing.
-        if "source_column" in changes or "table_id" in changes:
+        # A moved attribute keeps only its declared links: the import links
+        # those afterwards, and inserting alone would leave the old ones standing.
+        if obsolete:
             store().query_write(
                 s.column__has_attribute.delete().where(
-                    s.column__has_attribute.c.attribute_id == live_id
+                    s.column__has_attribute.c.attribute_id == live_id,
+                    s.column__has_attribute.c.column_id.in_(sorted(obsolete)),
                 )
             )
         if "term_name" in changes:
@@ -1698,7 +1725,11 @@ def _update_matched_attributes(
 
         ctx = context[yaml_id]
         col_ctx = ctx["col_ctx"]
-        if embed_buffer is not None and col_ctx is not None:
+        if (
+            (changes or term_renamed)
+            and embed_buffer is not None
+            and col_ctx is not None
+        ):
             merged = {**row, **changes}
             embed_buffer.replaced_semantic_ids.add(live_id)
             embed_buffer.semantic_rows.extend(
@@ -1832,6 +1863,11 @@ def _import_column_attributes(
 ) -> None:
     attr_items: list[tuple[str, dict[str, Any]]] = []
     context: dict[str, dict[str, Any]] = {}
+    # An attribute shared by several columns is exported once per column, so
+    # one attribute id can carry several declarations. Every one of them is a
+    # link to keep; the last alone would drop the others.
+    declared_columns: dict[str, list[str]] = {}
+    declared_sources: dict[str, set[tuple[str, str]]] = {}
 
     # The name each Term has after _import_terms, which is the document's only
     # when the Term was created or renamed. A rename rejected as certified or
@@ -1874,6 +1910,15 @@ def _import_column_attributes(
                     },
                 ),
             )
+            live_column_id = _remap(
+                id_map, attr.column_id, kind="column attribute column"
+            )
+            columns = declared_columns.setdefault(attr.id, [])
+            if live_column_id not in columns:
+                columns.append(live_column_id)
+            declared_sources.setdefault(attr.id, set()).add(
+                (col_ctx.name if col_ctx else "", live_table_id)
+            )
             context[attr.id] = {
                 "attr": attr,
                 "term": term,
@@ -1897,6 +1942,8 @@ def _import_column_attributes(
             conflicts,
             embed_buffer,
             renamed_terms or set(),
+            declared_columns=declared_columns,
+            declared_sources=declared_sources,
         )
 
     has_attribute_rows: list[dict[str, Any]] = []
@@ -1912,13 +1959,9 @@ def _import_column_attributes(
         else:
             skipped["column_attributes"] += 1
 
-        has_attribute_rows.append(
-            {
-                "column_id": _remap(
-                    id_map, attr.column_id, kind="column attribute column"
-                ),
-                "attribute_id": live_attr_id,
-            }
+        has_attribute_rows.extend(
+            {"column_id": column_id, "attribute_id": live_attr_id}
+            for column_id in declared_columns[attr_id]
         )
         property_of_rows.append(
             {"attribute_id": live_attr_id, "term_id": ctx["live_term_id"]}

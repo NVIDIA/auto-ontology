@@ -999,3 +999,64 @@ def test_moving_an_attribute_replaces_its_column_link(world: World) -> None:
     assert _attribute_columns(world.attribute) == {world.customer_ref}
     assert _attribute_row(world.attribute)["term_name"] == f"{world.prefix}-Order"
     assert again["updated"]["column_attributes"] == 0
+
+
+def _shared_attribute_document(world: World):
+    """The attribute linked to orders.id and orders.customer_id, declared once
+    per column, the stored source (orders.id) first and the other last."""
+    _link(
+        s.column__has_attribute,
+        column_id=world.customer_ref,
+        attribute_id=world.attribute,
+    )
+    document = _document(world)
+    declarations = document.semantic_layer.terms[0].columns_attributes
+    order = {world.order_id: 0, world.customer_ref: 1}
+    declarations.sort(key=lambda declaration: order[declaration.column_id])
+    assert [d.column_id for d in declarations] == [world.order_id, world.customer_ref]
+    return document
+
+
+def test_a_shared_attribute_keeps_every_declared_link(world: World) -> None:
+    """An unchanged export of an attribute on two columns re-imports as is:
+    neither link is dropped, and nothing counts as updated or re-embedded."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    document = _shared_attribute_document(world)
+    buffer = ImportEmbedBuffer()
+
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert _attribute_columns(world.attribute) == {world.order_id, world.customer_ref}
+    stored_source = store().query_read(
+        select(s.column_attribute.c.source_column).where(
+            s.column_attribute.c.id == world.attribute
+        )
+    )[0]["source_column"]
+    assert stored_source == "id"
+    assert summary["updated"]["column_attributes"] == 0
+    assert world.attribute not in buffer.replaced_semantic_ids
+
+
+def test_every_declared_column_is_linked(world: World) -> None:
+    document = _shared_attribute_document(world)
+    store().query_write(
+        s.column__has_attribute.delete().where(
+            s.column__has_attribute.c.column_id == world.customer_ref
+        )
+    )
+
+    mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.order_id, world.customer_ref}
+
+
+def test_a_link_the_document_drops_is_removed(world: World) -> None:
+    document = _shared_attribute_document(world)
+    declarations = document.semantic_layer.terms[0].columns_attributes
+    del declarations[1]
+
+    summary = mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.order_id}
+    assert summary["updated"]["column_attributes"] == 1
