@@ -199,6 +199,7 @@ def test_table_without_a_term_gets_one(store) -> None:
         "Who works on what",
         "employee_project",
         synonyms=[],
+        fallback_reason=None,
     )
     assert [c.kwargs["attr_name"] for c in store["commit_merge"].call_args_list] == [
         "Employee",

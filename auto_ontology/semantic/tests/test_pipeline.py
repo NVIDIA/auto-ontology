@@ -10,6 +10,8 @@ import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from auto_ontology.semantic.models import ProcessTableResult
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 
@@ -117,3 +119,53 @@ def test_compile_continues_after_error(
     count = compile_semantic_layer("dbx")
 
     assert count == 0
+
+
+@patch("auto_ontology.semantic.pipeline.fetch_fallback_term_names")
+@patch("auto_ontology.semantic.pipeline.process_table")
+@patch("auto_ontology.semantic.pipeline.fetch_table_context")
+@patch("auto_ontology.semantic.pipeline.load_domain_summary", return_value=None)
+@patch("auto_ontology.semantic.pipeline.fetch_all_tables_without_term")
+def test_a_stored_placeholder_is_reported_even_when_its_table_failed(
+    mock_fetch_tables: MagicMock,
+    _mock_summary: MagicMock,
+    mock_fetch_ctx: MagicMock,
+    mock_process: MagicMock,
+    mock_fallbacks: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#533: the summary reads the stored status, so a placeholder Term written
+    before a later attribute write failed is still named."""
+    mock_fetch_tables.return_value = [{"id": "t1", "name": "orders", "description": ""}]
+    mock_fetch_ctx.return_value = {"columns": [{"name": "amount"}], "fks": []}
+    mock_process.side_effect = RuntimeError("attribute write failed")
+    mock_fallbacks.return_value = ["Orders"]
+
+    with caplog.at_level("WARNING", logger="auto_ontology.semantic.pipeline"):
+        compile_semantic_layer("dbx")
+
+    mock_fallbacks.assert_called_once_with(["t1"])
+    assert "1 placeholder Term(s)" in caplog.text
+    assert "Orders" in caplog.text
+
+
+@patch(
+    "auto_ontology.semantic.pipeline.fetch_fallback_term_names",
+    side_effect=RuntimeError("store down"),
+)
+@patch("auto_ontology.semantic.pipeline.process_table")
+@patch("auto_ontology.semantic.pipeline.fetch_table_context")
+@patch("auto_ontology.semantic.pipeline.load_domain_summary", return_value=None)
+@patch("auto_ontology.semantic.pipeline.fetch_all_tables_without_term")
+def test_a_failed_placeholder_count_does_not_fail_the_compile(
+    mock_fetch_tables: MagicMock,
+    _mock_summary: MagicMock,
+    mock_fetch_ctx: MagicMock,
+    mock_process: MagicMock,
+    _mock_fallbacks: MagicMock,
+) -> None:
+    mock_fetch_tables.return_value = [{"id": "t1", "name": "orders", "description": ""}]
+    mock_fetch_ctx.return_value = {"columns": [{"name": "amount"}], "fks": []}
+    mock_process.return_value = ProcessTableResult()
+
+    assert compile_semantic_layer("dbx") == 1

@@ -383,6 +383,11 @@ def update_term(
         if touch:
             values["modified"] = func.now()
             values["modified_by"] = modified_by
+            # A person who writes or certifies the description has replaced
+            # compilation's placeholder with meaning.
+            if description is not None or description_certified:
+                values["generation_status"] = "generated"
+                values["generation_note"] = None
         rows = store().query_write(
             update(s.term)
             .where(s.term.c.id == term_id)
@@ -424,6 +429,7 @@ def upsert_table_term(
     description: str,
     table_id: str,
     synonyms: list[str] | None = None,
+    fallback_reason: str | None = None,
 ) -> tuple[str, str] | None:
     """Upsert a compilation Term owned by one table.
 
@@ -434,7 +440,15 @@ def upsert_table_term(
     (:func:`~auto_ontology.dal.concepts.ensure_term_concept`), so every
     committed Term has one.
     Returns ``(term_id, persisted_name)``, or ``None`` for a missing table.
+
+    *fallback_reason* marks the Term as a deterministic placeholder and records
+    why. Without it the Term is stored as ``generated``, so a later compile that
+    gets a real proposal clears an earlier placeholder.
     """
+    generation = {
+        "generation_status": "fallback" if fallback_reason else "generated",
+        "generation_note": fallback_reason,
+    }
     with write_transaction():
         tables = store().query_read(
             select(
@@ -497,7 +511,11 @@ def upsert_table_term(
                 store().query_write(
                     update(s.term)
                     .where(s.term.c.id == term_id)
-                    .values(description=description, synonyms=synonyms or [])
+                    .values(
+                        description=description,
+                        synonyms=synonyms or [],
+                        **generation,
+                    )
                 )
                 ensure_term_concept(term_id)
                 return term_id, candidate_name
@@ -511,6 +529,7 @@ def upsert_table_term(
                     source=SEMANTIC_SOURCE,
                     description=description,
                     synonyms=synonyms or [],
+                    **generation,
                 )
                 .on_conflict_do_nothing(constraint="uq_term_name_source")
                 .returning(s.term.c.id)
@@ -528,6 +547,27 @@ def upsert_table_term(
             return term_id, candidate_name
 
     raise RuntimeError(f"Could not allocate a private Term name for table {table_id}")
+
+
+def fetch_fallback_term_names(table_ids: list[str]) -> list[str]:
+    """Names of the placeholder Terms these tables represent (#533).
+
+    Read from the stored status rather than collected from compile results,
+    so a placeholder whose table failed after the Term was written is still
+    counted.
+    """
+    if not table_ids:
+        return []
+    rows = store().query_read(
+        select(s.term.c.name)
+        .select_from(s.term.join(s.table__term, s.table__term.c.term_id == s.term.c.id))
+        .where(
+            s.table__term.c.table_id.in_(table_ids),
+            s.term.c.generation_status == "fallback",
+        )
+        .distinct()
+    )
+    return sorted(row["name"] for row in rows)
 
 
 def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
