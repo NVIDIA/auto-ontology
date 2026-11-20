@@ -129,6 +129,9 @@ def _qualified_table_name(table: exp.Table) -> str:
     return ".".join(parts).lower()
 
 
+_OUTPUT_CLAUSES = (exp.Group, exp.Having, exp.Order, exp.Qualify)
+
+
 def _infer_single_table_columns(expression: exp.Expression) -> None:
     """Point each bare column at its table when its SELECT reads exactly one table.
 
@@ -138,9 +141,11 @@ def _infer_single_table_columns(expression: exp.Expression) -> None:
     per scope, as ``qualify()`` did, so subqueries and CTE bodies are covered too.
     """
     for scope in traverse_scope(expression):
-        if len(scope.sources) != 1:
+        # What its FROM and JOINs read, not every CTE it can see.
+        selected = list(scope.selected_sources.values())
+        if len(selected) != 1:
             continue
-        (source,) = scope.sources.values()
+        _, source = selected[0]
         if not isinstance(source, exp.Table):
             continue
         query = scope.expression
@@ -152,8 +157,10 @@ def _infer_single_table_columns(expression: exp.Expression) -> None:
             if column.table:
                 continue
             # In these clauses a bare name may be one of the SELECT's own outputs.
-            clause = column.find_ancestor(exp.Group, exp.Having, exp.Order, exp.Qualify)
-            if clause is not None and column.name in outputs:
+            # The search stops at the nearest SELECT, so a subquery's columns aren't
+            # taken for the clause it sits in.
+            clause = column.find_ancestor(exp.Select, *_OUTPUT_CLAUSES)
+            if isinstance(clause, _OUTPUT_CLAUSES) and column.name in outputs:
                 continue
             column.set("table", exp.to_identifier(source.alias_or_name))
 
