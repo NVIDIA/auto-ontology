@@ -14,7 +14,7 @@ query must order by something unique.
 
 from __future__ import annotations
 
-from sqlalchemy import ColumnElement, case, false, func, select
+from sqlalchemy import ColumnElement, FromClause, case, false, func, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.concepts import semantic_fk_attribute_links
@@ -65,7 +65,9 @@ def _attribute_description(column_id: ColumnElement, link_table) -> ColumnElemen
     )
 
 
-def _attribute_certified(column_id: ColumnElement, link_table) -> ColumnElement:
+def _attribute_certified(
+    column_id: ColumnElement, link_table: FromClause
+) -> ColumnElement:
     """``certified`` of the attribute :func:`_attribute_description` picks."""
     attribute = s.column_attribute
     return (
@@ -83,7 +85,9 @@ def _attribute_certified(column_id: ColumnElement, link_table) -> ColumnElement:
     )
 
 
-def column_description_certified_expr(column=s.catalog_column) -> ColumnElement:
+def column_description_certified_expr(
+    column: FromClause = s.catalog_column,
+) -> ColumnElement:
     """Whether the description :func:`column_description_expr` returns is
     certified: the flag of whichever source supplied the text.
 
@@ -156,7 +160,9 @@ def table_description_expr(table=s.catalog_table) -> ColumnElement:
     return func.coalesce(_non_blank(table.c.description), from_term)
 
 
-def table_description_certified_expr(table=s.catalog_table) -> ColumnElement:
+def table_description_certified_expr(
+    table: FromClause = s.catalog_table,
+) -> ColumnElement:
     """Whether the description :func:`table_description_expr` returns is
     certified: the table's own flag, or the flag of the Term it falls back to.
     """
