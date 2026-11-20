@@ -827,12 +827,14 @@ def test_an_fk_pointing_outside_the_catalog_disqualifies(world) -> None:
 # --------------------------------------------------------------------------
 
 
-def _shown(world, table: str) -> dict:
+def _shown(world: World, table: str) -> dict:
     [found] = d.fetch_tables_by_ids([world.tables[table]])
     return found
 
 
-def test_a_tables_certification_is_its_own_when_it_has_a_description(world) -> None:
+def test_a_tables_certification_is_its_own_when_it_has_a_description(
+    world: World,
+) -> None:
     store().query_write(
         update(s.catalog_table)
         .where(s.catalog_table.c.id == world.tables["customers"])
@@ -842,7 +844,9 @@ def test_a_tables_certification_is_its_own_when_it_has_a_description(world) -> N
     assert _shown(world, "customers")["description_certified"] is True
 
 
-def test_a_table_showing_its_terms_description_reports_the_terms_flag(world) -> None:
+def test_a_table_showing_its_terms_description_reports_the_terms_flag(
+    world: World,
+) -> None:
     """``orders`` has no description, so it shows its Term's: the flag shown
     must be the Term's, not the table's own unrelated one."""
     term = world.term("Order", description="A purchase")
@@ -859,7 +863,7 @@ def test_a_table_showing_its_terms_description_reports_the_terms_flag(world) -> 
 
 
 def test_a_column_showing_its_attributes_description_reports_that_flag(
-    world,
+    world: World,
 ) -> None:
     attribute = world.attribute("Total", description="Order total, tax included")
     _link(
