@@ -50,6 +50,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | python-dotenv | >=1.2.3 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
 | python-multipart | >=0.0.32 | Apache-2.0 | https://github.com/Kludex/python-multipart |
 | PyYAML | >=6.0.3 | MIT | https://github.com/yaml/pyyaml |
+| regex | >=2026.7.19 | Apache-2.0 AND CNRI-Python | https://github.com/mrabarnett/mrab-regex |
 | Requests | >=2.34.2 | Apache-2.0 | https://github.com/psf/requests |
 | snowflake-connector-python | >=4.7.2 | Apache-2.0 | https://github.com/snowflakedb/snowflake-connector-python |
 | SQLAlchemy | >=2.0.52 | MIT | https://github.com/sqlalchemy/sqlalchemy |
@@ -196,6 +197,7 @@ accompanies each upstream project at the URLs above.
 - **GNU General Public License v2.0 (GPL-2.0)** —
   https://www.gnu.org/licenses/old-licenses/gpl-2.0.html; **Universal FOSS
   Exception, Version 1.0** — https://oss.oracle.com/licenses/universal-foss-exception/
+- **CNRI Python License (CNRI-Python)** — https://opensource.org/license/cnri-python/
 - **ISC License** — https://opensource.org/license/isc-license-txt/
 - **PostgreSQL License** — https://opensource.org/license/postgresql/
 - **OpenLDAP Public License** — https://www.openldap.org/software/release/license.html
