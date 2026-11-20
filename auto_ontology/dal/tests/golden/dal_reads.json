@@ -4066,6 +4066,7 @@
           {
             "data_type": "integer",
             "description": "Primary key of customer.",
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "customer_id",
@@ -4075,6 +4076,7 @@
           {
             "data_type": "integer",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "inventory_id",
@@ -4084,6 +4086,7 @@
           {
             "data_type": "integer",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "rental_id",
@@ -4093,6 +4096,7 @@
           {
             "data_type": "integer",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "staff_id",
@@ -4102,6 +4106,7 @@
           {
             "data_type": "timestamp with time zone",
             "description": "When the rental started.",
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "rental_date",
@@ -4111,6 +4116,7 @@
           {
             "data_type": "timestamp with time zone",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "last_update",
@@ -4120,6 +4126,7 @@
           {
             "data_type": "timestamp with time zone",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "return_date",
@@ -4129,6 +4136,7 @@
         ],
         "database_name": "pagila",
         "description": "A single film rental transaction.",
+        "description_certified": true,
         "id": "<table:pagila.public.rental>",
         "label": "Table",
         "name": "rental",
@@ -4142,6 +4150,7 @@
           {
             "data_type": "integer",
             "description": "Primary key of film.",
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "film_id",
@@ -4151,6 +4160,7 @@
           {
             "data_type": "integer",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "language_id",
@@ -4160,6 +4170,7 @@
           {
             "data_type": "integer",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "original_language_id",
@@ -4169,6 +4180,7 @@
           {
             "data_type": "mpaa_rating",
             "description": "MPAA rating; an enum.",
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "rating",
@@ -4178,6 +4190,7 @@
           {
             "data_type": "numeric",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "rental_rate",
@@ -4187,6 +4200,7 @@
           {
             "data_type": "numeric",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "replacement_cost",
@@ -4196,6 +4210,7 @@
           {
             "data_type": "smallint",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "rental_duration",
@@ -4205,6 +4220,7 @@
           {
             "data_type": "smallint",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "length",
@@ -4214,6 +4230,7 @@
           {
             "data_type": "text",
             "description": "The film's title.",
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "title",
@@ -4223,6 +4240,7 @@
           {
             "data_type": "text",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "description",
@@ -4232,6 +4250,7 @@
           {
             "data_type": "text[]",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "special_features",
@@ -4241,6 +4260,7 @@
           {
             "data_type": "timestamp with time zone",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "last_update",
@@ -4250,6 +4270,7 @@
           {
             "data_type": "tsvector",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": false,
             "name": "fulltext",
@@ -4259,6 +4280,7 @@
           {
             "data_type": "year",
             "description": null,
+            "description_certified": false,
             "format": null,
             "is_nullable": true,
             "name": "release_year",
@@ -4268,6 +4290,7 @@
         ],
         "database_name": "pagila",
         "description": "A motion picture available for rental.",
+        "description_certified": true,
         "id": "<table:pagila.public.film>",
         "label": "Table",
         "name": "film",

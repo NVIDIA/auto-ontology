@@ -338,6 +338,17 @@ def _sample_values(values: Any) -> str:
 _MATCH_MARK = " ← matches the query"
 
 
+#: Marks a description or definition a person certified (#268). The model is
+#: told to prefer these over uncertified ones that compete.
+_CERTIFIED_MARK = "[certified]"
+
+
+def _described(text: Any, certified: Any) -> str:
+    """*text* clipped for display, marked when it is certified."""
+    clipped = _clip(text, _MAX_DESCRIPTION_CHARS)
+    return f"{_CERTIFIED_MARK} {clipped}" if certified else clipped
+
+
 def _column_line(column: dict, matched: set[str] | frozenset[str] = frozenset()) -> str:
     """One column; *matched* is the lowercase names the search matched."""
     parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
@@ -345,7 +356,9 @@ def _column_line(column: dict, matched: set[str] | frozenset[str] = frozenset())
         parts.append(_MATCH_MARK)
     details = []
     if column.get("description"):
-        details.append(_clip(column["description"], _MAX_DESCRIPTION_CHARS))
+        details.append(
+            _described(column["description"], column.get("description_certified"))
+        )
     if samples := _sample_values(column.get("sample_values")):
         details.append(f"values: {samples}")
     if column.get("format"):
@@ -388,7 +401,9 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
 def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     header = f"TABLE {_qualified(table)}"
     if table.get("description"):
-        header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
+        header += (
+            f" — {_described(table['description'], table.get('description_certified'))}"
+        )
     if seen_before:
         lowered = {m.lower() for m in matched}
         columns = [
@@ -418,7 +433,9 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     """
     header = f"TABLE {_qualified(table)}"
     if table.get("description"):
-        header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
+        header += (
+            f" — {_described(table['description'], table.get('description_certified'))}"
+        )
     keys = {str(k) for k in table.get("pk") or []}
     lowered = {m.lower() for m in matched}
     columns = list(table.get("columns") or [])
@@ -454,8 +471,14 @@ def _definition_block(hit: dict) -> str | None:
         line = f"ATTRIBUTE {name}"
         if hit.get("term_name"):
             line += f" (of {hit['term_name']})"
-        if description:
-            line += f" — {description}"
+        # After the dash: the text before it is read back as the name.
+        detail = " ".join(
+            part
+            for part in (_CERTIFIED_MARK if hit.get("certified") else "", description)
+            if part
+        )
+        if detail:
+            line += f" — {detail}"
         if hit.get("sql"):
             line += f"\n  SQL: {_clip(hit['sql'], _MAX_DEFINITION_CHARS)}"
         return line
@@ -758,15 +781,27 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         return {(table.get("schema_name"), table.get("name"))}
 
     # Most useful first, since the limit shortens or only names what comes
-    # last: new tables, how they join, definitions that carry SQL, then tables
-    # seen before. Each block carries the tables it names.
+    # last: certified definitions, new tables, their concepts, how they join,
+    # other definitions that carry SQL, then tables seen before. Each block
+    # carries the tables it names.
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
-    named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
-        (new_blocks[str(t["id"])], own(t)) for t in new_tables
-    ]
+    # Certified definitions lead, ahead of the tables (#268). They are short,
+    # and they are the deployment's reviewed answer to how a measure is
+    # calculated: placed after the tables, as other definitions are, the
+    # limit cut them on any catalog wide enough to fill it, so certifying a
+    # definition changed nothing the model saw. Uncertified definitions keep
+    # their place, so a catalog with nothing certified reads as before.
+    definitions: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    certified: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    for hit in hits:
+        if (block := _definition_block(hit)) is not None:
+            entry = (block, _tables_in_view(hit.get("sql")))
+            (certified if hit.get("certified") else definitions).append(entry)
+    named: list[tuple[str, set[tuple[str | None, str | None]]]] = list(certified)
+    named += [(new_blocks[str(t["id"])], own(t)) for t in new_tables]
     concept_lines = _concept_lines(ctx, new_tables)
     named += [(line, tables) for line, tables, _ in concept_lines]
     named += _join_lines(ctx, new_tables)
@@ -775,12 +810,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             (line, set().union(*(own(t) for t in tables)))
             for line, tables in sibling_lines(ctx, new_tables)
         ]
-    definitions = [
-        (block, _tables_in_view(hit.get("sql")))
-        for hit in hits
-        if (block := _definition_block(hit)) is not None
-    ]
     named += definitions
+    definitions = certified + definitions
     earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {

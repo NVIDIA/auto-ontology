@@ -55,7 +55,11 @@ business words: the question, something the last result was missing ("how is \
 revenue calculated", "which column stores admission status"), or an exact \
 table or column name. What it finds comes back as tables and columns with \
 their descriptions; a column that "references" another table is a foreign \
-key to join on. Search again \
+key to join on. A definition marked [certified] is your organization's \
+reviewed, official definition of that measure: when the question asks for \
+that measure, compute it the way the certified definition's SQL does, even \
+if another definition or your own formula seems more natural, unless the \
+question explicitly asks for a different definition. Search again \
 whenever something is missing.
 - run_sql: check a query against the catalog and run it. Use it to look at \
 stored values before filtering on them, and to test a draft.
