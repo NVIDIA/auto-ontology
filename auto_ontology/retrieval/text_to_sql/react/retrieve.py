@@ -422,13 +422,17 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     keys = {str(k) for k in table.get("pk") or []}
     lowered = {m.lower() for m in matched}
     columns = list(table.get("columns") or [])
-    kept = [
-        c
-        for c in columns
-        if str(c.get("name") or "").lower() in lowered
-        or str(c.get("name")) in keys
-        or c.get("semantic_fk")
-    ]
+
+    def priority(column: dict) -> int:
+        name = str(column.get("name") or "")
+        if name.lower() in lowered:
+            return 0
+        if name in keys:
+            return 1
+        return 2 if column.get("semantic_fk") else 3
+
+    cap = config.max_columns_per_table()
+    kept = sorted((c for c in columns if priority(c) < 3), key=priority)[:cap]
     lines = [header + " (shortened to fit)"]
     for column in kept:
         line = f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()
