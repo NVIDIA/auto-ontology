@@ -34,6 +34,9 @@ class ImportEmbedBuffer:
 
     data_rows: list[dict[str, Any]] = field(default_factory=list)
     semantic_rows: list[dict[str, Any]] = field(default_factory=list)
+    # Live ids whose semantic rows the import changed: their stored vectors
+    # are deleted before the fresh rows are written, since the store appends.
+    replaced_semantic_ids: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -194,6 +197,13 @@ def build_sql_attribute_semantic_row(
     )
 
 
+def build_sql_attribute_rows_from_docs(
+    docs: list[dict[str, Any]], database_name: str | None
+) -> list[dict[str, Any]]:
+    """Embed rows for SqlAttribute docs as ``fetch_sql_attribute_docs`` returns them."""
+    return [_doc_to_embed_row(doc, database_name) for doc in docs]
+
+
 def build_custom_analysis_semantic_row(
     *,
     live_id: str,
@@ -273,10 +283,15 @@ def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:
         result["data_rows"] = 0
 
     if buffer.semantic_rows:
-        result["semantic_rows"] = _embed_and_ingest_rows(
-            buffer.semantic_rows,
-            get_semantic_vdb(),
-        )
+        semantic_vdb = get_semantic_vdb()
+        # Embed first: if the endpoint fails, the replaced rows keep their old
+        # vectors, still searchable, instead of none. Deletes run after the
+        # import committed, so a rolled-back import never loses a vector.
+        embedded = embed_rows(buffer.semantic_rows, get_embed_params(), what="imported")
+        for live_id in sorted(buffer.replaced_semantic_ids):
+            semantic_vdb.delete_by_id(live_id)
+        write_embedded_rows(semantic_vdb, embedded)
+        result["semantic_rows"] = len(embedded)
     else:
         result["semantic_rows"] = 0
 

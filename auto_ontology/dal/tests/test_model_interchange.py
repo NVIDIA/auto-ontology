@@ -37,6 +37,7 @@ from auto_ontology.dal.concepts import (  # noqa: E402
     merge_concepts,
 )
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.server.model_interchange.schemas import AutoOntologyModelDocument  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -805,3 +806,580 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
             mi.apply_import_model(document, replace=False)
     finally:
         _cleanup(f"{world.prefix}-copy")
+
+
+# --------------------------------------------------------------------------
+# #525 — replace=true applies edits to matched terms and column attributes
+# --------------------------------------------------------------------------
+
+
+def _term_row(term_id: str) -> dict:
+    return store().query_read(
+        select(s.term.c.name, s.term.c.description).where(s.term.c.id == term_id)
+    )[0]
+
+
+def _attribute_row(attr_id: str) -> dict:
+    return store().query_read(
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+        ).where(s.column_attribute.c.id == attr_id)
+    )[0]
+
+
+def _edited(world: World, **term_edits):
+    """Export, then edit the term and its attribute as a person would."""
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    for field, value in term_edits.items():
+        setattr(term, field, value)
+    term.columns_attributes[0].description = "the order's identifier, edited"
+    return document
+
+
+def test_replace_applies_edits_to_matched_terms_and_attributes(world) -> None:
+    """The issue's reproduction: export, edit descriptions, import with replace."""
+    summary = mi.apply_import_model(
+        _edited(world, description="a customer's purchase, edited"), replace=True
+    )
+
+    assert _term_row(world.term)["description"] == "a customer's purchase, edited"
+    assert (
+        _attribute_row(world.attribute)["description"]
+        == "the order's identifier, edited"
+    )
+    assert summary["updated"]["terms"] == 1
+    assert summary["updated"]["column_attributes"] == 1
+    assert summary["skipped"]["terms"] == 0
+    assert summary["conflicts"] == []
+
+
+def test_replace_keeps_certified_fields_and_reports_them(world) -> None:
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(description_certified=True)
+    )
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attribute)
+        .values(certified=True)
+    )
+
+    summary = mi.apply_import_model(
+        _edited(world, description="overwritten?"), replace=True
+    )
+
+    assert _term_row(world.term)["description"] == "a purchase"
+    assert _attribute_row(world.attribute)["description"] == "the identifier"
+    reported = {(c["entity"], c["field"], c["reason"]) for c in summary["conflicts"]}
+    assert reported == {
+        ("term", "description", "certified"),
+        ("column_attribute", "description", "certified"),
+    }
+    assert summary["updated"]["terms"] == 0
+
+
+def test_replace_renames_a_term_and_its_attributes_follow(world) -> None:
+    new_name = f"{world.prefix}-Purchase"
+
+    mi.apply_import_model(_edited(world, name=new_name), replace=True)
+
+    assert _term_row(world.term)["name"] == new_name
+    assert _attribute_row(world.attribute)["term_name"] == new_name
+
+
+def test_a_rename_onto_another_terms_name_is_reported_not_fatal(world) -> None:
+    taken = f"{world.prefix}-Taken"
+    _add(s.term, name=taken, source=SEMANTIC_SOURCE)
+
+    summary = mi.apply_import_model(_edited(world, name=taken), replace=True)
+
+    assert _term_row(world.term)["name"] == f"{world.prefix}-Order"
+    assert ("term", "name", "name in use") in {
+        (c["entity"], c["field"], c["reason"]) for c in summary["conflicts"]
+    }
+
+
+def test_an_additive_import_still_leaves_matched_rows_alone(world) -> None:
+    summary = mi.apply_import_model(
+        _edited(world, description="not applied without replace"), replace=False
+    )
+
+    assert _term_row(world.term)["description"] == "a purchase"
+    assert summary["skipped"]["terms"] == 1
+    assert summary["updated"]["terms"] == 0
+
+
+def test_an_identical_replace_import_updates_nothing(world) -> None:
+    summary = mi.apply_import_model(_document(world), replace=True)
+
+    assert sum(summary["updated"].values()) == 0
+    assert summary["skipped"]["terms"] == 1
+
+
+def test_replace_queues_changed_rows_for_reembedding(world) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(
+        _edited(world, description="re-embed me"), replace=True, embed_buffer=buffer
+    )
+
+    assert {world.term, world.attribute} <= buffer.replaced_semantic_ids
+    queued = {row["metadata"]["id"] for row in buffer.semantic_rows}
+    assert world.term in queued
+
+
+def _attribute_columns(attr_id: str) -> set[str]:
+    return {
+        row["column_id"]
+        for row in store().query_read(
+            select(s.column__has_attribute.c.column_id).where(
+                s.column__has_attribute.c.attribute_id == attr_id
+            )
+        )
+    }
+
+
+def test_a_rename_alone_reembeds_the_terms_attributes(world: World) -> None:
+    """The rename rewrites each attribute's term_name, which its vector embeds,
+    so the attribute is re-embedded even when nothing else about it changed."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    document = _document(world)
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert _attribute_row(world.attribute)["term_name"] == new_name
+    assert world.attribute in buffer.replaced_semantic_ids
+    queued = {row["metadata"]["id"]: row for row in buffer.semantic_rows}
+    assert world.attribute in queued
+    assert summary["updated"]["column_attributes"] == 1
+
+
+def test_a_rejected_rename_keeps_attributes_on_the_stored_name(world: World) -> None:
+    """A certified name keeps its value, so the attributes must keep copying it:
+    the Term's attribute list is matched through term_name."""
+    from auto_ontology.dal.terms import fetch_column_attributes_by_term_id
+
+    store().query_write(
+        s.term.update().where(s.term.c.id == world.term).values(name_certified=True)
+    )
+    document = _document(world)
+    document.semantic_layer.terms[0].name = f"{world.prefix}-Rejected"
+
+    summary = mi.apply_import_model(document, replace=True)
+
+    stored = f"{world.prefix}-Order"
+    assert _term_row(world.term)["name"] == stored
+    assert _attribute_row(world.attribute)["term_name"] == stored
+    assert [a["id"] for a in fetch_column_attributes_by_term_id(world.term)] == [
+        world.attribute
+    ]
+    assert ("term", "name", "certified") in {
+        (c["entity"], c["field"], c["reason"]) for c in summary["conflicts"]
+    }
+
+
+def test_moving_an_attribute_replaces_its_column_link(world: World) -> None:
+    document = _document(world)
+    document.semantic_layer.terms[0].columns_attributes[
+        0
+    ].column_id = world.customer_ref
+
+    mi.apply_import_model(document, replace=True)
+    again = mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.customer_ref}
+    assert _attribute_row(world.attribute)["term_name"] == f"{world.prefix}-Order"
+    assert again["updated"]["column_attributes"] == 0
+
+
+def _shared_attribute_document(world: World) -> AutoOntologyModelDocument:
+    """The attribute linked to orders.id and orders.customer_id, declared once
+    per column, the stored source (orders.id) first and the other last."""
+    _link(
+        s.column__has_attribute,
+        column_id=world.customer_ref,
+        attribute_id=world.attribute,
+    )
+    document = _document(world)
+    declarations = document.semantic_layer.terms[0].columns_attributes
+    order = {world.order_id: 0, world.customer_ref: 1}
+    declarations.sort(key=lambda declaration: order[declaration.column_id])
+    assert [d.column_id for d in declarations] == [world.order_id, world.customer_ref]
+    return document
+
+
+def test_a_shared_attribute_keeps_every_declared_link(world: World) -> None:
+    """An unchanged export of an attribute on two columns re-imports as is:
+    neither link is dropped, and nothing counts as updated or re-embedded."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    document = _shared_attribute_document(world)
+    buffer = ImportEmbedBuffer()
+
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert _attribute_columns(world.attribute) == {world.order_id, world.customer_ref}
+    stored_source = store().query_read(
+        select(s.column_attribute.c.source_column).where(
+            s.column_attribute.c.id == world.attribute
+        )
+    )[0]["source_column"]
+    assert stored_source == "id"
+    assert summary["updated"]["column_attributes"] == 0
+    assert world.attribute not in buffer.replaced_semantic_ids
+
+
+def test_every_declared_column_is_linked(world: World) -> None:
+    document = _shared_attribute_document(world)
+    store().query_write(
+        s.column__has_attribute.delete().where(
+            s.column__has_attribute.c.column_id == world.customer_ref
+        )
+    )
+
+    summary = mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.order_id, world.customer_ref}
+    assert summary["updated"]["column_attributes"] == 1
+
+
+def test_a_link_the_document_drops_is_removed(world: World) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    document = _shared_attribute_document(world)
+    declarations = document.semantic_layer.terms[0].columns_attributes
+    del declarations[1]
+    buffer = ImportEmbedBuffer()
+
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert _attribute_columns(world.attribute) == {world.order_id}
+    assert summary["updated"]["column_attributes"] == 1
+    # The vectors follow the links, so a removed link re-embeds.
+    assert world.attribute in buffer.replaced_semantic_ids
+
+
+def test_a_scoped_import_keeps_links_to_other_databases(world: World) -> None:
+    """The document describes only its own database's columns, so a shared
+    attribute's link into another database is not the import's to remove."""
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, database_id=other_db, name="public")
+    other_table = _add(s.catalog_table, schema_id=other_schema, name="returns")
+    other_column = _add(
+        s.catalog_column,
+        table_id=other_table,
+        name="order_id",
+        data_type="integer",
+        ordinal_position=1,
+        is_nullable=True,
+    )
+    _link(s.column__has_attribute, column_id=other_column, attribute_id=world.attribute)
+    document = _document(world)
+
+    summary = mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.order_id, other_column}
+    assert summary["updated"]["column_attributes"] == 0
+
+
+def _other_database_column(world: World) -> tuple[str, str]:
+    """A table and column in a second database, which the world's Term also
+    represents. Named under the world's prefix so the fixture cleans it up."""
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, database_id=other_db, name="sales")
+    other_table = _add(s.catalog_table, schema_id=other_schema, name="returns")
+    other_column = _add(
+        s.catalog_column,
+        table_id=other_table,
+        name="order_id",
+        data_type="integer",
+        ordinal_position=1,
+        is_nullable=True,
+    )
+    return other_table, other_column
+
+
+def _queued(buffer, live_id: str) -> list[dict]:
+    return [r for r in buffer.semantic_rows if r["metadata"].get("id") == live_id]
+
+
+def test_a_shared_terms_vector_is_rebuilt_in_every_database(world: World) -> None:
+    """The flush deletes a replaced Term's vectors by id, which removes the
+    copy in every database it represents, so each copy must be rebuilt."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, _ = _other_database_column(world)
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    document = _document(world)
+    document.semantic_layer.terms[0].description = "an order a customer placed"
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert world.term in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
+        world.prefix,
+        f"{world.prefix}-other",
+    }
+
+
+def test_a_rename_reembeds_attributes_outside_the_document(world: World) -> None:
+    """A database-scoped document leaves out the shared Term's attribute in
+    the other database, but the rename rewrote its term_name too."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, other_column = _other_database_column(world)
+    outside = _add(
+        s.column_attribute,
+        name=f"{world.prefix}-returned-order",
+        description="the returned order",
+        source_column="order_id",
+        term_name=f"{world.prefix}-Order",
+        table_id=other_table,
+    )
+    _link(s.column__has_attribute, column_id=other_column, attribute_id=outside)
+    _link(s.column_attribute__term, attribute_id=outside, term_id=world.term)
+    document = _document(world)
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert outside in buffer.replaced_semantic_ids
+    rows = _queued(buffer, outside)
+    assert rows and all(new_name in r["text"] for r in rows)
+    assert {r["metadata"]["database_name"] for r in rows} == {f"{world.prefix}-other"}
+
+
+def test_a_rename_reembeds_the_terms_sql_attributes(world: World) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+    from auto_ontology.server.model_interchange.schemas import ModelSqlAttribute
+
+    document = _document(world)
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-order-count",
+            name=f"{world.prefix}-order-count",
+            description="orders placed",
+            sql="SELECT COUNT(*) FROM public.orders",
+            term_id=document.semantic_layer.terms[0].id,
+        )
+    )
+    mi.apply_import_model(document, replace=True)
+    sql_attr = store().query_read(
+        select(s.sql_attribute.c.id).where(
+            s.sql_attribute.c.name == f"{world.prefix}-order-count"
+        )
+    )[0]["id"]
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert sql_attr in buffer.replaced_semantic_ids
+    rows = _queued(buffer, sql_attr)
+    assert len(rows) == 1 and f"term: {new_name}" in rows[0]["text"]
+
+
+def test_a_move_to_a_column_named_like_the_old_one_replaces_the_link(
+    world: World,
+) -> None:
+    """The document gives the new column the old one's name, so source_column
+    doesn't change; the live column ids still decide which link goes."""
+    document = _document(world)
+    document.semantic_layer.terms[0].columns_attributes[
+        0
+    ].column_id = world.customer_ref
+    for database in document.data_layer.databases:
+        for schema in database.schemas:
+            for table in schema.tables:
+                for column in table.columns:
+                    if column.id == world.customer_ref:
+                        column.name = "id"
+
+    mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.customer_ref}
+
+
+def test_a_created_sql_attribute_embeds_the_name_the_term_kept(world: World) -> None:
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+    from auto_ontology.server.model_interchange.schemas import ModelSqlAttribute
+
+    store().query_write(
+        s.term.update().where(s.term.c.id == world.term).values(name_certified=True)
+    )
+    document = _document(world)
+    document.semantic_layer.terms[0].name = f"{world.prefix}-Rejected"
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-order-count",
+            name=f"{world.prefix}-order-count",
+            sql="SELECT COUNT(*) FROM public.orders",
+            term_id=document.semantic_layer.terms[0].id,
+        )
+    )
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    texts = [
+        r["text"] for r in buffer.semantic_rows if r["text"].startswith("sql_attribute")
+    ]
+    assert texts and all(f"term: {world.prefix}-Order," in t for t in texts)
+
+
+def test_a_term_moved_to_another_database_is_rebuilt_there(world: World) -> None:
+    """The vectors follow the representation the import commits, not the one
+    the Term had when its description changed."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    other_table, _ = _other_database_column(world)
+    other_db = store().query_read(
+        select(s.catalog_database.c.id).where(
+            s.catalog_database.c.name == f"{world.prefix}-other"
+        )
+    )[0]["id"]
+    rows = mi.fetch_export_rows([world.database, other_db])
+    document = mi.assemble_export_document(
+        rows,
+        dialect_by_db_name={
+            world.prefix: "postgres",
+            f"{world.prefix}-other": "postgres",
+        },
+        sql_column_resolver=lambda sql, database_name: [],
+    )
+    term = document.semantic_layer.terms[0]
+    term.represents = [other_table]
+    term.description = "a returned order"
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    represented = {
+        row["table_id"]
+        for row in store().query_read(
+            select(s.table__term.c.table_id).where(
+                s.table__term.c.term_id == world.term
+            )
+        )
+    }
+    assert represented == {other_table}
+    assert world.term in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
+        f"{world.prefix}-other"
+    }
+
+
+def test_a_rename_rebuilds_an_attribute_in_each_of_its_databases(world: World) -> None:
+    """One attribute with columns in two databases has a vector in each; a
+    scoped rename must rebuild both, since the flush deletes by id."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    _, other_column = _other_database_column(world)
+    _link(s.column__has_attribute, column_id=other_column, attribute_id=world.attribute)
+    document = _document(world)
+    new_name = f"{world.prefix}-Purchase"
+    document.semantic_layer.terms[0].name = new_name
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    rows = _queued(buffer, world.attribute)
+    assert world.attribute in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in rows} == {
+        world.prefix,
+        f"{world.prefix}-other",
+    }
+    assert all(new_name in r["text"] for r in rows)
+
+
+def test_a_term_leaving_a_database_is_reembedded(world: World) -> None:
+    """Only the representation changes, but the Term's vector in the database
+    it left must go, so the move alone re-embeds it and counts as an update."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+    from auto_ontology.server.model_interchange.schemas import ModelSqlAttribute
+
+    other_table, _ = _other_database_column(world)
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    other_db = store().query_read(
+        select(s.catalog_database.c.id).where(
+            s.catalog_database.c.name == f"{world.prefix}-other"
+        )
+    )[0]["id"]
+    rows = mi.fetch_export_rows([world.database, other_db])
+    document = mi.assemble_export_document(
+        rows,
+        dialect_by_db_name={
+            world.prefix: "postgres",
+            f"{world.prefix}-other": "postgres",
+        },
+        sql_column_resolver=lambda sql, database_name: [],
+    )
+    document.semantic_layer.terms[0].represents = [world.orders]
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-order-count",
+            name=f"{world.prefix}-order-count",
+            sql="SELECT COUNT(*) FROM public.orders",
+            term_id=document.semantic_layer.terms[0].id,
+        )
+    )
+    mi.apply_import_model(document, replace=False)
+    sql_attr = store().query_read(
+        select(s.sql_attribute.c.id).where(
+            s.sql_attribute.c.name == f"{world.prefix}-order-count"
+        )
+    )[0]["id"]
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    buffer = ImportEmbedBuffer()
+
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert summary["updated"]["terms"] == 1
+    assert world.term in buffer.replaced_semantic_ids
+    # The SqlAttribute is placed by its Term's databases, so it moves too.
+    assert sql_attr in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, sql_attr)} == {
+        world.prefix
+    }
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
+        world.prefix
+    }
+
+    again = ImportEmbedBuffer()
+    repeat = mi.apply_import_model(document, replace=True, embed_buffer=again)
+    assert world.term not in again.replaced_semantic_ids
+    assert repeat["updated"]["terms"] == 0
+
+
+def test_an_entity_with_no_buildable_vector_keeps_its_old_one(world: World) -> None:
+    """An attribute with no name builds no vector; replacing would delete its
+    old one and write nothing."""
+    from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attribute)
+        .values(name="")
+    )
+    document = _document(world)
+    document.semantic_layer.terms[0].name = f"{world.prefix}-Purchase"
+    buffer = ImportEmbedBuffer()
+
+    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+
+    assert world.term in buffer.replaced_semantic_ids
+    assert world.attribute not in buffer.replaced_semantic_ids
