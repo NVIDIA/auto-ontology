@@ -4,6 +4,8 @@
 
 import pandas as pd
 import pytest
+import sqlglot
+from sqlglot import exp
 
 from auto_ontology.retrieval.text_to_sql.react import run_sql as tool
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
@@ -381,3 +383,17 @@ def test_catalog_for_falls_back_to_every_schema_without_a_database_name(
     tool.catalog_for(ctx, connector)
 
     assert ctx.schemas == {None: {"public": ["schema-a", "schema-b"]}}
+
+
+@pytest.mark.parametrize(
+    "sql, written",
+    [
+        ("SELECT 1 FROM crm.Customers", "crm.Customers"),
+        ('SELECT 1 FROM crm."Customers"', 'crm."Customers"'),
+        ('SELECT 1 FROM "sales-data".orders', '"sales-data".orders'),
+    ],
+)
+def test_a_table_not_in_view_is_named_as_written(sql: str, written: str) -> None:
+    table = sqlglot.parse_one(sql, read="postgres").find(exp.Table)
+
+    assert tool._as_written(table, "postgres") == written

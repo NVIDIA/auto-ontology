@@ -6,6 +6,10 @@ from typing import Any
 
 import pandas as pd
 import pytest
+from types import SimpleNamespace
+
+import sqlglot
+from sqlglot import exp
 
 from auto_ontology.retrieval.text_to_sql.react import retrieve as tool
 from auto_ontology.retrieval.text_to_sql.react import siblings
@@ -378,7 +382,7 @@ _OPAQUE_TABLE = {
 
 
 def test_a_matched_column_is_tagged_and_the_others_are_not() -> None:
-    text = tool._table_block(_OPAQUE_TABLE, {"C_NM"}, False)
+    text = tool._table_block(_ctx(), _OPAQUE_TABLE, {"C_NM"}, False)
 
     assert text.splitlines() == [
         "TABLE crm.customers",
@@ -389,13 +393,13 @@ def test_a_matched_column_is_tagged_and_the_others_are_not() -> None:
 
 
 def test_no_column_is_tagged_when_the_search_matched_none() -> None:
-    text = tool._table_block(_OPAQUE_TABLE, set(), False)
+    text = tool._table_block(_ctx(), _OPAQUE_TABLE, set(), False)
 
     assert "matches the query" not in text
 
 
 def test_a_shortened_table_tags_its_matched_column() -> None:
-    text = tool._short_table_block(_OPAQUE_TABLE, {"c_nm"})
+    text = tool._short_table_block(_ctx(), _OPAQUE_TABLE, {"c_nm"})
 
     assert "  c_nm TEXT ← matches the query" in text.splitlines()
     assert "  c1 INT" not in text
@@ -912,3 +916,200 @@ def test_a_concept_the_limit_dropped_is_shown_by_a_later_search(
     second = tool.retrieve(ctx, "customer status")
     assert "CONCEPT Customer: sales.orders + crm.customers" in second
     assert "concept-1" in ctx.shown_concepts
+
+
+_UUID_DB = "01a1d278-8f97-7755-8907-45833c5c34a5"
+
+
+@pytest.mark.parametrize(
+    ("schema", "table", "column", "shown", "column_shown"),
+    [
+        ("sales-data", "orders", "amount", '"sales-data".orders', "amount"),
+        (_UUID_DB, "orders", "amount", f'"{_UUID_DB}".orders', "amount"),
+        ("crm", "Customers", "customerId", 'crm."Customers"', '"customerId"'),
+        ("crm", "customers", "status", "crm.customers", "status"),
+    ],
+)
+def test_names_are_shown_the_way_postgres_needs_them_written(
+    schema: str, table: str, column: str, shown: str, column_shown: str
+) -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    block = tool._table_block(
+        ctx,
+        {"schema_name": schema, "name": table, "columns": [{"name": column}]},
+        set(),
+        False,
+    )
+
+    assert block.splitlines()[0] == f"TABLE {shown}"
+    written = block.splitlines()[1].strip()
+    assert written == column_shown
+    sql = f"SELECT {written} FROM {shown}"
+    statement = sqlglot.parse_one(sql, read="postgres")
+    assert statement.find(exp.Table).db == schema
+    assert statement.find(exp.Table).name == table
+    assert statement.find(exp.Column).name == column
+
+
+def test_join_routes_quote_their_names() -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    hop = {
+        "source_schema": "sales-data",
+        "source_table": "orders",
+        "source_column": "customerId",
+        "target_schema": "crm",
+        "target_table": "customers",
+        "target_column": "id",
+    }
+
+    assert (
+        tool._hop_text(ctx, hop)
+        == '"sales-data".orders."customerId" = crm.customers.id'
+    )
+
+
+def test_a_join_route_is_quoted_in_its_tables_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = ToolContext(
+        retriever=object(),
+        connectors=[SimpleNamespace(database_name="lake", dialect="spark")],
+        dialect="postgres",
+    )
+    orders = {
+        "id": "t-orders",
+        "database_name": "lake",
+        "schema_name": "sales-data",
+        "name": "orders",
+    }
+    customers = {**orders, "id": "t-customers", "name": "customers"}
+    ctx.seen_tables["t-customers"] = customers
+    ctx.anchor_column_ids.update({"t-orders": "c-orders", "t-customers": "c-cust"})
+    hop = {
+        "source_schema": "sales-data",
+        "source_table": "orders",
+        "source_column": "customer_id",
+        "target_schema": "sales-data",
+        "target_table": "customers",
+        "target_column": "id",
+    }
+    monkeypatch.setattr(
+        tool, "find_join_routes", lambda *_: [{"hops": [hop], "default": True}]
+    )
+
+    [(line, _)] = tool._join_lines(ctx, [orders])
+
+    assert line == (
+        "JOIN `sales-data`.orders ↔ `sales-data`.customers: "
+        "`sales-data`.orders.customer_id = `sales-data`.customers.id"
+    )
+
+
+def test_names_are_quoted_for_the_database_the_table_is_in() -> None:
+    ctx = ToolContext(
+        retriever=object(),
+        connectors=[
+            SimpleNamespace(database_name="shop", dialect="postgres"),
+            SimpleNamespace(database_name="lake", dialect="spark"),
+        ],
+    )
+    table = {
+        "database_name": "lake",
+        "schema_name": "sales-data",
+        "name": "orders",
+        "columns": [
+            {
+                "name": "my col",
+                "semantic_fk": "sales-data.customers.id",
+                "semantic_fk_target": {
+                    "concept": "Customer",
+                    "columns": [["sales-data", "customers", "id"]],
+                },
+            }
+        ],
+    }
+
+    assert tool._table_block(ctx, table, set(), False).splitlines() == [
+        "TABLE `sales-data`.orders",
+        "  `my col` — references `sales-data`.customers.id",
+    ]
+
+
+def test_a_reference_is_quoted_part_by_part() -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    column = {
+        "name": "customer_ref",
+        "semantic_fk": "crm.customers.v2.id",
+        "semantic_fk_target": {
+            "concept": "Customer",
+            "columns": [["crm", "customers.v2", "id"]],
+        },
+    }
+
+    assert tool._column_line(ctx, column) == (
+        '  customer_ref — references crm."customers.v2".id'
+    )
+
+
+def test_a_split_reference_quotes_each_member() -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    column = {
+        "name": "customer_id",
+        "semantic_fk": "Customer (sales-data.customer.id, sales-data.customer_ext.id)",
+        "semantic_fk_target": {
+            "concept": "Customer",
+            "columns": [
+                ["sales-data", "customer", "id"],
+                ["sales-data", "customer_ext", "id"],
+            ],
+        },
+    }
+
+    assert tool._column_line(ctx, column) == (
+        '  customer_id — references Customer ("sales-data".customer.id, '
+        '"sales-data".customer_ext.id)'
+    )
+
+
+def test_a_short_block_says_to_retrieve_the_name_as_searched() -> None:
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+    table = {
+        "schema_name": "sales-data",
+        "name": "orders",
+        "columns": [{"name": "a"}, {"name": "b"}],
+    }
+
+    assert tool._short_table_block(ctx, table, set()).splitlines() == [
+        'TABLE "sales-data".orders (shortened to fit)',
+        "  … 2 more columns not shown; retrieve sales-data.orders to see all of them",
+    ]
+
+
+def test_a_concept_line_quotes_its_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    columns = [
+        {"schema_name": "sales-data", "table_name": t, "column_name": "customerId"}
+        for t in ("customers", "customer_ext")
+    ]
+    concept = {
+        "concept_id": "concept-1",
+        "concept_name": "Customer",
+        "members": [
+            {"table_id": "t-1", "schema_name": "sales-data", "table_name": "customers"},
+            {
+                "table_id": "t-2",
+                "schema_name": "sales-data",
+                "table_name": "customer_ext",
+            },
+        ],
+        "keys": [{"columns": columns}],
+    }
+    monkeypatch.setattr(tool, "fetch_concept_members", lambda ids: {"t-1": concept})
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+
+    [(line, _, _)] = tool._concept_lines(ctx, [{"id": "t-1"}])
+
+    assert line == (
+        'CONCEPT Customer: "sales-data".customers + "sales-data".customer_ext, '
+        'joined on "sales-data".customers."customerId" = '
+        '"sales-data".customer_ext."customerId"'
+    )

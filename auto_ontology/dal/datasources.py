@@ -1055,7 +1055,7 @@ def fetch_columns_for_table(
     return table
 
 
-def _semantic_fk_target_expr() -> ColumnElement:
+def _semantic_fk_target_expr(parts: bool = False) -> ColumnElement:
     """What a catalog column's semantic FK references, for SQL prompts.
 
     ``schema.table.column`` when the target Concept has one member, which is
@@ -1063,6 +1063,10 @@ def _semantic_fk_target_expr() -> ColumnElement:
     and each member's key column, ``Customer (sales.customer.customer_id,
     sales.customer_ext.customer_id)``: any of them joins. Correlated on
     ``catalog_column``.
+
+    With *parts*, the same target as ``{"concept", "columns"}``, each column
+    a ``[schema, table, column]`` list, so a prompt can quote every name on
+    its own.
     """
     member_column = s.catalog_column.alias("semantic_fk_target")
     member_table = s.catalog_table.alias("semantic_fk_table")
@@ -1074,13 +1078,27 @@ def _semantic_fk_target_expr() -> ColumnElement:
         qualified,
         aggregate_order_by(literal(", "), qualified),
     )
-    return (
-        select(
-            case(
-                (func.count() > 1, s.concept.c.name + " (" + members + ")"),
-                else_=func.min(qualified),
-            )
+    if parts:
+        target = func.json_build_object(
+            "concept",
+            s.concept.c.name,
+            "columns",
+            func.json_agg(
+                aggregate_order_by(
+                    func.json_build_array(
+                        member_schema.c.name, member_table.c.name, member_column.c.name
+                    ),
+                    qualified,
+                )
+            ),
         )
+    else:
+        target = case(
+            (func.count() > 1, s.concept.c.name + " (" + members + ")"),
+            else_=func.min(qualified),
+        )
+    return (
+        select(target)
         .select_from(
             s.column__semantic_fk.join(
                 s.concept_key, s.concept_key.c.id == s.column__semantic_fk.c.key_id
@@ -1123,11 +1141,11 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` names what the column references for SQL prompts — see
-    :func:`_semantic_fk_target_expr`.
+    :func:`_semantic_fk_target_expr`; ``semantic_fk_target`` is the same
+    reference with each name kept apart.
     """
     if not table_ids:
         return []
-    semantic_fk_target = _semantic_fk_target_expr()
     try:
         rows = store().query_read(
             select(
@@ -1143,7 +1161,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
-                semantic_fk_target.label("semantic_fk"),
+                _semantic_fk_target_expr().label("semantic_fk"),
+                _semantic_fk_target_expr(parts=True).label("semantic_fk_target"),
             )
             .select_from(
                 _table_join().join(
@@ -1189,6 +1208,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
+                    "semantic_fk_target": row["semantic_fk_target"],
                 }
             )
     return list(tables.values())
