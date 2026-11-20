@@ -85,12 +85,19 @@ class World:
         self.tables[name] = tid
         return tid
 
-    def column(self, table: str, name: str, position: int = 1) -> str:
+    def column(
+        self,
+        table: str,
+        name: str,
+        position: int = 1,
+        sample_values: str | None = None,
+    ) -> str:
         cid = _add(
             s.catalog_column,
             table_id=self.tables[table],
             name=name,
             ordinal_position=position,
+            sample_values=sample_values,
         )
         self.columns[f"{table}.{name}"] = cid
         return cid
@@ -949,6 +956,27 @@ def test_a_database_filter_does_not_drop_the_attribute(joined) -> None:
         [joined.attributes["customer-id"]], database_name="some-other-database"
     )
     assert joined.attributes["customer-id"] in contexts
+
+
+# --------------------------------------------------------------------------
+# fetch_attr_sample_values
+# --------------------------------------------------------------------------
+
+
+def test_sample_values_come_from_the_owning_column(world) -> None:
+    world.table("repos")
+    world.column("repos", "repo_name", 1, sample_values='["astrolabe", "chorecraft"]')
+    world.column("repos", "plain", 2)
+    named = world.attribute("repo-name", owner="repos.repo_name")
+    plain = world.attribute("plain", owner="repos.plain")
+
+    values = a.fetch_attr_sample_values([named, plain])
+
+    assert values == {named: ["astrolabe", "chorecraft"]}
+
+
+def test_sample_values_are_empty_for_an_empty_list() -> None:
+    assert a.fetch_attr_sample_values([]) == {}
 
 
 # --------------------------------------------------------------------------
