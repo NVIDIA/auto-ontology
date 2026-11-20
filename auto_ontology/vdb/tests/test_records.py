@@ -24,7 +24,11 @@ from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.embedding_rows import build_embed_row
 from auto_ontology.vdb.postgres import PostgresVDB
-from auto_ontology.vdb.records import to_vdb_records, write_embedded_rows
+from auto_ontology.vdb.records import (
+    replace_embedded_rows,
+    to_vdb_records,
+    write_embedded_rows,
+)
 
 _DIMENSIONS = 2048
 
@@ -171,3 +175,19 @@ def test_written_rows_come_back_from_a_search(
     assert (
         retriever.query("who buys", vdb_kwargs={"where": {"database_name": "x"}}) == []
     )
+
+
+def test_replacing_a_row_swaps_it_for_the_new_one(vdb: Any) -> None:
+    write_embedded_rows(
+        vdb, [_row("orders", _unit(0)), _row("customers", _unit(1), "customers")]
+    )
+
+    replaced = replace_embedded_rows(
+        vdb, ["orders"], [_row("orders", _unit(2), text="orders, renamed")]
+    )
+
+    assert replaced == 1
+    hits = vdb.retrieval([_unit(2)], top_k=5)[0]
+    assert sorted(hit["metadata"]["id"] for hit in hits) == ["customers", "orders"]
+    assert hits[0]["metadata"]["id"] == "orders"
+    assert hits[0]["text"] == "orders, renamed"

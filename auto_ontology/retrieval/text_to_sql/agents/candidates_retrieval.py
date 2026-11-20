@@ -35,6 +35,7 @@ from auto_ontology.semantic.constants import (
 )
 
 from auto_ontology.dal.custom_analyses import custom_analysis_exists
+from auto_ontology.retrieval.data_access.hit_scores import rank_score
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
@@ -101,9 +102,7 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         if evidence_query:
             evidence_by_id[key] = str(evidence_query)
         prev = best.get(key)
-        if prev is None or float(hit.get("score") or float("inf")) < float(
-            prev.get("score") or float("inf")
-        ):
+        if prev is None or rank_score(hit) < rank_score(prev):
             best[key] = hit
     result: list[dict] = []
     for key, hit in best.items():
@@ -116,7 +115,7 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         result.append(out)
     return sorted(
         result,
-        key=lambda h: float(h.get("score") or float("inf")),
+        key=rank_score,
     )
 
 

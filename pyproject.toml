@@ -62,6 +62,7 @@ dependencies = [
     # Not imported, but FastAPI refuses to register the model-import upload
     # route without it.
     "python-multipart>=0.0.32",
+    "elasticsearch>=9.5.1",
     "regex>=2026.7.19",
 ]
 

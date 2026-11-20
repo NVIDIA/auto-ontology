@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Vector search over a pgvector collection, and the app's two singletons."""
+"""Vector search over the configured store, and the app's two singletons."""
 
 from __future__ import annotations
 
@@ -11,11 +11,13 @@ import random
 import time
 from typing import Any
 
+from elasticsearch import ApiError, TransportError
 from openai import APIConnectionError, APIStatusError
 
 from auto_ontology.utils.embedding import EmbedParams, embed_texts, get_embed_params
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
-from auto_ontology.vdb.postgres import PostgresVDB
+from auto_ontology.vdb.base import VectorStore
+from auto_ontology.vdb.elasticsearch import is_retryable_failure
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +37,26 @@ def _is_transient(exc: Exception) -> bool:
     ``APIConnectionError`` covers timeouts too, whose message ("Request timed
     out.") names no status. Any other error -- a bad configuration, an invalid
     response -- fails at once, whatever its message happens to contain.
+
+    The Elasticsearch store embeds the query itself, so an endpoint blip
+    reaches here as the cluster's error -- often a 400 that quotes the
+    endpoint's real status in its body; see ``is_retryable_failure``.
     """
     if isinstance(exc, APIConnectionError):
         return True
     if isinstance(exc, APIStatusError):
         return exc.status_code in (408, 429) or exc.status_code >= 500
+    if isinstance(exc, TransportError):
+        return True
+    if isinstance(exc, ApiError):
+        return exc.status_code != 409 and is_retryable_failure(
+            exc.status_code, (str(exc), exc.body)
+        )
     return False
 
 
 class Retriever:
-    """Embed a query and run a k-NN search against one :class:`PostgresVDB`.
+    """Embed a query and run a k-NN search against one :class:`VectorStore`.
 
     ``vdb_kwargs["vdb"]`` is part of the interface, not an implementation
     detail: :func:`~auto_ontology.retrieval.data_access.semantic_search.search_semantic_index`
@@ -52,12 +64,12 @@ class Retriever:
     the ``where`` filter.
     """
 
-    def __init__(self, vdb: PostgresVDB, embed_params: EmbedParams) -> None:
+    def __init__(self, vdb: VectorStore, embed_params: EmbedParams) -> None:
         self.vdb_kwargs: dict[str, Any] = {"vdb": vdb}
         self.embed_params = embed_params
 
     @property
-    def vdb(self) -> PostgresVDB:
+    def vdb(self) -> VectorStore:
         return self.vdb_kwargs["vdb"]
 
     def query(
@@ -69,20 +81,27 @@ class Retriever:
         """The *top_k* nearest rows to *text*, best first.
 
         Each hit is ``{"text", "metadata", "_distance"}``, with ``metadata``
-        the row's full stored metadata. ``vdb_kwargs["where"]``, when given,
-        is the store's metadata filter. A timeout, a dropped connection or a
-        5xx/408/429 from the embedding endpoint is retried with backoff; when
-        the query still cannot be embedded this raises, with the endpoint's
-        HTTP status in the message, so callers can tell a failure from an
-        empty result.
+        the row's full stored metadata, plus any other ``_``-prefixed scores
+        the store returns (a hybrid search's ``_fused_score`` and per-branch
+        scores). ``vdb_kwargs["where"]``, when given, is the store's metadata
+        filter. A timeout, a dropped connection or a 5xx/408/429 from the
+        embedding endpoint is retried with backoff; when the query still
+        cannot be embedded this raises, with the endpoint's HTTP status in the
+        message, so callers can tell a failure from an empty result.
+
+        A store that embeds server-side is handed the text itself, and the
+        query is embedded -- as a ``query``, not a ``passage`` -- by its
+        inference endpoint, so the search itself is what gets retried.
         """
-        vector = self._embed_query(text)
-        if vector is None:
+        if not text.strip():
             raise ValueError("Cannot search for a blank query.")
         where = (vdb_kwargs or {}).get("where")
-        hits = self.vdb.retrieval([vector], top_k=top_k, where=where)[0]
+        hits = self._search(text, top_k, where)
         return [
             {
+                # Store-specific scores (a hybrid hit's ``_fused_score`` and per-branch
+                # scores) ride along; see retrieval.data_access.hit_scores.
+                **{k: v for k, v in hit.items() if k.startswith("_")},
                 "text": (hit.get("text") or "").strip(),
                 "metadata": hit.get("metadata") or {},
                 "_distance": float(hit.get("_distance", 0.0)),
@@ -90,16 +109,11 @@ class Retriever:
             for hit in hits[:top_k]
         ]
 
-    def _embed_query(self, text: str) -> list[float] | None:
+    def _search(self, text: str, top_k: int, where: Any) -> list[dict[str, Any]]:
         for attempt in range(1, _QUERY_ATTEMPTS + 1):
             try:
-                return embed_texts(
-                    [text],
-                    self.embed_params,
-                    "query",
-                    timeout=_QUERY_TIMEOUT_S,
-                    retries=0,
-                )[0]
+                query = self._query_input(text)
+                return self.vdb.retrieval([query], top_k=top_k, where=where)[0]
             except Exception as exc:
                 if attempt == _QUERY_ATTEMPTS or not _is_transient(exc):
                     raise
@@ -113,6 +127,18 @@ class Retriever:
                 )
                 time.sleep(wait)
         raise AssertionError("unreachable")
+
+    def _query_input(self, text: str) -> Any:
+        """The query text for a store that embeds it, or else its vector."""
+        if self.vdb.embeds_server_side:
+            return text.strip()
+        return embed_texts(
+            [text],
+            self.embed_params,
+            "query",
+            timeout=_QUERY_TIMEOUT_S,
+            retries=0,
+        )[0]
 
 
 _data_retriever: Retriever | None = None
@@ -141,7 +167,7 @@ def _close_retriever_vdb(retriever: Retriever | None) -> None:
     try:
         retriever.vdb.close()
     except Exception:
-        logger.exception("Failed to close PostgresVDB on retriever cleanup")
+        logger.exception("Failed to close the VDB on retriever cleanup")
 
 
 def close_retrievers() -> None:

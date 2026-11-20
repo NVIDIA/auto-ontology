@@ -93,7 +93,7 @@ def clear_connection(*, database_name: str) -> None:
 
     The row itself stays. ``catalog_schema`` cascades off it, so deleting it
     here would drop the ingested catalog while leaving behind the semantic rows
-    and pgvector embeddings that are identified *through* it — the half-state
+    and vector-store embeddings that are identified *through* it — the half-state
     :func:`auto_ontology.dal.reset.delete_all_data` orders its own deletes to avoid.
     Tearing the graph down is that function's job.
     """

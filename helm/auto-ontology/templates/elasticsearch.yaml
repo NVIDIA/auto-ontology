@@ -1,0 +1,127 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.elasticsearch.bundled.enabled }}
+{{- $bundled := .Values.elasticsearch.bundled }}
+{{/*
+Single-node Elasticsearch for evaluating the elasticsearch vector store. See
+`elasticsearch.bundled` in values.yaml for why this is not for production.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elasticsearch-data
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "elasticsearch") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with $bundled.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $bundled.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "elasticsearch") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $bundled.service.port }}
+      targetPort: 9200
+  selector:
+    {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "elasticsearch") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "elasticsearch") | nindent 4 }}
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "elasticsearch") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "elasticsearch") | nindent 8 }}
+    spec:
+      securityContext:
+        # The image runs as uid 1000; the data volume has to be writable by it.
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: elasticsearch
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          image: "{{ $bundled.image.repository }}:{{ $bundled.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9200
+          env:
+            - name: discovery.type
+              value: single-node
+            # Security on, so the cluster needs a password; TLS off on HTTP,
+            # which stays inside the cluster network. Setting these explicitly
+            # also skips the image's first-start certificate generation.
+            - name: xpack.security.enabled
+              value: "true"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: xpack.security.transport.ssl.enabled
+              value: "false"
+            # The `nvidia` inference service is an Enterprise feature.
+            - name: xpack.license.self_generated.type
+              value: trial
+            # mmap needs vm.max_map_count raised on the node, which takes a
+            # privileged init container. A single small node does not need it.
+            - name: node.store.allow_mmap
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: {{ $bundled.javaOpts | quote }}
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auto-ontology.secretName" . }}
+                  key: ES_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -fsS -u "elastic:${ELASTIC_PASSWORD}" "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            # The port, not cluster health: a red cluster is not fixed by a
+            # restart.
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            {{- toYaml $bundled.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: elasticsearch-data
+{{- end }}

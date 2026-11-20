@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Literal
 
 from auto_ontology.catalog.constants import Labels
 
+from auto_ontology.retrieval.data_access.hit_scores import HYBRID_SCORE_FIELDS
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 
 if TYPE_CHECKING:
@@ -203,7 +204,9 @@ def _hits_to_semantic_rows(
     at most *per_label_k* rows are kept (best-first).  *per_label_k* can
     be a single int (same cap for every label) or a ``{label: k}`` dict.
 
-    ``score`` is the raw vector ``_distance`` (lower is better).
+    ``score`` is the raw vector ``_distance`` (lower is better). On a hybrid
+    search that is ``1 - fused_score``, an ordering only; the row then also carries
+    the fields in ``HYBRID_SCORE_FIELDS`` (see ``hit_scores``).
     """
     label_counts: dict[str, int] = {}
     rows: list[dict] = []
@@ -229,6 +232,12 @@ def _hits_to_semantic_rows(
         }
         for _field in ("name", "schema_name", "database_name", "data_type", "source"):
             val = meta.get(_field)
+            if val is not None:
+                row[_field] = val
+        # A hybrid hit's scores, under the names hit_scores reads. Absent on a
+        # semantic search, where ``score`` alone is the cosine distance.
+        for _field in HYBRID_SCORE_FIELDS:
+            val = hit.get(f"_{_field}")
             if val is not None:
                 row[_field] = val
         rows.append(row)

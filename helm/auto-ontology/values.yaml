@@ -107,6 +107,79 @@ postgres:
       memory: 256Mi
 
 # ------------------------------------------------------------------
+# Vector store
+# ------------------------------------------------------------------
+vectorStore:
+  # postgres (default): pgvector in the Postgres above; the app embeds rows
+  # itself with the EMBED_* model.
+  # elasticsearch: a semantic_text index. Elasticsearch embeds rows and queries
+  # through an `nvidia` inference endpoint the app creates from the same
+  # EMBED_* settings, so the model is configured once. Postgres still holds
+  # the catalog either way. Configure the cluster under `elasticsearch` below.
+  backend: postgres
+  # semantic (default): vector search only. hybrid (elasticsearch only, ES
+  # 9.5+ or Serverless): BM25 over row names and vector search, fused in one
+  # ES|QL query and weighted towards the vector search. Puts exact identifiers
+  # (rental_rate, MediaTypeId) first without losing paraphrases.
+  searchMode: semantic
+
+# ------------------------------------------------------------------
+# Elasticsearch (used when vectorStore.backend=elasticsearch)
+# ------------------------------------------------------------------
+# Needs Elasticsearch 9.3+ or Serverless. Self-managed clusters need an
+# Enterprise (or trial) license for the `nvidia` inference service.
+elasticsearch:
+  # An existing cluster: Elastic Cloud, Serverless, ECK or self-managed.
+  # Leave url empty when bundled.enabled is true.
+  url: ""
+  # Authenticate with an API key, or with username/password.
+  apiKey: ""
+  username: ""
+  # With bundled.enabled and no password, the chart generates one and keeps it
+  # across upgrades by reading the existing Secret. `helm template` and
+  # --dry-run can't read it, so set a password if you apply rendered output:
+  # otherwise each render makes a new one and the app can't authenticate.
+  password: ""
+  verifyCerts: true
+  # A Secret holding the cluster's CA certificate, mounted into the backend and
+  # ingestion pods. For ECK this is `<cluster>-es-http-certs-public`.
+  caSecret:
+    name: ""
+    key: ca.crt
+  # Index names are <indexPrefix>-data_objects_layer / -semantic_layer.
+  # Empty = auto-ontology.
+  indexPrefix: ""
+  # The inference endpoint the app creates and writes through. Empty =
+  # auto-ontology-embed. It keeps the model and key it was created with: to
+  # change either, delete the endpoint (and, for a new model, the indices) and
+  # re-ingest.
+  inferenceId: ""
+
+  # A single-node Elasticsearch in the cluster, for evaluation. It runs on a
+  # 30-day trial license, which the `nvidia` inference service needs; when the
+  # trial ends ingest and search stop working. For anything longer-lived point
+  # `url` at Elastic Cloud / Serverless, or an ECK cluster with a license.
+  # Security is on: the app connects as `elastic` with `password` above, or a
+  # generated one kept across upgrades. HTTP is plain inside the cluster.
+  bundled:
+    enabled: false
+    image:
+      repository: docker.elastic.co/elasticsearch/elasticsearch
+      tag: "9.5.6"
+    service:
+      port: 9200
+    javaOpts: "-Xms1g -Xmx1g"
+    persistence:
+      size: 10Gi
+      storageClassName: ""
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        memory: 2Gi
+
+# ------------------------------------------------------------------
 # pgAdmin
 # ------------------------------------------------------------------
 pgadmin:

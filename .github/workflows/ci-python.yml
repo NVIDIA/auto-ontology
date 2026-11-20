@@ -122,6 +122,7 @@ jobs:
       POSTGRES_USER: auto_ontology
       POSTGRES_PASSWORD: auto_ontology
       POSTGRES_DATABASE: auto_ontology
+      ES_URL: http://localhost:9200
 
     steps:
       - name: Checkout
@@ -166,6 +167,26 @@ jobs:
       # an UndefinedColumn in whichever environment deploys first.
       - name: Fail if the schema has drifted from the models
         run: uv run --no-sync alembic check
+
+      # A local Elasticsearch in trial mode, which inference endpoints need, so
+      # the tests can run inference in Elasticsearch. Its endpoint calls the
+      # fake embedder on this runner through the host-gateway alias.
+      - name: Start Elasticsearch
+        run: |
+          docker run -d --name elasticsearch -p 9200:9200 \
+            --add-host=host.docker.internal:host-gateway \
+            -e discovery.type=single-node \
+            -e xpack.security.enabled=false \
+            -e xpack.license.self_generated.type=trial \
+            -e ES_JAVA_OPTS="-Xms1g -Xmx1g" \
+            docker.elastic.co/elasticsearch/elasticsearch:9.5.6
+          for _ in $(seq 1 60); do
+            curl -sf "localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" \
+              >/dev/null && exit 0
+            sleep 2
+          done
+          docker logs elasticsearch
+          exit 1
 
       # `-p no:randomly` is not set and no `-x`: the point of this job is the
       # whole picture, including how many of the fixture-backed tests ran.
