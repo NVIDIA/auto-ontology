@@ -561,6 +561,19 @@ def _join_routes(anchor: str, dest: str, boost: set[str]) -> tuple[list[dict], b
     return ranked, True
 
 
+def _link_join_routes(ctx: ToolContext, links: list[_PendingLink]) -> None:
+    """Keep one route per table pair in ``ctx.join_paths``, for ``predict``.
+
+    Runs after ``ctx.seen_tables`` is updated, so "loaded" means the tables
+    ``predict`` will build its graph from: a table the observation limit
+    shortened or left out is not one of them. One link per table pair is what
+    ``predict`` expects.
+    """
+    loaded = {(t.get("schema_name"), t.get("name")) for t in ctx.seen_tables.values()}
+    for routes, ranked in links:
+        ctx.join_paths.append({"path": _route_to_link(routes, loaded, ranked)})
+
+
 def _route_to_link(
     routes: list[dict],
     loaded: set[tuple[str | None, str | None]],
@@ -605,30 +618,35 @@ def _join_line(table: dict, other: dict, routes: list[dict], *, ranked: bool) ->
     )
 
 
+#: One table pair's routes, and whether they are ranked, waiting for
+#: :func:`_link_join_routes` to pick the route ``predict`` links with.
+_PendingLink = tuple[list[dict], bool]
+
+
 def _join_lines(
     ctx: ToolContext, new_tables: list[dict]
-) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
+) -> tuple[list[tuple[str, set[tuple[str | None, str | None]]]], list[_PendingLink]]:
     """Join routes from each new table to every table already in view.
 
     Two tables one hop apart get every direct column pair, the default first;
     the others get their one shortest route, or the ranked alternatives when
     more are asked for. Each line comes with every table on its routes,
-    bridges included. One route per pair is kept in ``ctx.join_paths``: the
-    first, or with ranked routes the best one whose tables are all loaded, so
-    ``predict`` can apply it.
+    bridges included. Each pair's routes are also returned for
+    :func:`_link_join_routes`, which runs once the observation limit has
+    settled which tables are in ``ctx.seen_tables``.
     """
     lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    links: list[_PendingLink] = []
     lookups = 0
     others = list(ctx.seen_tables.values()) + new_tables
     boost = set(ctx.seen_tables) | {str(t["id"]) for t in new_tables}
-    loaded = {(t.get("schema_name"), t.get("name")) for t in others}
     for table in new_tables:
         for other in others:
             pair = frozenset((str(table["id"]), str(other["id"])))
             if len(pair) < 2 or pair in ctx.joined_pairs:
                 continue
             if lookups >= _JOIN_PAIRS_PER_CALL:
-                return lines
+                return lines, links
             lookups += 1
             ctx.joined_pairs.add(pair)
             anchor = _anchor_column_id(ctx, table)
@@ -638,14 +656,12 @@ def _join_lines(
             routes, ranked = _join_routes(anchor, dest, boost)
             if not routes:
                 continue
-            # One route only: ``predict`` links its graph with these, and one
-            # link per table pair is what it expects.
-            ctx.join_paths.append({"path": _route_to_link(routes, loaded, ranked)})
+            links.append((routes, ranked))
             tables: set[tuple[str | None, str | None]] = set()
             for route in routes:
                 tables |= _hop_tables(route["hops"])
             lines.append((_join_line(table, other, routes, ranked=ranked), tables))
-    return lines
+    return lines, links
 
 
 def _concept_lines(
@@ -839,7 +855,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     ]
     concept_lines = _concept_lines(ctx, new_tables)
     named += [(line, tables) for line, tables, _ in concept_lines]
-    named += _join_lines(ctx, new_tables)
+    join_lines, join_links = _join_lines(ctx, new_tables)
+    named += join_lines
     if config.siblings_enabled():
         named += [
             (line, set().union(*(own(t) for t in tables)))
@@ -880,6 +897,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     ctx.seen_tables.update(
         {str(t["id"]): t for t in new_tables if new_blocks[str(t["id"])] in result}
     )
+    _link_join_routes(ctx, join_links)
     for block, tables in named:
         if block in result or short_blocks.get(block, "\0") in result:
             for schema, name in tables:
