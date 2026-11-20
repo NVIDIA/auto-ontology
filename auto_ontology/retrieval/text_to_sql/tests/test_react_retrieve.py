@@ -1083,3 +1083,33 @@ def test_a_short_block_says_to_retrieve_the_name_as_searched() -> None:
         'TABLE "sales-data".orders (shortened to fit)',
         "  … 2 more columns not shown; retrieve sales-data.orders to see all of them",
     ]
+
+
+def test_a_concept_line_quotes_its_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    columns = [
+        {"schema_name": "sales-data", "table_name": t, "column_name": "customerId"}
+        for t in ("customers", "customer_ext")
+    ]
+    concept = {
+        "concept_id": "concept-1",
+        "concept_name": "Customer",
+        "members": [
+            {"table_id": "t-1", "schema_name": "sales-data", "table_name": "customers"},
+            {
+                "table_id": "t-2",
+                "schema_name": "sales-data",
+                "table_name": "customer_ext",
+            },
+        ],
+        "keys": [{"columns": columns}],
+    }
+    monkeypatch.setattr(tool, "fetch_concept_members", lambda ids: {"t-1": concept})
+    ctx = ToolContext(retriever=object(), connectors=[], dialect="postgres")
+
+    [(line, _, _)] = tool._concept_lines(ctx, [{"id": "t-1"}])
+
+    assert line == (
+        'CONCEPT Customer: "sales-data".customers + "sales-data".customer_ext, '
+        'joined on "sales-data".customers."customerId" = '
+        '"sales-data".customer_ext."customerId"'
+    )

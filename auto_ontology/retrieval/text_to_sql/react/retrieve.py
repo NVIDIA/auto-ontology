@@ -644,10 +644,20 @@ def _concept_lines(
         if concept["concept_id"] in ctx.shown_concepts | listed:
             continue
         listed.add(concept["concept_id"])
-        members = " + ".join(_qualified_member(m) for m in concept["members"])
+        dialect = ctx.dialect_of(table)
+        members = " + ".join(
+            ctx.name(m.get("schema_name"), m.get("table_name"), dialect=dialect)
+            for m in concept["members"]
+        )
         keys = [
             " = ".join(
-                f"{_qualified_member(c)}.{c['column_name']}" for c in key["columns"]
+                ctx.name(
+                    c.get("schema_name"),
+                    c.get("table_name"),
+                    c.get("column_name"),
+                    dialect=dialect,
+                )
+                for c in key["columns"]
             )
             for key in concept["keys"]
             if len(key["columns"]) > 1
@@ -666,12 +676,6 @@ def _concept_lines(
             )
         )
     return lines
-
-
-def _qualified_member(member: dict) -> str:
-    return ".".join(
-        p for p in (member.get("schema_name"), member.get("table_name")) if p
-    )
 
 
 def _cap(
