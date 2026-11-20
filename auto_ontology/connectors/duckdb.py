@@ -213,10 +213,51 @@ class DuckDBDatabase(SQLDatabase):
         )
 
     def get_pks(self) -> pd.DataFrame:
-        return pd.DataFrame()
+        """Return declared primary-key columns, one row per key column.
+
+        ``duckdb_constraints()`` lists a key's columns in declared order, so
+        ``ordinal_position`` is each column's place in the key -- not in the
+        table -- and a composite key declared ``(line_no, order_id)`` keeps
+        that order. Scoped to the connected database: an attached catalog's
+        keys would otherwise land on same-named tables in this one.
+        """
+        return self.execute(
+            """
+            SELECT
+                schema_name AS table_schema,
+                table_name,
+                UNNEST(constraint_column_names) AS column_name,
+                UNNEST(range(1, len(constraint_column_names) + 1)) AS ordinal_position
+            FROM duckdb_constraints()
+            WHERE constraint_type = 'PRIMARY KEY'
+              AND database_name = current_database()
+            ORDER BY table_schema, table_name, ordinal_position
+        """
+        )
 
     def get_fks(self) -> pd.DataFrame:
-        return pd.DataFrame()
+        """Return declared foreign-key columns, one row per column pair.
+
+        Two ``UNNEST`` calls in one select list are zipped by position, which
+        pairs each column of a composite key with the column it references.
+        DuckDB refuses foreign keys across schemas, so the referenced schema
+        is always the referencing table's own.
+        """
+        return self.execute(
+            """
+            SELECT
+                schema_name AS table_schema,
+                table_name,
+                UNNEST(constraint_column_names) AS column_name,
+                schema_name AS referenced_schema,
+                referenced_table,
+                UNNEST(referenced_column_names) AS referenced_column
+            FROM duckdb_constraints()
+            WHERE constraint_type = 'FOREIGN KEY'
+              AND database_name = current_database()
+            ORDER BY table_schema, table_name, column_name
+        """
+        )
 
     # ------------------------------------------------------------------
     # Context manager / cleanup
