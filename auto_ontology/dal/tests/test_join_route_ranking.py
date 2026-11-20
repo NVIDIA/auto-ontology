@@ -227,3 +227,37 @@ def test_schema_qualified_names_break_ties_between_same_named_tables() -> None:
     names = {"t1": "sales.customer", "t2": "archive.customer"}
     ranked = rank_routes(build(edges), "a", "b", k=2, table_names=names)
     assert [route.tables[1] for route in ranked] == ["t2", "t1"]
+
+
+def test_the_cap_keeps_a_shorter_route_whatever_the_ids() -> None:
+    # 200 three-hop routes a -> x -> u_i -> b, and one two-hop route
+    # a -> z -> b. `x` sorts before `z`, so an id-ordered walk would fill the
+    # cap through `x` and never reach `z`.
+    adjacency: dict[str, list[tuple[str, str, str, str]]] = {
+        "a": [("x", "a.x", "x.a", "k"), ("z", "a.z", "z.a", "k")],
+        "x": [(f"u{i:03}", f"x.u{i}", f"u{i}.x", "k") for i in range(200)],
+        "z": [("b", "z.b", "b.z", "k")],
+        "b": [],
+    }
+    for i in range(200):
+        adjacency[f"u{i:03}"] = [("b", f"u{i}.b", f"b.u{i}", "k")]
+
+    routes = enumerate_routes(adjacency, "a", "b", max_extra_hops=1)
+    assert len(routes) == MAX_ENUMERATED_ROUTES
+    assert routes[0][0] == ("a", "z", "b")
+
+    (best,) = rank_routes(adjacency, "a", "b", k=1)
+    assert best.tables == ("a", "z", "b")
+
+
+def test_within_one_length_the_cap_keeps_boosted_routes_first() -> None:
+    # 250 two-hop routes a -> m_i -> b; only m_249 is boosted and it sorts last.
+    adjacency: dict[str, list[tuple[str, str, str, str]]] = {
+        "a": [(f"m{i:03}", f"a.m{i}", f"m{i}.a", "k") for i in range(250)],
+        "b": [],
+    }
+    for i in range(250):
+        adjacency[f"m{i:03}"] = [("b", f"m{i}.b", f"b.m{i}", "k")]
+
+    (best,) = rank_routes(adjacency, "a", "b", k=1, boost_tables={"m249"})
+    assert best.tables == ("a", "m249", "b")

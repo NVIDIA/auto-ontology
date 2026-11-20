@@ -834,17 +834,42 @@ STAFF = {
 def test_predict_can_apply_every_link_when_the_limit_cuts_a_bridge(
     ranked: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The top-ranked route runs through `hr.staff`, which this retrieve found
-    but the observation limit cut, so it is not in `seen_tables` and `predict`
-    will not load it. The route linked must be one it can apply."""
+    """The top-ranked orders/customers route runs through `hr.staff`, which
+    this retrieve found but the observation limit cut, so it is not in
+    `seen_tables` and `predict` will not load it. That pair must link the route
+    `predict` can apply; pairs that end at `hr.staff` keep their own route."""
     from auto_ontology.retrieval import kumo
     from auto_ontology.retrieval.kumo import rag
     from auto_ontology.retrieval.text_to_sql.react.predict import predict
 
-    direct = [_hop(ORDERS_T, CUSTOMERS_T)]
-    monkeypatch.setattr(
-        tool, "find_join_paths", lambda *a, **k: [{"path": VIA_STAFF}, {"path": direct}]
-    )
+    staff_t = ("hr", "staff")
+    ref = {"orders": ORDERS_T, "customers": CUSTOMERS_T, "staff": staff_t}
+
+    def path(*tables: tuple[str, str]) -> list[dict]:
+        return [_hop(a, b) for a, b in zip(tables, tables[1:])]
+
+    def ends(anchor: str, dest: str) -> tuple[tuple[str, str], tuple[str, str]]:
+        # The stubbed column ids are "<table>.<column>".
+        return ref[anchor.split(".")[0]], ref[dest.split(".")[0]]
+
+    requested: set[frozenset[tuple[str, str]]] = set()
+
+    def routes(anchor: str, dest: str) -> list[dict]:
+        a, b = ends(anchor, dest)
+        requested.add(frozenset((a, b)))
+        if staff_t in (a, b):
+            return [{"hops": path(a, b), "default": True}]
+        return [{"hops": path(a, staff_t, b), "default": True}]
+
+    def ranked_paths(
+        anchor: str, dest: str, *, k: int, boost_table_ids: set[str]
+    ) -> list[dict]:
+        a, b = ends(anchor, dest)
+        assert staff_t not in (a, b), "a one-hop pair is never ranked"
+        return [{"path": path(a, staff_t, b)}, {"path": path(a, b)}]
+
+    monkeypatch.setattr(tool, "find_join_routes", routes)
+    monkeypatch.setattr(tool, "find_join_paths", ranked_paths)
     tables = {**TABLES, STAFF["id"]: STAFF}
     monkeypatch.setattr(
         tool, "fetch_tables_by_ids", lambda ids: [tables[i] for i in ids if i in tables]
@@ -875,9 +900,14 @@ def test_predict_can_apply_every_link_when_the_limit_cuts_a_bridge(
     built: dict[str, Any] = {}
 
     class Built:
-        pass
+        """Stands in for a KumoRFM ``PredictionContext``."""
 
-    def build(connectors, tables, join_paths=None, examples=None):
+    def build(
+        connectors: list[Any],
+        tables: list[dict],
+        join_paths: list[dict] | None = None,
+        examples: list[dict] | None = None,
+    ) -> Built:
         built.update(tables=tables, join_paths=join_paths)
         return Built()
 
@@ -892,19 +922,37 @@ def test_predict_can_apply_every_link_when_the_limit_cuts_a_bridge(
     tool.retrieve(ctx, "customer and clerk")
     # Found and joined, but cut by the limit: not loaded.
     assert set(ctx.seen_tables) == {"t-orders", "t-customers"}
-    assert frozenset({"t-staff", "t-orders"}) in ctx.joined_pairs
+    assert frozenset((staff_t, ORDERS_T)) in requested
 
     predict(ctx)
 
     loaded = {(t.get("schema_name"), t["name"]) for t in built["tables"]}
-    assert built["join_paths"]
+    links: dict[frozenset[tuple[str, str]], list[dict]] = {}
     for link in built["join_paths"]:
-        hop_tables = {
+        hops = link["path"]
+        first = (hops[0]["source_schema"], hops[0]["source_table"])
+        last = (hops[-1]["target_schema"], hops[-1]["target_table"])
+        links[frozenset((first, last))] = hops
+    # Every link connects the pair it was asked for, one per pair.
+    assert set(links) == requested
+    assert len(built["join_paths"]) == len(requested)
+
+    def tables_of(hops: list[dict]) -> set[tuple[str, str]]:
+        return {
             (hop[f"{side}_schema"], hop[f"{side}_table"])
-            for hop in link["path"]
+            for hop in hops
             for side in ("source", "target")
         }
-        assert hop_tables <= loaded, link
+
+    # The loaded pair links its direct route, not the one through hr.staff.
+    assert tables_of(links[frozenset((ORDERS_T, CUSTOMERS_T))]) == {
+        ORDERS_T,
+        CUSTOMERS_T,
+    }
+    # Every pair whose ends predict loads gets a link predict can apply.
+    for pair, hops in links.items():
+        if pair <= loaded:
+            assert tables_of(hops) <= loaded, hops
 
 
 @pytest.mark.parametrize(("raw", "routes"), [("", 1), ("3", 3), ("0", 1), ("9", 5)])

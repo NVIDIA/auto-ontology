@@ -46,14 +46,19 @@ adjacency as the single-route BFS (so every hop is a join that BFS would also
 accept), and are at most ``max_extra_hops`` longer than the shortest route and
 never longer than ``max_hops``. Enumeration prunes with the remaining distance
 to the destination, so it only walks routes that can still finish within
-bounds.
+bounds. It collects routes shortest first and, within a length, follows the
+edges most likely to score well first (boosted tables, then more resource,
+then names), so the :data:`MAX_ENUMERATED_ROUTES` cap drops the least
+promising candidates. Within one length this is a heuristic order, not an
+exact best-first search.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 #: ``adjacency[table_id]`` lists ``(next_table_id, source_col_id, target_col_id,
 #: key_id)``.
@@ -129,6 +134,11 @@ def _distances_to(adjacency: Adjacency, dest: str) -> dict[str, int]:
     return distance
 
 
+#: Orders the edges leaving one table during enumeration; smaller is visited
+#: first. Receives ``(next_table_id, source_col_id, target_col_id, key_id)``.
+EdgePriority = Callable[[tuple[str, str, str, str]], Any]
+
+
 def enumerate_routes(
     adjacency: Adjacency,
     anchor: str,
@@ -136,35 +146,58 @@ def enumerate_routes(
     *,
     max_extra_hops: int = 1,
     max_hops: int = 8,
+    edge_priority: EdgePriority | None = None,
 ) -> list[tuple[tuple[str, ...], tuple[Hop, ...]]]:
-    """Simple routes from *anchor* to *dest* within the length bounds."""
+    """Simple routes from *anchor* to *dest* within the length bounds.
+
+    Routes are collected shortest first: every route of the shortest length,
+    then the next length, until :data:`MAX_ENUMERATED_ROUTES` is reached. So
+    when the cap cuts, it cuts longer routes, never a shorter one. Within one
+    length the walk is depth-first and visits a table's edges in
+    *edge_priority* order (by edge, ids included, when not given), so the
+    routes the cap keeps are the most promising ones rather than whichever
+    ids sort first.
+    """
     if anchor == dest:
         return []
     distance = _distances_to(adjacency, dest)
     if anchor not in distance:
         return []
     limit = min(distance[anchor] + max_extra_hops, max_hops)
+    order: EdgePriority = edge_priority or (lambda edge: edge)
 
     routes: list[tuple[tuple[str, ...], tuple[Hop, ...]]] = []
-    stack: list[tuple[tuple[str, ...], tuple[Hop, ...]]] = [((anchor,), ())]
-    while stack and len(routes) < MAX_ENUMERATED_ROUTES:
-        tables, hops = stack.pop()
-        here = tables[-1]
-        for next_table, source_col, target_col, key_id in sorted(
-            adjacency.get(here, ()), reverse=True
-        ):
-            if next_table in tables:
-                continue
-            remaining = distance.get(next_table)
-            if remaining is None or len(hops) + 1 + remaining > limit:
-                continue
-            route = (tables + (next_table,), hops + ((source_col, target_col, key_id),))
-            if next_table == dest:
-                routes.append(route)
-                if len(routes) >= MAX_ENUMERATED_ROUTES:
-                    return routes
-            else:
-                stack.append(route)
+    for length in range(distance[anchor], limit + 1):
+        stack: list[tuple[tuple[str, ...], tuple[Hop, ...]]] = [((anchor,), ())]
+        while stack:
+            tables, hops = stack.pop()
+            depth = len(hops) + 1
+            candidates = []
+            for edge in adjacency.get(tables[-1], ()):
+                next_table = edge[0]
+                remaining = distance.get(next_table)
+                if next_table in tables or remaining is None:
+                    continue
+                if depth + remaining > length:
+                    continue
+                if next_table == dest and depth != length:
+                    continue
+                candidates.append(edge)
+            candidates.sort(key=order)
+            deeper = []
+            for next_table, source_col, target_col, key_id in candidates:
+                route = (
+                    tables + (next_table,),
+                    hops + ((source_col, target_col, key_id),),
+                )
+                if next_table == dest:
+                    routes.append(route)
+                    if len(routes) >= MAX_ENUMERATED_ROUTES:
+                        return routes
+                else:
+                    deeper.append(route)
+            # The stack pops from the end, so the best candidate goes on last.
+            stack.extend(reversed(deeper))
     return routes
 
 
@@ -198,8 +231,25 @@ def rank_routes(
     columns = column_names or {}
     boosted = set(boost_tables)
     ranked: list[RankedRoute] = []
+
+    def edge_priority(edge: tuple[str, str, str, str]) -> tuple[Any, ...]:
+        next_table, source_col, target_col, _ = edge
+        return (
+            next_table not in boosted,
+            -resources.get(next_table, 0.0),
+            names.get(next_table, next_table),
+            columns.get(source_col, source_col),
+            columns.get(target_col, target_col),
+            edge,
+        )
+
     for tables, hops in enumerate_routes(
-        adjacency, anchor, dest, max_extra_hops=max_extra_hops, max_hops=max_hops
+        adjacency,
+        anchor,
+        dest,
+        max_extra_hops=max_extra_hops,
+        max_hops=max_hops,
+        edge_priority=edge_priority,
     ):
         reliability = sum(resources.get(t, 0.0) for t in tables) / len(hops)
         factor = (1.0 + boost) ** sum(1 for t in tables[1:-1] if t in boosted)
