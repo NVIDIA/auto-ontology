@@ -15,6 +15,7 @@ started.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
@@ -41,13 +42,13 @@ def _client_connections(conn: psycopg.Connection) -> int:
 
 
 @pytest.fixture
-def probe():
+def probe() -> Iterator[tuple[psycopg.Connection, str]]:
     """A throwaway collection, and a connection to count the others with."""
     try:
         conn = psycopg.connect(
             get_postgres_connection_string(), connect_timeout=3, autocommit=True
         )
-    except Exception as exc:  # noqa: BLE001 -- no database, nothing to assert
+    except psycopg.OperationalError as exc:
         pytest.skip(f"postgres not reachable: {exc}")
     collection = f"pool_probe_{uuid.uuid4().hex[:8]}"
     try:
@@ -57,7 +58,9 @@ def probe():
         conn.close()
 
 
-def test_closing_each_store_returns_its_connections(probe) -> None:
+def test_closing_each_store_returns_its_connections(
+    probe: tuple[psycopg.Connection, str],
+) -> None:
     conn, collection = probe
 
     def one_call(index: int) -> None:
