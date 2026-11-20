@@ -14,6 +14,8 @@ started.
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -103,3 +105,37 @@ def test_the_context_manager_closes_the_store() -> None:
         vdb.close.assert_not_called()
 
     vdb.close.assert_called_once_with()
+
+
+def test_workers_sharing_a_store_build_one_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Semantic FK resolution shares one store across its workers.
+
+    Each engine built is a pool, and ``close()`` disposes only the one the
+    store keeps, so a second engine built by a racing worker would stay open.
+    """
+    import auto_ontology.vdb.postgres as mod
+
+    built: list[object] = []
+    all_waiting = threading.Barrier(_WORKERS)
+
+    def _slow_engine(*args: object, **kwargs: object) -> object:
+        engine = object()
+        built.append(engine)
+        time.sleep(0.05)  # let the other workers reach the check meanwhile
+        return engine
+
+    monkeypatch.setattr(mod.PGEngine, "from_connection_string", _slow_engine)
+    monkeypatch.setattr(mod, "_instrument_engine", lambda engine: None)
+    vdb = PostgresVDB(connection_string="postgresql://unused")
+
+    def first_use(_: int) -> object:
+        all_waiting.wait()
+        return vdb._get_engine()
+
+    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+        engines = list(pool.map(first_use, range(_WORKERS)))
+
+    assert len(built) == 1
+    assert all(engine is built[0] for engine in engines)
