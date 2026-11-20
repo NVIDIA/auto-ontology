@@ -44,19 +44,29 @@ them apart.
 **Bounds.** Routes are simple (no repeated table), use the same directed
 adjacency as the single-route BFS (so every hop is a join that BFS would also
 accept), and are at most ``max_extra_hops`` longer than the shortest route and
-never longer than ``max_hops``. Enumeration prunes with the remaining distance
-to the destination, so it only walks routes that can still finish within
-bounds. It collects routes shortest first and, within a length, follows the
-edges most likely to score well first (boosted tables, then more resource,
-then names), so the :data:`MAX_ENUMERATED_ROUTES` cap drops the least
-promising candidates. Within one length this is a heuristic order, not an
-exact best-first search.
+never longer than ``max_hops``.
+
+**Search.** :func:`rank_routes` returns the exact top *k* without listing
+every route. It searches table sequences best first, ordered by an upper
+bound on the score any completion can still reach: the resource collected so
+far, plus the destination's, plus the largest resource any unvisited table
+holds for each table still to add, divided by the length, times the boost of
+every unvisited boosted table that could still fit. A route's score never
+exceeds the bound of any route it extends, so once *k* finished routes beat
+the best bound left in the queue, no unexplored route can beat them. Parallel
+joins between the same two tables share one table sequence and one score; they
+are expanded only when that sequence finishes, and only the first *k* by
+column name. :data:`MAX_SEARCH_STATES` caps the partial routes the search
+expands, so a dense schema cannot turn one prompt into a combinatorial walk;
+only a search that hits it can miss a better route.
 """
 
 from __future__ import annotations
 
+import heapq
+import itertools
 from collections import defaultdict, deque
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,9 +79,11 @@ Hop = tuple[str, str, str]
 DEFAULT_ALPHA = 0.7
 DEFAULT_THETA = 0.005
 DEFAULT_BOOST = 0.5
-#: Hard ceiling on routes enumerated per pair, so a dense schema cannot turn
-#: one prompt into a combinatorial walk.
-MAX_ENUMERATED_ROUTES = 200
+#: Hard ceiling on the partial routes one :func:`rank_routes` call expands.
+MAX_SEARCH_STATES = 10_000
+#: Scores are reported rounded to 6 places, and routes equal after rounding
+#: tie-break by name, so the search keeps going while a bound is this close.
+_EPSILON = 1e-6
 
 
 @dataclass(frozen=True)
@@ -134,73 +146,6 @@ def _distances_to(adjacency: Adjacency, dest: str) -> dict[str, int]:
     return distance
 
 
-#: Orders the edges leaving one table during enumeration; smaller is visited
-#: first. Receives ``(next_table_id, source_col_id, target_col_id, key_id)``.
-EdgePriority = Callable[[tuple[str, str, str, str]], Any]
-
-
-def enumerate_routes(
-    adjacency: Adjacency,
-    anchor: str,
-    dest: str,
-    *,
-    max_extra_hops: int = 1,
-    max_hops: int = 8,
-    edge_priority: EdgePriority | None = None,
-) -> list[tuple[tuple[str, ...], tuple[Hop, ...]]]:
-    """Simple routes from *anchor* to *dest* within the length bounds.
-
-    Routes are collected shortest first: every route of the shortest length,
-    then the next length, until :data:`MAX_ENUMERATED_ROUTES` is reached. So
-    when the cap cuts, it cuts longer routes, never a shorter one. Within one
-    length the walk is depth-first and visits a table's edges in
-    *edge_priority* order (by edge, ids included, when not given), so the
-    routes the cap keeps are the most promising ones rather than whichever
-    ids sort first.
-    """
-    if anchor == dest:
-        return []
-    distance = _distances_to(adjacency, dest)
-    if anchor not in distance:
-        return []
-    limit = min(distance[anchor] + max_extra_hops, max_hops)
-    order: EdgePriority = edge_priority or (lambda edge: edge)
-
-    routes: list[tuple[tuple[str, ...], tuple[Hop, ...]]] = []
-    for length in range(distance[anchor], limit + 1):
-        stack: list[tuple[tuple[str, ...], tuple[Hop, ...]]] = [((anchor,), ())]
-        while stack:
-            tables, hops = stack.pop()
-            depth = len(hops) + 1
-            candidates = []
-            for edge in adjacency.get(tables[-1], ()):
-                next_table = edge[0]
-                remaining = distance.get(next_table)
-                if next_table in tables or remaining is None:
-                    continue
-                if depth + remaining > length:
-                    continue
-                if next_table == dest and depth != length:
-                    continue
-                candidates.append(edge)
-            candidates.sort(key=order)
-            deeper = []
-            for next_table, source_col, target_col, key_id in candidates:
-                route = (
-                    tables + (next_table,),
-                    hops + ((source_col, target_col, key_id),),
-                )
-                if next_table == dest:
-                    routes.append(route)
-                    if len(routes) >= MAX_ENUMERATED_ROUTES:
-                        return routes
-                else:
-                    deeper.append(route)
-            # The stack pops from the end, so the best candidate goes on last.
-            stack.extend(reversed(deeper))
-    return routes
-
-
 def rank_routes(
     adjacency: Adjacency,
     anchor: str,
@@ -224,41 +169,107 @@ def rank_routes(
     same-named tables in two schemas differ) and *column_names* cover the
     route. Ids are the last resort.
     """
-    if k < 1:
+    if k < 1 or anchor == dest:
         return []
+    distance = _distances_to(adjacency, dest)
+    if anchor not in distance:
+        return []
+    limit = min(distance[anchor] + max_extra_hops, max_hops)
     resources = flow_resources(adjacency, anchor, alpha=alpha, theta=theta)
     names = table_names or {}
     columns = column_names or {}
     boosted = set(boost_tables)
-    ranked: list[RankedRoute] = []
+    gain = 1.0 + boost
 
-    def edge_priority(edge: tuple[str, str, str, str]) -> tuple[Any, ...]:
-        next_table, source_col, target_col, _ = edge
-        return (
-            next_table not in boosted,
-            -resources.get(next_table, 0.0),
-            names.get(next_table, next_table),
-            columns.get(source_col, source_col),
-            columns.get(target_col, target_col),
-            edge,
-        )
+    # Parallel joins collapse into one step per neighbouring table, their
+    # hops ordered by column name for the tie-break.
+    steps: dict[str, dict[str, list[Hop]]] = defaultdict(lambda: defaultdict(list))
+    for table, edges in adjacency.items():
+        for next_table, source_col, target_col, key_id in edges:
+            if next_table in distance:
+                steps[table][next_table].append((source_col, target_col, key_id))
 
-    for tables, hops in enumerate_routes(
-        adjacency,
-        anchor,
-        dest,
-        max_extra_hops=max_extra_hops,
-        max_hops=max_hops,
-        edge_priority=edge_priority,
-    ):
-        reliability = sum(resources.get(t, 0.0) for t in tables) / len(hops)
-        factor = (1.0 + boost) ** sum(1 for t in tables[1:-1] if t in boosted)
-        ranked.append(
-            RankedRoute(
-                tables, hops, round(reliability, 6), round(reliability * factor, 6)
+    def hop_key(hop: Hop) -> tuple[Any, ...]:
+        return (columns.get(hop[0], hop[0]), columns.get(hop[1], hop[1]), hop)
+
+    for neighbours in steps.values():
+        for hops in neighbours.values():
+            hops.sort(key=hop_key)
+
+    middle = [t for t in distance if t not in (anchor, dest)]
+    best_middle = max((resources.get(t, 0.0) for t in middle), default=0.0)
+    dest_resource = resources.get(dest, 0.0)
+
+    def bound(tables: tuple[str, ...], collected: float, lifts: int) -> float:
+        """Best score any finished extension of *tables* can reach."""
+        hops = len(tables) - 1
+        spare_boosts = len(boosted.difference(tables, (dest,)))
+        best = 0.0
+        for length in range(hops + distance[tables[-1]], limit + 1):
+            added = length - hops - 1  # tables still to add before dest
+            reliability = (collected + dest_resource + added * best_middle) / length
+            factor = gain ** (lifts + (min(added, spare_boosts) if gain > 1 else 0))
+            best = max(best, reliability * factor)
+        return best
+
+    def finished_score(tables: tuple[str, ...], lifts: int) -> tuple[float, float]:
+        # ``sum`` is compensated, so a score does not depend on summation order.
+        reliability = sum(resources.get(t, 0.0) for t in tables) / (len(tables) - 1)
+        return reliability, reliability * gain**lifts
+
+    def order(tables: tuple[str, ...]) -> tuple[Any, ...]:
+        return (len(tables), tuple(names.get(t, t) for t in tables), tables)
+
+    # Entries: (-priority, order, finished, tables, collected, lifts).
+    queue: list[tuple[Any, ...]] = []
+    start = (anchor,)
+    first = resources.get(anchor, 0.0)
+    heapq.heappush(
+        queue, (-bound(start, first, 0), order(start), False, start, first, 0)
+    )
+    found: list[RankedRoute] = []
+    expanded = 0
+    while queue:
+        neg, _, finished, tables, collected, lifts = heapq.heappop(queue)
+        if len(found) >= k and -neg < found[k - 1].score - _EPSILON:
+            break
+        if finished:
+            reliability, score = finished_score(tables, lifts)
+            choices = [steps[a][b] for a, b in itertools.pairwise(tables)]
+            for hops in itertools.islice(itertools.product(*choices), k):
+                found.append(RankedRoute(tables, tuple(hops), reliability, score))
+            continue
+        expanded += 1
+        if expanded > MAX_SEARCH_STATES:
+            break
+        for next_table in steps[tables[-1]]:
+            remaining = distance[next_table]
+            if next_table in tables or len(tables) + remaining > limit:
+                continue
+            route = tables + (next_table,)
+            if next_table == dest:
+                _, score = finished_score(route, lifts)
+                heapq.heappush(queue, (-score, order(route), True, route, 0.0, lifts))
+                continue
+            gathered = collected + resources.get(next_table, 0.0)
+            lifted = lifts + (next_table in boosted)
+            heapq.heappush(
+                queue,
+                (
+                    -bound(route, gathered, lifted),
+                    order(route),
+                    False,
+                    route,
+                    gathered,
+                    lifted,
+                ),
             )
-        )
-    ranked.sort(
+
+    found = [
+        RankedRoute(r.tables, r.hops, round(r.reliability, 6), round(r.score, 6))
+        for r in found
+    ]
+    found.sort(
         key=lambda r: (
             -r.score,
             len(r.hops),
@@ -269,4 +280,4 @@ def rank_routes(
             r.hops,
         )
     )
-    return ranked[:k]
+    return found[:k]

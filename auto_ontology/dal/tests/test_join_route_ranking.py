@@ -11,7 +11,9 @@ handled it, and the two routes mean different things.
 
 from __future__ import annotations
 
+import itertools
 import random
+import time
 import uuid
 
 import pytest
@@ -19,9 +21,7 @@ import pytest
 from auto_ontology.dal.join_route_ranking import (
     DEFAULT_ALPHA,
     DEFAULT_BOOST,
-    MAX_ENUMERATED_ROUTES,
     RankedRoute,
-    enumerate_routes,
     flow_resources,
     rank_routes,
 )
@@ -158,15 +158,15 @@ def test_equal_routes_into_a_shared_destination_tie_even_through_a_hub() -> None
 
 def test_routes_are_simple_and_bounded() -> None:
     adjacency = build(PAGILA)
-    routes = enumerate_routes(adjacency, "address", "rental", max_extra_hops=1)
+    routes = rank_routes(adjacency, "address", "rental", k=100, max_extra_hops=1)
     assert routes
-    for tables, hops in routes:
-        assert len(set(tables)) == len(tables)
-        assert len(hops) == len(tables) - 1
-        assert len(hops) <= 3  # shortest is 2
-    shortest_only = enumerate_routes(adjacency, "address", "rental", max_extra_hops=0)
+    for route in routes:
+        assert len(set(route.tables)) == len(route.tables)
+        assert len(route.hops) == len(route.tables) - 1
+        assert len(route.hops) <= 3  # shortest is 2
+    shortest_only = rank_routes(adjacency, "address", "rental", k=100, max_extra_hops=0)
     assert len(shortest_only) == 2
-    assert all(len(hops) == 2 for _, hops in shortest_only)
+    assert all(len(route.hops) == 2 for route in shortest_only)
 
 
 def test_hops_pair_the_real_join_columns() -> None:
@@ -200,14 +200,15 @@ def test_each_boosted_table_multiplies_the_score() -> None:
     )
 
 
-def test_enumeration_stops_at_the_cap_within_one_table() -> None:
-    # One table pair joined by more parallel columns than the cap allows.
+def test_parallel_joins_share_a_score_and_only_k_are_expanded() -> None:
+    # One table pair joined by many parallel columns: one table sequence.
     adjacency = {
-        "a": [("b", f"a.c{i:03}", f"b.c{i:03}", f"k{i:03}") for i in range(201)],
+        "a": [("b", f"a.c{i:03}", f"b.c{i:03}", f"k{i:03}") for i in range(500)],
         "b": [],
     }
-    routes = enumerate_routes(adjacency, "a", "b")
-    assert len(routes) == MAX_ENUMERATED_ROUTES
+    ranked = rank_routes(adjacency, "a", "b", k=3)
+    assert [route.hops[0][0] for route in ranked] == ["a.c000", "a.c001", "a.c002"]
+    assert len({route.score for route in ranked}) == 1
 
 
 def test_parallel_joins_tie_break_by_column_name_not_id() -> None:
@@ -229,7 +230,7 @@ def test_schema_qualified_names_break_ties_between_same_named_tables() -> None:
     assert [route.tables[1] for route in ranked] == ["t2", "t1"]
 
 
-def test_the_cap_keeps_a_shorter_route_whatever_the_ids() -> None:
+def test_a_shorter_route_beats_many_longer_ones_whatever_the_ids() -> None:
     # 200 three-hop routes a -> x -> u_i -> b, and one two-hop route
     # a -> z -> b. `x` sorts before `z`, so an id-ordered walk would fill the
     # cap through `x` and never reach `z`.
@@ -242,15 +243,11 @@ def test_the_cap_keeps_a_shorter_route_whatever_the_ids() -> None:
     for i in range(200):
         adjacency[f"u{i:03}"] = [("b", f"u{i}.b", f"b.u{i}", "k")]
 
-    routes = enumerate_routes(adjacency, "a", "b", max_extra_hops=1)
-    assert len(routes) == MAX_ENUMERATED_ROUTES
-    assert routes[0][0] == ("a", "z", "b")
-
     (best,) = rank_routes(adjacency, "a", "b", k=1)
     assert best.tables == ("a", "z", "b")
 
 
-def test_within_one_length_the_cap_keeps_boosted_routes_first() -> None:
+def test_a_boosted_route_wins_whatever_its_name_sorts_as() -> None:
     # 250 two-hop routes a -> m_i -> b; only m_249 is boosted and it sorts last.
     adjacency: dict[str, list[tuple[str, str, str, str]]] = {
         "a": [(f"m{i:03}", f"a.m{i}", f"m{i}.a", "k") for i in range(250)],
@@ -261,3 +258,93 @@ def test_within_one_length_the_cap_keeps_boosted_routes_first() -> None:
 
     (best,) = rank_routes(adjacency, "a", "b", k=1, boost_tables={"m249"})
     assert best.tables == ("a", "m249", "b")
+
+
+def test_a_boosted_longer_route_beats_many_parallel_shorter_ones() -> None:
+    # 200 parallel joins make 200 two-hop routes a -> m -> b; the boosted
+    # three-hop route a -> x -> y -> b scores higher and must still win.
+    adjacency: dict[str, list[tuple[str, str, str, str]]] = {
+        "a": [("m", f"a.m{i:03}", f"m.a{i:03}", f"k{i}") for i in range(200)],
+        "m": [("b", f"m.b{i:03}", f"b.m{i:03}", f"j{i}") for i in range(200)],
+        "b": [],
+    }
+    adjacency["a"].append(("x", "a.x", "x.a", "kx"))
+    adjacency["x"] = [("y", "x.y", "y.x", "ky")]
+    adjacency["y"] = [("b", "y.b", "b.y", "kb")]
+
+    ranked = rank_routes(adjacency, "a", "b", k=3, boost_tables={"x", "y"})
+    assert ranked[0].tables == ("a", "x", "y", "b")
+    assert ranked[0].score > ranked[1].score
+    assert [route.tables for route in ranked[1:]] == [("a", "m", "b")] * 2
+
+
+def _brute_force(
+    adjacency: dict[str, list[tuple[str, str, str, str]]],
+    anchor: str,
+    dest: str,
+    boosted: set[str],
+    max_extra_hops: int,
+) -> list[float]:
+    """Every route's score, best first, by listing all of them."""
+    resources = flow_resources(adjacency, anchor)
+    routes: list[tuple[str, ...]] = []
+
+    def walk(tables: tuple[str, ...]) -> None:
+        for next_table in sorted({edge[0] for edge in adjacency.get(tables[-1], ())}):
+            if next_table in tables:
+                continue
+            if next_table == dest:
+                routes.append(tables + (next_table,))
+            else:
+                walk(tables + (next_table,))
+
+    walk((anchor,))
+    if not routes:
+        return []
+    shortest = min(len(t) for t in routes) - 1
+    scores = []
+    for tables in routes:
+        if len(tables) - 1 > shortest + max_extra_hops:
+            continue
+        hops = list(itertools.pairwise(tables))
+        parallel = 1
+        for a, b in hops:
+            parallel *= sum(1 for edge in adjacency[a] if edge[0] == b)
+        reliability = sum(resources.get(t, 0.0) for t in tables) / len(hops)
+        lifts = sum(1 for t in tables[1:-1] if t in boosted)
+        scores += [round(reliability * (1 + DEFAULT_BOOST) ** lifts, 6)] * parallel
+    return sorted(scores, reverse=True)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_the_search_matches_listing_every_route(seed: int) -> None:
+    rng = random.Random(seed)
+    tables = [f"t{i}" for i in range(rng.randint(5, 9))]
+    edges: list[Edge] = []
+    for a, b in itertools.combinations(tables, 2):
+        for c in range(rng.choice([0, 0, 1, 1, 2])):
+            edges.append((a, f"{b}_{c}", b, f"id{c}"))
+    adjacency = build(edges)
+    boosted = set(rng.sample(tables[1:-1], rng.randint(0, 3)))
+    extra = rng.randint(0, 2)
+
+    expected = _brute_force(adjacency, tables[0], tables[-1], boosted, extra)
+    ranked = rank_routes(
+        adjacency,
+        tables[0],
+        tables[-1],
+        k=5,
+        boost_tables=boosted,
+        max_extra_hops=extra,
+    )
+    assert [route.score for route in ranked] == expected[:5]
+
+
+def test_a_dense_schema_still_answers_quickly() -> None:
+    tables = [f"t{i:02}" for i in range(40)]
+    edges = [(a, f"{b}_id", b, "id") for a, b in itertools.combinations(tables, 2)]
+    adjacency = build(edges)
+    started = time.perf_counter()
+    ranked = rank_routes(adjacency, "t00", "t39", k=3, max_extra_hops=3)
+    assert len(ranked) == 3
+    assert time.perf_counter() - started < 5
