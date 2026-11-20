@@ -58,7 +58,8 @@ joins between the same two tables share one table sequence and one score; they
 are expanded only when that sequence finishes, and only the first *k* by
 column name. :data:`MAX_SEARCH_STATES` caps the partial routes the search
 expands, so a dense schema cannot turn one prompt into a combinatorial walk;
-only a search that hits it can miss a better route.
+only a search that hits it can miss a better route. When it does, the
+finished routes already queued are still ranked and returned.
 """
 
 from __future__ import annotations
@@ -229,9 +230,12 @@ def rank_routes(
     )
     found: list[RankedRoute] = []
     expanded = 0
+    # Once the budget is spent, partial routes stop expanding, but the
+    # finished routes already queued are still collected, best first.
+    spent = False
     while queue:
         neg, _, finished, tables, collected, lifts = heapq.heappop(queue)
-        if len(found) >= k and -neg < found[k - 1].score - _EPSILON:
+        if len(found) >= k and (spent or -neg < found[k - 1].score - _EPSILON):
             break
         if finished:
             reliability, score = finished_score(tables, lifts)
@@ -239,9 +243,10 @@ def rank_routes(
             for hops in itertools.islice(itertools.product(*choices), k):
                 found.append(RankedRoute(tables, tuple(hops), reliability, score))
             continue
+        if expanded >= MAX_SEARCH_STATES:
+            spent = True
+            continue
         expanded += 1
-        if expanded > MAX_SEARCH_STATES:
-            break
         for next_table in steps[tables[-1]]:
             remaining = distance[next_table]
             if next_table in tables or len(tables) + remaining > limit:

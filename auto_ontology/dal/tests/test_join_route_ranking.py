@@ -340,6 +340,26 @@ def test_the_search_matches_listing_every_route(seed: int) -> None:
     assert [route.score for route in ranked] == expected[:5]
 
 
+def test_a_spent_search_budget_still_returns_the_queued_routes() -> None:
+    # a - x_i - y_j - b with 101 tables in each middle layer: every partial
+    # a-x-y route ties with its finished route and pops first, so the
+    # MAX_SEARCH_STATES budget runs out before any finished route is taken.
+    width = 101
+    edges: list[Edge] = []
+    for i in range(width):
+        edges.append(("a", f"x{i}_id", f"x{i:03}", "id"))
+        for j in range(width):
+            edges.append((f"x{i:03}", f"y{j}_id", f"y{j:03}", "id"))
+    for j in range(width):
+        edges.append((f"y{j:03}", "b_id", "b", "id"))
+    ranked = rank_routes(build(edges), "a", "b", k=3)
+    assert [names_of(route) for route in ranked] == [
+        ["a", "x000", "y000", "b"],
+        ["a", "x000", "y001", "b"],
+        ["a", "x000", "y002", "b"],
+    ]
+
+
 def test_a_dense_schema_still_answers_quickly() -> None:
     tables = [f"t{i:02}" for i in range(40)]
     edges = [(a, f"{b}_id", b, "id") for a, b in itertools.combinations(tables, 2)]
