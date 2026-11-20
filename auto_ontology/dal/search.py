@@ -35,7 +35,9 @@ switched on, this is the module with nowhere to pass it.
 
 from __future__ import annotations
 
-import re
+import sys
+import unicodedata
+from functools import cache
 from typing import Any
 
 from sqlalchemy import (
@@ -225,7 +227,122 @@ _SEPARATORS = (
 #: would also match ``orderXid``.
 _LIKE_ESCAPE = "\\"
 
-_WORD_RE = re.compile(r"[a-z0-9]+")
+_MARK_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
+
+
+def _word_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    current: list[str] = []
+
+    for char in text:
+        if _is_word_char(char):
+            current.append(char)
+            continue
+        if current:
+            tokens.append("".join(current))
+            current = []
+
+    if current:
+        tokens.append("".join(current))
+
+    return tokens
+
+
+def _is_word_char(char: str) -> bool:
+    """True for a letter, a number, or a mark that sits inside a word.
+
+    ``str.isalnum`` covers letters and numbers in every script -- including
+    ``²``, which a libc ctype does not call alnum -- but not the dependent vowel
+    signs and other marks Devanagari, Thai or Arabic write inside a word:
+    ``कला`` would otherwise tokenize as ``कल``, and ``कल`` would then match the
+    longer synonym.
+
+    This is not only the Python rule. :func:`_word_char_ranges` turns this
+    predicate into the character class Postgres matches with, so the boundary
+    SQL draws and the boundary here are one decision rather than two that have
+    to be kept in step.
+    """
+    if not char:
+        return False
+
+    return char.isalnum() or unicodedata.category(char) in _MARK_CATEGORIES
+
+
+@cache
+def _word_char_ranges() -> str:
+    """Every code point :func:`_is_word_char` accepts, as a regex class body.
+
+    Word boundaries are Postgres's to decide, and it decides differently per
+    cluster and per build. Measured on Postgres 17.12: `[[:alnum:]]` calls
+    ``U+094D`` (the Devanagari virama) neither alnum nor punct, so ``क्षेत्र``
+    grows a boundary after ``क`` and the synonym answers the search ``क``; and
+    under a libc ctype ``glibc`` excludes ``U+00B2`` from alnum while
+    ``str.isalnum`` accepts it, so ``m`` would match ``m²`` in SQL and not in
+    Python. Spelling out the characters removes the question, and taking them
+    from :func:`_is_word_char` means the class *is* the twin's rule rather than
+    a second opinion about it: a code point the two disagree on cannot exist.
+
+    The scan is ~0.6 s, hence the cache: it is paid once per process, not once
+    per query, and the pattern it returns is 12 KB of ranges that Postgres
+    compiles once per session.
+    """
+    ranges: list[tuple[int, int]] = []
+    start: int | None = None
+    last_word = 0
+
+    for code_point in range(sys.maxunicode + 1):
+        if _is_word_char(chr(code_point)):
+            if start is None:
+                start = code_point
+            last_word = code_point
+        elif start is not None:
+            ranges.append((start, last_word))
+            start = None
+
+    if start is not None:
+        ranges.append((start, last_word))
+
+    ranges_out: list[str] = []
+    for first, last in ranges:
+        low = _regex_code_point(first)
+        ranges_out.append(low if first == last else f"{low}-{_regex_code_point(last)}")
+
+    return "".join(ranges_out)
+
+
+def _regex_code_point(code_point: int) -> str:
+    """One code point as Postgres regex reads it: ``\\uXXXX`` or ``\\UXXXXXXXX``."""
+    if code_point <= 0xFFFF:
+        return f"\\u{code_point:04x}"
+
+    return f"\\U{code_point:08x}"
+
+
+def _word_char_class() -> str:
+    """The bracket-class *body* Postgres needs for a word character.
+
+    Deliberately not bracketed: callers wrap it, and nesting ``[...]`` inside
+    ``[...]`` is not how Postgres reads a class.
+    """
+    return _word_char_ranges()
+
+
+def _simple_lower(text: str) -> str:
+    """Lowercase the way Postgres does: one code point in, at most one out.
+
+    ``str.lower`` expands a few code points -- ``İ`` becomes ``i`` plus
+    ``U+0307`` -- while ``lower`` in Postgres maps each one to a single one. So
+    the two sides of the twin were not comparing the same string: with the
+    synonym ``İstanbul``, the search ``istanbul`` matched in SQL and did not in
+    Python, because the Python token still carried the combining dot.
+    """
+    lowered: list[str] = []
+    for char in text:
+        mapped = char.lower()
+        lowered.append(mapped if len(mapped) == 1 else mapped[0])
+
+    return "".join(lowered)
+
 
 # Typed NULLs, so every arm of the UNION agrees on a column's type. Postgres
 # rejects a bare NULL in a union branch it cannot infer a type for, and these
@@ -274,30 +391,49 @@ def search_tokens(search_term: str) -> list[str]:
 
 
 def synonym_word_tokens(search_term: str) -> list[str]:
-    """Alphanumeric tokens for whole-word ``Term.synonyms`` matching.
+    """Word tokens for whole-word ``Term.synonyms`` matching.
 
     ``unit`` matches the synonym ``Business Unit``; ``uni`` does not. Unlike the
     name and description match, synonyms are never matched on a substring.
+
+    Lowercased with :func:`_simple_lower` and not ``str.lower`` because these
+    tokens are compared against ``lower()`` in Postgres, and the two disagree on
+    the code points Postgres maps one-to-one while Python expands.
     """
-    cleaned = filter_special_characters(search_term).lower()
-    return _WORD_RE.findall(cleaned)
+    cleaned = _simple_lower(filter_special_characters(search_term))
+    return _word_tokens(cleaned)
 
 
 def synonym_matches_tokens(synonym: str, tokens: list[str]) -> bool:
     """True when every token appears as a whole word in *synonym*.
 
-    The Python twin of the regex :func:`_synonym_exists` sends to Postgres. Both
-    exist because the database decides which Terms come back and the service
-    decides which of their synonyms to show, and a disagreement between the two
-    surfaces as a hit with no visible reason for being there.
+    The Python twin of the predicate :func:`_synonym_exists` sends to Postgres.
+    Both exist because the database decides which Terms come back and the
+    service decides which of their synonyms to show, and a disagreement between
+    the two surfaces as a hit with no visible reason for being there.
     """
     if not tokens:
         return False
-    text = synonym.lower()
-    return all(
-        re.search(rf"(^|[^a-z0-9]){re.escape(tok)}([^a-z0-9]|$)", text) is not None
-        for tok in tokens
-    )
+    text = _simple_lower(synonym)
+    return all(_whole_word(text, token) for token in tokens)
+
+
+def _whole_word(text: str, token: str) -> bool:
+    """True when *token* appears in *text* and both neighbours are separators."""
+    start = 0
+
+    while True:
+        index = text.find(token, start)
+        if index < 0:
+            return False
+
+        end = index + len(token)
+        before = text[index - 1] if index else ""
+        after = text[end] if end < len(text) else ""
+        if not _is_word_char(before) and not _is_word_char(after):
+            return True
+
+        start = index + 1
 
 
 def _like_pattern(token: str) -> str:
@@ -626,8 +762,14 @@ def _synonym_exists(synonym_tokens: list[str]):
     "business unit" find the alias ``Business Unit`` rather than any Term with
     one alias mentioning business and another mentioning units.
 
-    Tokens are ``[a-z0-9]+`` by construction, so they are safe to concatenate
-    into a pattern -- there is no regex metacharacter left to escape.
+    Whole-word is answered by spacing rather than by a boundary class: every
+    run of non-word characters collapses to one space, the synonym is padded,
+    and a token matches when the padded token is in it. The word characters are
+    spelled out from :func:`_is_word_char` rather than asked of
+    ``[[:alnum:]]``, because Postgres answers that question differently per
+    cluster and per build -- see :func:`_word_char_ranges`. Folding to a space
+    also keeps ``total`` finding ``total_amount``, since ``_`` is a separator
+    like any other: the identifier is one word, not two.
     """
     # ``render_derived`` and not ``alias``: the alias alone emits
     # ``AS syn``, which names the table but leaves its one column called ``syn``
@@ -636,18 +778,15 @@ def _synonym_exists(synonym_tokens: list[str]):
     synonym = (
         func.unnest(s.term.c.synonyms).table_valued("synonym").render_derived("syn")
     )
+    spaced = func.regexp_replace(
+        func.lower(synonym.c.synonym), f"[^{_word_char_class()}]+", " ", "g"
+    )
+    padded = func.concat(" ", spaced, " ")
     return (
         select(literal(1))
         .select_from(synonym)
         .where(
-            and_(
-                *(
-                    func.lower(synonym.c.synonym).op("~")(
-                        f"(^|[^a-z0-9]){token}([^a-z0-9]|$)"
-                    )
-                    for token in synonym_tokens
-                )
-            )
+            and_(*(func.strpos(padded, f" {token} ") > 0 for token in synonym_tokens))
         )
         .correlate(s.term)
         .exists()
