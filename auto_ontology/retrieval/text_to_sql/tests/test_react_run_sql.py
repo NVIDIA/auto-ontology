@@ -325,6 +325,34 @@ def test_connector_for_prefers_the_target_database() -> None:
     assert tool.connector_for(ctx) is second
 
 
+def test_connector_for_uses_tables_the_sql_names_when_seen_tables_span_databases() -> (
+    None
+):
+    first, second = SQLiteConnector(SHOP_SCRIPT), SQLiteConnector(SHOP_SCRIPT)
+    first.database_name, second.database_name = "db_a", "db_b"
+    ctx = ToolContext(None, [first, second])
+    ctx.seen_tables["t1"] = {
+        "schema_name": "sales",
+        "name": "orders",
+        "database_name": "db_a",
+    }
+    ctx.seen_tables["t2"] = {
+        "schema_name": "public",
+        "name": "items",
+        "database_name": "db_b",
+    }
+    assert tool.connector_for(ctx) is None
+    assert tool.connector_for(ctx, "SELECT * FROM public.items") is second
+    assert tool.connector_for(ctx, "SELECT * FROM items i") is second
+    assert (
+        tool.connector_for(
+            ctx, "SELECT * FROM sales.orders o JOIN public.items i ON 1=1"
+        )
+        is None
+    )
+    assert tool.connector_for(ctx, "SELECT * FROM unknown_table") is None
+
+
 def test_catalog_for_loads_only_the_connectors_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
