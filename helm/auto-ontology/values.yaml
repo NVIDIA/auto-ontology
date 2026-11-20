@@ -57,6 +57,11 @@ kumoRfmApiUrl: ""
 # auto-derive from the API key prefix; set to override just the embedder.
 embedEndpoint: ""
 embedModel: ""
+# Optional. Output size to request from models that take OpenAI's `dimensions`
+# field (the vector store is 2048 wide), and a client-side character cut for
+# endpoints that ignore `truncate`. Leave empty to send neither.
+embedDimensions: ""
+embedMaxInputChars: ""
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.

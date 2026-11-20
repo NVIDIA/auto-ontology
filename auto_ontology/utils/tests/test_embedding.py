@@ -142,6 +142,36 @@ def test_the_hosted_nemotron_3_5_model_gets_input_type_without_a_prefix(
     assert body["input_type"] == "query"
 
 
+def test_configured_dimensions_reach_the_request(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
+    """text-embedding-3-* returns 3072 or 1536 unless asked for the column's 2048."""
+    seen = endpoint(_ok)
+
+    embed_texts(["x"], _params(dimensions=2048), "passage")
+
+    assert json.loads(seen[0].content)["dimensions"] == 2048
+
+
+def test_an_over_long_text_is_cut_to_the_configured_length(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
+    """OpenAI ignores ``truncate`` and 400s the whole batch on one long input."""
+    seen = endpoint(_ok)
+
+    embed_texts(["abcdef", "xy"], _params(max_input_chars=4), "passage")
+
+    assert json.loads(seen[0].content)["input"] == ["abcd", "xy"]
+
+
+@pytest.mark.parametrize("field_name", ["dimensions", "max_input_chars"])
+@pytest.mark.parametrize("value", [0, -100])
+def test_a_size_below_one_is_rejected(field_name: str, value: int) -> None:
+    """A negative cut slices from the end and drops short texts without a word."""
+    with pytest.raises(ValueError, match=field_name):
+        _params(**{field_name: value})
+
+
 @pytest.mark.parametrize(
     "configured",
     [
@@ -156,7 +186,9 @@ def test_both_endpoint_spellings_reach_the_same_url(endpoint, configured: str) -
     assert str(seen[0].url) == "https://embed.example/v1/embeddings"
 
 
-def test_no_key_sends_no_authorization_header(endpoint) -> None:
+def test_no_key_sends_no_authorization_header(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(_ok)
     embed_texts(["x"], _params(api_key=""), "passage")
     assert "authorization" not in seen[0].headers
@@ -166,7 +198,9 @@ def test_the_key_stays_out_of_repr() -> None:
     assert "sk-test" not in repr(_params())
 
 
-def test_batches_and_reassembles_in_input_order(endpoint) -> None:
+def test_batches_and_reassembles_in_input_order(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     """Out-of-order ``data`` and concurrent batches still line up with the input."""
     seen = endpoint(lambda request: _ok(request, reverse=True))
     texts = ["a", "bb", "ccc", "dddd", "eeeee"]
@@ -177,7 +211,9 @@ def test_batches_and_reassembles_in_input_order(endpoint) -> None:
     assert sorted(len(json.loads(r.content)["input"]) for r in seen) == [1, 2, 2]
 
 
-def test_a_short_response_is_an_error_not_a_partial_batch(endpoint) -> None:
+def test_a_short_response_is_an_error_not_a_partial_batch(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     """Silently leaving the missing rows unembedded would drop them from the store."""
 
     def _short(request: httpx.Request) -> httpx.Response:
@@ -191,7 +227,9 @@ def test_a_short_response_is_an_error_not_a_partial_batch(endpoint) -> None:
         embed_texts(["a", "b"], _params(), "passage")
 
 
-def test_a_duplicated_index_is_an_error(endpoint) -> None:
+def test_a_duplicated_index_is_an_error(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     """``[0, 1, 1]`` for two inputs would let one row's vector overwrite another's."""
 
     def _duplicated(request: httpx.Request) -> httpx.Response:
@@ -204,7 +242,9 @@ def test_a_duplicated_index_is_an_error(endpoint) -> None:
         embed_texts(["a", "b"], _params(), "passage")
 
 
-def test_blank_texts_are_not_sent(endpoint) -> None:
+def test_blank_texts_are_not_sent(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(_ok)
 
     vectors = embed_texts(["a", "  ", None, "b"], _params(), "passage")  # type: ignore[list-item]
@@ -213,13 +253,17 @@ def test_blank_texts_are_not_sent(endpoint) -> None:
     assert json.loads(seen[0].content)["input"] == ["a", "b"]
 
 
-def test_nothing_to_send_makes_no_request(endpoint) -> None:
+def test_nothing_to_send_makes_no_request(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(_ok)
     assert embed_texts(["", " "], _params(), "passage") == [None, None]
     assert seen == []
 
 
-def test_a_rate_limit_is_retried_by_the_client(endpoint) -> None:
+def test_a_rate_limit_is_retried_by_the_client(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     responses = [
         httpx.Response(429, headers={"retry-after-ms": "1"}, json={"error": "slow"}),
     ]
@@ -232,7 +276,9 @@ def test_a_rate_limit_is_retried_by_the_client(endpoint) -> None:
     assert len(seen) == 2
 
 
-def test_retries_zero_leaves_retrying_to_the_caller(endpoint) -> None:
+def test_retries_zero_leaves_retrying_to_the_caller(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(
         lambda request: httpx.Response(
             429, headers={"retry-after-ms": "1"}, json={"error": "slow"}
@@ -243,7 +289,9 @@ def test_retries_zero_leaves_retrying_to_the_caller(endpoint) -> None:
     assert len(seen) == 1
 
 
-def test_the_timeout_reaches_the_request(endpoint) -> None:
+def test_the_timeout_reaches_the_request(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(_ok)
     embed_texts(["a"], _params(), "query", timeout=7.0)
     assert seen[0].extensions["timeout"]["read"] == 7.0
@@ -274,7 +322,9 @@ def test_only_a_wrong_request_is_fatal(status: int, fatal: bool) -> None:
     assert _is_fatal(exc) is fatal
 
 
-def test_a_bad_key_fails_at_once(endpoint) -> None:
+def test_a_bad_key_fails_at_once(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(lambda request: httpx.Response(401, json={"error": "bad key"}))
     with pytest.raises(AuthenticationError):
         embed_texts(["a"], _params(), "passage")
@@ -290,7 +340,9 @@ def _rows(*texts: str) -> list[dict]:
     return [{"text": t, "metadata": {"id": t}} for t in texts]
 
 
-def test_embed_frame_writes_the_embedding_without_touching_the_input(endpoint) -> None:
+def test_embed_frame_writes_the_embedding_without_touching_the_input(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     endpoint(_ok)
     rows = _rows("a", "b")
 
@@ -300,7 +352,9 @@ def test_embed_frame_writes_the_embedding_without_touching_the_input(endpoint) -
     assert "embedding" not in rows[0]["metadata"]
 
 
-def test_embed_frame_reports_a_failure_instead_of_raising(endpoint) -> None:
+def test_embed_frame_reports_a_failure_instead_of_raising(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     endpoint(lambda request: httpx.Response(401, json={"error": "bad key"}))
 
     out = _embed_frame(pd.DataFrame(_rows("a")), _params())
@@ -310,27 +364,35 @@ def test_embed_frame_reports_a_failure_instead_of_raising(endpoint) -> None:
     assert out.attrs["embed_error_fatal"] is True
 
 
-def test_empty_rows_short_circuit_without_calling_the_endpoint(endpoint) -> None:
+def test_empty_rows_short_circuit_without_calling_the_endpoint(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     seen = endpoint(_ok)
     assert batch_embed([], _params()).empty
     assert batch_embed(pd.DataFrame(), _params()).empty
     assert seen == []
 
 
-def test_batch_embed_returns_every_row(endpoint) -> None:
+def test_batch_embed_returns_every_row(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     endpoint(_ok)
     out = batch_embed(_rows("a", "b", "c"), _params())
     assert [m["id"] for m in out["metadata"]] == ["a", "b", "c"]
     assert all(m["embedding"] for m in out["metadata"])
 
 
-def test_embed_rows_keeps_only_the_embedded_rows(endpoint) -> None:
+def test_embed_rows_keeps_only_the_embedded_rows(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     endpoint(_ok)
     out = embed_rows(_rows("a", " "), _params(), what="Thing")
     assert [r["metadata"]["id"] for r in out] == ["a"]
 
 
-def test_embed_rows_raises_when_the_endpoint_fails(endpoint) -> None:
+def test_embed_rows_raises_when_the_endpoint_fails(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     endpoint(lambda request: httpx.Response(401, json={"error": "bad key"}))
     with pytest.raises(RuntimeError, match="Thing"):
         embed_rows(_rows("a"), _params(), what="Thing")
@@ -351,7 +413,9 @@ def test_embed_rows_is_bounded_for_interactive_callers(
     assert seen == [{"timeout": 60.0, "retries": 1}]
 
 
-def test_embed_rows_raises_when_nothing_embeds(endpoint) -> None:
+def test_embed_rows_raises_when_nothing_embeds(
+    endpoint: Callable[[Handler], list[httpx.Request]],
+) -> None:
     endpoint(_ok)
     with pytest.raises(RuntimeError, match="0/1 Thing"):
         embed_rows(_rows(" "), _params(), what="Thing")
