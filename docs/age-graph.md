@@ -95,8 +95,10 @@ after the next sync.
 | REST | `GET /api/graph/terms/{term_id}/neighborhood?depth=1..3&max_nodes=1..1000` |
 | MCP | `explore_term_graph` |
 
-The CLI `query` command and every read run in a `READ ONLY` transaction that is
-rolled back, so a Cypher `CREATE` is refused. REST and MCP do not accept Cypher;
+The CLI `query` command and every read run in a `READ ONLY`, `READ COMMITTED`
+transaction that is rolled back, so a Cypher `CREATE` is refused, and a read
+that waited out a swap sees the new graph whatever the engine's default
+isolation level is. REST and MCP do not accept Cypher;
 the neighbourhood walk is fixed server-side, one hop per statement, and stops at
 `max_nodes` with `truncated: true`. Each hop is SQL over AGE's storage tables
 through the `start_id`/`end_id` indexes the sync creates, rather than a Cypher

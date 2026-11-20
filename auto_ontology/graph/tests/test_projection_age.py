@@ -450,21 +450,37 @@ def test_the_longest_configured_name_rebuilds(seeded: dict[str, str]) -> None:
         _drop_graph(name)
 
 
-def _sessions_waiting_on_locks() -> int:
+def _sessions_waiting_on_graph_lock(graph: str) -> int:
+    """Sessions queued on *graph*'s swap lock.
+
+    Only this test's graph: an advisory lock on the 32-bit key sits in
+    ``pg_locks`` with the low half in ``objid`` and ``objsubid`` 1, so other
+    sessions in the database, waiting on anything else, are not counted.
+    """
     with get_engine().connect() as conn:
         (count,) = conn.exec_driver_sql(
-            "SELECT count(*) FROM pg_stat_activity "
-            "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            "SELECT count(*) FROM pg_locks "
+            "WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1 "
+            "AND database = (SELECT oid FROM pg_database "
+            "                WHERE datname = current_database()) "
+            "AND objid::bigint = hashtext(%s)::bigint & 4294967295",
+            (age._graph_lock_key(graph),),
         ).one()
     return int(count)
 
 
-def _wait_for_lock_waiters(at_least: int, timeout: float = 15.0) -> None:
+def _wait_for_lock_waiters(graph: str, at_least: int, timeout: float = 15.0) -> None:
     deadline = time.monotonic() + timeout
+    waiting = 0
     while time.monotonic() < deadline:
-        if _sessions_waiting_on_locks() >= at_least:
+        waiting = _sessions_waiting_on_graph_lock(graph)
+        if waiting >= at_least:
             return
         time.sleep(0.05)
+    pytest.fail(
+        f"expected {at_least} sessions waiting on the lock of {graph}, "
+        f"saw {waiting} after {timeout}s"
+    )
 
 
 def test_readers_during_the_swap_finish_without_errors(
@@ -511,9 +527,9 @@ def test_readers_during_the_swap_finish_without_errors(
     threads = [guarded("in_flight", in_flight)]
     assert reading.wait(15)
     threads.append(guarded("sync", lambda: projection.sync_graph(graph=graph)))
-    _wait_for_lock_waiters(1)
+    _wait_for_lock_waiters(graph, 1)  # the rebuild, queued behind in_flight
     threads += [guarded(f"reader{i}", new_reader) for i in range(2)]
-    _wait_for_lock_waiters(2)
+    _wait_for_lock_waiters(graph, 3)  # and both readers, queued behind it
     release.set()
     for thread in threads:
         thread.join(60)
@@ -523,6 +539,16 @@ def test_readers_during_the_swap_finish_without_errors(
     first, second = results["in_flight"]
     assert first == second
     assert results["reader0"] == results["reader1"] == len(expected["nodes"])
+
+
+def test_reads_are_read_committed_whatever_the_engine_default(graph: str) -> None:
+    """A reader that waited out a swap must see the graph the rebuild
+    committed, so its transaction cannot keep a snapshot from before it."""
+    engine = get_engine().execution_options(isolation_level="REPEATABLE READ")
+    with age.read_transaction(engine, graph) as conn:
+        show = conn.exec_driver_sql
+        assert show("SHOW transaction_isolation").scalar() == "read committed"
+        assert show("SHOW transaction_read_only").scalar() == "on"
 
 
 def test_a_nonpositive_batch_size_keeps_the_active_graph(graph: str) -> None:

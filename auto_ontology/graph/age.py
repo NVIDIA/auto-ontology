@@ -170,11 +170,18 @@ def read_transaction(engine: Engine, graph: str | None = None) -> Iterator[Conne
     ``READ ONLY`` makes Postgres refuse a Cypher ``CREATE``/``SET``/``DELETE``
     (AGE writes through the executor, which the flag guards), and the rollback
     means nothing survives even if a future AGE release stops honouring it.
+
+    The isolation level is pinned to ``READ COMMITTED`` whatever the engine
+    default is: a reader that waited on the lock during a swap must see the
+    graph the rebuild committed, and under ``REPEATABLE READ`` its snapshot
+    would predate the swap.
     """
     with engine.connect() as conn:
         trans = conn.begin()
         try:
-            conn.exec_driver_sql("SET TRANSACTION READ ONLY")
+            conn.exec_driver_sql(
+                "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY"
+            )
             prepare(conn)
             require_extension(conn)
             if graph is not None:
