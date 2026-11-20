@@ -39,18 +39,22 @@ things (`auto_ontology/catalog/constants.py`,
 | `Term` | `term` |
 | `ColumnAttribute`, `SqlAttribute` | `column_attribute`, `sql_attribute` |
 | `TermFamily` | `term_family` |
+| `Concept`, `ConceptKey` | `concept`, `concept_key` |
 | `Tag`, `Zone` | `tag`, `zone` |
 
 | Edge | Shape | From table |
 | --- | --- | --- |
-| `CONTAINS` | Database→Schema→Table→Column, Schema→TermFamily | parent FKs |
+| `CONTAINS` | Database→Schema→Table→Column, Schema→TermFamily, Database→Concept | parent FKs |
 | `FOREIGN_KEY` | Column→Column | `column__foreign_key` |
 | `JOIN` | Table→Table, Column→Column | `table__join`, `column__join` |
 | `UNION` | Column→Column | `column__union` |
 | `REPRESENTS` | Table→Term | `table__term` |
-| `HAS_ATTRIBUTE`, `SEMANTIC_FK` | Column→ColumnAttribute | `column__has_attribute`, `column__semantic_fk` |
+| `HAS_ATTRIBUTE` | Column→ColumnAttribute | `column__has_attribute` |
+| `SEMANTIC_FK` | Column→ConceptKey (`use_in_join_paths` on the edge) | `column__semantic_fk` |
+| `HAS_KEY` | Concept→ConceptKey | `concept_key.concept_id` |
+| `KEY_COLUMN` | ConceptKey→Column, one per member table | `concept_key__column` |
 | `PROPERTY_OF` | ColumnAttribute/SqlAttribute→Term | `*_attribute__term` |
-| `MEMBER_OF` | Term→TermFamily (`base_name` on the edge) | `term__term_family` |
+| `MEMBER_OF` | Term→TermFamily (`base_name` on the edge), Term→Concept | `term__term_family`, `term__concept` |
 | `TAGGED` | Tag→Term/Table/Column/attribute | `tag_target` |
 | `ZONE_OF` | Zone→Database/Schema/Table | `zone_target` |
 
@@ -61,8 +65,14 @@ Statement-tier rows (`sql_query`) are left out.
 
 ## Keeping it current
 
-A sync drops and rebuilds the graph in one transaction, so readers see the old
-graph until it commits. It runs:
+A sync rebuilds the graph in one `REPEATABLE READ` transaction, so the graph
+matches a single snapshot of the catalog. It loads a staging graph
+(`<name>_next`) first and only then drops the active graph and renames the
+staging graph into its place. Readers keep reading the old graph while the new
+one loads; a read that arrives during the final drop and rename waits until the
+transaction commits, because dropping a graph holds its tables' locks until
+then. Graph names are limited to 58 characters so the staging name still fits
+Postgres' identifier limit. It runs:
 
 - automatically at the end of every semantic compilation pass, after tag rules
   are re-applied, when `AGE_GRAPH_ENABLED` is set. A failed sync is logged and
@@ -86,17 +96,24 @@ after the next sync.
 The CLI `query` command and every read run in a `READ ONLY` transaction that is
 rolled back, so a Cypher `CREATE` is refused. REST and MCP do not accept Cypher;
 the neighbourhood walk is fixed server-side, one hop per statement, and stops at
-`max_nodes` with `truncated: true`.
+`max_nodes` with `truncated: true`. Each hop asks the database for no more new
+vertices than the cap still allows, so a hub with many links costs the cap, not
+its fan-out.
+
+Both REST routes answer 503 while `AGE_GRAPH_ENABLED` is unset, or while the
+server has no AGE extension (reads never create it; the first sync does).
 
 ## Testing
 
-`auto_ontology/graph/tests/test_projection_age.py` runs against a migrated
-database on an AGE-enabled server and skips otherwise:
+`auto_ontology/graph/tests/test_projection_age.py` is marked `age`. It runs
+against a migrated database on an AGE-enabled server and skips otherwise. CI
+runs it in its own job on `apache/age`, and the main suite deselects it with
+`-m "not age"`:
 
 ```bash
 docker run -d --name ao-age -e POSTGRES_PASSWORD=age -p 55432:5432 apache/age:release_PG16_1.6.0
 export POSTGRES_HOST=localhost POSTGRES_PORT=55432 POSTGRES_USER=postgres POSTGRES_PASSWORD=age
 psql -h localhost -p 55432 -U postgres -c 'create database auto_ontology'
 uv run alembic upgrade head
-uv run pytest auto_ontology/graph auto_ontology/server/graph
+uv run pytest -m age auto_ontology/graph
 ```

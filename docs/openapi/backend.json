@@ -7921,7 +7921,7 @@
     },
     "/api/graph/status": {
       "get": {
-        "description": "Report whether the AGE graph projection is on, built, and how large it is.\n\n``synced_at`` is when the graph was last rebuilt from the catalog. Edits\nmade after it are not in the graph until the next sync, which runs at the\nend of every semantic compilation pass.",
+        "description": "Report whether the AGE graph projection is built, and how large it is.\n\nAnswers 503 while ``AGE_GRAPH_ENABLED`` is unset or the AGE extension is\nunavailable. ``synced_at`` is when the graph was last rebuilt from the\ncatalog. Edits made after it are not in the graph until the next sync,\nwhich runs at the end of every semantic compilation pass.",
         "operationId": "graph_status_api_graph_status_get",
         "responses": {
           "200": {

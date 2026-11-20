@@ -13,8 +13,10 @@ The neighbourhood walk is a breadth-first expansion, one Cypher statement per
 hop, rather than a single variable-length ``MATCH``. A variable-length pattern
 enumerates *paths*, and around a Term that represents a wide table the number
 of paths grows with the product of the fan-outs at each hop; expanding the
-frontier once per hop costs the number of edges actually touched, and the
-vertex cap stops it before it grows past what a caller can read.
+frontier once per hop costs the number of edges actually touched. Each hop
+asks the database for at most the vertices the cap still has room for (plus
+one, to know whether it cut anything), so a hub's fan-out never reaches
+Python.
 """
 
 from __future__ import annotations
@@ -88,10 +90,22 @@ def graph_status(engine: Engine | None = None, *, graph: str | None = None) -> d
     }
 
 
-_EXPAND = (
+#: The not-yet-seen neighbours of a frontier, at most ``{limit}`` of them, so a
+#: hub with thousands of links costs the cap, not its fan-out.
+_NEW_NEIGHBOURS = (
+    "UNWIND $ids AS i "
+    "MATCH (a:{label} {{id: i}})-[]-(b) "
+    "WHERE NOT b.id IN $known "
+    "RETURN DISTINCT b.id, label(b), properties(b) "
+    "ORDER BY b.id LIMIT {limit}"
+)
+
+#: The edges from a frontier to vertices the walk kept.
+_KEPT_EDGES = (
     "UNWIND $ids AS i "
     "MATCH (a:{label} {{id: i}})-[e]-(b) "
-    "RETURN a.id, label(e), start_id(e) = id(a), properties(e), label(b), properties(b)"
+    "WHERE b.id IN $kept "
+    "RETURN a.id, label(e), start_id(e) = id(a), properties(e), b.id"
 )
 
 
@@ -139,21 +153,32 @@ def term_neighborhood(
         for _ in range(depth):
             next_frontier: dict[str, list[str]] = defaultdict(list)
             for label, ids in frontier.items():
+                # One more than the room left: an extra row means the cap cut
+                # the walk short.
+                room = max_nodes - len(nodes)
                 rows = age.cypher(
                     conn,
                     graph,
-                    _EXPAND.format(label=age.identifier(label)),
-                    {"ids": ids},
-                    columns=("a", "rel", "outgoing", "eprops", "blabel", "bprops"),
+                    _NEW_NEIGHBOURS.format(label=age.identifier(label), limit=room + 1),
+                    {"ids": ids, "known": list(nodes)},
+                    columns=("bid", "blabel", "bprops"),
                 )
-                for a_id, rel, outgoing, eprops, b_label, b_props in rows:
-                    b_id = b_props["id"]
-                    if b_id not in nodes:
-                        if len(nodes) >= max_nodes:
-                            truncated = True
-                            continue
-                        nodes[b_id] = _vertex(b_label, b_props)
-                        next_frontier[b_label].append(b_id)
+                if len(rows) > room:
+                    truncated = True
+                for b_id, b_label, b_props in rows[:room]:
+                    nodes[b_id] = _vertex(b_label, b_props)
+                    next_frontier[b_label].append(b_id)
+            # Edges are read once the hop's vertices are settled, so every edge
+            # between two kept vertices is reported and none to a dropped one.
+            for label, ids in frontier.items():
+                rows = age.cypher(
+                    conn,
+                    graph,
+                    _KEPT_EDGES.format(label=age.identifier(label)),
+                    {"ids": ids, "kept": list(nodes)},
+                    columns=("a", "rel", "outgoing", "eprops", "bid"),
+                )
+                for a_id, rel, outgoing, eprops, b_id in rows:
                     source, target = (a_id, b_id) if outgoing else (b_id, a_id)
                     edges.setdefault(
                         (rel, source, target),

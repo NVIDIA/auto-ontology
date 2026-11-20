@@ -9,11 +9,13 @@ into a graph of its own, and reads it back through the same functions the CLI
 and the REST route use. The graph is dropped afterwards.
 
 Needs a migrated database on a server with the AGE extension available (for
-example the ``apache/age`` image) and skips without one.
+example the ``apache/age`` image) and skips without one. Marked ``age``: the
+main CI job deselects it, and a separate job runs it on ``apache/age``.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from collections.abc import Iterator
@@ -27,6 +29,9 @@ from auto_ontology.dal.session import get_engine, store  # noqa: E402
 from auto_ontology.graph import age, projection, queries  # noqa: E402
 from auto_ontology.graph.mapping import edge_labels  # noqa: E402
 
+pytestmark = pytest.mark.age
+logger = logging.getLogger(__name__)
+
 
 @pytest.fixture(scope="module", autouse=True)
 def require_age() -> None:
@@ -34,7 +39,8 @@ def require_age() -> None:
         pytest.skip("POSTGRES_* not set")
     try:
         store().query_read("SELECT 1 FROM tag_target LIMIT 1")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — logged, then skipped
+        logger.warning("auto_ontology schema probe failed", exc_info=True)
         pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
     with get_engine().connect() as conn:
         available = conn.exec_driver_sql(
@@ -65,6 +71,8 @@ def seeded() -> Iterator[dict[str, str]]:
             "tag",
             "zone",
             "family",
+            "concept",
+            "ckey",
         )
     }
     rows = [
@@ -141,6 +149,23 @@ def seeded() -> Iterator[dict[str, str]]:
             {"term_id": ids["term"], "family_id": ids["family"], "base_name": "orders"},
         ),
         (
+            s.concept,
+            {"id": ids["concept"], "database_id": ids["db"], "name": f"{p} Customer"},
+        ),
+        (
+            s.concept_key,
+            {"id": ids["ckey"], "concept_id": ids["concept"], "name": "id"},
+        ),
+        (
+            s.concept_key__column,
+            {
+                "key_id": ids["ckey"],
+                "column_id": ids["c_id"],
+                "table_id": ids["customers"],
+            },
+        ),
+        (s.term__concept, {"term_id": ids["cust_term"], "concept_id": ids["concept"]}),
+        (
             s.column__foreign_key,
             {"source_column_id": ids["o_cust"], "target_column_id": ids["c_id"]},
         ),
@@ -176,7 +201,7 @@ def seeded() -> Iterator[dict[str, str]]:
         ),
         (
             s.column__semantic_fk,
-            {"column_id": ids["o_cust"], "attribute_id": ids["attr"]},
+            {"column_id": ids["o_cust"], "key_id": ids["ckey"]},
         ),
         (
             s.column_attribute__term,
@@ -194,7 +219,14 @@ def seeded() -> Iterator[dict[str, str]]:
             conn.execute(table.insert().values(**values))
     yield ids
     with get_engine().begin() as conn:
-        for table in (s.zone, s.tag, s.sql_attribute, s.term, s.catalog_database):
+        for table in (
+            s.zone,
+            s.tag,
+            s.sql_attribute,
+            s.column_attribute,
+            s.term,
+            s.catalog_database,
+        ):
             conn.execute(table.delete().where(table.c.id.like(f"{p}-%")))
 
 
@@ -225,17 +257,20 @@ def test_every_edge_type_is_projected(graph: str, seeded: dict[str, str]) -> Non
             (i["schema"], i["orders"]),
             (i["orders"], i["o_cust"]),
             (i["schema"], i["family"]),
+            (i["db"], i["concept"]),
         },
         "FOREIGN_KEY": {(i["o_cust"], i["c_id"])},
         "JOIN": {(i["orders"], i["customers"]), (i["o_cust"], i["c_id"])},
         "UNION": {(i["o_total"], i["o_total"])},
         "REPRESENTS": {(i["orders"], i["term"])},
         "HAS_ATTRIBUTE": {(i["o_total"], i["attr"])},
-        "SEMANTIC_FK": {(i["o_cust"], i["attr"])},
+        "SEMANTIC_FK": {(i["o_cust"], i["ckey"])},
+        "HAS_KEY": {(i["concept"], i["ckey"])},
+        "KEY_COLUMN": {(i["ckey"], i["c_id"])},
         "PROPERTY_OF": {(i["attr"], i["term"]), (i["sql_attr"], i["term"])},
         "TAGGED": {(i["tag"], i["term"])},
         "ZONE_OF": {(i["zone"], i["orders"])},
-        "MEMBER_OF": {(i["term"], i["family"])},
+        "MEMBER_OF": {(i["term"], i["family"]), (i["cust_term"], i["concept"])},
     }
     assert set(expected) == set(edge_labels())
     for label, pairs in expected.items():
@@ -300,6 +335,16 @@ def test_neighborhood_walks_from_a_term(graph: str, seeded: dict[str, str]) -> N
     assert capped["truncated"] is True
 
 
+def test_the_node_cap_bounds_the_walk_and_its_edges(
+    graph: str, seeded: dict[str, str]
+) -> None:
+    only = queries.term_neighborhood(seeded["term"], depth=3, max_nodes=1, graph=graph)
+    assert only is not None
+    assert [n["id"] for n in only["nodes"]] == [seeded["term"]]
+    assert only["edges"] == []
+    assert only["truncated"] is True
+
+
 def test_unknown_term_is_none(graph: str) -> None:
     assert queries.term_neighborhood("no-such-term", graph=graph) is None
 
@@ -322,6 +367,9 @@ def test_resync_replaces_rather_than_duplicates(
         "MATCH (t:Term {id: $id}) RETURN count(t)", {"id": seeded["term"]}, graph=graph
     )
     assert rows == [(1,)]
+    with get_engine().connect() as conn:
+        age.prepare(conn)
+        assert not age.graph_exists(conn, projection.staging_name(graph))
 
 
 def test_missing_graph_is_reported(seeded: dict[str, str]) -> None:

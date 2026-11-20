@@ -42,13 +42,13 @@ def test_parse_agtype_none() -> None:
     assert age.parse_agtype(None) is None
 
 
-@pytest.mark.parametrize("name", ["auto_ontology", "g", "_x1"])
+@pytest.mark.parametrize("name", ["auto_ontology", "g", "_x1", "x" * 58])
 def test_graph_name_accepts(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setenv(age.GRAPH_NAME_ENV, name)
     assert age.graph_name() == name
 
 
-@pytest.mark.parametrize("name", ["", "Graph", "a-b", "a'b", "1abc", "x" * 64])
+@pytest.mark.parametrize("name", ["", "Graph", "a-b", "a'b", "1abc", "x" * 59])
 def test_graph_name_rejects(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setenv(age.GRAPH_NAME_ENV, name)
     with pytest.raises(ValueError):
@@ -124,3 +124,18 @@ def test_sync_if_enabled_swallows_failures(monkeypatch: pytest.MonkeyPatch) -> N
         projection, "sync_graph", MagicMock(side_effect=age.AgeUnavailable("x"))
     )
     assert projection.sync_if_enabled() is None
+
+
+def test_require_extension_refuses_a_database_without_it() -> None:
+    conn = MagicMock()
+    conn.exec_driver_sql.return_value.first.return_value = None
+    with pytest.raises(age.AgeUnavailable, match="CREATE EXTENSION age"):
+        age.require_extension(conn)
+
+
+def test_prepare_keeps_the_dal_schema_ahead_of_the_role_schema() -> None:
+    conn = MagicMock()
+    age.prepare(conn)
+    statements = [c.args[0] for c in conn.exec_driver_sql.call_args_list]
+    assert "SET LOCAL search_path = ag_catalog, public" in statements
+    assert not any("$user" in sql for sql in statements)

@@ -54,10 +54,17 @@ from auto_ontology.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
 
 LABEL_TAG = "Tag"
 REL_TAGGED = "TAGGED"
-# Names from the comments on ``term_family`` / ``term__term_family`` in
-# ``auto_ontology/dal/schema.py``.
+# Names from the comments on ``term_family`` / ``term__term_family`` and on the
+# Concept tables in ``auto_ontology/dal/schema.py`` (``MEMBER_OF`` is used for
+# both Term -> TermFamily and Term -> Concept), and from the join-path comments
+# in ``auto_ontology/dal/attributes.py`` (``KEY_COLUMN``). The schema names no
+# relationship for Concept -> ConceptKey; ``HAS_KEY`` is this module's.
 LABEL_TERM_FAMILY = "TermFamily"
+LABEL_CONCEPT = "Concept"
+LABEL_CONCEPT_KEY = "ConceptKey"
 REL_MEMBER_OF = "MEMBER_OF"
+REL_HAS_KEY = "HAS_KEY"
+REL_KEY_COLUMN = "KEY_COLUMN"
 
 
 @dataclass(frozen=True)
@@ -120,6 +127,8 @@ NODES: tuple[NodeSpec, ...] = (
         ("name", "description", "expression", "source", "certified"),
     ),
     NodeSpec(LABEL_TERM_FAMILY, s.term_family, ("prefix",)),
+    NodeSpec(LABEL_CONCEPT, s.concept, ("name", "description", "source", "certified")),
+    NodeSpec(LABEL_CONCEPT_KEY, s.concept_key, ("name",)),
     NodeSpec(LABEL_TAG, s.tag, ("name",)),
     NodeSpec(LABEL_ZONE, s.zone, ("name", "description", "enabled")),
 )
@@ -135,6 +144,7 @@ EDGES: tuple[EdgeSpec, ...] = (
     _parent(s.catalog_table, Labels.SCHEMA, Labels.TABLE, "schema_id"),
     _parent(s.term_family, Labels.SCHEMA, LABEL_TERM_FAMILY, "schema_id"),
     _parent(s.catalog_column, Labels.TABLE, Labels.COLUMN, "table_id"),
+    _parent(s.concept, Labels.DB, LABEL_CONCEPT, "database_id"),
     # Physical relationships between columns and tables.
     EdgeSpec(
         Edges.FOREIGN_KEY,
@@ -183,14 +193,27 @@ EDGES: tuple[EdgeSpec, ...] = (
         "column_id",
         "attribute_id",
     ),
+    # A semantic FK references a Concept key; the key lands on one column per
+    # member table of the Concept.
     EdgeSpec(
         REL_SEMANTIC_FK,
         Labels.COLUMN,
-        LABEL_COLUMN_ATTRIBUTE,
+        LABEL_CONCEPT_KEY,
         s.column__semantic_fk,
         "column_id",
-        "attribute_id",
+        "key_id",
         ("use_in_join_paths",),
+    ),
+    EdgeSpec(
+        REL_HAS_KEY, LABEL_CONCEPT, LABEL_CONCEPT_KEY, s.concept_key, "concept_id", "id"
+    ),
+    EdgeSpec(
+        REL_KEY_COLUMN,
+        LABEL_CONCEPT_KEY,
+        Labels.COLUMN,
+        s.concept_key__column,
+        "key_id",
+        "column_id",
     ),
     EdgeSpec(
         REL_PROPERTY_OF,
@@ -207,6 +230,15 @@ EDGES: tuple[EdgeSpec, ...] = (
         s.sql_attribute__term,
         "attribute_id",
         "term_id",
+    ),
+    # A Term belongs to one Concept, the entity its tables store.
+    EdgeSpec(
+        REL_MEMBER_OF,
+        LABEL_TERM,
+        LABEL_CONCEPT,
+        s.term__concept,
+        "term_id",
+        "concept_id",
     ),
     # Term families: one version of a schema kept in several copies.
     EdgeSpec(

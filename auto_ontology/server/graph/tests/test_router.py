@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -28,15 +28,49 @@ def enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(age.ENABLED_ENV, "true")
 
 
-def test_status_reports_disabled_without_touching_the_database(
+def test_status_is_503_when_disabled_without_touching_the_database(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(age.ENABLED_ENV, raising=False)
     with patch("auto_ontology.graph.queries.graph_status") as status:
         response = client.get("/api/graph/status")
-    assert response.status_code == 200
-    assert response.json()["enabled"] is False
+    assert response.status_code == 503
     status.assert_not_called()
+
+
+def _engine_without_the_age_extension() -> MagicMock:
+    """An engine whose server has the AGE library but no ``CREATE EXTENSION age``."""
+    conn = MagicMock()
+
+    def execute(sql: str, *_: object) -> MagicMock:
+        result = MagicMock()
+        if "pg_extension" in sql:
+            result.first.return_value = None
+        elif "ag_catalog." in sql:
+            raise AssertionError(
+                f"read ag_catalog before checking the extension: {sql}"
+            )
+        return result
+
+    conn.exec_driver_sql.side_effect = execute
+    engine = MagicMock()
+    engine.connect.return_value.__enter__.return_value = conn
+    return engine
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/graph/status", "/api/graph/terms/t1/neighborhood"]
+)
+def test_reads_before_the_first_sync_are_503(
+    client: TestClient, enabled: None, path: str
+) -> None:
+    with patch(
+        "auto_ontology.dal.session.get_engine",
+        return_value=_engine_without_the_age_extension(),
+    ):
+        response = client.get(path)
+    assert response.status_code == 503
+    assert "CREATE EXTENSION age" in response.json()["detail"]
 
 
 def test_status_when_enabled(client: TestClient, enabled: None) -> None:

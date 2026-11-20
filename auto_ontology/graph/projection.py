@@ -121,6 +121,11 @@ def create_edges_statement(spec: EdgeSpec) -> str:
     )
 
 
+def staging_name(graph: str) -> str:
+    """The graph a rebuild loads into before it replaces *graph*."""
+    return f"{graph}_next"
+
+
 def _create_schema(conn: Connection, graph: str) -> None:
     if age.graph_exists(conn, graph):
         conn.exec_driver_sql("SELECT drop_graph(%s, true)", (graph,))
@@ -159,7 +164,16 @@ def sync_graph(
     graph: str | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> SyncReport:
-    """Rebuild the graph from Postgres in one transaction and report counts."""
+    """Rebuild the graph from Postgres in one transaction and report counts.
+
+    The rebuild loads a separate staging graph and only then replaces the
+    active one (drop, then ``alter_graph`` rename), so readers keep reading
+    the old graph while the new one loads. They wait only for the swap at the
+    end, which holds the dropped graph's locks until commit.
+
+    Every source read runs in one ``REPEATABLE READ`` snapshot, so the graph
+    matches one moment of the catalog even when writes commit mid-rebuild.
+    """
     if engine is None:
         from auto_ontology.dal.session import get_engine
 
@@ -168,24 +182,33 @@ def sync_graph(
     report = SyncReport(graph=graph)
     started = time.monotonic()
 
-    with engine.begin() as conn:
+    staging = staging_name(graph)
+    with (
+        engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn,
+        conn.begin(),
+    ):
         age.ensure_extension(conn)
         age.prepare(conn)
-        _create_schema(conn, graph)
+        _create_schema(conn, staging)
         for spec in NODES:
             rows = vertex_rows(conn, spec)
             report.vertices[spec.label] = _load(
-                conn, graph, create_vertices_statement(spec.label), rows, batch_size
+                conn, staging, create_vertices_statement(spec.label), rows, batch_size
             )
         for vertex_label in report.vertices:
             # Fresh statistics so the planner uses the GIN index for the
             # edge MATCHes below instead of guessing from an empty table.
-            conn.exec_driver_sql(f'ANALYZE "{graph}"."{vertex_label}"')
+            conn.exec_driver_sql(f'ANALYZE "{staging}"."{vertex_label}"')
         for spec in EDGES:
             rows = edge_rows(conn, spec)
-            written = _load(conn, graph, create_edges_statement(spec), rows, batch_size)
+            written = _load(
+                conn, staging, create_edges_statement(spec), rows, batch_size
+            )
             report.edges[spec.label] = report.edges.get(spec.label, 0) + written
             report.unmatched_edges += len(rows) - written
+        if age.graph_exists(conn, graph):
+            conn.exec_driver_sql("SELECT drop_graph(%s, true)", (graph,))
+        conn.exec_driver_sql("SELECT alter_graph(%s, 'RENAME', %s)", (staging, graph))
         # Recorded on the graph's own schema so it commits, or rolls back,
         # together with the graph it describes.
         # COMMENT takes only a literal; an ISO timestamp contains no quote.

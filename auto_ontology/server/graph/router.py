@@ -72,14 +72,14 @@ def _require_enabled() -> None:
 
 @router.get("/graph/status", response_model=GraphStatusResponse)
 def graph_status() -> dict:
-    """Report whether the AGE graph projection is on, built, and how large it is.
+    """Report whether the AGE graph projection is built, and how large it is.
 
-    ``synced_at`` is when the graph was last rebuilt from the catalog. Edits
-    made after it are not in the graph until the next sync, which runs at the
-    end of every semantic compilation pass.
+    Answers 503 while ``AGE_GRAPH_ENABLED`` is unset or the AGE extension is
+    unavailable. ``synced_at`` is when the graph was last rebuilt from the
+    catalog. Edits made after it are not in the graph until the next sync,
+    which runs at the end of every semantic compilation pass.
     """
-    if not age.enabled():
-        return {"enabled": False}
+    _require_enabled()
     try:
         return {"enabled": True, **queries.graph_status()}
     except age.AgeUnavailable as exc:

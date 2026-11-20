@@ -39,7 +39,9 @@ ENABLED_ENV = "AGE_GRAPH_ENABLED"
 GRAPH_NAME_ENV = "AGE_GRAPH_NAME"
 DEFAULT_GRAPH_NAME = "auto_ontology"
 
-_GRAPH_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+#: At most 58 characters, so the rebuild's ``<name>_next`` staging graph still
+#: fits Postgres' 63-character identifier limit.
+_GRAPH_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,57}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _DOLLAR_TAG = "$cypher$"
 
@@ -76,7 +78,12 @@ def identifier(value: str) -> str:
 
 
 def prepare(conn: Connection) -> None:
-    """Load AGE and put ``ag_catalog`` on the path for this transaction only."""
+    """Load AGE and put ``ag_catalog`` on the path for this transaction only.
+
+    ``public`` follows it and ``"$user"`` is left out, matching the DAL's own
+    ``search_path=public`` pin: a same-named schema with old catalog tables
+    must not shadow the tables the projection reads.
+    """
     try:
         conn.exec_driver_sql("LOAD 'age'")
     except Exception as exc:  # noqa: BLE001 — re-raised with the fix attached
@@ -85,12 +92,30 @@ def prepare(conn: Connection) -> None:
             "that ships it (for example apache/age) or install the extension, "
             "then run CREATE EXTENSION age."
         ) from exc
-    conn.exec_driver_sql('SET LOCAL search_path = ag_catalog, "$user", public')
+    conn.exec_driver_sql("SET LOCAL search_path = ag_catalog, public")
 
 
 def ensure_extension(conn: Connection) -> None:
     """``CREATE EXTENSION age`` if it is installable but not yet created."""
     conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS age")
+
+
+def require_extension(conn: Connection) -> None:
+    """Raise :class:`AgeUnavailable` unless ``CREATE EXTENSION age`` has run.
+
+    ``LOAD 'age'`` succeeds as soon as the library is installed, but
+    ``ag_catalog`` only exists once the extension is created. Reads check
+    here instead of creating it, so a read transaction never runs DDL.
+    """
+    row = conn.exec_driver_sql(
+        "SELECT 1 FROM pg_extension WHERE extname = 'age'"
+    ).first()
+    if row is None:
+        raise AgeUnavailable(
+            "The age extension has not been created in this database yet. "
+            "Run `python -m auto_ontology.graph sync`, which creates it, or "
+            "CREATE EXTENSION age."
+        )
 
 
 def graph_exists(conn: Connection, name: str) -> bool:
@@ -113,6 +138,7 @@ def read_transaction(engine: Engine) -> Iterator[Connection]:
         try:
             conn.exec_driver_sql("SET TRANSACTION READ ONLY")
             prepare(conn)
+            require_extension(conn)
             yield conn
         finally:
             trans.rollback()

@@ -25,6 +25,9 @@ NOT_EDGES = {
     # Owning table of an attribute, already reachable as
     # Table -CONTAINS-> Column -HAS_ATTRIBUTE-> ColumnAttribute.
     ("column_attribute", "table_id"),
+    # Member table of a key column, already reachable as
+    # ConceptKey -KEY_COLUMN-> Column <-CONTAINS- Table.
+    ("concept_key__column", "table_id"),
 }
 
 
