@@ -106,7 +106,7 @@ def submit(
                 None,
             )
         return "Accepted.", Submission("", response, assumptions, None)
-    connector = connector_for(ctx)
+    connector = connector_for(ctx, sql)
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first.", None
     check = check_query(ctx, connector, sql)

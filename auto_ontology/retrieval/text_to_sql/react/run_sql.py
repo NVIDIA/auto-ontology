@@ -364,11 +364,32 @@ def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResu
     return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
 
 
-def connector_for(ctx: ToolContext) -> SQLDatabase | None:
+def _tables_named_in(sql: str, ctx: ToolContext) -> list[dict]:
+    """The seen tables *sql* names, matched on (schema, name) or bare name."""
+    try:
+        tree = sqlglot.parse_one(sql)
+    except Exception:  # noqa: BLE001 — unparseable SQL is reported by check_query
+        return []
+    named = {
+        ((t.db or "").lower() or None, t.name.lower()) for t in tree.find_all(exp.Table)
+    }
+    out = []
+    for table in ctx.seen_tables.values():
+        schema = str(table.get("schema_name") or "").lower() or None
+        name = str(table.get("name") or "").lower()
+        if (schema, name) in named or (None, name) in named:
+            out.append(table)
+    return out
+
+
+def connector_for(ctx: ToolContext, sql: str | None = None) -> SQLDatabase | None:
     """The database the episode's SQL runs on.
 
     The target database when the caller named one; otherwise the connector that
-    owns the tables ``retrieve`` has shown, or the only one configured.
+    owns the tables ``retrieve`` has shown, or the only one configured. When the
+    shown tables span databases and *sql* is given, the tables *sql* names
+    decide, so one search that returned a table from another database does not
+    block every later query in the episode.
     """
     if ctx.database_name:
         for connector in ctx.connectors:
@@ -380,6 +401,14 @@ def connector_for(ctx: ToolContext) -> SQLDatabase | None:
         return resolve_connector_from_tables(
             list(ctx.seen_tables.values()), ctx.connectors
         )
+    except ValueError:
+        if not sql:
+            return None
+    named = _tables_named_in(sql, ctx)
+    if not named:
+        return None
+    try:
+        return resolve_connector_from_tables(named, ctx.connectors)
     except ValueError:
         return None
 
@@ -427,7 +456,7 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
             "Error: no exploratory run_sql calls left in this episode. Run your "
             "best query with final=true."
         )
-    connector = connector_for(ctx)
+    connector = connector_for(ctx, sql)
     if connector is None:
         return "Error: no database to run on. Retrieve the tables you need first."
     dialect = getattr(connector, "dialect", None)
