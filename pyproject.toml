@@ -63,6 +63,7 @@ dependencies = [
     # route without it.
     "python-multipart>=0.0.32",
     "regex>=2026.7.19",
+    "pymongo>=4.20.0",
 ]
 
 [project.optional-dependencies]
