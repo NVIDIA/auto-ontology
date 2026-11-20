@@ -24,6 +24,8 @@ export type CertificationSelectProps = {
 	disabled?: boolean;
 	/** Renders the full pill (icon + status text) instead of the icon-only badge. */
 	showLabel?: boolean;
+	/** Hide the dropdown chevron until the control is hovered or focused. */
+	chevronOnHover?: boolean;
 };
 
 export const CertificationSelect = ({
@@ -31,6 +33,7 @@ export const CertificationSelect = ({
 	onChange,
 	disabled = false,
 	showLabel = false,
+	chevronOnHover = false,
 }: CertificationSelectProps) => {
 	const [saving, setSaving] = useState(false);
 	const status = fieldStatus(certified);
@@ -82,7 +85,7 @@ export const CertificationSelect = ({
 							? 'Saving Certification…'
 							: `Set Certification (${CERTIFICATION_LABEL[status]})`
 					}
-					className={`inline-flex items-center gap-1 ${saving ? 'cursor-default opacity-70' : 'cursor-pointer'}`}
+					className={`group/cert inline-flex items-center gap-1 ${saving ? 'cursor-default opacity-70' : 'cursor-pointer'}`}
 				>
 					<CertificationBadge status={status} iconOnly={!showLabel} decorative />
 					{saving ? (
@@ -90,7 +93,7 @@ export const CertificationSelect = ({
 					) : (
 						<Icon
 							name={IconName.ChevronRight}
-							className="h-3 w-3 rotate-90 text-secondary"
+							className={`h-3 w-3 rotate-90 text-secondary ${chevronOnHover ? 'opacity-0 transition-opacity group-hover/cert:opacity-100 group-focus-visible/cert:opacity-100' : ''}`}
 						/>
 					)}
 				</button>

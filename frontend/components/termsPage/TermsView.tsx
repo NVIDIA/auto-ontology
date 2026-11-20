@@ -4,30 +4,19 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { Placeholders } from '@/assets/images/placeholders';
 import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 import { Button } from '@/common/Button';
-import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
-import { InfiniteScroll } from '@/common/InfiniteScroll';
-import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
-import { SearchInput } from '@/common/SearchInput';
-import { Text } from '@/common/Text';
-import { TextVariant } from '@/enums/text';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { entitySidePanel } from '@/common/SidePanel';
-import { Label } from '@/common/Label';
-import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
 import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
@@ -42,16 +31,35 @@ import {
 	syncTags,
 } from '@/lib/tags';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
-import { canEditEntity, changedOwnerId, entityOwnerSection, findOwner } from '@/lib/owners';
+import { canEditEntity, changedOwnerId, entityOwnerSection } from '@/lib/owners';
 import { fetchOwnerDirectory, ownerQueries } from '@/lib/queries/owners';
 import { OwnerPermission } from '@/types/owners';
 import { useSession } from '@/auth/auth-client';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
-import { OwnerLabel } from '@/common/OwnerLabel';
-import type { Owner } from '@/types/owners';
-import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
+import type { ColumnAttribute, SqlAttribute, Term, TermDetail } from '@/types/terms';
+import { termHref } from '@/lib/termHref';
+
+/** What each box on a term's page is for, shown as its info tooltip. */
+const TERM_SECTION_INFO: Record<string, string> = {
+	description:
+		'What the term means, in plain language. The answering agent reads it to decide whether a question is about this term, so certify it once it is accurate.',
+	synonyms:
+		'Other words people use for this term. Search and the answering agent match them too. Generated with the ontology.',
+	entities:
+		'The tables whose rows are instances of this term. Click one to open it in the data catalog.',
+	zones: 'Access zones that cover this term’s tables. People only see data in the zones they have been granted.',
+	related_terms:
+		'Terms connected to this one by a join between their tables. Click one to jump to it.',
+	column_attributes:
+		'Columns that describe a property of this term. Certify a row when the column really means that property for this term, not merely because it holds values of the right type. Click a row to edit it.',
+	sql_attributes:
+		'Properties computed by a SQL expression, such as a total or a flag. Add one with + SQL Attribute; click a row to edit it.',
+	owner_id: 'The person or group responsible for keeping this term accurate.',
+	tags: 'Free-form labels for organising and filtering terms.',
+	'Last Modified': 'Who last changed this term, and when.',
+};
 
 const termFocusTrail = ({
 	focusId,
@@ -72,217 +80,16 @@ const termFocusTrail = ({
 
 	const term: BreadcrumbItem = {
 		label: termName ?? focusId,
-		href: `/terms?focus=${encodeURIComponent(focusId)}`,
+		href: termHref(focusId),
 	};
 	if (sqlAttrId != null) return [term, { label: sqlAttrName ?? sqlAttrId }];
 	if (colAttrId != null) return [term, { label: colAttrName ?? colAttrId }];
 	return [term];
 };
 
-type TermCardProps = {
-	term: Term;
-	owners: Owner[];
-	columnAttributeCount: number;
-	sqlAttributeCount: number;
-	relatedCount: number;
-	certificationStatus: CertificationStatus;
-	onClick: (term: Term) => void;
-};
-
-/** How many tag chips a card shows before the rest collapse to a count. */
-const CARD_TAG_LIMIT = 2;
-
 type SqlAttributeDeleteTarget = {
 	id: string;
 	name: string;
-};
-
-const LOADING_SKELETON_CLASSNAMES = [
-	'',
-	'',
-	'hidden [@media(min-height:760px)]:block',
-	'hidden [@media(min-height:960px)]:block',
-] as const;
-
-export const TermsLoadingSkeleton = () => (
-	<div
-		className="flex min-h-[calc(100dvh-11rem)] flex-col gap-4"
-		role="status"
-		aria-label="Loading terms"
-	>
-		{LOADING_SKELETON_CLASSNAMES.map((className, index) => (
-			<SkeletonCard key={index} className={className} rows={4} />
-		))}
-	</div>
-);
-
-const TermCard = ({
-	term,
-	owners,
-	columnAttributeCount,
-	sqlAttributeCount,
-	relatedCount,
-	certificationStatus,
-	onClick,
-}: TermCardProps) => {
-	const tags = term.tags ?? [];
-	const shownTags = tags.slice(0, CARD_TAG_LIMIT);
-	const hiddenTagCount = tags.length - shownTags.length;
-	return (
-		<li
-			role="button"
-			tabIndex={0}
-			onClick={() => onClick(term)}
-			onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick(term)}
-			className="cursor-pointer rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
-		>
-			{/* Card header */}
-			<div className="flex items-start justify-between gap-3">
-				<div className="min-w-0 space-y-0.5">
-					<div className="flex min-w-0 items-center gap-2">
-						<Icon
-							name={IconName.Terms}
-							className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
-						/>
-						<Text as="h2" text={term.name} variant={TextVariant.CardTitle} fill />
-					</div>
-					{term.synonyms && term.synonyms.length > 0 && (
-						<Text
-							as="p"
-							text={term.synonyms.join(', ')}
-							variant={TextVariant.Caption}
-						/>
-					)}
-				</div>
-				<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-					<span className="inline-flex items-center gap-1 text-sm font-semibold text-heading dark:text-zinc-100">
-						<Icon name={IconName.Tag} className="h-4 w-4" />
-						Tags
-					</span>
-					{shownTags.length === 0 ? (
-						<span className="text-sm text-[#B3B4B7]">None</span>
-					) : (
-						shownTags.map((tag) => <Label key={tag.id} label={tag.name} />)
-					)}
-					{hiddenTagCount > 0 ? (
-						<span className="text-xs text-secondary dark:text-zinc-400">
-							+{hiddenTagCount}
-						</span>
-					) : null}
-					<OwnerLabel owner={findOwner(owners, term.owner_id)} />
-					<CertificationBadge status={certificationStatus} />
-				</div>
-			</div>
-
-			<div className="mt-2">
-				{term.description != null && term.description.trim() !== '' ? (
-					<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
-				) : (
-					<p className="text-sm italic text-secondary dark:text-zinc-500">
-						No Description Available
-					</p>
-				)}
-			</div>
-
-			{/* Four-column section */}
-			<div className="mt-4 grid grid-cols-4 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
-				{/* Column Attributes */}
-				<div className="border-r border-zinc-200 dark:border-zinc-700">
-					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							Column Attributes
-						</span>
-					</div>
-					<div className="flex items-center">
-						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
-							<span>Column Attributes</span>
-							<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
-								{columnAttributeCount}
-							</span>
-						</span>
-					</div>
-				</div>
-
-				{/* SQL Attributes */}
-				<div className="border-r border-zinc-200 dark:border-zinc-700">
-					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							SQL Attributes
-						</span>
-					</div>
-					<div className="flex items-center">
-						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
-							<span>SQL Attributes</span>
-							<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
-								{sqlAttributeCount}
-							</span>
-						</span>
-					</div>
-				</div>
-
-				{/* Related Terms */}
-				<div className="border-r border-zinc-200 dark:border-zinc-700">
-					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							Related Terms
-						</span>
-					</div>
-					<div className="flex items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
-						<span>Related Terms</span>
-						<span className="font-medium text-heading dark:text-zinc-100">
-							{relatedCount}
-						</span>
-					</div>
-				</div>
-
-				{/* Zones */}
-				<div>
-					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							Zones
-						</span>
-					</div>
-					<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
-						{term.zones.length > 0 ? (
-							term.zones.map((zone) => (
-								<Label
-									key={zone.id}
-									label={zone.name}
-									color={zone.color}
-									muted={!zone.enabled}
-								/>
-							))
-						) : (
-							<span className="text-sm text-secondary dark:text-zinc-400">-</span>
-						)}
-					</div>
-				</div>
-			</div>
-		</li>
-	);
-};
-
-/**
- * Per-card badge numbers, keyed by term id. The list endpoint sends them
- * alongside each page and only for that page's terms, so they accumulate as
- * pages load rather than replacing one another.
- */
-type TermBadgeCounts = {
-	columnAttributes: Map<string, number>;
-	sqlAttributes: Map<string, number>;
-	related: Map<string, number>;
-};
-
-const EMPTY_BADGE_COUNTS: TermBadgeCounts = {
-	columnAttributes: new Map(),
-	sqlAttributes: new Map(),
-	related: new Map(),
-};
-
-const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) => {
-	const merged = new Map(held);
-	for (const { term_id: termId, count } of rows ?? []) merged.set(termId, count);
-	return merged;
 };
 
 const FIELD_INPUT_CLASSNAME =
@@ -290,6 +97,13 @@ const FIELD_INPUT_CLASSNAME =
 
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
+/**
+ * The selected term's detail — description, certification, column and SQL
+ * attributes, tags, owner — for the Exploration page's side panel.
+ *
+ * The term is the one selected in the graph (`semanticId`); `sqlAttr` or
+ * `colAttr` open one of its attributes in the same panel instead.
+ */
 export const TermsView = () => {
 	const router = useRouter();
 	// The tag picker's options come from the shared cache rather than a read of
@@ -299,25 +113,12 @@ export const TermsView = () => {
 	const { data: session } = useSession();
 	const { data: owners = [] } = useQuery(ownerQueries.all());
 	const searchParams = useSearchParams();
-	const focusId = searchParams.get('focus');
+	const focusId = searchParams.get('semanticId');
 	const sqlAttrId = searchParams.get('sqlAttr');
 	const colAttrId = searchParams.get('colAttr');
 
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
 	const [columnAttrs, setColumnAttrs] = useState<ColumnAttribute[]>([]);
-	const [badgeCounts, setBadgeCounts] = useState<TermBadgeCounts>(EMPTY_BADGE_COUNTS);
-	const [hasLoadedTerms, setHasLoadedTerms] = useState(false);
-	const [searchQuery, setSearchQuery] = useState('');
-	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
-	// Read inside `fetchTermsPage` to tell a response for a query that has
-	// since been superseded apart from one that still describes what's on
-	// screen — `useInfiniteList` already discards a stale `items`/`total`
-	// response by its own request id, but the badge counts below are a side
-	// effect of that same callback and need the same guard applied by hand.
-	const debouncedSearchQueryRef = useRef(debouncedSearchQuery);
-	useEffect(() => {
-		debouncedSearchQueryRef.current = debouncedSearchQuery;
-	}, [debouncedSearchQuery]);
 	/**
 	 * The focused term as the single-term endpoint returned it. A term opened by
 	 * link isn't necessarily on the pages the list has loaded, so the detail
@@ -338,7 +139,6 @@ export const TermsView = () => {
 	const [deletingSqlAttr, setDeletingSqlAttr] = useState<SqlAttributeDeleteTarget | null>(null);
 	const [deletingSqlAttrBusy, setDeletingSqlAttrBusy] = useState(false);
 	const [deleteSqlAttrError, setDeleteSqlAttrError] = useState<string | null>(null);
-	const [termEditing, setTermEditing] = useState(false);
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
 	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
@@ -354,7 +154,6 @@ export const TermsView = () => {
 		setPrevFocusId(focusId);
 		setPrevSqlAttrId(sqlAttrId);
 		setPrevColAttrId(colAttrId);
-		setTermEditing(false);
 		setSqlAttrEditing(false);
 		setSqlAttrEditError(null);
 		setColumnAttrEditing(false);
@@ -391,75 +190,10 @@ export const TermsView = () => {
 		};
 	}, [focusId, colAttrId, sqlAttrId]);
 
-	const fetchTermsPage = useCallback(
-		async (skip: number, limit: number) => {
-			const query = debouncedSearchQuery;
-			const res = await termsApi.list({
-				...(query ? { query } : {}),
-				skip,
-				limit,
-			});
-			if (res.error) return { error: res.message ?? 'Failed to load terms' };
-
-			// A newer search may have started while this request was in flight.
-			// `useInfiniteList` already drops a late `items`/`total` response by
-			// request id; the badge counts have no such guard of their own, so a
-			// stale response merged in here would show counts for a search that
-			// is no longer on screen.
-			if (debouncedSearchQueryRef.current === query) {
-				setBadgeCounts((held) => {
-					const base = skip === 0 ? EMPTY_BADGE_COUNTS : held;
-					return {
-						columnAttributes: withCounts(
-							base.columnAttributes,
-							res.column_attribute_counts,
-						),
-						sqlAttributes: withCounts(base.sqlAttributes, res.sql_attribute_counts),
-						related: withCounts(base.related, res.related_counts),
-					};
-				});
-			}
-			setHasLoadedTerms(true);
-			return { items: res.terms ?? [], total: res.total ?? 0 };
-		},
-		[debouncedSearchQuery],
-	);
-
-	const {
-		items: terms,
-		setItems: setTerms,
-		isLoading: loading,
-		isLoadingMore: loadingMoreTerms,
-		error,
-		hasMore: hasMoreTerms,
-		loadMore: loadMoreTerms,
-		reload: reloadTerms,
-	} = useInfiniteList(fetchTermsPage, {
-		pageSize: DEFAULT_PAGE_SIZE,
-		itemKey: (term) => term.id,
-	});
-
-	/**
-	 * Applies a saved change to both copies of a term: the card in the list
-	 * behind this page, and the detail copy the header falls back to when the
-	 * term isn't on a page the list has loaded.
-	 */
-	const patchTerm = useCallback(
-		(termId: string, patch: Partial<Term>) => {
-			setTerms((prev) =>
-				prev.map((term) => (term.id === termId ? { ...term, ...patch } : term)),
-			);
-			setFocusedTermDetail((prev) => (prev?.id === termId ? { ...prev, ...patch } : prev));
-		},
-		[setTerms],
-	);
-
-	const handleCardClick = useCallback(
-		(term: Term) => {
-			router.push(`/terms?focus=${encodeURIComponent(term.id)}`);
-		},
-		[router],
-	);
+	/** Applies a saved change to the term the header and the edit form read. */
+	const patchTerm = useCallback((termId: string, patch: Partial<Term>) => {
+		setFocusedTermDetail((prev) => (prev?.id === termId ? { ...prev, ...patch } : prev));
+	}, []);
 
 	const handleSqlAttrCreated = useCallback((attribute: SqlAttribute) => {
 		setSqlAttrs((prev) => [...prev, attribute]);
@@ -556,7 +290,7 @@ export const TermsView = () => {
 		setSqlAttrsEpoch((prev) => prev + 1);
 		setDeletingSqlAttr(null);
 		if (focusId != null) {
-			router.push(`/terms?focus=${encodeURIComponent(focusId)}`);
+			router.push(termHref(focusId));
 		}
 	};
 
@@ -975,13 +709,9 @@ export const TermsView = () => {
 		(sectionId: string, rowId: string) => {
 			if (focusId == null) return;
 			if (sectionId === 'sql_attributes') {
-				router.push(
-					`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
-				);
+				router.push(termHref(focusId, { sqlAttr: rowId }));
 			} else if (sectionId === 'column_attributes') {
-				router.push(
-					`/terms?focus=${encodeURIComponent(focusId)}&colAttr=${encodeURIComponent(rowId)}`,
-				);
+				router.push(termHref(focusId, { colAttr: rowId }));
 			}
 		},
 		[focusId, router],
@@ -1221,6 +951,7 @@ export const TermsView = () => {
 					header: {
 						title: term.name,
 						icon: IconName.Terms,
+						kind: 'Term',
 						titleEditable: true,
 						certification: { certified: term.name_certified },
 						// Same server-rolled-up value the list card shows, so the two
@@ -1339,10 +1070,8 @@ export const TermsView = () => {
 		[queryClient],
 	);
 
-	const listedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedTerm =
-		(focusId != null && focusedTermDetail?.id === focusId ? focusedTermDetail : null) ??
-		listedTerm;
+		focusId != null && focusedTermDetail?.id === focusId ? focusedTermDetail : null;
 	const focusedSqlAttr =
 		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
 	const focusedColAttr =
@@ -1383,6 +1112,7 @@ export const TermsView = () => {
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						compact
 						key={sqlAttrId}
 						dataId={sqlAttrId}
 						getSinglePage={getSqlAttributeSinglePage}
@@ -1520,6 +1250,7 @@ export const TermsView = () => {
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						compact
 						key={colAttrId}
 						dataId={colAttrId}
 						getSinglePage={getColumnAttributeSinglePage}
@@ -1576,49 +1307,35 @@ export const TermsView = () => {
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						compact
 						key={focusId}
 						dataId={focusId}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
-						headerActions={
-							<>
-								{termEditing || !canEditFocusedTerm ? null : (
-									<Button
-										theme={ButtonTheme.Primary}
-										size={Size.REGULAR}
-										type="button"
-										onClick={() => {
-											setTermEditing(true);
-										}}
-										iconPosition="left"
-									>
-										<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-										Edit
-									</Button>
-								)}
-								{canEditCatalog ? (
-									<Button
-										theme={ButtonTheme.Primary}
-										size={Size.REGULAR}
-										type="button"
-										onClick={() => setCreateSqlAttrModalOpen(true)}
-										iconPosition="left"
-										shadow
-									>
-										<Icon name={IconName.Plus} className="h-4 w-4" />
-										Create New SQL Attribute
-									</Button>
-								) : null}
-							</>
+						editPerSection={canEditFocusedTerm}
+						sectionInfo={TERM_SECTION_INFO}
+						sectionActions={
+							canEditCatalog
+								? {
+										sql_attributes: (
+											<Button
+												theme={ButtonTheme.Soft}
+												size={Size.SMALL}
+												type="button"
+												onClick={() => setCreateSqlAttrModalOpen(true)}
+												iconPosition="left"
+											>
+												<Icon
+													name={IconName.Plus}
+													className="h-3.5 w-3.5"
+												/>
+												SQL Attribute
+											</Button>
+										),
+									}
+								: undefined
 						}
-						isEditing={termEditing}
 						onPatchEdits={handleTermEditSave}
-						onSave={() => {
-							setTermEditing(false);
-						}}
-						onCancel={() => {
-							setTermEditing(false);
-						}}
 						onDataTableRowClick={handleDataTableRowClick}
 						onCertificationChange={handleTermCertificationChange}
 						onDataTableCertificationChange={handleTermTableCertificationChange}
@@ -1686,91 +1403,5 @@ export const TermsView = () => {
 		);
 	}
 
-	return (
-		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.Terms} className="h-5 w-5 text-body dark:text-zinc-300" />
-				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-					Terms
-				</h1>
-			</header>
-
-			<InfiniteScroll
-				className="flex-1 px-6 py-6"
-				onLoadMore={loadMoreTerms}
-				isLoading={loadingMoreTerms}
-				hasMore={hasMoreTerms}
-				// Only a failed *first* page is shown below — a failed later page
-				// keeps the cards already loaded and gets its own retry control
-				// instead (see `error` on `InfiniteScroll`).
-				error={terms.length > 0 ? error : null}
-			>
-				{hasLoadedTerms && (
-					<SearchInput
-						value={searchQuery}
-						onChange={setSearchQuery}
-						placeholder="Search Terms…"
-						aria-label="Search terms"
-						className="mb-6 w-full"
-					/>
-				)}
-
-				{loading && <TermsLoadingSkeleton />}
-
-				{!loading && error != null && terms.length === 0 && (
-					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
-						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
-							Couldn&apos;t load terms
-						</h2>
-						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
-							{error}
-						</pre>
-						{/* `reload`, not `loadMore`: a failed first page leaves
-						    nothing fetched, so `loadMore` sees the list as ended
-						    and returns without asking for anything. */}
-						<div className="mt-4 flex justify-center">
-							<Button
-								theme={ButtonTheme.Secondary}
-								size={Size.SMALL}
-								type="button"
-								onClick={reloadTerms}
-							>
-								Retry
-							</Button>
-						</div>
-					</div>
-				)}
-
-				{!loading && error == null && terms.length === 0 && (
-					<EmptyState
-						illustration={<Placeholders.NoTerms />}
-						title={
-							debouncedSearchQuery
-								? 'No Terms Match Your Search'
-								: 'No Terms Created Yet'
-						}
-					/>
-				)}
-
-				{!loading && terms.length > 0 && (
-					<ul className="flex flex-col gap-4">
-						{terms.map((term) => (
-							<TermCard
-								key={term.id}
-								term={term}
-								owners={owners}
-								columnAttributeCount={
-									badgeCounts.columnAttributes.get(term.id) ?? 0
-								}
-								sqlAttributeCount={badgeCounts.sqlAttributes.get(term.id) ?? 0}
-								relatedCount={badgeCounts.related.get(term.id) ?? 0}
-								certificationStatus={term.certification}
-								onClick={handleCardClick}
-							/>
-						))}
-					</ul>
-				)}
-			</InfiniteScroll>
-		</div>
-	);
+	return null;
 };

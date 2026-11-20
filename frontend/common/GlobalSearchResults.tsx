@@ -24,6 +24,7 @@ import { tagPath } from '@/app/settings/tags/tags-path';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { searchTokens, synonymWordTokens } from '@/lib/searchTokens';
 import type { GlobalSearchItem } from '@/types/search';
+import { termHref } from '@/lib/termHref';
 
 const parentTermName = (item: GlobalSearchItem): string | null => {
 	const termCrumb =
@@ -43,15 +44,11 @@ const catalogFocusId = (item: GlobalSearchItem): string => {
 export const hrefForGlobalSearchItem = (item: GlobalSearchItem): string => {
 	switch (searchObjectTypeFromHit(item)) {
 		case SearchObjectType.Term:
-			return `/terms?focus=${encodeURIComponent(item.id)}`;
+			return termHref(item.id);
 		case SearchObjectType.Attribute:
-			return item.parent_id
-				? `/terms?focus=${encodeURIComponent(item.parent_id)}&colAttr=${encodeURIComponent(item.id)}`
-				: '/terms';
+			return item.parent_id ? termHref(item.parent_id, { colAttr: item.id }) : '/exploration';
 		case SearchObjectType.SqlAttribute:
-			return item.parent_id
-				? `/terms?focus=${encodeURIComponent(item.parent_id)}&sqlAttr=${encodeURIComponent(item.id)}`
-				: '/terms';
+			return item.parent_id ? termHref(item.parent_id, { sqlAttr: item.id }) : '/exploration';
 		case SearchObjectType.Analysis:
 			return `/analysis?focus=${encodeURIComponent(item.id)}`;
 		case SearchObjectType.PqlAnalysis:

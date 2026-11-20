@@ -25,3 +25,11 @@ export enum SearchObjectType {
 export enum TextMatchOption {
 	Contains = 'contains',
 }
+
+/** How a term in the Exploration search dropdown matched what was typed. */
+export enum TermSearchMatch {
+	/** The term's name contains the text. */
+	Name = 'name',
+	/** Only the semantic index ranked it close to the text. */
+	Meaning = 'meaning',
+}

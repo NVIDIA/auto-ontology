@@ -4,6 +4,7 @@
 
 import type { CertificationStatus } from '@/enums/certification';
 import type { TagAuthor, TagChip } from '@/types/tags';
+import type { TermSearchMatch } from '@/enums/search';
 
 /** Who last saved a glossary row, once the detail read has resolved the account. */
 export type GlossaryActivity = {
@@ -122,3 +123,13 @@ export type TermCount = {
 };
 
 export type RelatedTermCount = TermCount;
+
+/**
+ * A term in the Exploration search dropdown (`GET /terms/search`). Name
+ * matches come first; `similarity` is `1 - cosine distance` from the semantic
+ * index, or null when the term had no vector hit.
+ */
+export type TermSearchResult = Term & {
+	match: TermSearchMatch;
+	similarity: number | null;
+};
