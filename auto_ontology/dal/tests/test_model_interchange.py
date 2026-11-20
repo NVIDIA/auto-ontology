@@ -37,6 +37,7 @@ from auto_ontology.dal.concepts import (  # noqa: E402
     merge_concepts,
 )
 from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.server.model_interchange.schemas import AutoOntologyModelDocument  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -1001,7 +1002,7 @@ def test_moving_an_attribute_replaces_its_column_link(world: World) -> None:
     assert again["updated"]["column_attributes"] == 0
 
 
-def _shared_attribute_document(world: World):
+def _shared_attribute_document(world: World) -> AutoOntologyModelDocument:
     """The attribute linked to orders.id and orders.customer_id, declared once
     per column, the stored source (orders.id) first and the other last."""
     _link(
@@ -1046,9 +1047,10 @@ def test_every_declared_column_is_linked(world: World) -> None:
         )
     )
 
-    mi.apply_import_model(document, replace=True)
+    summary = mi.apply_import_model(document, replace=True)
 
     assert _attribute_columns(world.attribute) == {world.order_id, world.customer_ref}
+    assert summary["updated"]["column_attributes"] == 1
 
 
 def test_a_link_the_document_drops_is_removed(world: World) -> None:
@@ -1060,3 +1062,26 @@ def test_a_link_the_document_drops_is_removed(world: World) -> None:
 
     assert _attribute_columns(world.attribute) == {world.order_id}
     assert summary["updated"]["column_attributes"] == 1
+
+
+def test_a_scoped_import_keeps_links_to_other_databases(world: World) -> None:
+    """The document describes only its own database's columns, so a shared
+    attribute's link into another database is not the import's to remove."""
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, database_id=other_db, name="public")
+    other_table = _add(s.catalog_table, schema_id=other_schema, name="returns")
+    other_column = _add(
+        s.catalog_column,
+        table_id=other_table,
+        name="order_id",
+        data_type="integer",
+        ordinal_position=1,
+        is_nullable=True,
+    )
+    _link(s.column__has_attribute, column_id=other_column, attribute_id=world.attribute)
+    document = _document(world)
+
+    summary = mi.apply_import_model(document, replace=True)
+
+    assert _attribute_columns(world.attribute) == {world.order_id, other_column}
+    assert summary["updated"]["column_attributes"] == 0

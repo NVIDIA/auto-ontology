@@ -1624,6 +1624,7 @@ def _update_matched_attributes(
     *,
     declared_columns: dict[str, list[str]] | None = None,
     declared_sources: dict[str, set[tuple[str, str]]] | None = None,
+    scope_columns: set[str] | None = None,
 ) -> set[str]:
     """Give matched ColumnAttributes the document's values (``replace``).
 
@@ -1631,9 +1632,10 @@ def _update_matched_attributes(
     is certified, reported in *conflicts*. The denormalised ``term_name``,
     ``source_column`` and ``table_id`` always follow the document, since the
     import rewrites the links they copy. A shared attribute keeps its stored
-    source when that column is still among its declared ones, and loses only
-    the column links the document no longer declares. Returns the live ids
-    changed.
+    source when that column is still among its declared ones. Of the columns
+    the document describes (*scope_columns*), it loses the links the document
+    no longer declares; links to other columns stay. A restored link counts as
+    a change without re-embedding. Returns the live ids changed.
     """
     if not matched:
         return set()
@@ -1691,14 +1693,14 @@ def _update_matched_attributes(
                 continue
             if (props.get(field) or "") != (row[field] or ""):
                 changes[field] = props.get(field)
-        declared = (declared_columns or {}).get(yaml_id)
-        obsolete = (
-            stored_links.get(live_id, set()) - set(declared) if declared else set()
-        )
+        declared = set((declared_columns or {}).get(yaml_id) or ())
+        linked = stored_links.get(live_id, set())
+        obsolete = (linked & (scope_columns or set())) - declared if declared else set()
+        restored = declared - linked
         # Renaming the Term already rewrote term_name here, so nothing above
         # differs, but the vector still embeds the old name.
         term_renamed = context[yaml_id]["live_term_id"] in (renamed_terms or set())
-        if not changes and not term_renamed and not obsolete:
+        if not changes and not term_renamed and not obsolete and not restored:
             continue
         if changes:
             store().query_write(
@@ -1944,6 +1946,9 @@ def _import_column_attributes(
             renamed_terms or set(),
             declared_columns=declared_columns,
             declared_sources=declared_sources,
+            # Only links to columns this document describes are its to
+            # remove: a database-scoped document leaves other databases alone.
+            scope_columns={id_map[c] for c in column_meta if c in id_map},
         )
 
     has_attribute_rows: list[dict[str, Any]] = []
