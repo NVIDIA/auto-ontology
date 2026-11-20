@@ -1334,16 +1334,17 @@ def find_join_paths(
         walkable = _default_edges(
             _semantic_table_adjacency(anchor_context["database_id"])
         )
-        table_ids = set(walkable) | {
-            edge[0] for edges in walkable.values() for edge in edges
-        }
+        table_names, column_names = _tie_break_names(
+            walkable, anchor_col_id, dest_col_id
+        )
         ranked = rank_routes(
             walkable,
             anchor_context["table_id"],
             dest_context["table_id"],
             k=k,
             boost_tables=boost_table_ids,
-            table_names=_table_names(table_ids),
+            table_names=table_names,
+            column_names=column_names,
             alpha=alpha,
             theta=theta,
             max_hops=(MAX_PATH_DEPTH + 2) // 4,
@@ -1376,19 +1377,61 @@ def find_join_paths(
     ]
 
 
+def _tie_break_names(
+    walkable: dict[str, list[tuple[str, str, str, str]]],
+    anchor_col_id: str,
+    dest_col_id: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Schema-qualified table names and column names that order tied routes.
+
+    The names only break ties, so a failed lookup leaves the routes in place:
+    they are still ranked, by score first and by id last, and the failure is
+    logged.
+    """
+    table_ids = set(walkable) | {
+        edge[0] for edges in walkable.values() for edge in edges
+    }
+    column_ids = {col for edges in walkable.values() for e in edges for col in e[1:3]}
+    try:
+        return _table_names(table_ids), _column_names(column_ids)
+    except Exception:
+        logger.warning(
+            "find_join_paths: name lookup failed for %s -> %s; ties break by id",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        return {}, {}
+
+
 def _table_names(table_ids: Collection[str]) -> dict[str, str]:
-    """``{table_id: name}``, for tie-breaking route order by something stable."""
+    """``{table_id: "schema.table"}``, for tie-breaking route order."""
     if not table_ids:
         return {}
     names: dict[str, str] = {}
     ids = list(table_ids)
     for start in range(0, len(ids), IN_QUERY_BATCH):
         rows = store().query_read(
-            select(s.catalog_table.c.id, s.catalog_table.c.name).where(
-                s.catalog_table.c.id.in_(ids[start : start + IN_QUERY_BATCH])
+            select(
+                s.catalog_table.c.id,
+                s.catalog_table.c.name,
+                s.catalog_schema.c.name.label("schema_name"),
             )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .where(s.catalog_table.c.id.in_(ids[start : start + IN_QUERY_BATCH]))
         )
-        names.update({row["id"]: row["name"] for row in rows})
+        names.update({row["id"]: f"{row['schema_name']}.{row['name']}" for row in rows})
+    return names
+
+
+def _column_names(column_ids: Collection[str]) -> dict[str, str]:
+    """``{column_id: name}``, for tie-breaking parallel joins."""
+    names: dict[str, str] = {}
+    ids = list(column_ids)
+    for start in range(0, len(ids), IN_QUERY_BATCH):
+        names.update(_name_columns(ids[start : start + IN_QUERY_BATCH]))
     return names
 
 

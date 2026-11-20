@@ -561,6 +561,25 @@ def _join_routes(anchor: str, dest: str, boost: set[str]) -> tuple[list[dict], b
     return ranked, True
 
 
+def _route_to_link(
+    routes: list[dict],
+    loaded: set[tuple[str | None, str | None]],
+    ranked: bool,
+) -> list[dict]:
+    """The hops ``predict`` should link a table pair with.
+
+    ``predict`` builds its graph from the tables in view, and a hop through a
+    table outside it is skipped. Among ranked alternatives, the best route
+    whose tables are all loaded is the one it can apply; when none is, the
+    first route stands, as it does without ranking.
+    """
+    if ranked:
+        for route in routes:
+            if _hop_tables(route["hops"]) <= loaded:
+                return route["hops"]
+    return routes[0]["hops"]
+
+
 def _join_line(table: dict, other: dict, routes: list[dict], *, ranked: bool) -> str:
     head = f"JOIN {_qualified(table)} ↔ {_qualified(other)}"
     if len(routes) == 1:
@@ -594,12 +613,15 @@ def _join_lines(
     Two tables one hop apart get every direct column pair, the default first;
     the others get their one shortest route, or the ranked alternatives when
     more are asked for. Each line comes with every table on its routes,
-    bridges included. Only the first route is kept in ``ctx.join_paths``.
+    bridges included. One route per pair is kept in ``ctx.join_paths``: the
+    first, or with ranked routes the best one whose tables are all loaded, so
+    ``predict`` can apply it.
     """
     lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
     lookups = 0
     others = list(ctx.seen_tables.values()) + new_tables
     boost = set(ctx.seen_tables) | {str(t["id"]) for t in new_tables}
+    loaded = {(t.get("schema_name"), t.get("name")) for t in others}
     for table in new_tables:
         for other in others:
             pair = frozenset((str(table["id"]), str(other["id"])))
@@ -616,9 +638,9 @@ def _join_lines(
             routes, ranked = _join_routes(anchor, dest, boost)
             if not routes:
                 continue
-            # The first route only: ``predict`` links its graph with these,
-            # and one link per table pair is what it expects.
-            ctx.join_paths.append({"path": routes[0]["hops"]})
+            # One route only: ``predict`` links its graph with these, and one
+            # link per table pair is what it expects.
+            ctx.join_paths.append({"path": _route_to_link(routes, loaded, ranked)})
             tables: set[tuple[str | None, str | None]] = set()
             for route in routes:
                 tables |= _hop_tables(route["hops"])

@@ -18,6 +18,9 @@ import pytest
 
 from auto_ontology.dal.join_route_ranking import (
     DEFAULT_ALPHA,
+    DEFAULT_BOOST,
+    MAX_ENUMERATED_ROUTES,
+    RankedRoute,
     enumerate_routes,
     flow_resources,
     rank_routes,
@@ -39,11 +42,21 @@ PAGILA = [
 ]
 
 
-def build(edges, ids=None):
-    ids = ids or {}
+Edge = tuple[str, str, str, str]
 
-    def tid(name):
-        return ids.get(name, name)
+
+def build(
+    edges: list[Edge], ids: dict[str, str] | None = None
+) -> dict[str, list[tuple[str, str, str, str]]]:
+    """Adjacency from ``(fk_table, fk_col, owner_table, owner_col)`` edges.
+
+    *ids* maps table names to the ids the adjacency uses; unmapped names are
+    their own ids.
+    """
+    mapping = ids or {}
+
+    def tid(name: str) -> str:
+        return mapping.get(name, name)
 
     adjacency: dict[str, list[tuple[str, str, str, str]]] = {}
     for fk_t, fk_c, own_t, own_c in edges:
@@ -55,7 +68,7 @@ def build(edges, ids=None):
     return adjacency
 
 
-def names_of(route, ids=None):
+def names_of(route: RankedRoute, ids: dict[str, str] | None = None) -> list[str]:
     back = {v: k for k, v in (ids or {}).items()}
     return [back.get(t, t) for t in route.tables]
 
@@ -172,3 +185,45 @@ def test_unreachable_same_and_zero_k() -> None:
     assert rank_routes(adjacency, "address", "island", k=3) == []
     assert rank_routes(adjacency, "address", "address", k=3) == []
     assert rank_routes(adjacency, "address", "rental", k=0) == []
+
+
+def test_each_boosted_table_multiplies_the_score() -> None:
+    # a -> x -> y -> b, with both middle tables boosted.
+    edges = [("x", "a_id", "a", "id"), ("y", "x_id", "x", "id")]
+    edges += [("y", "b_id", "b", "id")]
+    adjacency = build(edges)
+    (plain,) = rank_routes(adjacency, "a", "b", k=1)
+    (boosted,) = rank_routes(adjacency, "a", "b", k=1, boost_tables={"x", "y"})
+    assert boosted.reliability == plain.reliability
+    assert boosted.score == pytest.approx(
+        plain.reliability * (1 + DEFAULT_BOOST) ** 2, abs=1e-5
+    )
+
+
+def test_enumeration_stops_at_the_cap_within_one_table() -> None:
+    # One table pair joined by more parallel columns than the cap allows.
+    adjacency = {
+        "a": [("b", f"a.c{i:03}", f"b.c{i:03}", f"k{i:03}") for i in range(201)],
+        "b": [],
+    }
+    routes = enumerate_routes(adjacency, "a", "b")
+    assert len(routes) == MAX_ENUMERATED_ROUTES
+
+
+def test_parallel_joins_tie_break_by_column_name_not_id() -> None:
+    adjacency = {
+        "a": [("b", "id-2", "id-9", "k1"), ("b", "id-1", "id-8", "k2")],
+        "b": [],
+    }
+    names = {"id-1": "z_ref", "id-8": "z_id", "id-2": "a_ref", "id-9": "a_id"}
+    ranked = rank_routes(adjacency, "a", "b", k=2, column_names=names)
+    assert [route.hops[0][0] for route in ranked] == ["id-2", "id-1"]
+
+
+def test_schema_qualified_names_break_ties_between_same_named_tables() -> None:
+    # Two `customer` tables in different schemas; the qualified name decides.
+    edges = [("t1", "a_id", "a", "id"), ("t1", "b_id", "b", "id")]
+    edges += [("t2", "a_id", "a", "id"), ("t2", "b_id", "b", "id")]
+    names = {"t1": "sales.customer", "t2": "archive.customer"}
+    ranked = rank_routes(build(edges), "a", "b", k=2, table_names=names)
+    assert [route.tables[1] for route in ranked] == ["t2", "t1"]

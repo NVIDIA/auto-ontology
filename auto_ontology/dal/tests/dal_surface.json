@@ -131,7 +131,7 @@
     "RankedRoute": "class(object)",
     "enumerate_routes": "(adjacency: 'Adjacency', anchor: 'str', dest: 'str', *, max_extra_hops: 'int' = 1, max_hops: 'int' = 8) -> 'list[tuple[tuple[str, ...], tuple[Hop, ...]]]'",
     "flow_resources": "(adjacency: 'Adjacency', source: 'str', *, alpha: 'float' = 0.7, theta: 'float' = 0.005) -> 'dict[str, float]'",
-    "rank_routes": "(adjacency: 'Adjacency', anchor: 'str', dest: 'str', *, k: 'int', boost_tables: 'Collection[str]' = (), table_names: 'Mapping[str, str] | None' = None, alpha: 'float' = 0.7, theta: 'float' = 0.005, boost: 'float' = 0.5, max_extra_hops: 'int' = 1, max_hops: 'int' = 8) -> 'list[RankedRoute]'"
+    "rank_routes": "(adjacency: 'Adjacency', anchor: 'str', dest: 'str', *, k: 'int', boost_tables: 'Collection[str]' = (), table_names: 'Mapping[str, str] | None' = None, column_names: 'Mapping[str, str] | None' = None, alpha: 'float' = 0.7, theta: 'float' = 0.005, boost: 'float' = 0.5, max_extra_hops: 'int' = 1, max_hops: 'int' = 8) -> 'list[RankedRoute]'"
   },
   "model_interchange": {
     "ModelImportValidationError": "class(ModelInterchangeError)",

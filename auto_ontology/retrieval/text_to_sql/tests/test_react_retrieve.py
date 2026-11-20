@@ -721,6 +721,7 @@ def ranked(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]
 def test_one_route_by_default_never_ranks(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_JOIN_ROUTES", raising=False)
     monkeypatch.setattr(
         tool, "find_join_paths", lambda *a, **k: pytest.fail("ranked lookup")
     )
@@ -793,6 +794,21 @@ def test_a_single_ranked_route_reads_like_the_default(
         "JOIN crm.customers ↔ sales.orders: "
         "sales.orders.id = hr.staff.id → hr.staff.id = crm.customers.id"
     ) in text
+
+
+def test_the_best_loaded_route_is_linked_when_the_top_one_is_not(
+    ranked: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    direct = [_hop(ORDERS_T, CUSTOMERS_T)]
+    monkeypatch.setattr(
+        tool, "find_join_paths", lambda *a, **k: [{"path": VIA_STAFF}, {"path": direct}]
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    assert "  1. sales.orders.id = hr.staff.id" in text
+    assert ctx.join_paths == [{"path": direct}]
 
 
 @pytest.mark.parametrize(("raw", "routes"), [("", 1), ("3", 3), ("0", 1), ("9", 5)])

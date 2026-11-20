@@ -24,16 +24,20 @@ a ranked handful lets the SQL step choose by meaning.
   only through a hub that joins to everything gets a small share, and a route
   that continues through it scores lower. (Two routes whose middle tables are
   both direct neighbours of the anchor still tie, hub or not; the dilution
-  applies to what flows past the hub.) A table that still has resource but would pass on less than
-  ``theta`` per neighbour stops expanding. Each table is set once, in the
-  first layer that reaches it.
+  applies to what flows past the hub.) A table stops expanding when
+  ``S(u) / |N(u)|`` is below ``theta``. That check runs **before** the
+  ``alpha`` decay, as in PathRAG equation 3, so tune ``theta`` against the
+  undecayed share: with 150 neighbours, ``1/150`` passes the default
+  ``theta`` even though each neighbour receives only ``0.7/150``. Each table
+  is set once, in the first layer that reaches it.
 * A route's **reliability** is the resource summed over its tables, divided by
   its number of hops.
 
 PathRAG then multiplies by how well a path's start matches the query. The
 join-route counterpart used here is a **question boost**: every intermediate
 table that holds one of the question's retrieved attributes multiplies the
-score by ``1 + boost``. Two routes that are structurally identical (same
+score by ``1 + boost``, so ``n`` such tables multiply it by
+``(1 + boost) ** n``. Two routes that are structurally identical (same
 length, same degrees) have the same reliability, and the boost is what tells
 them apart.
 
@@ -84,7 +88,11 @@ def flow_resources(
     alpha: float = DEFAULT_ALPHA,
     theta: float = DEFAULT_THETA,
 ) -> dict[str, float]:
-    """Resource reaching each table from *source* (PathRAG eq. 2 and 3)."""
+    """Resource reaching each table from *source* (PathRAG eq. 2 and 3).
+
+    A table expands only when ``S(u) / |N(u)|`` reaches *theta*; the share it
+    then passes on is ``alpha`` times that.
+    """
     resources = {source: 1.0}
     frontier = [source]
     while frontier:
@@ -153,6 +161,8 @@ def enumerate_routes(
             route = (tables + (next_table,), hops + ((source_col, target_col, key_id),))
             if next_table == dest:
                 routes.append(route)
+                if len(routes) >= MAX_ENUMERATED_ROUTES:
+                    return routes
             else:
                 stack.append(route)
     return routes
@@ -166,6 +176,7 @@ def rank_routes(
     k: int,
     boost_tables: Collection[str] = (),
     table_names: Mapping[str, str] | None = None,
+    column_names: Mapping[str, str] | None = None,
     alpha: float = DEFAULT_ALPHA,
     theta: float = DEFAULT_THETA,
     boost: float = DEFAULT_BOOST,
@@ -174,21 +185,24 @@ def rank_routes(
 ) -> list[RankedRoute]:
     """The *k* best routes, best first.
 
-    Ties are broken by hop count, then by the table names along the route
-    (falling back to ids), so the order never depends on how ids were
-    generated.
+    Ties are broken by hop count, then by the table names along the route,
+    then by the column names of each hop, so the order never depends on how
+    ids were generated as long as *table_names* (schema-qualified, so
+    same-named tables in two schemas differ) and *column_names* cover the
+    route. Ids are the last resort.
     """
     if k < 1:
         return []
     resources = flow_resources(adjacency, anchor, alpha=alpha, theta=theta)
     names = table_names or {}
+    columns = column_names or {}
     boosted = set(boost_tables)
     ranked: list[RankedRoute] = []
     for tables, hops in enumerate_routes(
         adjacency, anchor, dest, max_extra_hops=max_extra_hops, max_hops=max_hops
     ):
         reliability = sum(resources.get(t, 0.0) for t in tables) / len(hops)
-        factor = 1.0 + boost * sum(1 for t in tables[1:-1] if t in boosted)
+        factor = (1.0 + boost) ** sum(1 for t in tables[1:-1] if t in boosted)
         ranked.append(
             RankedRoute(
                 tables, hops, round(reliability, 6), round(reliability * factor, 6)
@@ -199,6 +213,9 @@ def rank_routes(
             -r.score,
             len(r.hops),
             tuple(names.get(t, t) for t in r.tables),
+            tuple(
+                (columns.get(src, src), columns.get(dst, dst)) for src, dst, _ in r.hops
+            ),
             r.hops,
         )
     )

@@ -1347,7 +1347,7 @@ def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
 
 
 @pytest.fixture
-def rentals(world):
+def rentals(world: World) -> World:
     """address <- customer <- rental -> staff -> address: two routes that mean
     different things (the renter's address or the clerk's)."""
     for table, cols in (
@@ -1374,7 +1374,7 @@ def _route_tables(entry: dict) -> list[str]:
     return [hops[0]["source_table"], *(hop["target_table"] for hop in hops)]
 
 
-def test_find_join_paths_returns_both_tied_routes(rentals) -> None:
+def test_find_join_paths_returns_both_tied_routes(rentals: World) -> None:
     routes = a.find_join_paths(
         rentals.columns["address.city"], rentals.columns["rental.rented_on"], k=3
     )
@@ -1392,7 +1392,7 @@ def test_find_join_paths_returns_both_tied_routes(rentals) -> None:
     ]
 
 
-def test_find_join_paths_boost_prefers_the_questions_table(rentals) -> None:
+def test_find_join_paths_boost_prefers_the_questions_table(rentals: World) -> None:
     routes = a.find_join_paths(
         rentals.columns["address.city"],
         rentals.columns["rental.rented_on"],
@@ -1407,7 +1407,7 @@ def test_find_join_paths_boost_prefers_the_questions_table(rentals) -> None:
     assert routes[0]["score"] > routes[1]["score"]
 
 
-def test_find_join_paths_hops_have_find_join_paths_shape(rentals) -> None:
+def test_find_join_paths_hops_have_find_join_paths_shape(rentals: World) -> None:
     single = a.find_join_path(
         rentals.columns["address.city"], rentals.columns["rental.rented_on"]
     )
@@ -1418,7 +1418,7 @@ def test_find_join_paths_hops_have_find_join_paths_shape(rentals) -> None:
     assert len(best["path"]) == len(single)
 
 
-def test_find_join_paths_empty_cases(rentals) -> None:
+def test_find_join_paths_empty_cases(rentals: World) -> None:
     city, rented_on = (
         rentals.columns["address.city"],
         rentals.columns["rental.rented_on"],
@@ -1427,3 +1427,20 @@ def test_find_join_paths_empty_cases(rentals) -> None:
     assert a.find_join_paths(city, rentals.columns["address.address_id"]) == []
     assert a.find_join_paths(city, "missing-column") == []
     assert a.find_join_paths(city, rented_on, k=0) == []
+
+
+def test_find_join_paths_keeps_the_routes_when_the_name_lookup_fails(
+    rentals: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(table_ids: object) -> dict[str, str]:
+        raise RuntimeError("lookup failed")
+
+    monkeypatch.setattr(a, "_table_names", fail)
+    routes = a.find_join_paths(
+        rentals.columns["address.city"], rentals.columns["rental.rented_on"], k=3
+    )
+
+    assert {tuple(_route_tables(r)) for r in routes} == {
+        ("address", "customer", "rental"),
+        ("address", "staff", "rental"),
+    }
