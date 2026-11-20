@@ -1308,8 +1308,9 @@ def test_a_rename_rebuilds_an_attribute_in_each_of_its_databases(world: World) -
 
 def test_a_term_leaving_a_database_is_reembedded(world: World) -> None:
     """Only the representation changes, but the Term's vector in the database
-    it left must go, so the move alone re-embeds it."""
+    it left must go, so the move alone re-embeds it and counts as an update."""
     from auto_ontology.server.model_interchange.embed import ImportEmbedBuffer
+    from auto_ontology.server.model_interchange.schemas import ModelSqlAttribute
 
     other_table, _ = _other_database_column(world)
     _link(s.table__term, table_id=other_table, term_id=world.term)
@@ -1328,18 +1329,40 @@ def test_a_term_leaving_a_database_is_reembedded(world: World) -> None:
         sql_column_resolver=lambda sql, database_name: [],
     )
     document.semantic_layer.terms[0].represents = [world.orders]
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-order-count",
+            name=f"{world.prefix}-order-count",
+            sql="SELECT COUNT(*) FROM public.orders",
+            term_id=document.semantic_layer.terms[0].id,
+        )
+    )
+    mi.apply_import_model(document, replace=False)
+    sql_attr = store().query_read(
+        select(s.sql_attribute.c.id).where(
+            s.sql_attribute.c.name == f"{world.prefix}-order-count"
+        )
+    )[0]["id"]
+    _link(s.table__term, table_id=other_table, term_id=world.term)
     buffer = ImportEmbedBuffer()
 
-    mi.apply_import_model(document, replace=True, embed_buffer=buffer)
+    summary = mi.apply_import_model(document, replace=True, embed_buffer=buffer)
 
+    assert summary["updated"]["terms"] == 1
     assert world.term in buffer.replaced_semantic_ids
+    # The SqlAttribute is placed by its Term's databases, so it moves too.
+    assert sql_attr in buffer.replaced_semantic_ids
+    assert {r["metadata"]["database_name"] for r in _queued(buffer, sql_attr)} == {
+        world.prefix
+    }
     assert {r["metadata"]["database_name"] for r in _queued(buffer, world.term)} == {
         world.prefix
     }
 
     again = ImportEmbedBuffer()
-    mi.apply_import_model(document, replace=True, embed_buffer=again)
+    repeat = mi.apply_import_model(document, replace=True, embed_buffer=again)
     assert world.term not in again.replaced_semantic_ids
+    assert repeat["updated"]["terms"] == 0
 
 
 def test_an_entity_with_no_buildable_vector_keeps_its_old_one(world: World) -> None:

@@ -1006,6 +1006,19 @@ def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
     return {term: names[0] for term, names in _term_database_names(term_ids).items()}
 
 
+def _term_tables(term_ids: list[str]) -> dict[str, set[str]]:
+    """The tables each Term represents."""
+    tables: dict[str, set[str]] = {}
+    if term_ids:
+        for row in store().query_read(
+            select(s.table__term.c.term_id, s.table__term.c.table_id).where(
+                s.table__term.c.term_id.in_(term_ids)
+            )
+        ):
+            tables.setdefault(row["term_id"], set()).add(row["table_id"])
+    return tables
+
+
 def _term_database_names(term_ids: list[str]) -> dict[str, list[str]]:
     """Every database each Term represents a table in, ordered by database id."""
     if not term_ids:
@@ -1164,7 +1177,7 @@ def apply_import_model(
         _import_custom_analyses(
             document, id_map, created, skipped, embed_buffer, schema_cache
         )
-        _mark_renamed_term_dependents(renamed_terms, embed_buffer)
+        _mark_term_dependents(renamed_terms, embed_buffer)
 
     if embed_buffer is not None:
         _queue_replacement_rows(embed_buffer)
@@ -1761,22 +1774,25 @@ def _update_matched_attributes(
     return changed
 
 
-def _mark_renamed_term_dependents(
-    renamed_terms: set[str], embed_buffer: ImportEmbedBuffer | None
+def _mark_term_dependents(
+    term_ids: set[str],
+    embed_buffer: ImportEmbedBuffer | None,
+    links: tuple[Any, ...] = (s.column_attribute__term, s.sql_attribute__term),
 ) -> None:
-    """Mark for re-embedding everything that carries a renamed Term's name.
+    """Mark for re-embedding the attributes linked to *term_ids* through *links*.
 
-    ``update_term`` rewrites ``term_name`` on all of the Term's
-    ColumnAttributes, including those a database-scoped document leaves out,
-    and its SqlAttributes embed the name through their link. Rows this import
-    created already carry the new name.
+    A rename reaches both kinds: ``update_term`` rewrites ``term_name`` on all
+    of the Term's ColumnAttributes, including those a database-scoped document
+    leaves out, and its SqlAttributes embed the name through their link. A
+    move between databases reaches only SqlAttributes, which are placed by
+    their Terms' databases. Rows this import created are already current.
     """
-    if embed_buffer is None or not renamed_terms:
+    if embed_buffer is None or not term_ids:
         return
     created_now = {row["metadata"].get("id") for row in embed_buffer.semantic_rows}
-    for link in (s.column_attribute__term, s.sql_attribute__term):
+    for link in links:
         for row in store().query_read(
-            select(link.c.attribute_id).where(link.c.term_id.in_(sorted(renamed_terms)))
+            select(link.c.attribute_id).where(link.c.term_id.in_(sorted(term_ids)))
         ):
             if row["attribute_id"] not in created_now:
                 embed_buffer.replaced_semantic_ids.add(row["attribute_id"])
@@ -1949,13 +1965,14 @@ def _import_terms(
         else set()
     )
 
-    # A Term has a vector in each database it represents a table in, so a
-    # representation change that moves it between databases re-embeds it.
-    track_placement = replace and embed_buffer is not None
+    # Under replace, a representation change is an update. A Term has a vector
+    # in each database it represents a table in, so one that moves between
+    # databases is re-embedded, with the SqlAttributes placed by it.
     matched_ids = [
         live for live, was_created in term_results.values() if not was_created
     ]
-    placed_before = _term_database_names(matched_ids) if track_placement else {}
+    links_before = _term_tables(matched_ids) if replace else {}
+    placed_before = _term_database_names(matched_ids) if replace else {}
 
     represents_rows: list[dict[str, Any]] = []
     newly_created: list[str] = []
@@ -1998,13 +2015,23 @@ def _import_terms(
                 continue
             represents_rows.append({"term_id": live_term_id, "table_id": live_table_id})
     _link(s.table__term, represents_rows)
-    if track_placement:
+    if replace:
+        links_after = _term_tables(matched_ids)
+        for live in matched_ids:
+            if live in changed or links_before.get(live) == links_after.get(live):
+                continue
+            skipped["terms"] -= 1
+            if updated is not None:
+                updated["terms"] += 1
         placed_after = _term_database_names(matched_ids)
-        embed_buffer.replaced_semantic_ids.update(
+        moved = {
             live
             for live in matched_ids
             if set(placed_before.get(live, [])) != set(placed_after.get(live, []))
-        )
+        }
+        if embed_buffer is not None:
+            embed_buffer.replaced_semantic_ids.update(moved)
+            _mark_term_dependents(moved, embed_buffer, links=(s.sql_attribute__term,))
 
     if embed_buffer is not None and newly_created:
         db_names = _database_names_for_terms(newly_created)
