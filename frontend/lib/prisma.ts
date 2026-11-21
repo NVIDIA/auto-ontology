@@ -37,9 +37,9 @@ function createPrismaClient(): PrismaClient {
 
 /** Lazy singleton — only connects when first accessed at runtime, not at import/build time. */
 export function getPrisma(): PrismaClient {
-	const client = globalForPrisma.prisma ?? createPrismaClient();
-	if (process.env.NODE_ENV !== 'production') {
-		globalForPrisma.prisma = client;
-	}
+	const existing = globalForPrisma.prisma;
+	if (existing) return existing;
+	const client = createPrismaClient();
+	globalForPrisma.prisma = client;
 	return client;
 }
