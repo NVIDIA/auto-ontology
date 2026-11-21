@@ -4,19 +4,30 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-This is a [Next.js](https://nextjs.org) app. **The Python API in `python/` must be running** for `/data` and other API-backed routes. See the **[root README](../../README.md)** for full setup.
+# Frontend
+
+This is the [Next.js](https://nextjs.org) app — the web UI **and the public API gateway** in front of the FastAPI backend. **The Python API (`auto_ontology/` at the repo root) must be running** on :3001 for API-backed routes. See the **[root README](../README.md)** for full setup, and [`frontend/CLAUDE.md`](./CLAUDE.md) for the conventions that apply under `frontend/`.
 
 ## Getting Started
 
 From the repo root:
 
 ```bash
-pnpm dev
+cp .env.example .env # then edit credentials
+cd frontend && pnpm install && pnpm dev
 ```
 
-This starts both the Next.js dev server (port **3001**) and the FastAPI backend (port **8000**) via Turborepo.
+`pnpm dev` pushes the Prisma schema, generates the Prisma client, and starts the Next.js dev server on port **3000**.
 
-Open **http://localhost:3001**.
+Start the backend separately, from the repo root:
+
+```bash
+uv run python -m auto_ontology.server # FastAPI on :3001
+```
+
+`./dev_tools/setup_env.sh --dev` brings up just the infrastructure (Postgres, pgAdmin, the ingestion service) so you don't have to start each piece by hand.
+
+Open <http://localhost:3000>.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
@@ -30,5 +41,3 @@ To learn more about Next.js, take a look at the following resources:
 - [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-run auto_ontology from root - cd auto_ontology && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001
