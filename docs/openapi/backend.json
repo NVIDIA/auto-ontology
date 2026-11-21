@@ -2360,6 +2360,48 @@
         "title": "GlobalSearchRequest",
         "type": "object"
       },
+      "GraphEdge": {
+        "additionalProperties": true,
+        "properties": {
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_label": {
+            "description": "Label of the source vertex.",
+            "title": "Source Label",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "target_label": {
+            "description": "Label of the target vertex.",
+            "title": "Target Label",
+            "type": "string"
+          },
+          "type": {
+            "description": "REPRESENTS, CONTAINS, PROPERTY_OF, ...",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "source",
+          "source_label",
+          "target",
+          "target_label"
+        ],
+        "title": "GraphEdge",
+        "type": "object"
+      },
       "GraphLink": {
         "additionalProperties": true,
         "description": "An undirected term\u2194term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.\n``SAME_CONCEPT`` links two terms that are members of one Concept, whether\nor not they share a table.",
@@ -2385,6 +2427,93 @@
           "target"
         ],
         "title": "GraphLink",
+        "type": "object"
+      },
+      "GraphNode": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "description": "The object's Auto Ontology id. Unique together with label: a Concept shares its id with the Term it was created from.",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Term, Table, Column, ColumnAttribute, ...",
+            "title": "Label",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "GraphNode",
+        "type": "object"
+      },
+      "GraphStatusResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "built": {
+            "default": false,
+            "description": "Whether the graph exists.",
+            "title": "Built",
+            "type": "boolean"
+          },
+          "edges": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Edge count per type.",
+            "title": "Edges",
+            "type": "object"
+          },
+          "enabled": {
+            "description": "Whether AGE_GRAPH_ENABLED is set.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "graph": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AGE graph name.",
+            "title": "Graph"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO timestamp of the last completed sync.",
+            "title": "Synced At"
+          },
+          "vertices": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Vertex count per label.",
+            "title": "Vertices",
+            "type": "object"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "GraphStatusResponse",
         "type": "object"
       },
       "Group": {
@@ -5783,6 +5912,47 @@
         "title": "TermListItem",
         "type": "object"
       },
+      "TermNeighborhoodResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "term_id": {
+            "title": "Term Id",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when max_nodes stopped the walk early.",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "term_id",
+          "depth",
+          "truncated",
+          "nodes",
+          "edges"
+        ],
+        "title": "TermNeighborhoodResponse",
+        "type": "object"
+      },
       "TermSummary": {
         "additionalProperties": true,
         "description": "The three fields every Term projection carries.",
@@ -7758,6 +7928,101 @@
         "summary": "Get Semantic Link Path",
         "tags": [
           "exploration"
+        ]
+      }
+    },
+    "/api/graph/status": {
+      "get": {
+        "description": "Report whether the AGE graph projection is built, and how large it is.\n\nAnswers 503 while ``AGE_GRAPH_ENABLED`` is unset or the AGE extension is\nunavailable. ``synced_at`` is when the graph was last rebuilt from the\ncatalog. Edits made after it are not in the graph until the next sync,\nwhich runs at the end of every semantic compilation pass.",
+        "operationId": "graph_status_api_graph_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Graph Status",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/graph/terms/{term_id}/neighborhood": {
+      "get": {
+        "description": "Return the vertices and edges within *depth* hops of one Term.\n\nEvery vertex is reported by its Auto Ontology id and label, every edge by\nits type and endpoint ids, so the result can be followed up with the\nregular Terms, Tables and attribute routes. ``truncated`` is true when the\nwalk stopped at *max_nodes*.",
+        "operationId": "term_neighborhood_api_graph_terms__term_id__neighborhood_get",
+        "parameters": [
+          {
+            "description": "Term id.",
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "description": "Term id.",
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Hops to expand from the Term.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Hops to expand from the Term.",
+              "maximum": 3,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Stop expanding once this many vertices are collected.",
+            "in": "query",
+            "name": "max_nodes",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "Stop expanding once this many vertices are collected.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Max Nodes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermNeighborhoodResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Term Neighborhood",
+        "tags": [
+          "graph"
         ]
       }
     },

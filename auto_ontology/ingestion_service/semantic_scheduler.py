@@ -51,6 +51,7 @@ from auto_ontology.ingestion_service.pii import run_pii_propagation_in_thread
 from auto_ontology.ingestion_service.rules import replay_rules_in_thread
 from auto_ontology.ingestion_service.scheduler import IntervalScheduler
 from auto_ontology.semantic.cancellation import clear_cancel, request_cancel
+from auto_ontology.graph.projection import sync_if_enabled
 from auto_ontology.semantic.compile import run_semantic_compilation
 
 logger = logging.getLogger(__name__)
@@ -244,6 +245,9 @@ class SemanticScheduler(IntervalScheduler):
             # attributes compilation just created already labelled.
             await run_pii_propagation_in_thread(self.name)
             await self._reapply_rules()
+            # Last, so the projection includes the labels the rules just
+            # applied. A no-op unless AGE_GRAPH_ENABLED is set.
+            await asyncio.to_thread(sync_if_enabled)
         finally:
             # A no-op when outcome is None (stop/disable) — see
             # record_run_finish's docstring on why that leaves the row NULL

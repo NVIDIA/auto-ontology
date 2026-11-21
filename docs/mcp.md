@@ -135,6 +135,7 @@ underlying databases.
 | `get_term_sql_attributes` | The SQL attributes defined under a term. |
 | `get_sql_attribute` | One SQL attribute: its expression and purpose. |
 | `describe_table` | The glossary terms a table carries, and stored queries that reference it. |
+| `explore_term_graph` | Everything within one to three hops of a term, with the relationship types. Needs the optional AGE projection (`docs/age-graph.md`). |
 
 There is deliberately no tool for browsing databases, schemas, or raw columns.
 Consumers are meant to reach the data through the semantic layer, and a catalog
