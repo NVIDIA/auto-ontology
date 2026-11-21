@@ -14,6 +14,7 @@ the exact join columns on every edge.
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Collection
 import logging
 from typing import Any
 
@@ -40,7 +41,12 @@ from auto_ontology.dal.concepts import (
     semantic_fk_targets,
 )
 from auto_ontology.dal.datasources import fetch_col_table_contexts
-from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.join_route_ranking import (
+    DEFAULT_ALPHA,
+    DEFAULT_THETA,
+    rank_routes,
+)
+from auto_ontology.dal.session import IN_QUERY_BATCH, store, write_transaction
 from auto_ontology.dal.tags import PII_TAG_NAME
 from auto_ontology.dal.term_families import attribute_family_prefix
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
@@ -1061,30 +1067,22 @@ _SEMANTIC_TABLE_EDGES = union(
 #: One table crossing: ``(source_column_id, target_column_id, key_id)``.
 JoinHop = tuple[str, str, str]
 
+#: One adjacency entry: ``(next_table_id, source_column_id, target_column_id,
+#: key_id, use_in_join_paths)``.
+_TableEdge = tuple[str, str, str, str, bool]
 
-def _find_table_join_hops(
-    anchor_table_id: str,
-    dest_table_id: str,
-    database_id: str,
-) -> list[tuple[list[JoinHop], bool]]:
-    """Find table-to-table join routes, oriented from anchor table to destination.
 
-    Returns ``(hops, is_default)`` routes. When the two tables are directly
-    connected, every direct column pair is its own one-hop route — FKs the
-    join-default step turned off included, as non-default — default routes
-    first. Otherwise the single shortest route over default edges, or ``[]``.
+def _semantic_table_adjacency(database_id: str) -> dict[str, set[_TableEdge]]:
+    """Table-level join edges of one database, walkable either way.
 
-    Each edge of :data:`_SEMANTIC_TABLE_EDGES` is a concrete column pair, so
-    every hop names the two physical columns it joins. Both ends of a semantic
-    FK are walkable: its target is always a Concept key column — an identity —
-    so two FK columns referencing one key meet at that key's table, never at
-    each other.
+    Every row of :data:`_SEMANTIC_TABLE_EDGES` is added in both directions,
+    carrying its key and whether the join-default step left it on.
     """
     rows = store().query_read(
         _SEMANTIC_TABLE_EDGES,
         {"database_id": database_id},
     )
-    adjacency: dict[str, set[tuple[str, str, str, str, bool]]] = defaultdict(set)
+    adjacency: dict[str, set[_TableEdge]] = defaultdict(set)
     for row in rows:
         from_table_id = row["from_table_id"]
         to_table_id = row["to_table_id"]
@@ -1109,6 +1107,38 @@ def _find_table_join_hops(
                 default,
             )
         )
+    return adjacency
+
+
+def _default_edges(
+    adjacency: dict[str, set[_TableEdge]],
+) -> dict[str, list[tuple[str, str, str, str]]]:
+    """The edges a multi-hop route may walk, sorted, without the default flag."""
+    return {
+        table_id: sorted(edge[:4] for edge in edges if edge[4])
+        for table_id, edges in adjacency.items()
+    }
+
+
+def _find_table_join_hops(
+    anchor_table_id: str,
+    dest_table_id: str,
+    database_id: str,
+) -> list[tuple[list[JoinHop], bool]]:
+    """Find table-to-table join routes, oriented from anchor table to destination.
+
+    Returns ``(hops, is_default)`` routes. When the two tables are directly
+    connected, every direct column pair is its own one-hop route — FKs the
+    join-default step turned off included, as non-default — default routes
+    first. Otherwise the single shortest route over default edges, or ``[]``.
+
+    Each edge of :data:`_SEMANTIC_TABLE_EDGES` is a concrete column pair, so
+    every hop names the two physical columns it joins. Both ends of a semantic
+    FK are walkable: its target is always a Concept key column — an identity —
+    so two FK columns referencing one key meet at that key's table, never at
+    each other.
+    """
+    adjacency = _semantic_table_adjacency(database_id)
 
     direct = sorted(
         (not default, source_col_id, target_col_id, key_id)
@@ -1123,10 +1153,7 @@ def _find_table_join_hops(
             for non_default, source_col_id, target_col_id, key_id in direct
         ]
 
-    ordered = {
-        table_id: sorted(edge[:4] for edge in edges if edge[4])
-        for table_id, edges in adjacency.items()
-    }
+    ordered = _default_edges(adjacency)
     max_hops = (MAX_PATH_DEPTH + 2) // 4
     parents: dict[str, tuple[str, str, str, str] | None] = {anchor_table_id: None}
     frontier: deque[tuple[str, int]] = deque([(anchor_table_id, 0)])
@@ -1166,55 +1193,35 @@ def _name_columns(node_ids: list[str]) -> dict[str, str]:
     }
 
 
-def find_join_routes(anchor_col_id: str, dest_col_id: str) -> list[dict]:
-    """The semantic join routes between the columns' tables.
-
-    The endpoint columns identify the tables to connect; they do not have to be
-    the join columns. Each route is ``{"hops": [...], "default": bool}``: every
-    direct column pair when the tables are one hop apart, default routes first,
-    else the one shortest route. Each hop names both columns and ``key``, the
-    ``"Concept.key"`` it joins on.
-
-    ``[]`` when both columns belong to the same table, no semantic route exists,
-    either endpoint is missing, or the endpoints belong to different databases.
-    """
+def _join_endpoints(
+    anchor_col_id: str, dest_col_id: str, caller: str
+) -> tuple[dict, dict] | None:
+    """The endpoint contexts of a same-database, cross-table pair, else ``None``."""
     if anchor_col_id == dest_col_id:
-        return []
-
+        return None
     endpoint_contexts = fetch_col_table_contexts([anchor_col_id, dest_col_id])
     anchor_context = endpoint_contexts.get(anchor_col_id)
     dest_context = endpoint_contexts.get(dest_col_id)
     if not anchor_context or not dest_context:
-        return []
+        return None
     if anchor_context["table_id"] == dest_context["table_id"]:
-        return []
+        return None
     if anchor_context["database_id"] != dest_context["database_id"]:
         logger.warning(
-            "find_join_routes: rejected cross-database path %s -> %s",
+            "%s: rejected cross-database path %s -> %s",
+            caller,
             anchor_col_id,
             dest_col_id,
         )
-        return []
+        return None
+    return anchor_context, dest_context
 
-    try:
-        routes = _find_table_join_hops(
-            anchor_context["table_id"],
-            dest_context["table_id"],
-            anchor_context["database_id"],
-        )
-    except Exception:
-        logger.warning(
-            "find_join_routes: query failed for %s -> %s",
-            anchor_col_id,
-            dest_col_id,
-            exc_info=True,
-        )
-        return []
 
-    if not routes:
-        return []
-
-    all_hops = [hop for hops, _ in routes for hop in hops]
+def _describe_routes(
+    routes: list[list[JoinHop]], anchor_col_id: str, dest_col_id: str, caller: str
+) -> list[list[dict]]:
+    """Name every hop of every route, with one lookup for all of them."""
+    all_hops = [hop for hops in routes for hop in hops]
     col_ids = list(dict.fromkeys(c for hop in all_hops for c in hop[:2]))
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
@@ -1222,7 +1229,8 @@ def find_join_routes(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         keys = _key_labels({hop[2] for hop in all_hops})
     except Exception:
         logger.warning(
-            "find_join_routes: key label lookup failed for %s -> %s",
+            "%s: key label lookup failed for %s -> %s",
+            caller,
             anchor_col_id,
             dest_col_id,
             exc_info=True,
@@ -1245,10 +1253,186 @@ def find_join_routes(anchor_col_id: str, dest_col_id: str) -> list[dict]:
             "key": keys.get(key_id, ""),
         }
 
+    return [[describe(hop) for hop in hops] for hops in routes]
+
+
+def find_join_routes(anchor_col_id: str, dest_col_id: str) -> list[dict]:
+    """The semantic join routes between the columns' tables.
+
+    The endpoint columns identify the tables to connect; they do not have to be
+    the join columns. Each route is ``{"hops": [...], "default": bool}``: every
+    direct column pair when the tables are one hop apart, default routes first,
+    else the one shortest route. Each hop names both columns and ``key``, the
+    ``"Concept.key"`` it joins on.
+
+    ``[]`` when both columns belong to the same table, no semantic route exists,
+    either endpoint is missing, or the endpoints belong to different databases.
+    """
+    endpoints = _join_endpoints(anchor_col_id, dest_col_id, "find_join_routes")
+    if endpoints is None:
+        return []
+    anchor_context, dest_context = endpoints
+
+    try:
+        routes = _find_table_join_hops(
+            anchor_context["table_id"],
+            dest_context["table_id"],
+            anchor_context["database_id"],
+        )
+    except Exception:
+        logger.warning(
+            "find_join_routes: query failed for %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        return []
+
+    if not routes:
+        return []
+
+    named = _describe_routes(
+        [hops for hops, _ in routes], anchor_col_id, dest_col_id, "find_join_routes"
+    )
     return [
-        {"hops": [describe(hop) for hop in hops], "default": default}
-        for hops, default in routes
+        {"hops": hops, "default": default}
+        for hops, (_, default) in zip(named, routes, strict=True)
     ]
+
+
+def find_join_paths(
+    anchor_col_id: str,
+    dest_col_id: str,
+    *,
+    k: int = 3,
+    boost_table_ids: Collection[str] = (),
+    alpha: float = DEFAULT_ALPHA,
+    theta: float = DEFAULT_THETA,
+) -> list[dict]:
+    """Up to *k* semantic join routes between the columns' tables, best first.
+
+    The ranked counterpart of :func:`find_join_routes`, scored as described in
+    :mod:`auto_ontology.dal.join_route_ranking`. Routes walk the same default
+    edges as the single shortest route of :func:`find_join_routes`, and are at
+    most one hop longer than the shortest. *boost_table_ids* are tables that
+    hold the question's retrieved attributes; a route through them ranks
+    higher.
+
+    Each entry is ``{"path": [hop, ...], "table_ids": [...], "score": float,
+    "reliability": float}``, where ``path`` has the same hop shape as
+    :func:`find_join_path`. ``[]`` in the same cases :func:`find_join_routes`
+    returns ``[]``.
+    """
+    if k < 1:
+        return []
+    endpoints = _join_endpoints(anchor_col_id, dest_col_id, "find_join_paths")
+    if endpoints is None:
+        return []
+    anchor_context, dest_context = endpoints
+
+    try:
+        walkable = _default_edges(
+            _semantic_table_adjacency(anchor_context["database_id"])
+        )
+        table_names, column_names = _tie_break_names(
+            walkable, anchor_col_id, dest_col_id
+        )
+        ranked = rank_routes(
+            walkable,
+            anchor_context["table_id"],
+            dest_context["table_id"],
+            k=k,
+            boost_tables=boost_table_ids,
+            table_names=table_names,
+            column_names=column_names,
+            alpha=alpha,
+            theta=theta,
+            max_hops=(MAX_PATH_DEPTH + 2) // 4,
+        )
+    except Exception:
+        logger.warning(
+            "find_join_paths: query failed for %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        return []
+
+    if not ranked:
+        return []
+    named = _describe_routes(
+        [list(route.hops) for route in ranked],
+        anchor_col_id,
+        dest_col_id,
+        "find_join_paths",
+    )
+    return [
+        {
+            "path": hops,
+            "table_ids": list(route.tables),
+            "score": route.score,
+            "reliability": route.reliability,
+        }
+        for route, hops in zip(ranked, named, strict=True)
+    ]
+
+
+def _tie_break_names(
+    walkable: dict[str, list[tuple[str, str, str, str]]],
+    anchor_col_id: str,
+    dest_col_id: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Schema-qualified table names and column names that order tied routes.
+
+    The names only break ties, so a failed lookup leaves the routes in place:
+    they are still ranked, by score first and by id last, and the failure is
+    logged.
+    """
+    table_ids = set(walkable) | {
+        edge[0] for edges in walkable.values() for edge in edges
+    }
+    column_ids = {col for edges in walkable.values() for e in edges for col in e[1:3]}
+    try:
+        return _table_names(table_ids), _column_names(column_ids)
+    except Exception:
+        logger.warning(
+            "find_join_paths: name lookup failed for %s -> %s; ties break by id",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        return {}, {}
+
+
+def _table_names(table_ids: Collection[str]) -> dict[str, str]:
+    """``{table_id: "schema.table"}``, for tie-breaking route order."""
+    if not table_ids:
+        return {}
+    names: dict[str, str] = {}
+    ids = list(table_ids)
+    for start in range(0, len(ids), IN_QUERY_BATCH):
+        rows = store().query_read(
+            select(
+                s.catalog_table.c.id,
+                s.catalog_table.c.name,
+                s.catalog_schema.c.name.label("schema_name"),
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .where(s.catalog_table.c.id.in_(ids[start : start + IN_QUERY_BATCH]))
+        )
+        names.update({row["id"]: f"{row['schema_name']}.{row['name']}" for row in rows})
+    return names
+
+
+def _column_names(column_ids: Collection[str]) -> dict[str, str]:
+    """``{column_id: name}``, for tie-breaking parallel joins."""
+    names: dict[str, str] = {}
+    ids = list(column_ids)
+    for start in range(0, len(ids), IN_QUERY_BATCH):
+        names.update(_name_columns(ids[start : start + IN_QUERY_BATCH]))
+    return names
 
 
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:

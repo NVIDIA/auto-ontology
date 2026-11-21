@@ -10,6 +10,7 @@
     "fetch_value_key_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
+    "find_join_paths": "(anchor_col_id: 'str', dest_col_id: 'str', *, k: 'int' = 3, boost_table_ids: 'Collection[str]' = (), alpha: 'float' = 0.7, theta: 'float' = 0.005) -> 'list[dict]'",
     "find_join_routes": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None' = None) -> 'str | None'",
@@ -125,6 +126,11 @@
     "list_groups": "() -> 'list[dict[str, Any]]'",
     "list_users_and_groups": "() -> 'dict[str, Any]'",
     "update_group": "(*, group_id: 'str', updates: 'dict[str, Any]', user_ids: 'list[str] | None') -> 'dict[str, Any] | None'"
+  },
+  "join_route_ranking": {
+    "RankedRoute": "class(object)",
+    "flow_resources": "(adjacency: 'Adjacency', source: 'str', *, alpha: 'float' = 0.7, theta: 'float' = 0.005) -> 'dict[str, float]'",
+    "rank_routes": "(adjacency: 'Adjacency', anchor: 'str', dest: 'str', *, k: 'int', boost_tables: 'Collection[str]' = (), table_names: 'Mapping[str, str] | None' = None, column_names: 'Mapping[str, str] | None' = None, alpha: 'float' = 0.7, theta: 'float' = 0.005, boost: 'float' = 0.5, max_extra_hops: 'int' = 1, max_hops: 'int' = 8) -> 'list[RankedRoute]'"
   },
   "model_interchange": {
     "ModelImportValidationError": "class(ModelInterchangeError)",
