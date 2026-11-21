@@ -32,7 +32,9 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 import httpx
 from openai import APIStatusError, Omit, OpenAI
 
+from auto_ontology.utils import bedrock
 from auto_ontology.utils.model_config import resolve
+from auto_ontology.vdb.postgres import DEFAULT_VECTOR_SIZE
 from auto_ontology.vdb.records import write_embedded_rows
 
 if TYPE_CHECKING:
@@ -167,7 +169,8 @@ def embed_texts(
 
     Blank texts are not sent and come back as ``None``. Raises the client's
     error when a request fails after its retries -- an
-    :class:`openai.APIStatusError` carries the HTTP status in its message.
+    :class:`openai.APIStatusError` carries the HTTP status in its message, and
+    a ``bedrock/`` model raises botocore's ``ClientError``.
     *timeout* (seconds per request) and *retries* (per request) default to the
     ingest-sized ``params.request_timeout_s`` and ``_REQUEST_RETRIES``; a caller
     with its own retry loop passes ``retries=0`` so the two do not multiply.
@@ -178,10 +181,27 @@ def embed_texts(
     if not to_send:
         return vectors
 
+    batches = list(itertools.batched(to_send, max(1, params.inference_batch_size)))
+
+    if bedrock.is_bedrock_model(params.model_name):
+
+        def _embed_bedrock_batch(indices: tuple[int, ...]) -> None:
+            batch = bedrock.embed(
+                [stripped[i] for i in indices],
+                params.model_name,
+                input_type,
+                timeout=timeout or params.request_timeout_s,
+                retries=_REQUEST_RETRIES if retries is None else retries,
+            )
+            for i, vector in zip(indices, batch, strict=True):
+                vectors[i] = _padded(vector)
+
+        _run_batches(batches, _embed_bedrock_batch, params)
+        return vectors
+
     client = _client(params)
     if retries is not None:
         client = client.with_options(max_retries=retries)
-    batches = list(itertools.batched(to_send, max(1, params.inference_batch_size)))
     prefix = _text_prefix(params.model_name, input_type)
 
     def _embed_batch(indices: tuple[int, ...]) -> None:
@@ -209,14 +229,39 @@ def embed_texts(
         for item in response.data:
             vectors[indices[item.index]] = list(item.embedding)
 
-    if len(batches) == 1:
-        _embed_batch(batches[0])
-    else:
-        workers = min(len(batches), max(1, params.nim_http_max_concurrent))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            # list() so the first failed batch re-raises here.
-            list(pool.map(_embed_batch, batches))
+    _run_batches(batches, _embed_batch, params)
     return vectors
+
+
+def _run_batches(
+    batches: list[tuple[int, ...]],
+    embed_batch: Callable[[tuple[int, ...]], None],
+    params: EmbedParams,
+) -> None:
+    """Run *embed_batch* over *batches*, ``nim_http_max_concurrent`` at a time."""
+    if len(batches) == 1:
+        embed_batch(batches[0])
+        return
+    workers = min(len(batches), max(1, params.nim_http_max_concurrent))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        # list() so the first failed batch re-raises here.
+        list(pool.map(embed_batch, batches))
+
+
+def _padded(vector: list[float]) -> list[float]:
+    """*vector* zero-padded to the width of the vector store.
+
+    The store's column is ``DEFAULT_VECTOR_SIZE`` wide, the width of the NVIDIA
+    embedding models, and no Bedrock embedding model is that wide. Trailing
+    zeros change no dot product and no norm, so cosine ranking is exactly the
+    model's own.
+    """
+    if len(vector) > DEFAULT_VECTOR_SIZE:
+        raise bedrock.UnsupportedModelError(
+            f"A {len(vector)}-dimension embedding does not fit the "
+            f"{DEFAULT_VECTOR_SIZE}-dimension vector store."
+        )
+    return list(vector) + [0.0] * (DEFAULT_VECTOR_SIZE - len(vector))
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +275,12 @@ def _is_fatal(exc: Exception) -> bool:
     Any 4xx except 408 (timeout), 409 and 429 (rate limit): a bad key, an
     unknown model id, a wrong path. The client has already retried the rest.
     """
-    return isinstance(exc, APIStatusError) and (
-        400 <= exc.status_code < 500 and exc.status_code not in (408, 409, 429)
+    if isinstance(exc, bedrock.UnsupportedModelError):
+        return True
+    status = (
+        exc.status_code if isinstance(exc, APIStatusError) else bedrock.http_status(exc)
     )
+    return status is not None and 400 <= status < 500 and status not in (408, 409, 429)
 
 
 def _embed_frame(frame: "pd.DataFrame", params: EmbedParams) -> "pd.DataFrame":

@@ -809,6 +809,29 @@ def test_flush_import_embeddings_skips_without_api_key(
     assert result["data_rows"] == 0
 
 
+@patch("auto_ontology.server.model_interchange.embed.get_data_vdb")
+@patch(
+    "auto_ontology.server.model_interchange.embed._embed_and_ingest_rows",
+    return_value=1,
+)
+@patch(
+    "auto_ontology.server.model_interchange.embed.resolve",
+    side_effect=lambda _prefix, field: (
+        "bedrock/global.cohere.embed-v4:0" if field == "MODEL" else ""
+    ),
+)
+def test_flush_import_embeddings_needs_no_api_key_for_a_bedrock_model(
+    _mock_resolve: MagicMock,
+    mock_ingest: MagicMock,
+    _mock_data_vdb: MagicMock,
+) -> None:
+    """A bedrock/ model authenticates with the AWS credential chain."""
+    buffer = ImportEmbedBuffer(data_rows=[{"text": "x"}])
+    result = flush_import_embeddings(buffer)
+    assert result == {"skipped": False, "data_rows": 1, "semantic_rows": 0}
+    mock_ingest.assert_called_once()
+
+
 def test_build_catalog_embed_rows_match_tabular_shape() -> None:
     column_row = build_column_data_row(
         live_id="col-live",
