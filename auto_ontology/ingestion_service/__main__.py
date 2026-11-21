@@ -14,9 +14,11 @@ background schedulers via the app lifespan:
   :class:`DataScheduler`'s first pass to finish (see ``semantic_scheduler.py``)
   so the two, which both start at the same moment on boot, can't race.
 
-Each runs once at startup, then every 24h measured from the previous run —
-independent of how long each run takes. Connections are reloaded from the
-catalog on every pass so newly added ones are picked up without restarting.
+Each runs once at startup, then on a timer measured from the previous run —
+independent of how long each run takes. Ingest repeats every
+``INGEST_INTERVAL_HOURS`` hours (default 24), semantic compilation every 24h.
+Connections are reloaded from the catalog on every pass so newly added ones
+are picked up without restarting.
 
 Usage::
 
