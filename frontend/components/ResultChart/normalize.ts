@@ -59,7 +59,7 @@ export function degenerateKpis(spec: ChartSpec): ChartKpi[] | null {
 		return [
 			{
 				label: spec.title,
-				value: formatValue(values[0], fmt),
+				value: formatValue(values[0], fmt, spec.y?.currency),
 				sub: cat || undefined,
 				tone: 'accent',
 			},
@@ -74,7 +74,7 @@ export function degenerateKpis(spec: ChartSpec): ChartKpi[] | null {
 			return [
 				{
 					label: spec.title,
-					value: `≈ ${formatValue(max, fmt)}`,
+					value: `≈ ${formatValue(max, fmt, spec.y?.currency)}`,
 					sub: `across all ${values.length}`,
 					tone: 'accent',
 				},

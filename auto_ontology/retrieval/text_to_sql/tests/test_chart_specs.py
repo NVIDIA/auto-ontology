@@ -47,7 +47,35 @@ def test_numeric_y_is_summed_per_category() -> None:
     ]
 
 
-# --- results with no numeric measure are listings, not charts ----------------
+def test_currency_branch_sets_y_currency() -> None:
+    df = pd.DataFrame(
+        {
+            "OrderType": ["Promotional", "Non-Promotional"],
+            "AverageOrderValue": [3100.5, 2432.75],
+        }
+    )
+    spec = build_chart_spec(
+        df,
+        _plot(x="OrderType", y="AverageOrderValue", y_format="currency", currency="EUR"),
+    )
+
+    assert spec is not None
+    assert spec["y"] == {"label": "AverageOrderValue", "format": "currency", "currency": "EUR"}
+
+
+def test_currency_unset_omits_currency_key() -> None:
+    df = pd.DataFrame(
+        {
+            "OrderType": ["Promotional", "Non-Promotional"],
+            "AverageOrderValue": [3100.5, 2432.75],
+        }
+    )
+    spec = build_chart_spec(
+        df, _plot(x="OrderType", y="AverageOrderValue", y_format="currency")
+    )
+
+    assert spec is not None
+    assert "currency" not in spec["y"]
 
 
 def test_no_chart_when_y_holds_no_numeric_measure() -> None:
