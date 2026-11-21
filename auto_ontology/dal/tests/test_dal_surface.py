@@ -69,8 +69,10 @@ def _describe(obj: Any) -> str:
 #: ``__repr__`` renders its address, which differs every process. A snapshot
 #: containing one can never match itself, so the address is normalised away and
 #: the type name kept. ``sql_fragments`` defaults to a ``Table``, whose repr is
-#: full of these.
-_ADDRESS = re.compile(r" object at 0x[0-9a-f]+")
+#: full of these. ``re.IGNORECASE`` matters on Windows: the MSVC-built runtime
+#: prints addresses in upper case (``at 0x00000241BFA62660``), and a lowercase
+#: class would stop the match early, leaving ``objectBFA62660`` behind.
+_ADDRESS = re.compile(r" object at 0x[0-9a-f]+", re.IGNORECASE)
 
 
 def _stable(signature: str) -> str:

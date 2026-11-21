@@ -20,6 +20,14 @@ import pytest
 from auto_ontology.retrieval.kumo import predictor
 from auto_ontology.retrieval.kumo.graph_cache import _term
 
+# The relational engine has no Windows wheels, so a local Windows run cannot
+# install it; CI syncs with `--extra kumo` and runs these for real. Skip rather
+# than error at the lazy `from kumo_relational_client import RelationalClient`
+# inside the predictor, the same way test_composite_keys.py does.
+pytest.importorskip(
+    "kumo_relational_client.relational", reason="Relational engine is not installed"
+)
+
 CATALOG = [
     {
         "name": "customers",

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -33,6 +34,13 @@ def _sqlite_path_from_connection_string(connection_string: str) -> Path:
         path = unquote(parsed.path)
         if not path:
             raise ValueError(f"Invalid SQLite connection string: {connection_string!r}")
+        # On Windows, ``sqlite:///C:/path/db.sqlite`` parses to ``/C:/path/db.sqlite``.
+        # The leading slash is the URI's path marker, not part of the file path;
+        # keeping it makes ``Path`` read the drive letter as a folder under the
+        # current drive's root and the file is never found. The slashless
+        # ``sqlite:C:/path`` form already parses cleanly and needs no fix-up.
+        if re.match(r"^/[A-Za-z]:", path):
+            path = path[1:]
         return Path(path)
     return Path(connection_string)
 
