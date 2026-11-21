@@ -121,7 +121,7 @@ class ReactSQLAgent(BaseAgent):
         if submission is None:
             self.logger.info("ReAct episode ended without an answer: %s", result.reason)
             explanation = ctx.prediction_refusal or _UNANSWERED
-            if ctx.submit_permission_denied and not ctx.prediction_refusal:
+            if ctx.submit_permission_denied:
                 path_state["unconstructable_error_code"] = "source_permission_denied"
                 explanation = "The selected data source denied access to the query."
             path_state["unconstructable_explanation"] = explanation

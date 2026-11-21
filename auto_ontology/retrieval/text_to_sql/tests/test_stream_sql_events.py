@@ -20,6 +20,7 @@ from psycopg.errors import InsufficientPrivilege, UndefinedTable
 
 from auto_ontology.retrieval.text_to_sql.react import loop, run_sql
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.predict import _refused
 from auto_ontology.retrieval.text_to_sql.state import TextToSQLPayload
 from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
     FakeCatalog,
@@ -110,6 +111,42 @@ def test_an_unanswered_question_emits_no_sql(
     assert _sql_events(events) == []
 
 
+@pytest.fixture
+def shipment_payload(monkeypatch: pytest.MonkeyPatch) -> TextToSQLPayload:
+    connector = SimpleNamespace(
+        database_name="production", dialect="postgres", execute=Mock()
+    )
+    catalog = FakeCatalog({"shipments": ["order_id"]}, {"shipments": ["public"]})
+    monkeypatch.setattr(run_sql, "catalog_for", lambda *_: catalog)
+
+    def retrieve(ctx: ToolContext, _query: str, _kinds: list[str] | None) -> str:
+        ctx.show_table("public", "shipments")
+        return "TABLE public.shipments"
+
+    monkeypatch.setattr(loop, "retrieve", retrieve)
+    return cast(
+        TextToSQLPayload,
+        {
+            "question": "Which orders shipped from production?",
+            "data_retriever": object(),
+            "connectors": [connector],
+        },
+    )
+
+
+def _shipment_model(*steps: dict) -> ScriptedModel:
+    calls = [call("retrieve", "0", query="shipments"), *steps]
+    return ScriptedModel([AIMessage(content="", tool_calls=[step]) for step in calls])
+
+
+def _shipment_submission(order_id: int) -> dict:
+    return call(
+        "submit",
+        str(order_id),
+        sql=f"SELECT order_id FROM public.shipments WHERE order_id = {order_id}",
+    )
+
+
 @pytest.mark.parametrize(
     ("outcomes", "error_code"),
     [
@@ -123,48 +160,21 @@ def test_an_unanswered_question_emits_no_sql(
 def test_submitted_sql_preserves_source_permission_denial(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    shipment_payload: TextToSQLPayload,
     outcomes: tuple[type[Exception] | None, ...],
     error_code: str | None,
 ) -> None:
-    connector = SimpleNamespace(
-        database_name="production",
-        dialect="postgres",
-        execute=Mock(
-            side_effect=[
-                error("private driver detail") if error else pd.DataFrame()
-                for error in outcomes
-            ]
-        ),
+    connector = shipment_payload["connectors"][0]
+    connector.execute.side_effect = [
+        error("private driver detail") if error else pd.DataFrame()
+        for error in outcomes
+    ]
+    model = _shipment_model(
+        *(_shipment_submission(i) for i in range(1, len(outcomes) + 1))
     )
-    catalog = FakeCatalog({"shipments": ["order_id"]}, {"shipments": ["public"]})
-    monkeypatch.setattr(run_sql, "catalog_for", lambda *_: catalog)
-
-    def retrieve(ctx: ToolContext, _query: str, _kinds: list[str] | None) -> str:
-        ctx.show_table("public", "shipments")
-        return "TABLE public.shipments"
-
-    monkeypatch.setattr(loop, "retrieve", retrieve)
-    calls = [call("retrieve", "0", query="shipments")]
-    calls.extend(
-        call(
-            "submit",
-            str(i),
-            sql=f"SELECT order_id FROM public.shipments WHERE order_id = {i}",
-        )
-        for i in range(1, len(outcomes) + 1)
-    )
-    model = ScriptedModel([AIMessage(content="", tool_calls=[step]) for step in calls])
     monkeypatch.setattr(main, "reasoning_llm_client", model)
-    payload = cast(
-        TextToSQLPayload,
-        {
-            "question": "Which orders shipped from production?",
-            "data_retriever": object(),
-            "connectors": [connector],
-        },
-    )
 
-    events = list(main.stream_agent_response(payload))
+    events = list(main.stream_agent_response(shipment_payload))
 
     assert connector.execute.call_count == len(outcomes)
     assert events[-1]["type"] == "result"
@@ -179,6 +189,64 @@ def test_submitted_sql_preserves_source_permission_denial(
         assert answer["sql_code"] == ""
     if error_code:
         assert "denied" in answer["response"].lower()
+
+
+def test_final_sql_denial_takes_priority_over_earlier_prediction_refusal(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    shipment_payload: TextToSQLPayload,
+) -> None:
+    connector = shipment_payload["connectors"][0]
+    connector.execute.side_effect = InsufficientPrivilege("permission denied")
+    monkeypatch.setattr(loop.config, "prediction_enabled", lambda: True)
+    prediction = Mock(
+        side_effect=lambda ctx: _refused(ctx, "Prediction needs more shipment history.")
+    )
+    monkeypatch.setattr(loop, "predict", prediction)
+    model = _shipment_model(
+        call("predict", "prediction"),
+        _shipment_submission(1),
+    )
+    monkeypatch.setattr(main, "reasoning_llm_client", model)
+
+    answer = main.get_agent_response(shipment_payload)
+
+    prediction.assert_called_once()
+    connector.execute.assert_called_once()
+    assert answer.get("error_code") == "source_permission_denied"
+    assert "denied" in answer["response"].lower()
+
+
+def test_reused_path_state_does_not_carry_previous_denial_code(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    shipment_payload: TextToSQLPayload,
+) -> None:
+    connector = shipment_payload["connectors"][0]
+    connector.execute.side_effect = [
+        InsufficientPrivilege("permission denied"),
+        UndefinedTable("relation does not exist"),
+    ]
+    monkeypatch.setattr(
+        main, "reasoning_llm_client", _shipment_model(_shipment_submission(1))
+    )
+    denied = main.get_agent_response_with_state(shipment_payload)
+    assert denied["error_code"] == "source_permission_denied"
+
+    monkeypatch.setattr(
+        main, "reasoning_llm_client", _shipment_model(_shipment_submission(2))
+    )
+    failure = main.get_agent_response_with_state(
+        {**shipment_payload, "path_state": denied["path_state"]}
+    )
+
+    assert connector.execute.call_count == 2
+    assert failure["sql_response_from_db"] is None
+    assert "error_code" not in failure
+    assert "unconstructable_error_code" not in failure["path_state"]
+    assert (
+        denied["path_state"]["unconstructable_error_code"] == "source_permission_denied"
+    )
 
 
 def test_other_nodes_never_emit_sql(

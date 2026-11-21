@@ -87,6 +87,8 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         )
 
     initial_path_state = dict(payload.get("path_state") or {})
+    # A failure code describes only the episode that produced it.
+    initial_path_state.pop("unconstructable_error_code", None)
 
     target_db = payload.get("target_db")
     if target_db:
