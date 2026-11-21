@@ -1,0 +1,8 @@
+<svg id="icon-system-attributes" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g>
+<g>
+<path d="M4 8C4 5.79086 5.79086 4 8 4H16C18.2091 4 20 5.79086 20 8V16C20 18.2091 18.2091 20 16 20H8C5.79086 20 4 18.2091 4 16V8ZM8 5H16C17.6569 5 19 6.34315 19 8V16C19 17.6569 17.6569 19 16 19H8C6.34315 19 5 17.6569 5 16V8C5 6.34315 6.34315 5 8 5Z" fill-rule="evenodd" clip-rule="evenodd" fill="currentColor"/>
+<path d="M10.19 15H8.92436L11.2287 8.45455H12.6925L15 15H13.7344L11.9862 9.79688H11.935L10.19 15ZM10.2315 12.4336H13.6832V13.386H10.2315V12.4336Z" fill="currentColor"/>
+</g>
+</g>
+</svg>

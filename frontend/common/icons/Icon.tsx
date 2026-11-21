@@ -42,6 +42,13 @@ import CodeBracketSvg from './svg/code-bracket.svg';
 import LightningSvg from './svg/lightning.svg';
 import DiscoverySvg from './svg/discovery.svg';
 import FilterSvg from './svg/filter.svg';
+import SystemCheckedSvg from './svg/system-checked.svg';
+import SystemMetricSvg from './svg/system-metric.svg';
+import SystemAnalysisSvg from './svg/system-analysis.svg';
+import SystemAttributesSvg from './svg/system-attributes.svg';
+import SystemQuerySvg from './svg/system-query.svg';
+import SystemDatabaseSvg from './svg/system-database.svg';
+import SystemTagSvg from './svg/system-tag.svg';
 
 export enum IconName {
 	Close = 'close',
@@ -82,6 +89,13 @@ export enum IconName {
 	Lightning = 'lightning',
 	Discovery = 'discovery',
 	Filter = 'filter',
+	SystemChecked = 'system-checked',
+	SystemMetric = 'system-metric',
+	SystemAnalysis = 'system-analysis',
+	SystemAttributes = 'system-attributes',
+	SystemQuery = 'system-query',
+	SystemDatabase = 'system-database',
+	SystemTag = 'system-tag',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -123,6 +137,13 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Lightning]: LightningSvg,
 	[IconName.Discovery]: DiscoverySvg,
 	[IconName.Filter]: FilterSvg,
+	[IconName.SystemChecked]: SystemCheckedSvg,
+	[IconName.SystemMetric]: SystemMetricSvg,
+	[IconName.SystemAnalysis]: SystemAnalysisSvg,
+	[IconName.SystemAttributes]: SystemAttributesSvg,
+	[IconName.SystemQuery]: SystemQuerySvg,
+	[IconName.SystemDatabase]: SystemDatabaseSvg,
+	[IconName.SystemTag]: SystemTagSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {
