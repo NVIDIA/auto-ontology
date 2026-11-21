@@ -32,6 +32,7 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import traverse_scope, walk_in_scope
 
 
 class SQLSyntaxError(ValueError):
@@ -126,6 +127,42 @@ def _qualified_table_name(table: exp.Table) -> str:
     present in the AST, or just ``table`` otherwise."""
     parts = [p for p in [table.db, table.name] if p]
     return ".".join(parts).lower()
+
+
+_OUTPUT_CLAUSES = (exp.Group, exp.Having, exp.Order, exp.Qualify)
+
+
+def _infer_single_table_columns(expression: exp.Expression) -> None:
+    """Point each bare column at its table when its SELECT reads exactly one table.
+
+    ``qualify()`` did this itself when given no schema, until sqlglot 30.22.0
+    removed its schema inference (tobymao/sqlglot#8552).  Without it, every bare
+    column of a schema-less query was left unattributed and then dropped.  Done
+    per scope, as ``qualify()`` did, so subqueries and CTE bodies are covered too.
+    """
+    for scope in traverse_scope(expression):
+        # What its FROM and JOINs read, not every CTE it can see.
+        selected = list(scope.selected_sources.values())
+        if len(selected) != 1:
+            continue
+        _, source = selected[0]
+        if not isinstance(source, exp.Table):
+            continue
+        query = scope.expression
+        outputs = set(query.named_selects) if isinstance(query, exp.Query) else set()
+        columns = [
+            node for node in walk_in_scope(query) if isinstance(node, exp.Column)
+        ]
+        for column in columns:
+            if column.table:
+                continue
+            # In these clauses a bare name may be one of the SELECT's own outputs.
+            # The search stops at the nearest SELECT, so a subquery's columns aren't
+            # taken for the clause it sits in.
+            clause = column.find_ancestor(exp.Select, *_OUTPUT_CLAUSES)
+            if isinstance(clause, _OUTPUT_CLAUSES) and column.name in outputs:
+                continue
+            column.set("table", exp.to_identifier(source.alias_or_name))
 
 
 def _alias_to_table_map(
@@ -699,6 +736,8 @@ def extract_tables_and_columns(
         )
     except Exception:
         qualified = statement  # fall back to unqualified AST if optimizer fails
+    if not schema_dict:
+        _infer_single_table_columns(qualified)
 
     # Walk every Column node; after qualify, col.table names the resolved table/alias.
     for col in qualified.find_all(exp.Column):

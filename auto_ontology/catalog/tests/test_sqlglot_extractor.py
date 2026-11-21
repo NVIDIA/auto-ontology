@@ -36,6 +36,36 @@ def test_extract_tables_and_columns_with_column() -> None:
     assert result.tables["s.t"].columns == {"col"}
 
 
+def test_extract_tables_and_columns_bare_columns_per_select() -> None:
+    """Without schemas, a bare column belongs to the one table its own SELECT reads."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t WHERE b IN (SELECT c FROM u) GROUP BY a HAVING COUNT(d) > 1",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"a", "b", "d"}
+    assert result.tables["u"].columns == {"c"}
+
+
+def test_extract_tables_and_columns_bare_columns_beside_a_visible_cte() -> None:
+    """A CTE a SELECT can see but doesn't read isn't one of its tables."""
+    result = extract_tables_and_columns(
+        "WITH c AS (SELECT a FROM t), d AS (SELECT b FROM u) SELECT * FROM c CROSS JOIN d",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"a"}
+    assert result.tables["u"].columns == {"b"}
+
+
+def test_extract_tables_and_columns_subquery_inside_having() -> None:
+    """A subquery's own columns aren't taken for the outer HAVING's output names."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t GROUP BY a HAVING a IN (SELECT c FROM u)", ["postgres"], {}
+    )
+    assert result.tables["u"].columns == {"c"}
+
+
 def test_extract_tables_and_columns_cte_virtual_tables_excluded() -> None:
     """CTE aliases must not be treated as real source tables."""
     result = extract_tables_and_columns(
