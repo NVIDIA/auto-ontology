@@ -54,6 +54,9 @@ class ToolContext:
     ``information_retrieved`` records that ``retrieve`` showed the information
     view, which such an answer has to come from; a SQL-view search does not count.
 
+    ``submit_permission_denied`` tracks the outcome of the last executed final
+    query so the episode can explain a denial if it ends without an answer.
+
     ``cost_status`` is for callers that charge for queries: it returns what the
     model has left to spend and what each action costs, read fresh each time
     because every query changes it. ``None`` when queries are free.
@@ -88,6 +91,7 @@ class ToolContext:
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    submit_permission_denied: bool = False
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:

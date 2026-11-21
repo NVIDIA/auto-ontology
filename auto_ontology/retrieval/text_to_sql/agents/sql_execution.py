@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Any, Optional
 
+from psycopg.errors import InsufficientPrivilege
+
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
     cast_jsonb_numeric_projections,
@@ -29,6 +31,7 @@ class QueryResponse:
         numeric_kinds: Optional[list] = None,
         values_digest: Optional[str] = None,
         sql_correction: Optional[str] = None,
+        permission_denied: bool = False,
     ):
         # Per output column ``"float"`` / ``"decimal"`` / ``None``; lets a caller
         # that needs a predictable numeric type know what this SQL returned.
@@ -38,6 +41,7 @@ class QueryResponse:
         self.result = result
         self.sliced = sliced
         self.error = error
+        self.permission_denied = permission_denied
         # The SQL as executed, which is not always the SQL as generated -- see
         # ``_sanitize_sql_for_dialect``. Classifying ``error`` means stripping
         # the statement the driver echoed, so it has to be this text.
@@ -145,7 +149,13 @@ def _run_sql(
         )
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
-        return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
+        return QueryResponse(
+            result=None,
+            sliced=False,
+            error=str(e),
+            statement=sql,
+            permission_denied=isinstance(e, InsufficientPrivilege),
+        )
     return QueryResponse(
         result=[payload],
         sliced=False,

@@ -9,12 +9,23 @@ drafts it ran while exploring.
 """
 
 import importlib
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, Iterator, cast
+from unittest.mock import Mock
 
+import pandas as pd
 import pytest
+from langchain_core.messages import AIMessage
+from psycopg.errors import InsufficientPrivilege, UndefinedTable
 
+from auto_ontology.retrieval.text_to_sql.react import loop, run_sql
+from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.state import TextToSQLPayload
+from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
+    FakeCatalog,
+    ScriptedModel,
+    call,
+)
 from auto_ontology.utils import llm_invoke
 
 
@@ -97,6 +108,77 @@ def test_an_unanswered_question_emits_no_sql(
     )
 
     assert _sql_events(events) == []
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "error_code"),
+    [
+        ((None,), None),
+        ((InsufficientPrivilege,), "source_permission_denied"),
+        ((InsufficientPrivilege, None), None),
+        ((InsufficientPrivilege, UndefinedTable), None),
+    ],
+    ids=["empty", "denied", "retried-empty", "retried-other-error"],
+)
+def test_submitted_sql_preserves_source_permission_denial(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    outcomes: tuple[type[Exception] | None, ...],
+    error_code: str | None,
+) -> None:
+    connector = SimpleNamespace(
+        database_name="production",
+        dialect="postgres",
+        execute=Mock(
+            side_effect=[
+                error("private driver detail") if error else pd.DataFrame()
+                for error in outcomes
+            ]
+        ),
+    )
+    catalog = FakeCatalog({"shipments": ["order_id"]}, {"shipments": ["public"]})
+    monkeypatch.setattr(run_sql, "catalog_for", lambda *_: catalog)
+
+    def retrieve(ctx: ToolContext, _query: str, _kinds: list[str] | None) -> str:
+        ctx.show_table("public", "shipments")
+        return "TABLE public.shipments"
+
+    monkeypatch.setattr(loop, "retrieve", retrieve)
+    calls = [call("retrieve", "0", query="shipments")]
+    calls.extend(
+        call(
+            "submit",
+            str(i),
+            sql=f"SELECT order_id FROM public.shipments WHERE order_id = {i}",
+        )
+        for i in range(1, len(outcomes) + 1)
+    )
+    model = ScriptedModel([AIMessage(content="", tool_calls=[step]) for step in calls])
+    monkeypatch.setattr(main, "reasoning_llm_client", model)
+    payload = cast(
+        TextToSQLPayload,
+        {
+            "question": "Which orders shipped from production?",
+            "data_retriever": object(),
+            "connectors": [connector],
+        },
+    )
+
+    events = list(main.stream_agent_response(payload))
+
+    assert connector.execute.call_count == len(outcomes)
+    assert events[-1]["type"] == "result"
+    answer = events[-1]["answer"]
+    assert "private driver detail" not in str(answer)
+    assert answer.get("error_code") == error_code
+    if outcomes[-1] is None:
+        assert answer["sql_response_from_db"] == ["[]"]
+        assert answer["sql_code"] == connector.execute.call_args.args[0]
+    else:
+        assert answer["sql_response_from_db"] is None
+        assert answer["sql_code"] == ""
+    if error_code:
+        assert "denied" in answer["response"].lower()
 
 
 def test_other_nodes_never_emit_sql(

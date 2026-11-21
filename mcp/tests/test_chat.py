@@ -178,6 +178,34 @@ def test_reports_no_rows_when_the_query_returned_none() -> None:
     assert result.data.row_count == 0
 
 
+def test_successful_empty_query_has_no_error_code() -> None:
+    answer = dict(_ANSWER, sql_response_from_db=["[]"])
+    mcp = _server(_stream(_sse({"type": "result", "answer": answer})))
+
+    result = _call(mcp, {"question": "q"})
+
+    assert result.data.row_count == 0
+    assert result.data.sql == _ANSWER["sql_code"]
+    assert result.data.error_code is None
+
+
+def test_reports_source_permission_denied_in_the_structured_answer() -> None:
+    answer = {
+        "response": "The selected data source denied access to the query.",
+        "sql_code": "",
+        "sql_response_from_db": None,
+        "error_code": "source_permission_denied",
+    }
+    mcp = _server(_stream(_sse({"type": "result", "answer": answer})))
+
+    result = _call(mcp, {"question": "Which orders shipped from production?"})
+
+    assert not result.is_error
+    assert result.structured_content["error_code"] == "source_permission_denied"
+    assert result.data.sql == ""
+    assert result.data.row_count == 0
+
+
 def test_truncates_large_result_sets_and_says_so() -> None:
     rows = [{"n": n} for n in range(chat.MAX_ROWS + 25)]
     answer = dict(_ANSWER, sql_response_from_db=[json.dumps(rows)])

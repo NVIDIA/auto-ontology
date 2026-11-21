@@ -28,6 +28,7 @@ class SQLUnconstructableAgent(BaseAgent):
 
     Input Requirements:
     - path_state["unconstructable_explanation"]: Optional explanation text
+    - path_state["unconstructable_error_code"]: Optional machine-readable reason
 
     Output:
     - path_state["final_response"]: complete response dict
@@ -76,6 +77,8 @@ class SQLUnconstructableAgent(BaseAgent):
             "custom_analyses_used": [],
             "sql_response_from_db": None,
         }
+        if error_code := path_state.get("unconstructable_error_code"):
+            response["error_code"] = error_code
 
         self.logger.info(
             f"Generated unconstructable SQL response: {response_text[:50]}..."
