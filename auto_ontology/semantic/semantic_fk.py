@@ -30,11 +30,12 @@ Algorithm
    c. **Validated** — an inferred edge is stored only when joining the two
       columns returns a row.
 3. **Siblings** — a column still without an FK or an attribute takes the
-   target of a column with the same name elsewhere in the database, as a name
-   match: a low share of
-   values does not refute it, the family rule still applies, and the join
-   still has to return a row. When the namesakes point at several Concepts,
-   only the one whose key holds the column's values is taken.
+   target of a column with the same name elsewhere in the database, unless
+   that column refers to its own table or a unique column of the column's own
+   table holds its values — both say self-reference. It counts as a name match: a
+   low share of values does not refute it, the family rule still applies, and
+   the join still has to return a row. When the namesakes point at several
+   Concepts, only the one whose key holds the column's values is taken.
 
 ``PREVENT_SEMANTIC_FK_DB_QUERIES`` turns off everything that queries the
 warehouse — on-demand probes, the value-only fallback and the join check —
@@ -57,6 +58,7 @@ from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
     fetch_semantic_fk_ends,
     fetch_semantic_fk_join_groups,
+    fetch_unique_column_values,
     fetch_value_key_candidates,
     find_unlinked_fk_columns,
     merge_semantic_fk,
@@ -345,18 +347,45 @@ def _copy_sibling_fks(
     ]
     if not columns:
         return 0
+    ends = fetch_semantic_fk_ends(database_name)
+    self_references = {
+        end["source_column_id"]
+        for end in ends
+        if end["source_table_id"] == end["target_table_id"]
+    }
     targets: dict[str, dict[str, str]] = {}
-    for end in fetch_semantic_fk_ends(database_name):
+    for end in ends:
         name = _normalized_name(end["source_column_name"])
-        if end["target_attribute_id"] and name and name not in _GENERIC_KEY_NAMES:
+        if (
+            end["target_attribute_id"]
+            and end["source_column_id"] not in self_references
+            and name
+            and name not in _GENERIC_KEY_NAMES
+        ):
             targets.setdefault(name, {})[end["target_attribute_id"]] = end[
                 "target_concept_id"
             ]
+    if not targets:
+        return 0
+    unique_values: dict[str, list[tuple[str, list[Any]]]] = {}
+    for row in fetch_unique_column_values(database_name):
+        values = parse_sample_values(row.get("distinct_values"))
+        if values:
+            unique_values.setdefault(row["table_id"], []).append(
+                (row["column_id"], values)
+            )
     written = 0
     for col in sorted(columns, key=lambda c: (c.get("table_name"), c.get("name"))):
         candidates = targets.get(_normalized_name(col.get("name")))
+        own_unique = [
+            values
+            for column_id, values in unique_values.get(col.get("table_id") or "", [])
+            if column_id != col["id"]
+        ]
         attribute_id = (
-            _sibling_target(col, candidates, keys, families) if candidates else None
+            _sibling_target(col, candidates, keys, families, own_unique)
+            if candidates
+            else None
         )
         if (
             attribute_id
@@ -380,13 +409,29 @@ def _sibling_target(
     candidates: dict[str, str],
     keys: _KeyIndex,
     families: _Families,
+    own_unique: list[list[Any]],
 ) -> str | None:
     """The key column, among *candidates* (attribute id → Concept id), for *col*.
 
     Never one on *col*'s own table or another family's copy of a table. Several
-    Concepts are told apart by values alone; one Concept needs none.
+    Concepts are told apart by values alone; one Concept needs none. ``None``
+    when a unique column of *col*'s own table (the values in *own_unique*)
+    holds its values: it likely refers to other rows of that table, which no
+    other table's column can say.
     """
     fk_values = parse_sample_values(col.get("distinct_values"))
+    if fk_values and any(
+        (containment(fk_values, values, limit=KEY_DISTINCT_VALUES_LIMIT) or 0.0)
+        >= MIN_CONTAINMENT
+        for values in own_unique
+    ):
+        logger.info(
+            "resolve_semantic_fks [sibling]: %s.%s — a unique column of its own "
+            "table holds its values; not copied",
+            col.get("table_name"),
+            col.get("name"),
+        )
+        return None
     scored: list[tuple[float, str, str]] = []
     for attribute_id, concept_id in candidates.items():
         target = keys.target(attribute_id)

@@ -561,6 +561,41 @@ def fetch_value_key_candidates(database_name: str) -> list[dict[str, Any]]:
     return [dict(row) for row in store().query_read(statement)]
 
 
+def fetch_unique_column_values(database_name: str) -> list[dict[str, Any]]:
+    """Every column of *database_name* profiled unique, with its stored values.
+
+    Unlike :func:`fetch_value_key_candidates`, a column counts whether or not it
+    owns an attribute — an FK column can be unique too. Rows carry
+    ``column_id``, ``table_id`` and ``distinct_values`` (``None`` until a probe
+    has written them).
+    """
+    statement = (
+        select(
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.table_id,
+            s.catalog_column.c.distinct_values,
+        )
+        .select_from(
+            s.catalog_column.join(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            s.catalog_column.c.is_unique.is_(True),
+        )
+        .order_by(s.catalog_column.c.table_id, s.catalog_column.c.id)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
 def fetch_attributes_to_describe(database_name: str) -> list[dict[str, Any]]:
     """Every semantic ColumnAttribute of *database_name* with no description yet.
 
@@ -626,9 +661,10 @@ def fetch_semantic_fk_ends(database_name: str) -> list[dict[str, Any]]:
     """Both ends of every SEMANTIC_FK whose source column is in *database_name*.
 
     One row per FK and member column of the key it targets. Rows carry
-    ``source_column_id``, ``source_table_name``, ``source_column_name``,
-    ``target_concept_id``, ``target_attribute_id`` (``None`` when the member
-    column owns no attribute), ``target_table_name`` and ``target_column_name``.
+    ``source_column_id``, ``source_table_id``, ``source_table_name``,
+    ``source_column_name``, ``target_concept_id``, ``target_attribute_id``
+    (``None`` when the member column owns no attribute), ``target_table_id``,
+    ``target_table_name`` and ``target_column_name``.
     """
     targets = semantic_fk_targets("fk_end_target")
     source_column = s.catalog_column.alias("fk_end_source_column")
@@ -639,10 +675,12 @@ def fetch_semantic_fk_ends(database_name: str) -> list[dict[str, Any]]:
     statement = (
         select(
             source_column.c.id.label("source_column_id"),
+            source_table.c.id.label("source_table_id"),
             source_table.c.name.label("source_table_name"),
             source_column.c.name.label("source_column_name"),
             targets.c.concept_id.label("target_concept_id"),
             targets.c.target_attribute_id,
+            target_table.c.id.label("target_table_id"),
             target_table.c.name.label("target_table_name"),
             target_column.c.name.label("target_column_name"),
         )

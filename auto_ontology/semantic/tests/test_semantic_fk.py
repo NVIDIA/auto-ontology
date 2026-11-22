@@ -1015,11 +1015,21 @@ def test_only_the_llms_pick_is_kept_without_values() -> None:
     )
 
 
-def _fk_end(source_column_name: str, attr_id: str, concept_id: str) -> dict:
+def _fk_end(
+    source_column_name: str,
+    attr_id: str,
+    concept_id: str,
+    *,
+    source_table: str = "table-9",
+    target_table: str = "table-2",
+) -> dict:
     return {
+        "source_column_id": f"{source_table}.{source_column_name}",
+        "source_table_id": source_table,
         "source_column_name": source_column_name,
         "target_attribute_id": attr_id,
         "target_concept_id": concept_id,
+        "target_table_id": target_table,
     }
 
 
@@ -1030,11 +1040,16 @@ def _copy_siblings(
     *,
     families: semantic_fk._Families = semantic_fk._NO_FAMILIES,
     join_ok: bool = True,
+    unique_columns: list[dict] | None = None,
 ) -> MagicMock:
     with (
         patch(
             "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
             return_value=[col],
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_unique_column_values",
+            return_value=unique_columns or [],
         ),
         patch(
             "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_ends",
@@ -1144,6 +1159,37 @@ def test_sibling_copy_never_crosses_into_another_familys_copy() -> None:
         [_fk_end("hotel_key", "new-hotels", "concept-1")],
         keys,
         families=_FAMILIES,
+    )
+
+    merge.assert_not_called()
+
+
+def test_a_self_referencing_namesake_is_not_copied() -> None:
+    """``subjects.master_id`` points at another subject; ``offers.master_id`` need not."""
+    keys = _keys([_key_row("subjects", "table-2", _LOWEST_KEYS)])
+    col = _fk_column(["K001"], name="master_id")
+    end = _fk_end("master_id", "subjects", "concept-1", source_table="table-2")
+
+    merge = _copy_siblings(col, [end], keys)
+
+    merge.assert_not_called()
+
+
+def test_a_column_held_by_a_unique_column_of_its_own_table_is_not_copied() -> None:
+    """The unique column need not be a key: an FK column can be unique too."""
+    keys = _keys([_key_row("subjects", "table-2", _LOWEST_KEYS)])
+    col = _fk_column(["K001", "K002"], name="master_id")
+    own_subject_id = {
+        "column_id": "own-subject-id",
+        "table_id": "table-1",
+        "distinct_values": json.dumps(_LOWEST_KEYS),
+    }
+
+    merge = _copy_siblings(
+        col,
+        [_fk_end("master_id", "subjects", "concept-1")],
+        keys,
+        unique_columns=[own_subject_id],
     )
 
     merge.assert_not_called()

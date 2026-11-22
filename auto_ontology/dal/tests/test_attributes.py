@@ -1119,6 +1119,35 @@ def test_value_key_candidates_scope_to_one_database(world) -> None:
     assert len(a.fetch_value_key_candidates(f"{world.prefix}-otherdb")) == 1
 
 
+def test_unique_column_values_include_columns_without_an_attribute(world) -> None:
+    world.table("orders")
+    world.column("orders", "id", 1)
+    world.column("orders", "parent_id", 2)
+    world.column("orders", "note", 3)
+    world.attribute("order-id", owner="orders.id")
+    _mark_unique("orders.id", world, "[1, 2]")
+    _mark_unique("orders.parent_id", world, None)
+    world.database("otherdb")
+    world.table("there", database="otherdb")
+    world.column("there", "id")
+    _mark_unique("there.id", world, "[9]")
+
+    rows = a.fetch_unique_column_values(f"{world.prefix}-shopdb")
+
+    assert sorted(rows, key=lambda row: row["distinct_values"] or "") == [
+        {
+            "column_id": world.columns["orders.parent_id"],
+            "table_id": world.tables["orders"],
+            "distinct_values": None,
+        },
+        {
+            "column_id": world.columns["orders.id"],
+            "table_id": world.tables["orders"],
+            "distinct_values": "[1, 2]",
+        },
+    ]
+
+
 # --------------------------------------------------------------------------
 # Attribute descriptions
 # --------------------------------------------------------------------------
@@ -1171,10 +1200,12 @@ def test_semantic_fk_ends_name_the_owning_column(describable) -> None:
 
     assert end == {
         "source_column_id": describable.columns["orders.customer_id"],
+        "source_table_id": describable.tables["orders"],
         "source_table_name": "orders",
         "source_column_name": "customer_id",
         "target_concept_id": describable.concept("customers"),
         "target_attribute_id": describable.attributes["customer-id"],
+        "target_table_id": describable.tables["customers"],
         "target_table_name": "customers",
         "target_column_name": "id",
     }

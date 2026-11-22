@@ -7,6 +7,7 @@
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
     "fetch_semantic_fk_ends": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
+    "fetch_unique_column_values": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "fetch_value_key_candidates": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
