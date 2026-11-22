@@ -124,6 +124,29 @@ of its integer columns' values.
 - Return the exact column_id of that candidate, or null if none is plausible.
 - Do NOT guess. If unsure, return null.
 """
+# Integer keys overlap by construction: almost every table numbers its rows
+# 1, 2, 3, ... So for an integer foreign key the values carry little, and the
+# candidate has to fit by meaning.
+_INTEGER_VALUE_SYSTEM_PROMPT = """\
+You are a database schema expert. A foreign-key column's name matched no \
+primary key, so candidate key columns were found by their values instead: each \
+candidate, prefixed with its unique column_id, holds most of the foreign key's \
+lowest distinct values. These values are integers, and consecutive integer ids \
+overlap across almost every table, so sharing them says little.
+
+Rules:
+- Pick a candidate only when its table name, column name or description fits \
+the foreign key's name and description: the foreign key must plausibly name \
+the entity that table holds.
+- If a candidate's names and description have nothing to do with the foreign \
+key's, do NOT pick it, however many values they share.
+- A candidate marked [same table] is a self-reference: rows pointing at other \
+rows of the same entity (a parent, a manager, an accepted answer). Pick it only \
+when the column's name or description says so — the table's own key holds most \
+of its integer columns' values.
+- Return the exact column_id of that candidate, or null if none fits.
+- Do NOT guess. If unsure, return null.
+"""
 # Candidates the value-only search hands the LLM.
 _VALUE_SHORTLIST_SIZE = 5
 
@@ -725,16 +748,22 @@ def _match_by_values_only(
             "text": (
                 f"{row.get('schema_name') or ''}.{row['table_name']}."
                 f"{row['column_name']} ({row.get('data_type') or 'unknown type'}); "
+                f"description: {row.get('description') or '(none)'}; "
                 f"holds {share:.0%} of the foreign key's comparable values; "
                 f"lowest values: {', '.join(stringify_sample_values(values, max_len=30) or [])}"
             ),
         }
         for share, row, values in scored[:_VALUE_SHORTLIST_SIZE]
     ]
+    integers = all(
+        isinstance(value, int) and not isinstance(value, bool) for value in fk_values
+    )
     selected = _llm_pick_hit(
         col,
         candidates,
-        system_prompt=_VALUE_SYSTEM_PROMPT,
+        system_prompt=_INTEGER_VALUE_SYSTEM_PROMPT
+        if integers
+        else _VALUE_SYSTEM_PROMPT,
         source="matched by values",
     )
     if selected:

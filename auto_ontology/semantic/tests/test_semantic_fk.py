@@ -263,8 +263,25 @@ def test_value_only_search_shortlists_containing_keys_for_the_llm() -> None:
     assert selected == "holder"
     fallback = pick.call_args_list[1]
     assert [hit["metadata"]["id"] for hit in fallback.args[1]] == ["holder", "own-key"]
-    assert fallback.kwargs["system_prompt"] == semantic_fk._VALUE_SYSTEM_PROMPT
+    assert fallback.kwargs["system_prompt"] == semantic_fk._INTEGER_VALUE_SYSTEM_PROMPT
     assert "public.clients.id" in fallback.args[1][0]["text"]
+
+
+def test_value_only_search_keeps_the_looser_prompt_for_string_codes() -> None:
+    codes = ["CUST-0001", "CUST-0002", "CUST-0003"]
+    holder = _key_row("holder", "table-3", codes, table_name="clients")
+    holder["description"] = "Client account code"
+    with patch(
+        "auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="holder"
+    ) as pick:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column(codes[:2]), _retriever(), "database", _keys([holder])
+        )
+
+    assert selected == "holder"
+    fallback = pick.call_args_list[-1]
+    assert fallback.kwargs["system_prompt"] == semantic_fk._VALUE_SYSTEM_PROMPT
+    assert "description: Client account code" in fallback.args[1][0]["text"]
 
 
 def test_value_only_search_runs_without_vector_hits() -> None:

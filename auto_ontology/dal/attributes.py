@@ -41,6 +41,7 @@ from auto_ontology.dal.concepts import (
     semantic_fk_targets,
 )
 from auto_ontology.dal.datasources import fetch_col_table_contexts
+from auto_ontology.dal.sql_fragments import column_description_expr
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.tags import PII_TAG_NAME
 from auto_ontology.dal.term_families import attribute_family_prefix
@@ -507,7 +508,8 @@ def fetch_value_key_candidates(database_name: str) -> list[dict[str, Any]]:
     candidate without stored values gets them probed from the warehouse.
 
     Rows carry ``attribute_id``, ``column_id``, ``column_name``, ``data_type``,
-    ``distinct_values``, ``table_id``, ``table_name`` and ``schema_name``.
+    ``description``, ``distinct_values``, ``table_id``, ``table_name`` and
+    ``schema_name``.
     """
     pii_tagged = (
         select(literal(1))
@@ -524,6 +526,7 @@ def fetch_value_key_candidates(database_name: str) -> list[dict[str, Any]]:
             s.catalog_column.c.id.label("column_id"),
             s.catalog_column.c.name.label("column_name"),
             s.catalog_column.c.data_type,
+            column_description_expr().label("description"),
             s.catalog_column.c.distinct_values,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),

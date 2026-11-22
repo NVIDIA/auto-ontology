@@ -1082,6 +1082,7 @@ def test_value_key_candidates_are_unique_attribute_owners(world) -> None:
         "column_id": world.columns["customers.id"],
         "column_name": "id",
         "data_type": None,
+        "description": None,
         "distinct_values": "[1, 2]",
         "table_id": world.tables["customers"],
         "table_name": "customers",
