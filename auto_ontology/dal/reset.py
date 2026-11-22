@@ -74,6 +74,7 @@ def _delete_scoped_semantic(database_name: str) -> int:
     * a **Term** through the tables that represent it;
     * a **Concept** through its Terms: it goes once none is left;
     * a **semantic FK** through its column, whatever Concept it targets;
+    * a **direct FK group** through its ``database_id``;
     * a **ColumnAttribute** through its ``table_id``;
     * a **SqlAttribute** and a **CustomAnalysis** through the tables their SQL
       references.
@@ -151,6 +152,22 @@ def _delete_scoped_semantic(database_name: str) -> int:
         )
     )
 
+    # SEMANTIC_FK_DIRECT: a group is scoped by database, so it goes whole and
+    # its memberships by cascade.
+    deleted += len(
+        store().query_write(
+            delete(s.semantic_fk_direct)
+            .where(
+                s.semantic_fk_direct.c.database_id.in_(
+                    select(s.catalog_database.c.id).where(
+                        s.catalog_database.c.name == database_name
+                    )
+                )
+            )
+            .returning(s.semantic_fk_direct.c.id)
+        )
+    )
+
     # Concept: deleted once no Term belongs to it. A Concept whose shared Term
     # survives keeps its keys and the FKs into them, which other databases'
     # tables may hold.
@@ -225,6 +242,7 @@ def _delete_all_semantic() -> int:
     for table in (
         s.term_family,
         s.concept,
+        s.semantic_fk_direct,
         s.term,
         s.column_attribute,
         s.sql_attribute,

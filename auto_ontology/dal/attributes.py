@@ -21,6 +21,7 @@ from sqlalchemy import (
     and_,
     bindparam,
     case,
+    delete,
     func,
     literal,
     or_,
@@ -421,7 +422,7 @@ def fetch_attr_column_contexts(
 def find_unlinked_fk_columns(
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Columns carrying no SEMANTIC_FK or HAS_ATTRIBUTE link.
+    """Columns carrying no SEMANTIC_FK, SEMANTIC_FK_DIRECT or HAS_ATTRIBUTE link.
 
     A Concept key column is the entity's identity, not a reference to another
     entity, so it is a candidate only with a declared foreign key — a table
@@ -474,6 +475,9 @@ def find_unlinked_fk_columns(
             .exists(),
             ~select(s.column__has_attribute.c.attribute_id)
             .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
+            .exists(),
+            ~select(s.column__semantic_fk_direct.c.group_id)
+            .where(s.column__semantic_fk_direct.c.column_id == s.catalog_column.c.id)
             .exists(),
             or_(
                 s.column__foreign_key.c.target_column_id.is_not(None),
@@ -811,6 +815,120 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     return merge_semantic_fk_to_column(src_column_id, owner_column_id)
 
 
+# ---------------------------------------------------------------------------
+# SEMANTIC_FK_DIRECT
+# ---------------------------------------------------------------------------
+
+
+def fetch_direct_fk_peers(database_name: str) -> list[dict[str, Any]]:
+    """Every FK column of *database_name* an unlinked FK column may join directly.
+
+    The columns already linked: those holding a SEMANTIC_FK, and members of a
+    SEMANTIC_FK_DIRECT group. Rows carry ``id``, ``name``, ``table_id``,
+    ``table_name``, ``schema_name`` and ``group_id`` (``None`` for a column
+    in no group).
+    """
+    linked = or_(
+        select(s.column__semantic_fk.c.key_id)
+        .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+        .exists(),
+        s.column__semantic_fk_direct.c.group_id.is_not(None),
+    )
+    statement = (
+        select(
+            s.catalog_column.c.id,
+            s.catalog_column.c.name,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+            s.column__semantic_fk_direct.c.group_id,
+        )
+        .select_from(
+            s.catalog_column.join(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+            .outerjoin(
+                s.column__semantic_fk_direct,
+                s.column__semantic_fk_direct.c.column_id == s.catalog_column.c.id,
+            )
+        )
+        .where(s.catalog_database.c.name == database_name, linked)
+        .order_by(s.catalog_table.c.name, s.catalog_column.c.name)
+    )
+    return [dict(row) for row in store().query_read(statement)]
+
+
+def link_direct_fk_columns(column_ids: list[str]) -> str | None:
+    """Put *column_ids* in one SEMANTIC_FK_DIRECT group. Idempotent.
+
+    A group one of the columns already belongs to is reused — the lowest id
+    when they belong to several, and the others are merged into it — so a
+    recompile grows the existing groups rather than duplicating them. Returns
+    the group id, or ``None`` without writing when fewer than two distinct
+    columns are given or they span databases: a join between them would name
+    a table missing from the query's database.
+    """
+    ids = sorted(set(column_ids))
+    if len(ids) < 2:
+        return None
+    contexts = fetch_col_table_contexts(ids)
+    database_ids = {contexts.get(column_id, {}).get("database_id") for column_id in ids}
+    if len(database_ids) != 1 or None in database_ids:
+        logger.warning(
+            "link_direct_fk_columns: refusing a group across databases or with "
+            "unknown columns: %s",
+            ids,
+        )
+        return None
+    (database_id,) = database_ids
+
+    member = s.column__semantic_fk_direct
+    with write_transaction():
+        existing = sorted(
+            {
+                row["group_id"]
+                for row in store().query_read(
+                    select(member.c.group_id).where(member.c.column_id.in_(ids))
+                )
+            }
+        )
+        if existing:
+            group_id, absorbed = existing[0], existing[1:]
+        else:
+            group_id = store().query_write(
+                insert(s.semantic_fk_direct)
+                .values(database_id=database_id)
+                .returning(s.semantic_fk_direct.c.id)
+            )[0]["id"]
+            absorbed = []
+        if absorbed:
+            store().query_write(
+                update(member)
+                .where(member.c.group_id.in_(absorbed))
+                .values(group_id=group_id)
+            )
+            store().query_write(
+                delete(s.semantic_fk_direct).where(
+                    s.semantic_fk_direct.c.id.in_(absorbed)
+                )
+            )
+        store().query_write(
+            insert(member)
+            .values(
+                [{"column_id": column_id, "group_id": group_id} for column_id in ids]
+            )
+            .on_conflict_do_nothing()
+        )
+    return group_id
+
+
 def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
     """Return semantic FKs with the context needed to choose one join default.
 
@@ -1028,16 +1146,22 @@ _member_schema = s.catalog_schema.alias("join_member_schema")
 _fk_targets = semantic_fk_targets("join_fk_target")
 _identity_from = s.concept_key__column.alias("join_identity_from")
 _identity_to = s.concept_key__column.alias("join_identity_to")
+_direct_from = s.column__semantic_fk_direct.alias("join_direct_from")
+_direct_to = s.column__semantic_fk_direct.alias("join_direct_to")
+_direct_from_column = s.catalog_column.alias("join_direct_from_column")
+_direct_to_column = s.catalog_column.alias("join_direct_to_column")
 
 #: Every table-crossing a join may take, as ``(from_table_id, from_column_id,
-#: to_table_id, to_column_id, key_id, use_in_join_paths)``. Two kinds, both
+#: to_table_id, to_column_id, key_id, use_in_join_paths)``. Three kinds, all
 #: walkable either way:
 #:
 #: * a semantic FK, from its column to **each** member column of the key it
 #:   targets — so the path can enter whichever member table holds the field it
 #:   needs, on that table's own key column;
 #: * an identity hop between two member columns of one key, which joins the
-#:   parts of a split entity to each other.
+#:   parts of a split entity to each other;
+#: * a direct FK hop between two members of one SEMANTIC_FK_DIRECT group on
+#:   different tables. It goes through no Concept, so its ``key_id`` is ``''``.
 #:
 #: FKs the join-default step turned off are included with
 #: ``use_in_join_paths`` false: they are offered as direct alternatives but
@@ -1080,6 +1204,30 @@ _SEMANTIC_TABLE_EDGES = union(
         .join(s.concept, s.concept.c.id == s.concept_key.c.concept_id)
     )
     .where(s.concept.c.database_id == bindparam("database_id")),
+    select(
+        _direct_from_column.c.table_id,
+        _direct_from.c.column_id,
+        _direct_to_column.c.table_id,
+        _direct_to.c.column_id,
+        literal("", s.concept_key.c.id.type),
+        true(),
+    )
+    .select_from(
+        _direct_from.join(
+            _direct_to,
+            (_direct_to.c.group_id == _direct_from.c.group_id)
+            & (_direct_to.c.column_id > _direct_from.c.column_id),
+        )
+        .join(_direct_from_column, _direct_from_column.c.id == _direct_from.c.column_id)
+        .join(_direct_to_column, _direct_to_column.c.id == _direct_to.c.column_id)
+        .join(
+            s.semantic_fk_direct, s.semantic_fk_direct.c.id == _direct_from.c.group_id
+        )
+    )
+    .where(
+        s.semantic_fk_direct.c.database_id == bindparam("database_id"),
+        _direct_to_column.c.table_id != _direct_from_column.c.table_id,
+    ),
 )
 
 
@@ -1103,7 +1251,7 @@ def _find_table_join_hops(
     every hop names the two physical columns it joins. Both ends of a semantic
     FK are walkable: its target is always a Concept key column — an identity —
     so two FK columns referencing one key meet at that key's table, never at
-    each other.
+    each other. Only a SEMANTIC_FK_DIRECT group joins FK columns to each other.
     """
     rows = store().query_read(
         _SEMANTIC_TABLE_EDGES,
@@ -1198,7 +1346,8 @@ def find_join_routes(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     the join columns. Each route is ``{"hops": [...], "default": bool}``: every
     direct column pair when the tables are one hop apart, default routes first,
     else the one shortest route. Each hop names both columns and ``key``, the
-    ``"Concept.key"`` it joins on.
+    ``"Concept.key"`` it joins on — ``""`` for a SEMANTIC_FK_DIRECT hop, which
+    joins two FK columns through no Concept.
 
     ``[]`` when both columns belong to the same table, no semantic route exists,
     either endpoint is missing, or the endpoints belong to different databases.
@@ -1287,6 +1436,7 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
 
 def _key_labels(key_ids: set[str]) -> dict[str, str]:
     """``"Concept.key"`` for each key id."""
+    key_ids = {key_id for key_id in key_ids if key_id}
     if not key_ids:
         return {}
     return {

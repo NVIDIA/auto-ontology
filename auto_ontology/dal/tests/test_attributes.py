@@ -1393,3 +1393,191 @@ def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
         )
     )
     assert rows == []
+
+
+# --------------------------------------------------------------------------
+# SEMANTIC_FK_DIRECT
+# --------------------------------------------------------------------------
+
+
+def _group_of(world: World, column: str) -> str | None:
+    rows = store().query_read(
+        select(s.column__semantic_fk_direct.c.group_id).where(
+            s.column__semantic_fk_direct.c.column_id == world.columns[column]
+        )
+    )
+    return rows[0]["group_id"] if rows else None
+
+
+def _groups(world: World) -> list[str]:
+    return [
+        row["id"]
+        for row in store().query_read(
+            select(s.semantic_fk_direct.c.id).where(
+                s.semantic_fk_direct.c.database_id.in_(list(world.databases.values()))
+            )
+        )
+    ]
+
+
+@pytest.fixture
+def enrolled(world):
+    """Three tables holding `course_id`, with no key that holds their values."""
+    for table in ("lessons", "grades", "rooms"):
+        world.table(table)
+        world.column(table, "course_id")
+    return world
+
+
+def test_link_direct_groups_the_columns(enrolled) -> None:
+    group_id = a.link_direct_fk_columns(
+        [enrolled.columns["lessons.course_id"], enrolled.columns["grades.course_id"]]
+    )
+
+    assert group_id is not None
+    assert _group_of(enrolled, "lessons.course_id") == group_id
+    assert _group_of(enrolled, "grades.course_id") == group_id
+    assert _groups(enrolled) == [group_id]
+
+
+def test_link_direct_needs_two_columns(enrolled) -> None:
+    column = enrolled.columns["lessons.course_id"]
+    assert a.link_direct_fk_columns([column, column]) is None
+    assert _groups(enrolled) == []
+
+
+def test_link_direct_reuses_the_group_a_column_is_in(enrolled) -> None:
+    first = a.link_direct_fk_columns(
+        [enrolled.columns["lessons.course_id"], enrolled.columns["grades.course_id"]]
+    )
+    second = a.link_direct_fk_columns(
+        [enrolled.columns["grades.course_id"], enrolled.columns["rooms.course_id"]]
+    )
+
+    assert second == first
+    assert _group_of(enrolled, "rooms.course_id") == first
+    assert _groups(enrolled) == [first]
+
+
+def test_link_direct_merges_the_groups_it_spans(enrolled) -> None:
+    enrolled.table("halls")
+    enrolled.column("halls", "course_id")
+    one = a.link_direct_fk_columns(
+        [enrolled.columns["lessons.course_id"], enrolled.columns["grades.course_id"]]
+    )
+    other = a.link_direct_fk_columns(
+        [enrolled.columns["rooms.course_id"], enrolled.columns["halls.course_id"]]
+    )
+    assert one != other
+
+    merged = a.link_direct_fk_columns(
+        [enrolled.columns["grades.course_id"], enrolled.columns["halls.course_id"]]
+    )
+
+    assert merged == min(one, other)
+    assert _groups(enrolled) == [merged]
+    assert {
+        _group_of(enrolled, f"{table}.course_id")
+        for table in ("lessons", "grades", "rooms", "halls")
+    } == {merged}
+
+
+def test_link_direct_refuses_a_cross_database_group(enrolled) -> None:
+    enrolled.database("otherdb")
+    enrolled.table("remote", database="otherdb")
+    enrolled.column("remote", "course_id")
+
+    assert (
+        a.link_direct_fk_columns(
+            [
+                enrolled.columns["lessons.course_id"],
+                enrolled.columns["remote.course_id"],
+            ]
+        )
+        is None
+    )
+    assert _groups(enrolled) == []
+
+
+def test_unlinked_excludes_direct_group_members(enrolled) -> None:
+    a.link_direct_fk_columns(
+        [enrolled.columns["lessons.course_id"], enrolled.columns["grades.course_id"]]
+    )
+
+    rows = a.find_unlinked_fk_columns(f"{enrolled.prefix}-shopdb")
+    assert {(r["table_name"], r["name"]) for r in rows} == {("rooms", "course_id")}
+
+
+def test_direct_fk_peers_are_fk_and_group_columns(world) -> None:
+    world.table("courses", pk=["id"])
+    world.column("courses", "id")
+    world.attribute("course-id", owner="courses.id")
+    for table in ("lessons", "grades", "rooms"):
+        world.table(table)
+        world.column(table, "course_id")
+    world.references("lessons.course_id", "course-id")
+    group_id = a.link_direct_fk_columns(
+        [world.columns["grades.course_id"], world.columns["lessons.course_id"]]
+    )
+
+    peers = {
+        (row["table_name"], row["name"]): row
+        for row in a.fetch_direct_fk_peers(f"{world.prefix}-shopdb")
+    }
+
+    assert set(peers) == {("lessons", "course_id"), ("grades", "course_id")}
+    assert peers[("grades", "course_id")]["group_id"] == group_id
+    assert peers[("grades", "course_id")]["schema_name"] == "public"
+    assert peers[("grades", "course_id")]["table_id"] == world.tables["grades"]
+
+
+def test_direct_group_members_join_each_other_with_no_key(enrolled) -> None:
+    a.link_direct_fk_columns(
+        [
+            enrolled.columns["lessons.course_id"],
+            enrolled.columns["grades.course_id"],
+            enrolled.columns["rooms.course_id"],
+        ]
+    )
+
+    routes = a.find_join_routes(
+        enrolled.columns["lessons.course_id"], enrolled.columns["rooms.course_id"]
+    )
+
+    assert [
+        (
+            route["default"],
+            [(h["source_table"], h["target_table"], h["key"]) for h in route["hops"]],
+        )
+        for route in routes
+    ] == [(True, [("lessons", "rooms", "")])]
+
+
+def test_a_route_walks_a_direct_hop_then_a_semantic_fk(world) -> None:
+    world.table("courses", pk=["id"])
+    world.column("courses", "id")
+    world.attribute("course-id", owner="courses.id")
+    world.table("lessons")
+    world.column("lessons", "course_id", 1)
+    world.column("lessons", "teacher_id", 2)
+    world.table("teachers", pk=["id"])
+    world.column("teachers", "id")
+    world.attribute("teacher-id", owner="teachers.id")
+    world.references("lessons.teacher_id", "teacher-id")
+    world.table("grades")
+    world.column("grades", "course_id")
+    a.link_direct_fk_columns(
+        [world.columns["grades.course_id"], world.columns["lessons.course_id"]]
+    )
+
+    hops = a.find_join_path(
+        world.columns["grades.course_id"], world.columns["teachers.id"]
+    )
+
+    assert [
+        (h["source_table"], h["source_column"], h["target_table"], h["key"])
+        for h in hops
+    ] == [
+        ("grades", "course_id", "lessons", ""),
+        ("lessons", "teacher_id", "teachers", f"{world.prefix}-teachers-term.id"),
+    ]

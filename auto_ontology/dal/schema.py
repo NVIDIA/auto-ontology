@@ -739,6 +739,41 @@ column__semantic_fk = Table(
     ),
 )
 
+# SEMANTIC_FK_DIRECT: FK columns that join each other directly, with no Concept
+# and no direction. It is for FK columns whose referenced key does not hold
+# their values — a sampled warehouse that kept different rows of each table —
+# while their values still join one another. A group holds any number of
+# columns, every pair of them on different tables a join path may walk; a
+# column belongs to at most one group (`auto_ontology.semantic.direct_fks`).
+semantic_fk_direct = Table(
+    "semantic_fk_direct",
+    METADATA,
+    _id(),
+    Column(
+        "database_id",
+        Text,
+        ForeignKey(catalog_database.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+)
+
+column__semantic_fk_direct = Table(
+    "column__semantic_fk_direct",
+    METADATA,
+    Column(
+        "column_id",
+        Text,
+        ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "group_id",
+        Text,
+        ForeignKey(semantic_fk_direct.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+)
+
 sql_attribute = Table(
     "sql_attribute",
     METADATA,
@@ -1369,6 +1404,8 @@ Index("ix_sql_attribute__term_term_id", sql_attribute__term.c.term_id)
 # primary key already indexes the column_id order; these cover the reverse.
 Index("ix_column__has_attribute_attribute_id", column__has_attribute.c.attribute_id)
 Index("ix_column__semantic_fk_key_id", column__semantic_fk.c.key_id)
+Index("ix_semantic_fk_direct_database_id", semantic_fk_direct.c.database_id)
+Index("ix_column__semantic_fk_direct_group_id", column__semantic_fk_direct.c.group_id)
 
 # A Concept's members, keys and key columns are read from the Concept side.
 Index("ix_concept_database_id", concept.c.database_id)
@@ -1483,6 +1520,7 @@ __all__ = [
     "column_attribute",
     "column__has_attribute",
     "column__semantic_fk",
+    "column__semantic_fk_direct",
     "column_attribute__term",
     "column__foreign_key",
     "concept",
@@ -1498,6 +1536,7 @@ __all__ = [
     "sql_query__table",
     "sql_query__column",
     "semantic_compilation_history",
+    "semantic_fk_direct",
     "table__join",
     "table__term",
     "term",

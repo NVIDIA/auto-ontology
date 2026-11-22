@@ -9,7 +9,9 @@ the LLM — out of its table's Term, expecting semantic FK resolution to link it
 to the attribute it references instead. A column resolution could not link (a
 key that is also a foreign key, a reference to a table that
 was never ingested, an inferred match the values or the join refuted) would
-otherwise belong to nothing. After resolution it is attached like any other
+otherwise belong to nothing. One that joins other FK columns directly is in a
+SEMANTIC_FK_DIRECT group instead (``auto_ontology.semantic.direct_fks``) and
+is left alone. The rest, after resolution, are attached like any other
 column: to its table's Term, or to a new Term when the table has none — a
 junction table, whose columns were all keys, is the usual case.
 """
@@ -68,8 +70,8 @@ def attach_unmatched_fk_columns(
 
     The term step assigns every column it is given, so once all tables went
     through ``process_table`` a column with no ColumnAttribute is a suspected
-    FK that resolution did not link. Returns the number of ColumnAttributes
-    written.
+    FK that resolution did not link, to a key or directly. Returns the number
+    of ColumnAttributes written.
     """
     by_table: dict[str, set[str]] = defaultdict(set)
     for row in find_unlinked_fk_columns(database_name):
