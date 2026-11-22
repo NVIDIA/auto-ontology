@@ -15,6 +15,11 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import re
+
+import sqlglot
+from sqlglot import exp
+
 from auto_ontology.connectors.base import SQLDatabase
 
 
@@ -109,4 +114,111 @@ def resolve_connector_from_tables(
     )
 
 
-__all__ = ["resolve_connector_from_tables", "resolve_target_database_name"]
+def resolve_connector_for_sql(
+    tables: Iterable[dict],
+    connectors: list[SQLDatabase],
+    sql: str | None,
+) -> SQLDatabase | None:
+    """The connector *sql* runs on, or None when it cannot be told.
+
+    Like :func:`resolve_connector_from_tables`, but never raises: when *tables*
+    span databases, the one holding every table *sql* reads decides. A name
+    two of them hold (every SQLite file's schema is ``main``) is not guessed
+    at; :func:`databases_for_sql` lists them so the caller can ask.
+    """
+    tables = [t for t in tables or [] if isinstance(t, dict)]
+    try:
+        return resolve_connector_from_tables(tables, connectors)
+    except ValueError:
+        if not sql:
+            return None
+    candidates = databases_for_sql(tables, connectors, sql)
+    if len(candidates) != 1:
+        return None
+    return connector_named(candidates[0], connectors)
+
+
+def connector_named(
+    database_name: str, connectors: list[SQLDatabase]
+) -> SQLDatabase | None:
+    """The connector for *database_name*, matched exactly, then ignoring case."""
+    try:
+        resolved = resolve_target_database_name(database_name, connectors)
+    except ValueError:
+        return None
+    for connector in connectors:
+        if getattr(connector, "database_name", None) == resolved:
+            return connector
+    return None
+
+
+# A single shard (``events_20210131``) or a partial wildcard (``events_2021*``)
+# of a date-sharded BigQuery table, which the catalog holds as ``events_*``.
+_SHARD_REFERENCE = re.compile(r"^(?P<prefix>.*\D)(?:\d{4,8}|\d{1,7}\*)$")
+
+
+def wildcard_for(table: str) -> str | None:
+    """The wildcard table that *table* reads part of, if it names shards."""
+    match = _SHARD_REFERENCE.match(table)
+    return f"{match.group('prefix')}*" if match else None
+
+
+def databases_for_sql(
+    tables: Iterable[dict], connectors: list[SQLDatabase], sql: str
+) -> list[str]:
+    """The databases among *tables* holding every table *sql* reads."""
+    referenced = _referenced_tables(sql, connectors)
+    if not referenced:
+        return []
+    candidates: list[str] | None = None
+    for schema, name in referenced:
+        names = {name, wildcard_for(name)}
+        holders = {
+            str(table.get("database_name") or "")
+            for table in tables
+            if isinstance(table, dict)
+            and str(table.get("name") or "").lower() in names
+            and (
+                schema is None or str(table.get("schema_name") or "").lower() == schema
+            )
+        }
+        holders.discard("")
+        candidates = sorted(
+            holders if candidates is None else holders.intersection(candidates)
+        )
+    return candidates or []
+
+
+def _referenced_tables(
+    sql: str, connectors: list[SQLDatabase]
+) -> list[tuple[str | None, str]] | None:
+    """The ``(schema, table)`` pairs *sql* reads, lowercased; None if unparsable.
+
+    Tried in each connector's dialect too: the default one rejects BigQuery's
+    backquoted ``project.dataset.table`` and names starting with a digit.
+    """
+    dialects = [None] + list(
+        dict.fromkeys(d for c in connectors if (d := getattr(c, "dialect", None)))
+    )
+    for dialect in dialects:
+        try:
+            statement = sqlglot.parse_one(sql, read=dialect)
+        except (sqlglot.errors.ParseError, ValueError):
+            continue
+        derived = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
+        return [
+            ((table.db or "").lower() or None, table.name.lower())
+            for table in statement.find_all(exp.Table)
+            if table.name and table.name.lower() not in derived
+        ]
+    return None
+
+
+__all__ = [
+    "connector_named",
+    "databases_for_sql",
+    "resolve_connector_for_sql",
+    "resolve_connector_from_tables",
+    "resolve_target_database_name",
+    "wildcard_for",
+]

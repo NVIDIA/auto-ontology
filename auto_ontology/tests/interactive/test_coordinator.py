@@ -11,6 +11,7 @@ from auto_ontology.retrieval.interactive.coordinator import (
     _apply_follow_up_seed,
     _format_user_clarifications,
     _run_sql_generation,
+    _session_connector,
     apply_user_answer,
     create_session,
     step,
@@ -35,6 +36,22 @@ def _make_session(**kwargs):
     )
     defaults.update(kwargs)
     return InteractiveSessionState(**defaults)
+
+
+def test_session_connector_routes_by_sql_when_tables_span_databases():
+    first = MagicMock(database_name="first", dialect="sqlite")
+    second = MagicMock(database_name="second", dialect="sqlite")
+    sess = _make_session()
+    sess.connectors = [first, second]
+    sess.path_state = {
+        "relevant_tables": [
+            {"database_name": "first", "schema_name": "main", "name": "aliens"},
+            {"database_name": "second", "schema_name": "main", "name": "ships"},
+        ]
+    }
+
+    assert _session_connector(sess, "SELECT * FROM main.ships") is second
+    assert _session_connector(sess, "SELECT * FROM main.planets") is None
 
 
 def test_step_requires_turn_type():

@@ -312,11 +312,35 @@ def _resolve_tables(
 
 
 def _in_database(ctx: ToolContext, table: dict) -> bool:
-    return not ctx.database_name or table.get("database_name") == ctx.database_name
+    """Whether *table* is one the episode can query.
+
+    The catalog can still hold a database whose connection is gone; its tables
+    would send the model after SQL that has nowhere to run.
+    """
+    database_name = table.get("database_name")
+    if ctx.database_name:
+        return database_name == ctx.database_name
+    if not database_name or len(ctx.connectors) <= 1:
+        return True
+    return any(
+        getattr(c, "database_name", None) == database_name for c in ctx.connectors
+    )
 
 
 def _qualified(table: dict) -> str:
     return ".".join(p for p in (table.get("schema_name"), table.get("name")) if p)
+
+
+def _labels_databases(ctx: ToolContext) -> bool:
+    """Whether a table's database is worth naming: more than one could own it."""
+    return not ctx.database_name and len(ctx.connectors) > 1
+
+
+def _header(table: dict, show_database: bool) -> str:
+    header = f"TABLE {_qualified(table)}"
+    if show_database and table.get("database_name"):
+        header += f" (database: {table['database_name']})"
+    return header
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -385,8 +409,10 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
     return chosen, len(columns) - len(chosen)
 
 
-def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
-    header = f"TABLE {_qualified(table)}"
+def _table_block(
+    table: dict, matched: set[str], seen_before: bool, show_database: bool = False
+) -> str:
+    header = _header(table, show_database)
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     if seen_before:
@@ -409,14 +435,16 @@ def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     return "\n".join(lines)
 
 
-def _short_table_block(table: dict, matched: set[str]) -> str:
+def _short_table_block(
+    table: dict, matched: set[str], show_database: bool = False
+) -> str:
     """*table* in a few lines, for when its full block does not fit.
 
     Keeps the description and the columns a query most likely needs -- the
     matched ones, the key and the foreign keys -- without their descriptions,
     and says how to see the rest.
     """
-    header = f"TABLE {_qualified(table)}"
+    header = _header(table, show_database)
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     keys = {str(k) for k in table.get("pk") or []}
@@ -760,8 +788,11 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # Most useful first, since the limit shortens or only names what comes
     # last: new tables, how they join, definitions that carry SQL, then tables
     # seen before. Each block carries the tables it names.
+    show_database = _labels_databases(ctx)
     new_blocks = {
-        str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
+        str(t["id"]): _table_block(
+            t, matched.get(str(t["id"]), set()), False, show_database
+        )
         for t in new_tables
     }
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
@@ -781,7 +812,10 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if (block := _definition_block(hit)) is not None
     ]
     named += definitions
-    earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
+    earlier = [
+        (_table_block(t, matched[str(t["id"])], True, show_database), t)
+        for t in revisited
+    ]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
         **{new_blocks[str(t["id"])]: _qualified(t) for t in new_tables},
@@ -794,7 +828,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         )
     short_blocks = {
         new_blocks[str(t["id"])]: _short_table_block(
-            t, matched.get(str(t["id"]), set())
+            t, matched.get(str(t["id"]), set()), show_database
         )
         for t in new_tables
     }

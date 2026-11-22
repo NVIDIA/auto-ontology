@@ -39,7 +39,10 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 )
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
-    resolve_connector_from_tables,
+    connector_named,
+    databases_for_sql,
+    resolve_connector_for_sql,
+    wildcard_for,
 )
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
@@ -164,6 +167,21 @@ def _suggest(name: str, options: list[str]) -> str:
     return f" (did you mean: {', '.join(close)}?)" if close else ""
 
 
+def catalog_table(name: str, schema: str | None, catalog: CatalogNames) -> str:
+    """*name*, or the catalog's wildcard table when *name* reads some of its shards.
+
+    BigQuery reads ``events_20210131`` and ``events_2021*`` from the same
+    shards as ``events_*``, the one table the catalog holds for them; the
+    query still runs as written.
+    """
+    if catalog.columns(name, schema) is not None:
+        return name
+    wildcard = wildcard_for(name)
+    if wildcard and catalog.columns(wildcard, schema) is not None:
+        return wildcard
+    return name
+
+
 def find_unknown_names(statement: exp.Expression, catalog: CatalogNames) -> list[str]:
     """Tables and columns *statement* names that the catalog does not have.
 
@@ -183,6 +201,7 @@ def find_unknown_names(statement: exp.Expression, catalog: CatalogNames) -> list
         name = table.name
         if not name or name.lower() in derived:
             continue
+        name = catalog_table(name, table.db or None, catalog)
         columns = catalog.columns(name, table.db or None)
         tables[table.alias_or_name.lower()] = columns
         tables.setdefault(name.lower(), columns)
@@ -302,8 +321,9 @@ def tables_not_shown(
     for table in statement.find_all(exp.Table):
         if not table.name or table.name.lower() in derived:
             continue
-        owners = catalog.schemas_with(table.name)
-        if ctx.was_shown(table.db or None, table.name, owners):
+        name = catalog_table(table.name, table.db or None, catalog)
+        owners = catalog.schemas_with(name)
+        if ctx.was_shown(table.db or None, name, owners):
             continue
         if not table.db and len(owners) > 1:
             problems.append(
@@ -364,11 +384,15 @@ def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResu
     return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
 
 
-def connector_for(ctx: ToolContext) -> SQLDatabase | None:
+def connector_for(
+    ctx: ToolContext, sql: str | None = None, database: str | None = None
+) -> SQLDatabase | None:
     """The database the episode's SQL runs on.
 
-    The target database when the caller named one; otherwise the connector that
-    owns the tables ``retrieve`` has shown, or the only one configured.
+    The target database when the caller named one; otherwise the only one
+    configured, the *database* the model named, or the connector that owns the
+    tables ``retrieve`` has shown. When those span several databases, *sql*
+    decides: the one database holding every table it reads.
     """
     if ctx.database_name:
         for connector in ctx.connectors:
@@ -376,12 +400,37 @@ def connector_for(ctx: ToolContext) -> SQLDatabase | None:
                 return connector
     if len(ctx.connectors) == 1:
         return ctx.connectors[0]
-    try:
-        return resolve_connector_from_tables(
-            list(ctx.seen_tables.values()), ctx.connectors
+    if database and database.strip():
+        return connector_named(database.strip(), ctx.connectors)
+    return resolve_connector_for_sql(
+        list(ctx.seen_tables.values()), ctx.connectors, sql
+    )
+
+
+def no_database_error(ctx: ToolContext, sql: str, database: str | None) -> str:
+    """Why :func:`connector_for` found no database for *sql*, and what to do."""
+    shown = sorted(
+        {str(t.get("database_name")) for t in ctx.seen_tables.values()} - {"None", ""}
+    )
+    if database and database.strip():
+        return (
+            f"Error: no connected database is named {database.strip()!r}. "
+            f"Databases of the tables shown so far: {', '.join(shown) or 'none'}."
         )
-    except ValueError:
-        return None
+    candidates = databases_for_sql(list(ctx.seen_tables.values()), ctx.connectors, sql)
+    if len(candidates) > 1:
+        return (
+            "Error: the tables this query reads are in more than one database "
+            f"({', '.join(candidates)}). Run it again with database set to the "
+            "one you mean."
+        )
+    if len(shown) > 1:
+        return (
+            "Error: no single shown database holds every table this query reads. "
+            f"Shown databases: {', '.join(shown)}. Query one database at a time, "
+            "and set database if a table name is in several."
+        )
+    return "Error: no database to run on. Retrieve the tables you need first."
 
 
 def _cell(value: Any) -> str:
@@ -413,7 +462,7 @@ def _clip(text: str) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def run_sql(ctx: ToolContext, sql: str) -> str:
+def run_sql(ctx: ToolContext, sql: str, database: str = "") -> str:
     """Check *sql* against the catalog and, if it passes, run it."""
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -427,9 +476,9 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
             "Error: no exploratory run_sql calls left in this episode. Run your "
             "best query with final=true."
         )
-    connector = connector_for(ctx)
+    connector = connector_for(ctx, sql, database)
     if connector is None:
-        return "Error: no database to run on. Retrieve the tables you need first."
+        return no_database_error(ctx, sql, database)
     dialect = getattr(connector, "dialect", None)
     check = check_query(ctx, connector, sql)
     if check.problems:

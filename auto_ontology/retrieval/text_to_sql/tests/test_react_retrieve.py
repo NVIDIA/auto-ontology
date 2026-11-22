@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -912,3 +913,28 @@ def test_a_concept_the_limit_dropped_is_shown_by_a_later_search(
     second = tool.retrieve(ctx, "customer status")
     assert "CONCEPT Customer: sales.orders + crm.customers" in second
     assert "concept-1" in ctx.shown_concepts
+
+
+def test_table_header_names_its_database_only_when_several_could_own_it() -> None:
+    table = {"schema_name": "main", "name": "orders", "database_name": "northwind"}
+    one = ToolContext(None, [object()])
+    several = ToolContext(None, [object(), object()])
+    targeted = ToolContext(None, [object(), object()], database_name="northwind")
+
+    assert not tool._labels_databases(one)
+    assert not tool._labels_databases(targeted)
+    assert tool._labels_databases(several)
+    assert tool._table_block(table, set(), False, True).startswith(
+        "TABLE main.orders (database: northwind)"
+    )
+    assert "(database:" not in tool._table_block(table, set(), False)
+
+
+def test_tables_of_unconnected_databases_are_not_offered() -> None:
+    connected = ToolContext(
+        None, [SimpleNamespace(database_name="a"), SimpleNamespace(database_name="b")]
+    )
+
+    assert tool._in_database(connected, {"database_name": "a"})
+    assert not tool._in_database(connected, {"database_name": "gone"})
+    assert tool._in_database(connected, {"name": "no_database_recorded"})

@@ -141,6 +141,13 @@ class ReactSQLAgent(BaseAgent):
                 "path_state": path_state,
             }
 
+        ran_on = ctx.submitted_database
+        if ran_on:
+            path_state["relevant_tables"] = [
+                t
+                for t in path_state["relevant_tables"]
+                if t.get("database_name") in (None, "", ran_on)
+            ]
         path_state["sql_code"] = submission.sql
         path_state["sql_generation_result"] = SQLGenerationModel(
             thought=submission.assumptions or _NO_ASSUMPTIONS,

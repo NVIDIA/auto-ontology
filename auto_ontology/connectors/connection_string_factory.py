@@ -257,4 +257,23 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             f"?protocol={_enc(protocol)}"
         )
 
+    if conn_type == "bigquery":
+        project = _require(connection, "database")
+        # Required here even though the connector can fall back to Application
+        # Default Credentials: that fallback is the pod's own identity, and a UI
+        # connection must not be able to borrow it.
+        key = _require(connection, "credentials_json")
+        if not key.startswith("{"):
+            raise ValueError("BigQuery credentials_json must be a JSON key")
+        params = [
+            f"credentials={_enc(base64.urlsafe_b64encode(key.encode()).decode())}"
+        ]
+        location = str(connection.get("location") or "").strip()
+        if location:
+            params.append(f"location={_enc(location)}")
+        schema = str(connection.get("schema") or "").strip()
+        if schema:
+            params.append(f"schema={_enc(schema)}")
+        return f"bigquery://{_enc(project)}?{'&'.join(params)}"
+
     raise ValueError(f"Unsupported connection type: {conn_type!r}")

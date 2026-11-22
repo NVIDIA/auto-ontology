@@ -49,6 +49,7 @@ The URL scheme selects the connector:
 | Snowflake     | `snowflake://`              | yes           |
 | ClickHouse    | `clickhouse://`             | yes           |
 | Trino         | `trino://`                  | yes           |
+| BigQuery      | `bigquery://`               | yes           |
 | Apache Kyuubi | `kyuubi://`                 | yes           |
 | HeavyDB       | `heavydb://`                | yes           |
 | DuckDB        | `duckdb://`                 | no            |
@@ -56,6 +57,33 @@ The URL scheme selects the connector:
 
 The registry lives in
 [`auto_ontology/connectors/registry.py`](../auto_ontology/connectors/registry.py).
+
+### BigQuery
+
+A BigQuery connection binds one project, and its datasets are the schemas you
+pick from. In the UI it authenticates with a pasted service-account JSON key;
+the account needs **BigQuery Data Viewer** and **BigQuery Job User** on the
+project. A `CONNECTION_STRINGS` URL can instead point at a key file, or omit
+credentials and run as the pod's Application Default Credentials:
+
+```text
+bigquery://my-project?location=US&credentials=<URL-safe base64 JSON key>
+bigquery://my-project?schema=analytics&credentials_file=/secrets/sa.json
+```
+
+To query datasets that live in another project (public datasets, say), give
+the connection a name in the path and list its datasets. Jobs are billed to the
+host project, and `dataset.table` in generated SQL resolves to the dataset's own
+project:
+
+```text
+bigquery://my-billing-project/austin?dataset=bigquery-public-data.austin_311&dataset=bigquery-public-data.austin_crime
+```
+
+Every query job is capped at 10 GiB billed (`maximum_bytes_billed=` overrides
+it); a profiling query over the cap fails without being billed, and that column
+is left unprofiled. Query history is read from `JOBS_BY_PROJECT` only when
+`location` is set, and needs `bigquery.jobs.listAll`.
 
 ## Vault
 

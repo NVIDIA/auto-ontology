@@ -45,6 +45,7 @@ from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,
     connector_for,
+    no_database_error,
     run_sql,
 )
 
@@ -84,6 +85,7 @@ def submit(
     response: str = "",
     assumptions: str = "",
     resubmit: str = "submit this version",
+    database: str = "",
 ) -> tuple[str, Submission | None]:
     """Check and run a final query; the submission when it ran cleanly.
 
@@ -106,9 +108,9 @@ def submit(
                 None,
             )
         return "Accepted.", Submission("", response, assumptions, None)
-    connector = connector_for(ctx)
+    connector = connector_for(ctx, sql, database)
     if connector is None:
-        return "Error: no database to run on. Retrieve the tables you need first.", None
+        return no_database_error(ctx, sql, database), None
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
@@ -131,6 +133,7 @@ def submit(
             f"instead:\n{db_response.sql_correction}"
         ), None
     submission = Submission(sql, (response or "").strip(), assumptions, db_response)
+    ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission
 
 
@@ -163,12 +166,15 @@ def _can_run_queries(ctx: ToolContext) -> bool:
 
 
 def _submit_draft(
-    ctx: ToolContext, draft: str | None, calls: int, trajectory: list[dict[str, Any]]
+    ctx: ToolContext,
+    draft: tuple[str, str] | None,
+    calls: int,
+    trajectory: list[dict[str, Any]],
 ) -> EpisodeResult | None:
     """Submit the latest drafted query when the budget ended the episode."""
     if not draft:
         return None
-    observation, submission = submit(ctx, draft)
+    observation, submission = submit(ctx, draft[0], database=draft[1])
     trajectory.append({"role": "draft_submission", "content": observation})
     if submission is None:
         return None
@@ -187,7 +193,7 @@ def _dispatch(
         ToolName.RETRIEVE: lambda query="", kinds=None, purpose="sql": _retrieve(
             ctx, query, kinds, purpose
         ),
-        ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
+        ToolName.RUN_SQL: lambda sql="", database="": run_sql(ctx, sql, database),
         ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
             ctx, page, pattern, offset
         ),
@@ -203,7 +209,7 @@ def _dispatch(
                 ctx, **final_args, resubmit="run this version with final=true"
             )
         if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
-            args = {k: v for k, v in args.items() if k == "sql"}
+            args = {k: v for k, v in args.items() if k in ("sql", "database")}
         if name == ToolName.PREDICT:
             return predict(ctx)
         return handlers[name](**args), None
@@ -267,7 +273,7 @@ def run_episode(
     calls = 0
     nudges = 0
     made: set[str] = set()
-    draft: str | None = None
+    draft: tuple[str, str] | None = None
     out_of_queries = False
 
     while True:
@@ -340,7 +346,7 @@ def run_episode(
                 name in (ToolName.RUN_SQL, ToolName.SUBMIT)
                 and (args.get("sql") or "").strip()
             ):
-                draft = args["sql"]
+                draft = (args["sql"], str(args.get("database") or ""))
             key = _call_key(name, args)
             answer: Submission | Prediction | None
             answers = prompts.is_answer(name, args)

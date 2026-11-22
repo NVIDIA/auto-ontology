@@ -392,7 +392,7 @@ in the [OpenAPI spec](./docs/openapi/auto-ontology-api.json).
 
 ### Sources
 
-Auto Ontology connects to ten engines:
+Auto Ontology connects to eleven engines:
 
 - PostgreSQL
 - MySQL
@@ -400,6 +400,7 @@ Auto Ontology connects to ten engines:
 - Snowflake
 - ClickHouse
 - Trino
+- Google BigQuery
 - Apache Kyuubi
 - HeavyDB
 - DuckDB
