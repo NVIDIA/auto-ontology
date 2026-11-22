@@ -352,6 +352,28 @@ def test_a_term_family_goes_with_its_database(world) -> None:
     assert _exists(s.term_family, theirs)
 
 
+def test_a_direct_fk_group_goes_with_its_database(world) -> None:
+    _, make = world
+    shop, warehouse = make("shop"), make("warehouse")
+    ours = _add(s.semantic_fk_direct, database_id=shop.id)
+    _link(s.column__semantic_fk_direct, column_id=shop.column, group_id=ours)
+    theirs = _add(s.semantic_fk_direct, database_id=warehouse.id)
+    _link(s.column__semantic_fk_direct, column_id=warehouse.column, group_id=theirs)
+
+    r.delete_semantic_layer(shop.name)
+
+    assert not _exists(s.semantic_fk_direct, ours)
+    assert _exists(s.semantic_fk_direct, theirs)
+    assert (
+        store().query_read(
+            select(s.column__semantic_fk_direct.c.column_id).where(
+                s.column__semantic_fk_direct.c.column_id == shop.column
+            )
+        )
+        == []
+    )
+
+
 def test_a_column_attribute_goes_with_its_table(world) -> None:
     """Owned outright by one table, so no all-or-nothing question arises."""
     _, make = world
