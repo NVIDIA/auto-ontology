@@ -23,10 +23,11 @@
     "expand_info": "(ids_and_labels: 'list | None') -> 'dict'"
   },
   "concepts": {
+    "delete_keyless_concepts": "(database_names: 'Iterable[str]') -> 'int'",
     "delete_orphan_concepts": "(database_ids: 'Iterable[str]') -> 'int'",
     "ensure_column_key": "(column_id: 'str') -> 'str | None'",
     "ensure_concept_key": "(concept_id: 'str', column_id: 'str') -> 'str | None'",
-    "ensure_term_concept": "(term_id: 'str') -> 'str | None'",
+    "ensure_term_concept": "(term_id: 'str', *, require_key: 'bool' = False) -> 'str | None'",
     "fetch_column_key_id": "(column_id: 'str') -> 'str | None'",
     "fetch_concept_fields": "(concept_ids: 'Iterable[str]') -> 'list[dict[str, Any]]'",
     "fetch_concept_members": "(table_ids: 'Iterable[str]') -> 'dict[str, dict[str, Any]]'",

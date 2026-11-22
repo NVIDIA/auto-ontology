@@ -430,9 +430,10 @@ def upsert_table_term(
     The proposed name is kept unless another table already owns it. Collisions
     are qualified with the table's full catalog identity, keeping the global
     ``(name, source)`` constraint and name-based attribute lookups unambiguous.
-    The Term's one-member Concept is created here as well
-    (:func:`~auto_ontology.dal.concepts.ensure_term_concept`), so every
-    committed Term has one.
+    When the table has a declared single-column primary key, the Term's
+    one-member Concept is created here as well
+    (:func:`~auto_ontology.dal.concepts.ensure_term_concept`); otherwise it is
+    created once an FK resolves to one of the table's columns.
     Returns ``(term_id, persisted_name)``, or ``None`` for a missing table.
     """
     with write_transaction():
@@ -499,7 +500,7 @@ def upsert_table_term(
                     .where(s.term.c.id == term_id)
                     .values(description=description, synonyms=synonyms or [])
                 )
-                ensure_term_concept(term_id)
+                ensure_term_concept(term_id, require_key=True)
                 return term_id, candidate_name
             if existing:
                 continue
@@ -524,7 +525,7 @@ def upsert_table_term(
             store().query_write(
                 insert(s.table__term).values(table_id=table_id, term_id=term_id)
             )
-            ensure_term_concept(term_id)
+            ensure_term_concept(term_id, require_key=True)
             return term_id, candidate_name
 
     raise RuntimeError(f"Could not allocate a private Term name for table {table_id}")

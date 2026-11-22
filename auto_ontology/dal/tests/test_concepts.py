@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Concept rows: one per Term, keys on unique columns, merges that move rows.
+"""Concept rows: one per keyed Term, keys on unique columns, merges that move rows.
 
 A merge that recreated rows instead of moving them would still leave a
 plausible Concept behind, so each merge test checks *ids*: the survivor's id,
@@ -390,3 +390,54 @@ def test_merge_candidates_list_key_columns_with_their_concept(split) -> None:
         ("orders", "order_id"),
     }
     assert all(r["concept_id"] and r["is_pk"] for r in rows)
+
+
+def test_a_term_without_a_key_gets_no_concept_when_one_is_required(world) -> None:
+    world.table("events", ("event_id", "kind"), unique=("event_id",))
+    term = world.term("Event", "events")
+
+    assert c.ensure_term_concept(term, require_key=True) is None
+    assert c.fetch_table_concept_id(world.tables["events"]) is None
+
+
+def test_a_term_with_a_pk_gets_its_concept_when_a_key_is_required(world) -> None:
+    world.table("customer", ("customer_id",), pk="customer_id")
+    concept = c.ensure_term_concept(
+        world.term("Customer", "customer"), require_key=True
+    )
+
+    assert concept is not None
+    assert c.fetch_column_key_id(world.columns["customer.customer_id"]) is not None
+
+
+def test_a_column_key_creates_its_concept_on_demand(world) -> None:
+    world.table("events", ("event_id", "kind"), unique=("event_id",))
+    world.term("Event", "events")
+
+    key = c.ensure_column_key(world.columns["events.event_id"])
+
+    assert key is not None
+    assert c.fetch_table_concept_id(world.tables["events"]) is not None
+
+
+def test_keyless_concepts_are_deleted_and_keyed_ones_kept(world) -> None:
+    world.table("customer", ("customer_id",), pk="customer_id")
+    world.table("events", ("event_id",))
+    keyed = c.ensure_term_concept(world.term("Customer", "customer"))
+    keyless = c.ensure_term_concept(world.term("Event", "events"))
+
+    assert c.delete_keyless_concepts([world.prefix]) == 1
+    assert _concept(keyless) is None
+    assert _concept(keyed) is not None
+    assert c.delete_keyless_concepts([]) == 0
+
+
+def test_merge_candidates_include_terms_without_a_concept(split) -> None:
+    rows = c.fetch_concept_merge_candidates(split.prefix)
+
+    assert {(r["table_name"], r["column_name"]) for r in rows} == {
+        ("customer", "customer_id"),
+        ("customer_ext", "customer_id"),
+        ("orders", "order_id"),
+    }
+    assert all(r["concept_id"] is None and r["term_id"] for r in rows)

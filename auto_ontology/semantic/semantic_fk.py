@@ -55,6 +55,7 @@ from auto_ontology.dal.attributes import (
     merge_semantic_fk_to_column,
     set_semantic_fk_join_default,
 )
+from auto_ontology.dal.concepts import delete_keyless_concepts
 from auto_ontology.dal.datasources import store_column_distinct_values
 from auto_ontology.dal.term_families import fetch_table_families
 from auto_ontology.infra.feature_flags import is_semantic_fk_db_query_prevented
@@ -164,11 +165,15 @@ null only when the schema context is genuinely insufficient. Never invent an ID.
 def resolve_semantic_fks(database_name: str) -> int:
     """Create SEMANTIC_FK edges for all unlinked FK columns.
 
-    Runs after the taxonomy while-loop in ``compile_semantic_layer``.
-    Returns the total number of SEMANTIC_FK edges created.
+    Runs after the taxonomy while-loop in ``compile_semantic_layer``, and is
+    the last stage to create Concept keys, so it then drops the Concepts that
+    got none. Returns the total number of SEMANTIC_FK edges created.
     """
     created = _resolve_semantic_fks(database_name)
     select_semantic_fk_join_defaults(database_name)
+    removed = delete_keyless_concepts([database_name])
+    if removed:
+        logger.info("resolve_semantic_fks: removed %d keyless Concept(s)", removed)
     return created
 
 

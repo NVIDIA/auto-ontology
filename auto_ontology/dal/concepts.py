@@ -4,7 +4,8 @@
 
 """Concepts: the real-world entities Terms are parts of, and their keys.
 
-Every Term that represents a table belongs to exactly one Concept. Most
+A Term that represents a table belongs to at most one Concept, and has one
+only once the entity has a key: a keyless Concept is never a join target. Most
 Concepts have one member; a vertically split entity (``customer`` and
 ``customer_ext`` sharing ``customer_id``) has one per part. A Concept key names
 the entity's identity and maps it to one column on each member table, and a
@@ -129,13 +130,17 @@ def fetch_table_concept_id(table_id: str) -> str | None:
     return rows[0]["concept_id"] if rows else None
 
 
-def ensure_term_concept(term_id: str) -> str | None:
+def ensure_term_concept(term_id: str, *, require_key: bool = False) -> str | None:
     """Return the Term's Concept, creating a one-member Concept when it has none.
 
     The new Concept is scoped to the database of the table the Term represents
     and named after the Term. When that table's declared primary key is a
     single column, the Concept is given a key mapped to it. Returns ``None``
     for a Term that represents no table: there is no database to scope it to.
+
+    With *require_key*, a Concept is only created when it gets that key: a
+    Concept without one is never a join target, so a Term without a primary key
+    gets its Concept later, when an FK first resolves to one of its columns.
     """
     with write_transaction():
         # Concurrent callers for one Term wait here, and the later one then
@@ -175,6 +180,19 @@ def ensure_term_concept(term_id: str) -> str | None:
             return None
         row = rows[0]
 
+        pk = list(row["pk"] or [])
+        pk_column_id = None
+        if len(pk) == 1:
+            columns = store().query_read(
+                select(s.catalog_column.c.id).where(
+                    s.catalog_column.c.table_id == row["table_id"],
+                    s.catalog_column.c.name == pk[0],
+                )
+            )
+            pk_column_id = columns[0]["id"] if columns else None
+        if require_key and pk_column_id is None:
+            return None
+
         concept_id = None
         for name in (row["name"], f"{row['name']} ({term_id})"):
             inserted = store().query_write(
@@ -196,16 +214,10 @@ def ensure_term_concept(term_id: str) -> str | None:
             insert(s.term__concept).values(term_id=term_id, concept_id=concept_id)
         )
 
-        pk = list(row["pk"] or [])
-        if len(pk) == 1:
-            columns = store().query_read(
-                select(s.catalog_column.c.id).where(
-                    s.catalog_column.c.table_id == row["table_id"],
-                    s.catalog_column.c.name == pk[0],
-                )
-            )
-            if columns:
-                ensure_concept_key(concept_id, columns[0]["id"])
+        key_id = ensure_concept_key(concept_id, pk_column_id) if pk_column_id else None
+        if require_key and key_id is None:
+            store().query_write(delete(s.concept).where(s.concept.c.id == concept_id))
+            return None
         return concept_id
 
 
@@ -496,11 +508,41 @@ def delete_orphan_concepts(database_ids: Iterable[str]) -> int:
     return len(deleted)
 
 
+def delete_keyless_concepts(database_names: Iterable[str]) -> int:
+    """Delete the Concepts of *database_names* that have no key.
+
+    Nothing can join to a Concept without a key, so one is only worth keeping
+    once a key exists. Concepts are created on demand while a compile looks
+    for keys, and this removes the ones it found none for. Returns how many
+    were deleted.
+    """
+    names = list(dict.fromkeys(database_names))
+    if not names:
+        return 0
+    deleted = store().query_write(
+        delete(s.concept)
+        .where(
+            s.concept.c.database_id.in_(
+                select(s.catalog_database.c.id).where(
+                    s.catalog_database.c.name.in_(names)
+                )
+            ),
+            ~select(s.concept_key.c.id)
+            .where(s.concept_key.c.concept_id == s.concept.c.id)
+            .exists(),
+        )
+        .returning(s.concept.c.id)
+    )
+    return len(deleted)
+
+
 def fetch_concept_merge_candidates(database_name: str) -> list[dict[str, Any]]:
     """Every single-column key candidate of every Term-represented table.
 
     One row per table and column that could identify the table's entity: a
-    single-column declared primary key, or a column profiled unique. Rows carry
+    single-column declared primary key, or a column profiled unique.
+    ``concept_id`` and ``concept_name`` are ``None`` for a Term that has no
+    Concept yet. Rows carry
     ``concept_id``, ``concept_name``, ``term_id``, ``term_name``,
     ``term_description``, ``table_id``, ``table_name``, ``table_description``,
     ``schema_name``, ``column_id``, ``column_name``, ``column_description``,
@@ -545,10 +587,8 @@ def fetch_concept_merge_candidates(database_name: str) -> list[dict[str, Any]]:
             family.label("family_id"),
         )
         .select_from(
-            s.concept.join(
-                s.term__concept, s.term__concept.c.concept_id == s.concept.c.id
-            )
-            .join(s.term, s.term.c.id == s.term__concept.c.term_id)
+            s.term.outerjoin(s.term__concept, s.term__concept.c.term_id == s.term.c.id)
+            .outerjoin(s.concept, s.concept.c.id == s.term__concept.c.concept_id)
             .join(s.table__term, s.table__term.c.term_id == s.term.c.id)
             .join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
             .join(

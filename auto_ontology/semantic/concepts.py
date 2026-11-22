@@ -4,11 +4,11 @@
 
 """Merge the Concepts of tables that are parts of one entity.
 
-Runs after term families and before semantic FKs. Every Term already has a
-one-member Concept (``dal.concepts.ensure_term_concept``); this stage folds two
-of them into one when the tables are a vertical split of the same entity —
-``customer`` and ``customer_ext``, one row per customer in each, sharing
-``customer_id``.
+Runs after term families and before semantic FKs. A Term has a one-member
+Concept once its table has a key (``dal.concepts.ensure_term_concept``), and
+this stage creates the ones it needs; it folds two of them into one when the
+tables are a vertical split of the same entity — ``customer`` and
+``customer_ext``, one row per customer in each, sharing ``customer_id``.
 
 Two tables are merged only when every check passes:
 
@@ -44,6 +44,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.concepts import (
     ensure_concept_key,
+    ensure_term_concept,
     fetch_concept_fields,
     fetch_concept_merge_candidates,
     fetch_table_concept_id,
@@ -130,8 +131,12 @@ def resolve_concepts(database_name: str) -> int:
     merged = 0
     renamed: set[str] = set()
     for base, part in pairs:
-        survivor = fetch_table_concept_id(base["table_id"])
-        absorbed = fetch_table_concept_id(part["table_id"])
+        survivor = fetch_table_concept_id(base["table_id"]) or ensure_term_concept(
+            base["term_id"]
+        )
+        absorbed = fetch_table_concept_id(part["table_id"]) or ensure_term_concept(
+            part["term_id"]
+        )
         if survivor is None or absorbed is None or survivor == absorbed:
             continue
         if not _values_match(base, part, values):
@@ -167,7 +172,7 @@ def resolve_concepts(database_name: str) -> int:
                 base["column_name"],
                 part["table_name"],
                 part["column_name"],
-                decision.name or base["concept_name"],
+                decision.name or base["concept_name"] or base["term_name"],
             )
     logger.info("resolve_concepts: %d merge(s) applied", merged)
     return merged

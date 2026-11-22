@@ -624,9 +624,11 @@ column__has_attribute = Table(
 )
 
 # A Concept is one real-world entity, whatever number of tables it is stored in.
-# Every Term belongs to exactly one: most Concepts have a single member, and an
-# entity split across tables that share a key (`customer` and `customer_ext`)
-# has one member per table (`auto_ontology.semantic.concepts`).
+# A Term belongs to at most one, and has one only once the entity has a key (a
+# declared single-column PK, or a column an FK resolves to): most Concepts have
+# a single member, and an entity split across tables that share a key
+# (`customer` and `customer_ext`) has one member per table
+# (`auto_ontology.semantic.concepts`).
 #
 # Scoped by database so a data reset removes it by cascade. Compilation merges
 # Concepts by moving rows, never by deleting and recreating them, so the

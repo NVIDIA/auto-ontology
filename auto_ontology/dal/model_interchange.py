@@ -32,6 +32,7 @@ from auto_ontology.dal.attributes import attribute_owner_column_id
 from auto_ontology.dal.concepts import (
     ensure_column_key,
     ensure_concept_key,
+    delete_keyless_concepts,
     delete_orphan_concepts,
     ensure_term_concept,
     merge_concepts,
@@ -1099,6 +1100,14 @@ def apply_import_model(
         )
         _import_concepts(document, id_map)
         _import_semantic_fks(document, id_map)
+        delete_keyless_concepts(
+            row["name"]
+            for row in store().query_read(
+                select(s.catalog_database.c.name).where(
+                    s.catalog_database.c.id.in_(live_db_ids)
+                )
+            )
+        )
         _import_sql_attributes(
             document, id_map, created, skipped, embed_buffer, term_names, schema_cache
         )
@@ -1633,7 +1642,7 @@ def _import_concepts(
     for term in document.semantic_layer.terms:
         live_term_id = _remap_optional(id_map, term.id)
         if live_term_id is not None:
-            ensure_term_concept(live_term_id)
+            ensure_term_concept(live_term_id, require_key=True)
 
     for concept in document.semantic_layer.concepts:
         live_concepts = [
