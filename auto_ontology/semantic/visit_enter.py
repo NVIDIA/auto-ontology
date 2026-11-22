@@ -268,6 +268,63 @@ def _is_excluded_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _EXCLUDED_SAMPLE_TYPES)
 
 
+_FLOAT_TYPE = re.compile(r"float|double|\breal\b", re.IGNORECASE)
+_INTEGER_TYPE = re.compile(r"int|serial", re.IGNORECASE)
+_KEY_NAME = re.compile(r"(?:^|_)(?:id|code|key)$|[a-z](?:ID|Id|Code|Key)$")
+
+
+def _unique_columns(
+    ratios: dict[str, float],
+    types: dict[str, str | None],
+    date_columns: set[str],
+    pk: list[str],
+) -> set[str]:
+    """The columns of one table to mark ``is_unique``, from sampled ratios.
+
+    A single-column primary key and every fully distinct column are unique.
+    Only when a table has neither does the ``_UNIQUE_RATIO`` threshold apply,
+    and then to one column: the most distinct, preferring a key-like name and
+    an integer or text type, then column order. Date and floating-point
+    columns are never unique: a sample of timestamps or measurements rarely
+    repeats, but neither identifies a row.
+    """
+
+    def eligible(name: str) -> bool:
+        declared = types.get(name)
+        return (
+            name not in date_columns
+            and not is_date_type(declared)
+            and not _FLOAT_TYPE.search(declared or "")
+        )
+
+    single_pk = pk[0] if len(pk) == 1 else None
+    unique = {name for name, ratio in ratios.items() if ratio >= 1.0 and eligible(name)}
+    if single_pk and eligible(single_pk):
+        unique.add(single_pk)
+    if single_pk or unique:
+        return unique
+
+    order = {name: index for index, name in enumerate(ratios)}
+    candidates = [
+        name
+        for name, ratio in ratios.items()
+        if ratio >= _UNIQUE_RATIO and eligible(name)
+    ]
+    if not candidates:
+        return set()
+
+    def rank(name: str) -> tuple:
+        declared = types.get(name) or ""
+        return (
+            -ratios[name],
+            not _KEY_NAME.search(name),
+            not (_INTEGER_TYPE.search(declared) or _is_text_sample_type(declared)),
+            order[name],
+        )
+
+    return {min(candidates, key=rank)}
+
+
 def _is_text_sample_type(data_type: str | None) -> bool:
     """Whether a column's declared type is free/categorical text."""
     if not data_type:
@@ -502,10 +559,10 @@ def calculate_columns_profiling(
     the warehouse. They get no profile at all -- no samples, ``is_unique``,
     ratio, or format.
 
-    Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
-    ``is_unique`` flag (at least 95% of non-null values distinct, the measured
-    share persisted as ``distinct_ratio``) and the 5 most-common
-    values. For non-unique text columns whose sample yields fewer than 5
+    Runs ``SELECT * ... LIMIT 1000`` and, for every column, measures the
+    share of distinct non-null values (persisted as ``distinct_ratio``) and
+    the 5 most-common values. ``is_unique`` is then chosen per table by
+    :func:`_unique_columns`. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
 
@@ -857,6 +914,13 @@ def calculate_columns_profiling(
                 )
         if filtered:
             sample_values[col_name] = filtered
+
+    unique = _unique_columns(
+        distinct_ratios, type_by_column, set(date_formats), list(table.get("pk") or [])
+    )
+    for name in uniqueness:
+        uniqueness[name] = name in unique
+        profiling[name]["is_unique"] = uniqueness[name]
 
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)

@@ -107,53 +107,116 @@ def test_keep_persisted_sample_caps_text_only() -> None:
     assert _keep_persisted_sample(["x" * 40]) is False
 
 
-@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
-@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
-@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
-def test_a_column_is_unique_when_95_percent_of_its_values_are_distinct(
-    mock_store_samples: MagicMock,
-    mock_store_unique: MagicMock,
-    mock_store_dates: MagicMock,
+def _uniqueness(
+    frame: dict[str, list],
+    types: dict[str, str],
+    pk: list[str] | None = None,
+) -> dict[str, bool]:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame(frame)
+    table = {"id": "t1", "name": "t", "schema_name": "public", "pk": pk}
+    columns = [{"name": name, "data_type": kind} for name, kind in types.items()]
+    with (
+        patch("auto_ontology.semantic.visit_enter.store_column_date_formats"),
+        patch("auto_ontology.semantic.visit_enter.store_column_uniqueness"),
+        patch("auto_ontology.semantic.visit_enter.store_column_sample_values"),
+    ):
+        result = calculate_columns_profiling(table, columns, connector)
+    return {name: profile["is_unique"] for name, profile in result.items()}
+
+
+def test_without_a_key_only_the_most_distinct_column_clears_95_percent(
     store_distinct_ratios: MagicMock,
 ) -> None:
-    connector = _mock_connector()
-    connector.execute.return_value = pd.DataFrame(
+    uniqueness = _uniqueness(
         {
-            "mostly_distinct": [*range(19), 0],
-            "repeated": [*range(18), 0, 0],
-            "small_enum": [*"ABCDE", *[None] * 15],
-            "small_repeat": [*"ABCDA", *[None] * 15],
-            "empty": [None] * 20,
-        }
-    )
-    columns = [
-        {"name": "mostly_distinct", "data_type": "integer"},
-        {"name": "repeated", "data_type": "integer"},
-        {"name": "small_enum", "data_type": "integer"},
-        {"name": "small_repeat", "data_type": "integer"},
-        {"name": "empty", "data_type": "integer"},
-    ]
-
-    result = calculate_columns_profiling(
-        {"id": "t1", "name": "t", "schema_name": "public"}, columns, connector
-    )
-
-    assert {name: profile["is_unique"] for name, profile in result.items()} == {
-        "mostly_distinct": True,
-        "repeated": False,
-        "small_enum": True,
-        "small_repeat": False,
-        "empty": False,
-    }
-    store_distinct_ratios.assert_called_once_with(
-        "t1",
+            "mostly_distinct": [*range(38), 0, 1],
+            "more_distinct": [*range(39), 0],
+            "repeated": [*range(18), 0, 0] * 2,
+            "empty": [None] * 40,
+        },
         {
-            "mostly_distinct": 0.95,
-            "repeated": 0.9,
-            "small_enum": 1.0,
-            "small_repeat": 0.8,
+            "mostly_distinct": "integer",
+            "more_distinct": "integer",
+            "repeated": "integer",
+            "empty": "integer",
         },
     )
+
+    assert uniqueness == {
+        "mostly_distinct": False,
+        "more_distinct": True,
+        "repeated": False,
+        "empty": False,
+    }
+    ratios = store_distinct_ratios.call_args[0][1]
+    assert ratios["mostly_distinct"] == 0.95, "the measured share is still stored"
+
+
+def test_a_fully_distinct_column_turns_off_the_95_percent_fallback() -> None:
+    uniqueness = _uniqueness(
+        {"mostly_distinct": [*range(19), 0], "code": [f"C{i}" for i in range(20)]},
+        {"mostly_distinct": "integer", "code": "text"},
+    )
+
+    assert uniqueness == {"mostly_distinct": False, "code": True}
+
+
+@pytest.mark.parametrize(
+    ("pk", "expected"),
+    [
+        (["order_id"], {"order_id": True, "line_no": False, "ref": False}),
+        (["order_id", "line_no"], {"order_id": False, "line_no": False, "ref": True}),
+    ],
+    ids=["single-column-pk", "composite-pk"],
+)
+def test_only_a_single_column_pk_turns_off_the_fallback(
+    pk: list[str], expected: dict[str, bool]
+) -> None:
+    uniqueness = _uniqueness(
+        {
+            "order_id": [i // 2 for i in range(40)],
+            "line_no": [i % 2 for i in range(40)],
+            "ref": [*range(39), 0],
+        },
+        {"order_id": "integer", "line_no": "integer", "ref": "integer"},
+        pk=pk,
+    )
+
+    assert uniqueness == expected
+
+
+def test_dates_and_floats_are_never_unique() -> None:
+    uniqueness = _uniqueness(
+        {
+            "created_at": pd.date_range("2020-01-01", periods=20).tolist(),
+            "shipped": [f"2020-02-{i + 1:02d}" for i in range(20)],
+            "amount": [i + 0.5 for i in range(20)],
+            "id": list(range(20)),
+        },
+        {
+            "created_at": "timestamp",
+            "shipped": "TEXT",
+            "amount": "double precision",
+            "id": "integer",
+        },
+    )
+
+    assert uniqueness == {
+        "created_at": False,
+        "shipped": False,
+        "amount": False,
+        "id": True,
+    }
+
+
+def test_a_tied_fallback_prefers_a_key_like_name() -> None:
+    uniqueness = _uniqueness(
+        {"label": [*range(19), 0], "customer_id": [*range(19), 1]},
+        {"label": "integer", "customer_id": "integer"},
+    )
+
+    assert uniqueness == {"label": False, "customer_id": True}
 
 
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
@@ -356,7 +419,7 @@ def test_calculate_columns_profiling(
     assert len(result["created_at"]["sample_values"]) == 4
     assert result["id"]["is_unique"] is True
     assert result["status"]["is_unique"] is False
-    assert result["created_at"]["is_unique"] is True
+    assert result["created_at"]["is_unique"] is False  # a date never is
     assert result["token"]["is_unique"] is False
     assert result["created_at"]["format"] == "YYYY-MM-DD"
     mock_store_dates.assert_called_once()
@@ -367,7 +430,7 @@ def test_calculate_columns_profiling(
     assert uniqueness == {
         "id": True,
         "status": False,
-        "created_at": True,
+        "created_at": False,
         "token": False,
     }
 

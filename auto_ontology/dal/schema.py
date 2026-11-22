@@ -285,9 +285,12 @@ catalog_column = Table(
     # `950324` and `1995-03-24` are the same day and share no predicate, and a
     # wrong guess yields SQL that runs, returns nothing, and looks right.
     Column("format", Text, nullable=True),
-    # Profiling sets `is_unique` when at least 95% of the sampled non-null
-    # values are distinct, so a key with a few dirty duplicates still reads as
-    # a key. `distinct_ratio` is that measured share. Readers that need exact
+    # Profiling sets `is_unique` on a single-column primary key and on every
+    # column whose sampled non-null values are all distinct. A table with
+    # neither gets one column at least 95% distinct, so a key with a few dirty
+    # duplicates still reads as a key. Date and floating-point columns never
+    # are (`auto_ontology.semantic.visit_enter._unique_columns`).
+    # `distinct_ratio` is the measured share. Readers that need exact
     # uniqueness -- the text-to-SQL validators, through `find_table_key_columns`
     # -- require 1.0. NULL means no ratio was measured (a model import, or a
     # column profiled before the ratio existed), and the flag is then exact.
