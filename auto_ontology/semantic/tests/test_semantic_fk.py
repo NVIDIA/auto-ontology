@@ -869,3 +869,59 @@ def test_declared_fk_onto_the_column_itself_is_rejected() -> None:
         assert semantic_fk.resolve_semantic_fks("database") == 0
 
     merge.assert_not_called()
+
+
+_CODES = [f"C{n}" for n in range(1001, 1011)]
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="sort")
+def test_the_column_of_the_table_holding_every_value_wins(
+    _mock_llm_pick: MagicMock,
+) -> None:
+    """Nine in ten passes the threshold; the table's own key holds all ten."""
+    keys = _keys(
+        [
+            _key_row("sort", "table-2", [*_CODES[:9], "C2000"], column_name="sort"),
+            _key_row("key", "table-2", _CODES, column_name="key"),
+        ]
+    )
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column(_CODES), _retriever(_hit("sort", "table-2")), "database", keys
+    )
+
+    assert selected == "key"
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="sort")
+def test_a_better_column_on_another_table_does_not_replace_the_pick(
+    _mock_llm_pick: MagicMock,
+) -> None:
+    keys = _keys(
+        [
+            _key_row("sort", "table-2", [*_CODES[:9], "C2000"], column_name="sort"),
+            _key_row("elsewhere", "table-3", _CODES),
+        ]
+    )
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column(_CODES), _retriever(_hit("sort", "table-2")), "database", keys
+    )
+
+    assert selected == "sort"
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="first")
+def test_a_pick_holding_every_value_stands(_mock_llm_pick: MagicMock) -> None:
+    keys = _keys(
+        [
+            _key_row("first", "table-2", _CODES, column_name="first"),
+            _key_row("second", "table-2", _CODES, column_name="second"),
+        ]
+    )
+
+    selected = semantic_fk._resolve_via_vdb(
+        _fk_column(_CODES), _retriever(_hit("first", "table-2")), "database", keys
+    )
+
+    assert selected == "first"

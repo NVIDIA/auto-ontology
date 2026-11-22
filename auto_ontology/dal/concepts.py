@@ -26,21 +26,24 @@ from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.semantic.date_format import DATE_TYPE_TOKENS
+from auto_ontology.semantic.date_format import DATE_NAME_PATTERN, DATE_TYPE_TOKENS
 
 logger = logging.getLogger(__name__)
 
 
 def is_date_column(column=s.catalog_column) -> ColumnElement[bool]:
-    """Whether *column* holds dates: a date/time type, or a profiled date format.
+    """Whether *column* holds dates: a date/time type, a profiled date format,
+    or a date name (``START_DATE``).
 
-    The format catches dates stored as text, as SQLite stores them. Two
+    The format and the name catch dates stored as text, as SQLite and many
+    warehouses store them. Two
     columns of dates share values without referencing each other, so an
     inferred key or FK never lands on one.
     """
     data_type = func.lower(func.coalesce(column.c.data_type, ""))
     return or_(
         column.c.format.is_not(None),
+        column.c.name.regexp_match(DATE_NAME_PATTERN),
         *(data_type.contains(token) for token in DATE_TYPE_TOKENS),
     )
 

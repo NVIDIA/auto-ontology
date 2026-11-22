@@ -21,9 +21,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
+import re
 
 # Declared type substrings that make a column temporal.
 DATE_TYPE_TOKENS = ("date", "time", "timestamp", "datetime")
+
+# A column named as a date (``START_DATE``, ``start_date``, ``startDate``) holds
+# dates even when its stored values follow no single notation. Case-sensitive
+# so ``update`` and ``candidate`` are not read as ``...Date``; written in the
+# subset of regex syntax Python and Postgres share.
+DATE_NAME_PATTERN = r"(^|_)(date|DATE|Date)$|[a-z]Date$"
+_DATE_NAME = re.compile(DATE_NAME_PATTERN)
 
 # How many distinct values the inference looks at. Enough that a day-first
 # column almost certainly shows a day past the 12th, cheap enough to run on
@@ -49,6 +57,8 @@ _CANDIDATES: tuple[tuple[str, str], ...] = (
     ("%d-%m-%Y", "DD-MM-YYYY"),
     ("%m-%d-%Y", "MM-DD-YYYY"),
     ("%d.%m.%Y", "DD.MM.YYYY"),
+    ("%d-%b-%Y", "DD-MON-YYYY"),
+    ("%d-%b-%y", "DD-MON-YY"),
     ("%d/%m/%y", "DD/MM/YY"),
     ("%m/%d/%y", "MM/DD/YY"),
     ("%d-%m-%y", "DD-MM-YY"),
@@ -91,6 +101,11 @@ def is_date_type(data_type: str | None) -> bool:
         return False
     lowered = data_type.lower()
     return any(token in lowered for token in DATE_TYPE_TOKENS)
+
+
+def is_date_name(name: str | None) -> bool:
+    """Whether a column's name says it holds dates."""
+    return bool(name) and _DATE_NAME.search(name) is not None
 
 
 def _plausible_year(parsed: datetime) -> bool:

@@ -186,6 +186,28 @@ def test_only_a_single_column_pk_turns_off_the_fallback(
     assert uniqueness == expected
 
 
+def test_a_date_by_name_or_stored_notation_is_never_unique() -> None:
+    """Warehouses store dates as text the declared type says nothing about."""
+    uniqueness = _uniqueness(
+        {
+            "TERM_START_DATE": [f"{i + 1:02d}-JAN-{i:02d}?" for i in range(20)],
+            "REGISTRATION_DAY": [f"{i + 1:02d}-JAN-{i:02d}" for i in range(20)],
+            "TERM_CODE": [f"T{i:03d}" for i in range(20)],
+        },
+        {
+            "TERM_START_DATE": "varchar",
+            "REGISTRATION_DAY": "varchar",
+            "TERM_CODE": "varchar",
+        },
+    )
+
+    assert uniqueness == {
+        "TERM_START_DATE": False,
+        "REGISTRATION_DAY": False,
+        "TERM_CODE": True,
+    }
+
+
 def test_dates_and_floats_are_never_unique() -> None:
     uniqueness = _uniqueness(
         {

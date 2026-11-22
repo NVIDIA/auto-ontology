@@ -32,7 +32,11 @@ from auto_ontology.dal.datasources import (
     store_column_uniqueness,
 )
 from auto_ontology.dal.pii import pii_tagged_column_ids
-from auto_ontology.semantic.date_format import infer_date_format, is_date_type
+from auto_ontology.semantic.date_format import (
+    infer_date_format,
+    is_date_name,
+    is_date_type,
+)
 from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
     upsert_table_term,
@@ -285,7 +289,7 @@ def _unique_columns(
     Only when a table has neither does the ``_UNIQUE_RATIO`` threshold apply,
     and then to one column: the most distinct, preferring a key-like name and
     an integer or text type, then column order. Date and floating-point
-    columns are never unique: a sample of timestamps or measurements rarely
+    columns — a date by type, stored notation or name — are never unique: a sample of timestamps or measurements rarely
     repeats, but neither identifies a row.
     """
 
@@ -293,6 +297,7 @@ def _unique_columns(
         declared = types.get(name)
         return (
             name not in date_columns
+            and not is_date_name(name)
             and not is_date_type(declared)
             and not _FLOAT_TYPE.search(declared or "")
         )

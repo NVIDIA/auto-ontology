@@ -522,6 +522,14 @@ class _KeyIndex:
     def target(self, attribute_id: str) -> dict[str, Any] | None:
         return self._rows.get(attribute_id)
 
+    def on_table(self, table_id: str) -> list[str]:
+        """The candidate key columns of *table_id*, as attribute ids."""
+        return sorted(
+            attribute_id
+            for attribute_id, row in self._rows.items()
+            if row["table_id"] == table_id
+        )
+
     def values(self, attribute_id: str) -> list[Any] | None:
         row = self._rows.get(attribute_id)
         if row is None:
@@ -620,10 +628,10 @@ def _resolve_via_vdb(
     fk_values = parse_sample_values(col.get("distinct_values"))
     if not fk_values:
         return selected
-    confirmed = _confirm_by_values(col, fk_values, hits, selected, keys)
-    if confirmed:
-        return confirmed
-    return _match_by_values_only(col, fk_values, keys, families)
+    picked = _confirm_by_values(col, fk_values, hits, selected, keys)
+    if not picked:
+        picked = _match_by_values_only(col, fk_values, keys, families)
+    return _best_on_table(col, fk_values, picked, keys) if picked else None
 
 
 def _vector_hits(
@@ -722,6 +730,54 @@ def _confirm_by_values(
             selected,
         )
     return None
+
+
+def _best_on_table(
+    col: dict[str, Any],
+    fk_values: list[Any],
+    attribute_id: str,
+    keys: _KeyIndex,
+) -> str:
+    """*attribute_id*, or the key column of its table holding more of *col*'s values.
+
+    Passing the containment threshold is not the same as matching: of
+    ``1, 10, 11, …, 14W``, the zero-padded ``01, 02, …, 14W`` holds nine in
+    ten, the table's own key all ten. The table is settled; the column is the
+    one whose values hold the FK's best, the pick winning ties.
+    """
+    target = keys.target(attribute_id)
+    if target is None:
+        return attribute_id
+
+    def share(candidate: str) -> float:
+        held = containment(
+            fk_values, keys.values(candidate), limit=KEY_DISTINCT_VALUES_LIMIT
+        )
+        return held or 0.0
+
+    best, best_share = attribute_id, share(attribute_id)
+    if best_share >= 1.0:
+        return attribute_id
+    for candidate in keys.on_table(target["table_id"]):
+        if candidate == attribute_id or keys.target(candidate)["column_id"] == col.get(
+            "id"
+        ):
+            continue
+        candidate_share = share(candidate)
+        if candidate_share > best_share:
+            best, best_share = candidate, candidate_share
+    if best != attribute_id:
+        logger.info(
+            "resolve_semantic_fks [values]: %s.%s → %s.%s, which holds %.0f%% of "
+            "its values, rather than %s",
+            col.get("table_name"),
+            col.get("name"),
+            target["table_name"],
+            keys.target(best)["column_name"],
+            best_share * 100,
+            target["column_name"],
+        )
+    return best
 
 
 def _match_by_values_only(

@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from auto_ontology.semantic.date_format import infer_date_format, is_date_type
+from auto_ontology.semantic.date_format import (
+    infer_date_format,
+    is_date_name,
+    is_date_type,
+)
 
 
 @pytest.mark.parametrize(
@@ -20,6 +24,8 @@ from auto_ontology.semantic.date_format import infer_date_format, is_date_type
         (["2014/07/09", "2015/01/31"], "YYYY/MM/DD"),
         (["20120824", "19900101"], "YYYYMMDD"),
         (["12:30:00", "09:15:45"], "HH:MM:SS"),
+        (["20-DEC-24", "03-sep-24", "31-JAN-25"], "DD-MON-YY"),
+        (["20-DEC-2024", "03-SEP-1999"], "DD-MON-YYYY"),
     ],
 )
 def test_unambiguous_notations_are_reported(values: list[str], expected: str) -> None:
@@ -124,3 +130,17 @@ def test_non_string_values_are_read_through_their_rendering() -> None:
 )
 def test_is_date_type(declared: str | None, expected: bool) -> None:
     assert is_date_type(declared) is expected
+
+
+@pytest.mark.parametrize(
+    "name", ["START_DATE", "start_date", "startDate", "date", "DATE"]
+)
+def test_a_date_name_marks_a_date(name: str) -> None:
+    assert is_date_name(name)
+
+
+@pytest.mark.parametrize(
+    "name", ["update", "UPDATE", "candidate", "DATE_KEY", "validated", None]
+)
+def test_other_names_do_not(name: str | None) -> None:
+    assert not is_date_name(name)
