@@ -41,7 +41,7 @@ from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.information import information
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predict
-from auto_ontology.retrieval.text_to_sql.react.retrieve import retrieve
+from auto_ontology.retrieval.text_to_sql.react.catalog import retrieve
 from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,

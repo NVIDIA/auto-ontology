@@ -22,7 +22,7 @@ from auto_ontology.retrieval.text_to_sql.react.mode import (
     EpisodeMode,
     ToolName,
 )
-from auto_ontology.retrieval.text_to_sql.react.retrieve import KIND_LABELS
+from auto_ontology.retrieval.text_to_sql.react.catalog import KIND_LABELS
 
 _SQL_OPENING = """\
 You answer a question about a database by writing one {dialect} SQL query."""

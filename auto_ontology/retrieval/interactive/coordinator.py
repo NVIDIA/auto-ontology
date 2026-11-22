@@ -373,8 +373,6 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     payload: AgentRequest = {
         "question": question,
         "evidence": evidence,
-        "data_retriever": session.data_retriever,
-        "semantic_retriever": session.semantic_retriever,
         "connectors": session.connectors,
         "path_state": dict(
             session.path_state

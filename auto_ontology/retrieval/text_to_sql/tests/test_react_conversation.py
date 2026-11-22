@@ -40,7 +40,7 @@ def _turns(count: int, *, size: int = 40) -> list:
 
 @pytest.fixture
 def ctx() -> ToolContext:
-    return ToolContext(retriever=None, connectors=[], database_name="shop")
+    return ToolContext(connectors=[], database_name="shop")
 
 
 def _found(monkeypatch: pytest.MonkeyPatch, hits: FakeHits) -> list[dict]:
@@ -134,7 +134,7 @@ def test_no_database_means_nothing_to_search(
 ) -> None:
     calls = _found(monkeypatch, FakeHits())
 
-    answer = conversation(ToolContext(retriever=None, connectors=[]), "rate limit")
+    answer = conversation(ToolContext(connectors=[]), "rate limit")
 
     assert "No database selected" in answer
     assert calls == []

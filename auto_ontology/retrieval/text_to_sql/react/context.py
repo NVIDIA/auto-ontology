@@ -46,9 +46,6 @@ class ToolContext:
     table on a join route or the other copy on a SIMILAR line is one the model
     is told to use, though its columns were never listed.
 
-    ``retriever`` searches the semantic collection; ``data_retriever`` the one
-    tables and columns are embedded in, for what the semantic layer leaves out.
-
     ``information_answers`` lets ``submit`` take an information question's answer
     with no SQL; it stays off wherever a grader scores the SQL.
     ``information_retrieved`` records that ``retrieve`` showed the information
@@ -70,10 +67,8 @@ class ToolContext:
     refused, so the episode can still submit instead of trying to run one.
     """
 
-    retriever: Any
     connectors: list[SQLDatabase]
     database_name: str | None = None
-    data_retriever: Any = None
     numeric_type_alignment: bool = False
     calculation_answers: bool = True
     information_answers: bool = False

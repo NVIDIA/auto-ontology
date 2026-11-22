@@ -109,7 +109,7 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     )
     for search in ("_uncovered_physical_hits", "_name_hits"):
         setattr(search, lambda *_: [])
-    return ToolContext(retriever=None, connectors=[], database_name="shop")
+    return ToolContext(connectors=[], database_name="shop")
 
 
 def _found(monkeypatch: pytest.MonkeyPatch, hits: list[dict]) -> None:

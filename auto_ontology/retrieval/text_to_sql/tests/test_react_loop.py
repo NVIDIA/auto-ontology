@@ -42,9 +42,7 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setattr(
         loop, "information", lambda _ctx, query, kinds=None: f"TERM {query}"
     )
-    return show_shop_tables(
-        ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
-    )
+    return show_shop_tables(ToolContext(connectors=[SQLiteConnector(SHOP_SCRIPT)]))
 
 
 def _reply(*calls: dict) -> AIMessage:
@@ -1066,7 +1064,6 @@ def test_a_conversation_only_episode_answers_without_a_warehouse(
         loop, "conversation", lambda _ctx, query: f"TURN 14 (for {query})"
     )
     ctx = ToolContext(
-        retriever=None,
         connectors=[],
         database_name="beam",
         calculation_answers=False,

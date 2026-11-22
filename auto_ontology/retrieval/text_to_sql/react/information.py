@@ -33,7 +33,7 @@ from auto_ontology.dal.terms import (
 )
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
-from auto_ontology.retrieval.text_to_sql.react.retrieve import (
+from auto_ontology.retrieval.text_to_sql.react.catalog import (
     _definition_block,
     _meaning_hits,
     _merge_hits,

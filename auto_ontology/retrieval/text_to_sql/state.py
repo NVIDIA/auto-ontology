@@ -38,8 +38,6 @@ class AgentRequest(TypedDict):
     # the generated Postgres SQL to NUMERIC (see ``numeric_types``).
     numeric_type_alignment: NotRequired[bool]
     processing_question: NotRequired[str]
-    data_retriever: Retriever
-    semantic_retriever: NotRequired[Retriever]
     path_state: NotRequired[dict]
     connectors: NotRequired[list[SQLDatabase]]
     target_db: NotRequired[str]
@@ -96,8 +94,11 @@ class AgentState(TypedDict):
     decision: str
     connectors: list[SQLDatabase]
     path_state: dict
-    data_retriever: Retriever
-    semantic_retriever: Retriever
+    # Set by the entity-coverage pipeline, which is handed its stores. The
+    # react agent sets neither: its tools open the collection each one needs,
+    # at the point it is searched.
+    data_retriever: NotRequired[Retriever]
+    semantic_retriever: NotRequired[Retriever]
     prediction_override: NotRequired[bool | None]
     calculation: NotRequired[bool]
     information: NotRequired[bool]

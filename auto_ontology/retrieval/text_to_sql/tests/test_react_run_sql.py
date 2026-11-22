@@ -129,9 +129,7 @@ def test_render_rows_explains_an_empty_result() -> None:
 def _ctx(monkeypatch: pytest.MonkeyPatch) -> tuple[ToolContext, SQLiteConnector]:
     connector = SQLiteConnector(SHOP_SCRIPT)
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
-    return show_shop_tables(
-        ToolContext(retriever=None, connectors=[connector])
-    ), connector
+    return show_shop_tables(ToolContext(connectors=[connector])), connector
 
 
 def test_run_sql_checks_before_touching_the_database(
@@ -149,7 +147,7 @@ def test_run_sql_refuses_a_table_retrieve_never_named(
 ) -> None:
     connector = SQLiteConnector(SHOP_SCRIPT)
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
-    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx = ToolContext(connectors=[connector])
     ctx.show_table(None, "orders")
 
     text = tool.run_sql(
@@ -209,7 +207,7 @@ def test_run_sql_refuses_a_table_in_another_catalog(
 ) -> None:
     connector = _ThreeLevelConnector(SHOP_SCRIPT)
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
-    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx = ToolContext(connectors=[connector])
     ctx.show_table("sales", "orders")
 
     text = tool.run_sql(ctx, "SELECT order_id FROM other.sales.orders")
@@ -231,7 +229,7 @@ def test_run_sql_allows_the_bound_catalog_or_none(
 ) -> None:
     connector = _ThreeLevelConnector("CREATE TABLE orders (order_id INTEGER);")
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
-    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx = ToolContext(connectors=[connector])
     ctx.show_table("sales", "orders")
 
     check = tool.check_query(ctx, connector, f"SELECT order_id FROM {table}")
@@ -258,7 +256,7 @@ def test_run_sql_allows_the_bound_catalog_or_none(
 def test_was_shown_matches_the_table_each_name_resolves_to(
     shown: str | None, schema: str | None, owners: list[str], expected: bool
 ) -> None:
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     ctx.show_table(shown, "Orders")
 
     assert ctx.was_shown(schema, "orders", owners) is expected
@@ -289,7 +287,7 @@ def test_run_sql_refuses_a_same_named_table_in_another_schema(
     connector = SQLiteConnector(SHOP_SCRIPT)
     catalog = FakeCatalog(SHOP_CATALOG, {"orders": ["sales", "archive"]})
     monkeypatch.setattr(tool, "catalog_for", lambda *_: catalog)
-    ctx = ToolContext(retriever=None, connectors=[connector])
+    ctx = ToolContext(connectors=[connector])
     ctx.show_table(*shown)
 
     text = tool.run_sql(ctx, sql)
@@ -321,7 +319,7 @@ def test_run_sql_reports_database_errors(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_connector_for_prefers_the_target_database() -> None:
     first, second = SQLiteConnector(SHOP_SCRIPT), SQLiteConnector(SHOP_SCRIPT)
     second.database_name = "other"
-    ctx = ToolContext(None, [first, second], database_name="other")
+    ctx = ToolContext([first, second], database_name="other")
     assert tool.connector_for(ctx) is second
 
 
@@ -337,7 +335,7 @@ def test_catalog_for_loads_only_the_connectors_database(
     )
     db_a, db_b = SQLiteConnector(SHOP_SCRIPT), SQLiteConnector(SHOP_SCRIPT)
     db_a.database_name, db_b.database_name = "db_a", "db_b"
-    ctx = ToolContext(None, [db_a, db_b])
+    ctx = ToolContext([db_a, db_b])
 
     tool.catalog_for(ctx, db_a)
     tool.catalog_for(ctx, db_a)
@@ -361,7 +359,7 @@ def test_a_database_with_no_schemas_gets_an_empty_catalog_not_every_schema(
     monkeypatch.setattr(tool, "get_schemas_by_ids", fail)
     connector = SQLiteConnector(SHOP_SCRIPT)
     connector.database_name = "empty_db"
-    ctx = ToolContext(None, [connector])
+    ctx = ToolContext([connector])
 
     catalog = tool.catalog_for(ctx, connector)
 
@@ -376,7 +374,7 @@ def test_catalog_for_falls_back_to_every_schema_without_a_database_name(
     monkeypatch.setattr(tool, "get_schemas_by_ids", lambda ids: {"public": ids})
     connector = SQLiteConnector(SHOP_SCRIPT)
     connector.database_name = None
-    ctx = ToolContext(None, [connector])
+    ctx = ToolContext([connector])
 
     tool.catalog_for(ctx, connector)
 

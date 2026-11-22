@@ -79,8 +79,6 @@ class ReactSQLAgent(BaseAgent):
         path_state = dict(state.get("path_state") or {})
         sources = resolve_sources(state)
         ctx = ToolContext(
-            retriever=state.get("semantic_retriever") or state.get("data_retriever"),
-            data_retriever=state.get("data_retriever"),
             connectors=list(state.get("connectors") or []),
             database_name=path_state.get("target_db"),
             numeric_type_alignment=bool(state.get("numeric_type_alignment")),

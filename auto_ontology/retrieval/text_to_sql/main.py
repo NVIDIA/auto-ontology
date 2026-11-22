@@ -79,19 +79,6 @@ def _build_state(payload: AgentRequest) -> AgentState:
             "or set calculation=False to answer without querying."
         )
 
-    data_retriever = payload.get("data_retriever")
-    if data_retriever is None:
-        raise ValueError(
-            "AgentRequest is missing required 'data_retriever' (auto_ontology.utils.retriever.Retriever "
-            "instance). Construct a Retriever once at startup and pass it in the payload."
-        )
-    semantic_retriever = payload.get("semantic_retriever")
-    if semantic_retriever is None:
-        logger.warning(
-            "No 'semantic_retriever' in payload — "
-            "ColumnAttribute, CustomAnalysis, and SqlAttribute searches will be skipped."
-        )
-
     prediction_override = payload.get("prediction")
     if prediction_override is True and not prediction_enabled():
         raise ValueError(
@@ -131,8 +118,6 @@ def _build_state(payload: AgentRequest) -> AgentState:
         "connectors": connectors,
         "messages": [HumanMessage(content=processing_question)],
         "path_state": initial_path_state,
-        "data_retriever": data_retriever,
-        "semantic_retriever": semantic_retriever,
         "decision": "",
         "prediction_override": prediction_override,
         "custom_prompts": custom_prompts_section(
