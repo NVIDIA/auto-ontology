@@ -229,10 +229,10 @@ def test_an_inferred_key_is_never_a_date(world) -> None:
 
 
 def test_a_column_named_as_a_date_is_never_an_inferred_key(world) -> None:
-    world.table("terms", ("term_id", "TERM_START_DATE"), unique=("TERM_START_DATE",))
-    concept = c.ensure_term_concept(world.term("Term", "terms"))
+    world.table("orders", ("order_id", "ORDER_DATE"), unique=("ORDER_DATE",))
+    concept = c.ensure_term_concept(world.term("Order", "orders"))
 
-    assert c.ensure_concept_key(concept, world.columns["terms.TERM_START_DATE"]) is None
+    assert c.ensure_concept_key(concept, world.columns["orders.ORDER_DATE"]) is None
 
 
 def test_a_declared_date_key_is_kept(world) -> None:

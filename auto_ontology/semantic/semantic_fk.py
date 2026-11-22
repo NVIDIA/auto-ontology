@@ -38,6 +38,7 @@ leaving the LLM's vector-search pick unconfirmed.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -62,7 +63,6 @@ from auto_ontology.infra.feature_flags import is_semantic_fk_db_query_prevented
 from auto_ontology.semantic.fk_values import (
     MIN_CONTAINMENT,
     containment,
-    contains,
     is_value_search_ambiguous,
 )
 from auto_ontology.semantic.visit_enter import (
@@ -150,6 +150,8 @@ of its integer columns' values.
 """
 # Candidates the value-only search hands the LLM.
 _VALUE_SHORTLIST_SIZE = 5
+# Key names too generic to say which entity a column references.
+_GENERIC_KEY_NAMES = frozenset({"id", "pk", "key", "code", "uuid", "guid", "rowid"})
 
 _JOIN_DEFAULT_SYSTEM_PROMPT = """\
 You are choosing the default foreign-key relationship used to join two database
@@ -699,6 +701,11 @@ def _confirm_by_values(
     hit when *col*'s values are ones any surrogate key holds
     (:func:`is_value_search_ambiguous`) — ``votes.VoteTypeId`` in ``1..16``
     is contained in ``comments.Id`` without referring to it.
+
+    The LLM's pick also stands, left to the join check, when the values cannot
+    refute it: none of *col*'s lowest values falls in the range the key's
+    stored values cover, or the names already say it is the reference
+    (:func:`_names_match`) and a sampled warehouse is missing rows.
     """
     ordered = [selected] if selected else []
     if is_value_search_ambiguous(str(col.get("name") or ""), fk_values):
@@ -708,9 +715,25 @@ def _confirm_by_values(
         if hit_id and hit_id not in ordered and not _on_own_table(col, hit):
             ordered.append(hit_id)
     for attribute_id in ordered:
-        if contains(
+        share = containment(
             fk_values, keys.values(attribute_id), limit=KEY_DISTINCT_VALUES_LIMIT
-        ):
+        )
+        unrefuted = share is None or (
+            share < MIN_CONTAINMENT and _names_match(col, keys.target(selected))
+        )
+        if attribute_id == selected and unrefuted:
+            logger.info(
+                "resolve_semantic_fks [values]: %s.%s keeps the LLM's pick %s "
+                "for the join check — %s",
+                col.get("table_name"),
+                col.get("name"),
+                selected,
+                "no comparable values"
+                if share is None
+                else f"its name matches, {share:.0%} of values held",
+            )
+            return selected
+        if share is not None and share >= MIN_CONTAINMENT:
             if attribute_id != selected:
                 logger.info(
                     "resolve_semantic_fks [values]: %s.%s confirmed by values on "
@@ -732,6 +755,27 @@ def _confirm_by_values(
     return None
 
 
+def _names_match(col: dict[str, Any], target: dict[str, Any] | None) -> bool:
+    """Whether *col*'s name says it references *target*'s column.
+
+    The same column name, or the target table's name with a ``key``, ``id`` or
+    ``code`` suffix. A bare ``id`` or ``code`` names no entity.
+    """
+    if target is None:
+        return False
+    name = _normalized_name(col.get("name"))
+    if not name or name in _GENERIC_KEY_NAMES:
+        return False
+    table = _normalized_name(target.get("table_name"))
+    return name == _normalized_name(target.get("column_name")) or name in {
+        f"{table}{suffix}" for suffix in ("key", "id", "code")
+    }
+
+
+def _normalized_name(name: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(name or "").lower())
+
+
 def _best_on_table(
     col: dict[str, Any],
     fk_values: list[Any],
@@ -740,10 +784,10 @@ def _best_on_table(
 ) -> str:
     """*attribute_id*, or the key column of its table holding more of *col*'s values.
 
-    Passing the containment threshold is not the same as matching: of
-    ``1, 10, 11, …, 14W``, the zero-padded ``01, 02, …, 14W`` holds nine in
-    ten, the table's own key all ten. The table is settled; the column is the
-    one whose values hold the FK's best, the pick winning ties.
+    Passing the containment threshold is not the same as matching: another
+    column of the same table can hold nine in ten of the FK's values and the
+    table's own key all ten. The table is settled; the column is the one whose
+    values hold the FK's best, the pick winning ties.
     """
     target = keys.target(attribute_id)
     if target is None:
@@ -764,7 +808,7 @@ def _best_on_table(
         ):
             continue
         candidate_share = share(candidate)
-        if candidate_share > best_share:
+        if candidate_share > best_share and candidate_share >= MIN_CONTAINMENT:
             best, best_share = candidate, candidate_share
     if best != attribute_id:
         logger.info(

@@ -925,3 +925,87 @@ def test_a_pick_holding_every_value_stands(_mock_llm_pick: MagicMock) -> None:
     )
 
     assert selected == "first"
+
+
+_LOWEST_KEYS = [f"K{n:03d}" for n in range(20)]
+# Even codes only: odd FK values inside their range are rows the key lacks.
+_EVEN_KEYS = [f"K{n:03d}" for n in range(0, 40, 2)]
+
+
+def test_a_pick_with_no_comparable_values_is_left_to_the_join_check() -> None:
+    """Every FK value lies past the key's lowest twenty: nothing refutes it."""
+    keys = _keys([_key_row("picked", "table-2", _LOWEST_KEYS)])
+
+    assert (
+        semantic_fk._confirm_by_values(
+            _fk_column(["K500", "K501"]),
+            ["K500", "K501"],
+            [_hit("picked", "table-2")],
+            "picked",
+            keys,
+        )
+        == "picked"
+    )
+
+
+@pytest.mark.parametrize(
+    ("fk_name", "table_name", "column_name"),
+    [
+        ("customer_code", "customers", "customer_code"),
+        ("customer_key", "customer", "id"),
+    ],
+)
+def test_a_name_matched_pick_survives_missing_rows(
+    fk_name: str, table_name: str, column_name: str
+) -> None:
+    """A sampled warehouse drops rows; the name already says it is the reference."""
+    keys = _keys(
+        [
+            _key_row(
+                "picked",
+                "table-2",
+                _EVEN_KEYS,
+                table_name=table_name,
+                column_name=column_name,
+            )
+        ]
+    )
+    fk_values = ["K001", "K003", "K005", "K007"]
+
+    assert (
+        semantic_fk._confirm_by_values(
+            _fk_column(fk_values, name=fk_name),
+            fk_values,
+            [_hit("picked", "table-2")],
+            "picked",
+            keys,
+        )
+        == "picked"
+    )
+
+
+def test_a_pick_whose_name_does_not_match_still_needs_its_values() -> None:
+    keys = _keys([_key_row("picked", "table-2", _EVEN_KEYS, column_name="code")])
+    fk_values = ["K001", "K003", "K005", "K007"]
+
+    assert (
+        semantic_fk._confirm_by_values(
+            _fk_column(fk_values, name="code"),
+            fk_values,
+            [_hit("picked", "table-2")],
+            "picked",
+            keys,
+        )
+        is None
+    )
+
+
+def test_only_the_llms_pick_is_kept_without_values() -> None:
+    keys = _keys([_key_row("other", "table-2", _LOWEST_KEYS)])
+
+    assert (
+        semantic_fk._confirm_by_values(
+            _fk_column(["K500"]), ["K500"], [_hit("other", "table-2")], None, keys
+        )
+        is None
+    )

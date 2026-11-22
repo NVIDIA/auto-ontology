@@ -190,21 +190,21 @@ def test_a_date_by_name_or_stored_notation_is_never_unique() -> None:
     """Warehouses store dates as text the declared type says nothing about."""
     uniqueness = _uniqueness(
         {
-            "TERM_START_DATE": [f"{i + 1:02d}-JAN-{i:02d}?" for i in range(20)],
-            "REGISTRATION_DAY": [f"{i + 1:02d}-JAN-{i:02d}" for i in range(20)],
-            "TERM_CODE": [f"T{i:03d}" for i in range(20)],
+            "start_date": [f"{i + 1:02d}-JAN-{i:02d}?" for i in range(20)],
+            "signup_day": [f"{i + 1:02d}-JAN-{i:02d}" for i in range(20)],
+            "customer_code": [f"T{i:03d}" for i in range(20)],
         },
         {
-            "TERM_START_DATE": "varchar",
-            "REGISTRATION_DAY": "varchar",
-            "TERM_CODE": "varchar",
+            "start_date": "varchar",
+            "signup_day": "varchar",
+            "customer_code": "varchar",
         },
     )
 
     assert uniqueness == {
-        "TERM_START_DATE": False,
-        "REGISTRATION_DAY": False,
-        "TERM_CODE": True,
+        "start_date": False,
+        "signup_day": False,
+        "customer_code": True,
     }
 
 
