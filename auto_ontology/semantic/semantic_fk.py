@@ -29,6 +29,12 @@ Algorithm
       are all very short (``1..16``): only the LLM's pick can stand.
    c. **Validated** — an inferred edge is stored only when joining the two
       columns returns a row.
+3. **Siblings** — a column still without an FK or an attribute takes the
+   target of a column with the same name elsewhere in the database, as a name
+   match: a low share of
+   values does not refute it, the family rule still applies, and the join
+   still has to return a row. When the namesakes point at several Concepts,
+   only the one whose key holds the column's values is taken.
 
 ``PREVENT_SEMANTIC_FK_DB_QUERIES`` turns off everything that queries the
 warehouse — on-demand probes, the value-only fallback and the join check —
@@ -49,6 +55,7 @@ from sqlglot import exp
 from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
+    fetch_semantic_fk_ends,
     fetch_semantic_fk_join_groups,
     fetch_value_key_candidates,
     find_unlinked_fk_columns,
@@ -307,15 +314,118 @@ def _resolve_semantic_fks(database_name: str) -> int:
             if future.result():
                 inferred_written += 1
 
-    total = declared_written + inferred_written
+    copied = _copy_sibling_fks(database_name, keys, families) if keys is not None else 0
+    total = declared_written + inferred_written + copied
     logger.info(
-        "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
-        "SEMANTIC_FK edge(s)",
+        "resolve_semantic_fks: done — %d declared + %d inferred + %d from a "
+        "same-name column = %d total SEMANTIC_FK edge(s)",
         declared_written,
         inferred_written,
+        copied,
         total,
     )
     return total
+
+
+def _copy_sibling_fks(
+    database_name: str,
+    keys: _KeyIndex,
+    families: _Families,
+) -> int:
+    """Point each column still unlinked where a column of the same name points.
+
+    The columns are the ones with neither a semantic FK nor an attribute, as in
+    the first pass, less those with a declared FK, whose target was the one
+    answer. Returns the number of FKs stored.
+    """
+    columns = [
+        col
+        for col in find_unlinked_fk_columns(database_name)
+        if not col.get("fk_target_col_id")
+    ]
+    if not columns:
+        return 0
+    targets: dict[str, dict[str, str]] = {}
+    for end in fetch_semantic_fk_ends(database_name):
+        name = _normalized_name(end["source_column_name"])
+        if end["target_attribute_id"] and name and name not in _GENERIC_KEY_NAMES:
+            targets.setdefault(name, {})[end["target_attribute_id"]] = end[
+                "target_concept_id"
+            ]
+    written = 0
+    for col in sorted(columns, key=lambda c: (c.get("table_name"), c.get("name"))):
+        candidates = targets.get(_normalized_name(col.get("name")))
+        attribute_id = (
+            _sibling_target(col, candidates, keys, families) if candidates else None
+        )
+        if (
+            attribute_id
+            and _join_returns_rows(keys, col, attribute_id)
+            and merge_semantic_fk(col["id"], attribute_id)
+        ):
+            written += 1
+            logger.info(
+                "resolve_semantic_fks [sibling]: %s.%s → %s.%s, where a column of "
+                "the same name points",
+                col.get("table_name"),
+                col.get("name"),
+                keys.target(attribute_id)["table_name"],
+                keys.target(attribute_id)["column_name"],
+            )
+    return written
+
+
+def _sibling_target(
+    col: dict[str, Any],
+    candidates: dict[str, str],
+    keys: _KeyIndex,
+    families: _Families,
+) -> str | None:
+    """The key column, among *candidates* (attribute id → Concept id), for *col*.
+
+    Never one on *col*'s own table or another family's copy of a table. Several
+    Concepts are told apart by values alone; one Concept needs none.
+    """
+    fk_values = parse_sample_values(col.get("distinct_values"))
+    scored: list[tuple[float, str, str]] = []
+    for attribute_id, concept_id in candidates.items():
+        target = keys.target(attribute_id)
+        if (
+            target is None
+            or target["table_id"] == col.get("table_id")
+            or families.crosses(col.get("table_id"), target["table_id"])
+        ):
+            continue
+        share = (
+            containment(
+                fk_values, keys.values(attribute_id), limit=KEY_DISTINCT_VALUES_LIMIT
+            )
+            if fk_values
+            else None
+        )
+        scored.append((share or 0.0, attribute_id, concept_id))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    if len({concept_id for _, _, concept_id in scored}) == 1:
+        return scored[0][1]
+    holding = {
+        concept_id for share, _, concept_id in scored if share >= MIN_CONTAINMENT
+    }
+    if len(holding) != 1:
+        logger.info(
+            "resolve_semantic_fks [sibling]: %s.%s — columns of the same name point "
+            "at %d Concepts and its values do not settle which",
+            col.get("table_name"),
+            col.get("name"),
+            len({concept_id for _, _, concept_id in scored}),
+        )
+        return None
+    return next(
+        attribute_id
+        for share, attribute_id, concept_id in scored
+        if concept_id in holding and share >= MIN_CONTAINMENT
+    )
 
 
 def select_semantic_fk_join_defaults(database_name: str) -> int:

@@ -745,6 +745,10 @@ def _run_inferred_resolution(
             "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
             return_value=[],
         ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_ends",
+            return_value=[],
+        ),
     ):
         created = semantic_fk.resolve_semantic_fks("database")
     return created, resolve_connector, join, merge
@@ -1009,3 +1013,137 @@ def test_only_the_llms_pick_is_kept_without_values() -> None:
         )
         is None
     )
+
+
+def _fk_end(source_column_name: str, attr_id: str, concept_id: str) -> dict:
+    return {
+        "source_column_name": source_column_name,
+        "target_attribute_id": attr_id,
+        "target_concept_id": concept_id,
+    }
+
+
+def _copy_siblings(
+    col: dict,
+    ends: list[dict],
+    keys: semantic_fk._KeyIndex,
+    *,
+    families: semantic_fk._Families = semantic_fk._NO_FAMILIES,
+    join_ok: bool = True,
+) -> MagicMock:
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=[col],
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_ends",
+            return_value=ends,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._join_returns_rows",
+            return_value=join_ok,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
+        ) as merge,
+    ):
+        semantic_fk._copy_sibling_fks("database", keys, families)
+    return merge
+
+
+def test_a_sibling_target_is_taken_despite_missing_rows() -> None:
+    """A same-name column already points there; the sample just lacks rows."""
+    keys = _keys([_key_row("terms", "table-2", _EVEN_KEYS)])
+    col = _fk_column(["K001", "K003", "K005"], name="term_code")
+
+    merge = _copy_siblings(col, [_fk_end("TERM_CODE", "terms", "concept-1")], keys)
+
+    merge.assert_called_once_with("source-column", "terms")
+
+
+def test_a_sibling_target_is_dropped_when_the_join_returns_nothing() -> None:
+    keys = _keys([_key_row("terms", "table-2", _LOWEST_KEYS)])
+    col = _fk_column(["K001"], name="term_code")
+
+    merge = _copy_siblings(
+        col, [_fk_end("term_code", "terms", "concept-1")], keys, join_ok=False
+    )
+
+    merge.assert_not_called()
+
+
+def test_a_column_with_a_declared_fk_takes_no_sibling_target() -> None:
+    keys = _keys([_key_row("terms", "table-2", _LOWEST_KEYS)])
+    col = {**_fk_column(["K001"], name="term_code"), "fk_target_col_id": "declared"}
+
+    merge = _copy_siblings(col, [_fk_end("term_code", "terms", "concept-1")], keys)
+
+    merge.assert_not_called()
+
+
+def test_values_settle_siblings_pointing_at_several_concepts() -> None:
+    keys = _keys(
+        [
+            _key_row("all-terms", "table-2", _LOWEST_KEYS),
+            _key_row("some-terms", "table-3", _EVEN_KEYS),
+        ]
+    )
+    col = _fk_column(["K001", "K003"], name="term_code")
+    ends = [
+        _fk_end("term_code", "all-terms", "concept-1"),
+        _fk_end("term_code", "some-terms", "concept-2"),
+    ]
+
+    merge = _copy_siblings(col, ends, keys)
+
+    merge.assert_called_once_with("source-column", "all-terms")
+
+
+def test_siblings_at_several_concepts_without_values_are_left_alone() -> None:
+    keys = _keys(
+        [
+            _key_row("all-terms", "table-2", _LOWEST_KEYS),
+            _key_row("some-terms", "table-3", _LOWEST_KEYS),
+        ]
+    )
+    col = _fk_column(["K500"], name="term_code")
+    ends = [
+        _fk_end("term_code", "all-terms", "concept-1"),
+        _fk_end("term_code", "some-terms", "concept-2"),
+    ]
+
+    merge = _copy_siblings(col, ends, keys)
+
+    merge.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("name", "target_table"),
+    [("code", "table-2"), ("org_key", "table-1")],
+    ids=["generic-name", "own-table"],
+)
+def test_sibling_copy_skips_generic_names_and_the_own_table(
+    name: str, target_table: str
+) -> None:
+    keys = _keys([_key_row("target", target_table, _LOWEST_KEYS)])
+    col = _fk_column(["K001"], name=name)
+
+    merge = _copy_siblings(col, [_fk_end(name, "target", "concept-1")], keys)
+
+    merge.assert_not_called()
+
+
+def test_sibling_copy_never_crosses_into_another_familys_copy() -> None:
+    """OLD_ROOMS.hotel_key never takes NEW_HOTELS, whatever its namesake does."""
+    keys = _keys([_key_row("new-hotels", "table-2", _LOWEST_KEYS)])
+    col = _fk_column(["K001"], name="hotel_key")
+
+    merge = _copy_siblings(
+        col,
+        [_fk_end("hotel_key", "new-hotels", "concept-1")],
+        keys,
+        families=_FAMILIES,
+    )
+
+    merge.assert_not_called()
