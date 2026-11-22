@@ -14,6 +14,10 @@ already linked — on the same normalized name and a join probe that returns
 rows. Columns that join are written as one SEMANTIC_FK_DIRECT group, which
 joins them to each other through no Concept, and the unmatched-FK stage then
 skips them.
+
+An unlinked column with fewer than :data:`MIN_DISTINCT_VALUES` distinct values
+is never grouped: a handful of codes shared by two tables join whether or not
+one references the other.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from auto_ontology.dal.attributes import (
     find_unlinked_fk_columns,
     link_direct_fk_columns,
 )
+from auto_ontology.dal.datasources import store_column_distinct_values
 from auto_ontology.dal.term_families import fetch_table_families
 from auto_ontology.infra.feature_flags import is_semantic_fk_db_query_prevented
 from auto_ontology.semantic.cancellation import is_cancelled
@@ -36,10 +41,16 @@ from auto_ontology.semantic.semantic_fk import (
     _resolve_connector,
     join_probe_returns_rows,
 )
+from auto_ontology.semantic.visit_enter import probe_ascending_distinct_values
+from auto_ontology.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
 _STAGE = "link_direct_fks"
+
+#: Below :data:`~auto_ontology.semantic.visit_enter.KEY_DISTINCT_VALUES_LIMIT`,
+#: which caps how many distinct values a column stores.
+MIN_DISTINCT_VALUES = 5
 
 
 def link_direct_fks(database_name: str) -> int:
@@ -70,6 +81,18 @@ def link_direct_fks(database_name: str) -> int:
         )
         return 0
 
+    few = [col for col in candidates if not _has_enough_values(connector, col)]
+    if few:
+        logger.info(
+            "%s: %d column(s) with fewer than %d distinct values not grouped: %s",
+            _STAGE,
+            len(few),
+            MIN_DISTINCT_VALUES,
+            sorted(f"{col['table_name']}.{col['name']}" for col in few),
+        )
+        skipped = {col["id"] for col in few}
+        candidates = [col for col in candidates if col["id"] not in skipped]
+
     families = _Families(fetch_table_families(database_name))
     by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for peer in fetch_direct_fk_peers(database_name):
@@ -94,6 +117,22 @@ def link_direct_fks(database_name: str) -> int:
             logger.exception("%s: failed for columns named %r", _STAGE, name)
     logger.info("%s: %d column(s) linked directly", _STAGE, linked)
     return linked
+
+
+def _has_enough_values(connector: Any, col: dict[str, Any]) -> bool:
+    """Whether *col* holds at least :data:`MIN_DISTINCT_VALUES` distinct values.
+
+    Counted from its stored lowest distinct values, probed and stored first
+    when it has none. A column whose values cannot be read is not grouped.
+    """
+    values = parse_sample_values(col.get("distinct_values"))
+    if values is None:
+        values = probe_ascending_distinct_values(
+            connector, col.get("schema_name"), col["table_name"], col["name"]
+        )
+        if values:
+            store_column_distinct_values(col["table_id"], {col["name"]: values})
+    return len(values or []) >= MIN_DISTINCT_VALUES
 
 
 def _link_same_name(

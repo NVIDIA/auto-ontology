@@ -20,6 +20,7 @@ def _column(table: str, name: str = "course_id", **extra: Any) -> dict[str, Any]
         "table_id": table,
         "table_name": table,
         "schema_name": "school",
+        "distinct_values": "[1, 2, 3, 4, 5]",
         **extra,
     }
 
@@ -52,6 +53,8 @@ def wired(monkeypatch):
         "families": [],
         "groups": [],
         "warehouse": _Warehouse(set()),
+        "probed_values": {},
+        "stored_values": [],
     }
 
     def link(column_ids: list[str]) -> str:
@@ -73,7 +76,55 @@ def wired(monkeypatch):
         "join_probe_returns_rows",
         lambda *args, **kwargs: state["warehouse"].probe(*args, **kwargs),
     )
+    monkeypatch.setattr(
+        direct_fks,
+        "probe_ascending_distinct_values",
+        lambda _connector, _schema, table, _column: state["probed_values"].get(table),
+    )
+    monkeypatch.setattr(
+        direct_fks,
+        "store_column_distinct_values",
+        lambda table_id, values: state["stored_values"].append((table_id, values)),
+    )
     return state
+
+
+def test_a_column_with_few_distinct_values_is_not_grouped(wired) -> None:
+    wired["candidates"] = [
+        _column("lessons", distinct_values='["A", "B", "C"]'),
+        _column("grades"),
+        _column("rooms"),
+    ]
+    wired["warehouse"] = _Warehouse(
+        {frozenset({"lessons", "grades"}), frozenset({"grades", "rooms"})}
+    )
+
+    assert direct_fks.link_direct_fks("db") == 2
+    assert wired["groups"] == [["grades.course_id", "rooms.course_id"]]
+    assert all("lessons" not in probe for probe in wired["warehouse"].probes)
+
+
+def test_a_linked_peer_with_few_values_still_joins(wired) -> None:
+    wired["candidates"] = [_column("rooms")]
+    wired["peers"] = [_column("lessons", group_id=None, distinct_values='["A"]')]
+    wired["warehouse"] = _Warehouse({frozenset({"rooms", "lessons"})})
+
+    assert direct_fks.link_direct_fks("db") == 1
+
+
+def test_a_column_with_no_stored_values_is_probed_and_stored(wired) -> None:
+    wired["candidates"] = [
+        _column("lessons", distinct_values=None),
+        _column("grades", distinct_values=None),
+    ]
+    wired["probed_values"] = {"lessons": [1, 2, 3, 4, 5, 6], "grades": [1, 2]}
+    wired["warehouse"] = _Warehouse({frozenset({"lessons", "grades"})})
+
+    assert direct_fks.link_direct_fks("db") == 0
+    assert wired["stored_values"] == [
+        ("lessons", {"course_id": [1, 2, 3, 4, 5, 6]}),
+        ("grades", {"course_id": [1, 2]}),
+    ]
 
 
 def test_unlinked_columns_that_join_form_one_group(wired) -> None:
