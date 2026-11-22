@@ -1007,6 +1007,24 @@ def test_unlinked_keeps_a_key_column_only_with_a_declared_fk(world) -> None:
     assert names == {"customer_id"}
 
 
+def test_unlinked_keeps_a_date_column_only_with_a_declared_fk(world) -> None:
+    world.table("calendar", pk=["day"])
+    world.column("calendar", "day")
+    world.table("orders")
+    world.column("orders", "ordered_on", 1)
+    world.column("orders", "shipped_on", 2)
+    for column in ("calendar.day", "orders.ordered_on", "orders.shipped_on"):
+        _date_typed(world, column)
+    _link(
+        s.column__foreign_key,
+        source_column_id=world.columns["orders.ordered_on"],
+        target_column_id=world.columns["calendar.day"],
+    )
+
+    names = {r["name"] for r in a.find_unlinked_fk_columns(f"{world.prefix}-shopdb")}
+    assert names == {"ordered_on"}
+
+
 def test_unlinked_scopes_to_one_database(world) -> None:
     world.database("otherdb")
     world.table("here")
@@ -1301,6 +1319,41 @@ def test_merge_semantic_fk_refuses_a_declared_fk_within_one_concept(world) -> No
         is False
     )
     assert fetch_column_key_id(world.columns["customers.code"]) is None
+
+
+def _date_typed(world, column: str) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns[column])
+        .values(data_type="timestamp")
+    )
+
+
+def test_merge_semantic_fk_refuses_an_inferred_edge_on_a_date(world) -> None:
+    world.table("calendar", pk=["day"])
+    world.column("calendar", "day")
+    _date_typed(world, "calendar.day")
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.table("orders")
+    world.column("orders", "ordered_on", 1)
+    world.column("orders", "customer_id", 2)
+    _date_typed(world, "orders.ordered_on")
+    world.represent("calendar")
+    world.represent("customers")
+
+    for source, target in (
+        ("orders.ordered_on", "calendar.day"),
+        ("orders.ordered_on", "customers.id"),
+        ("orders.customer_id", "calendar.day"),
+    ):
+        assert (
+            a.merge_semantic_fk_to_column(world.columns[source], world.columns[target])
+            is False
+        ), f"{source} -> {target}"
+    assert a.merge_semantic_fk_to_column(
+        world.columns["orders.ordered_on"], world.columns["calendar.day"], declared=True
+    ), "a declared FK into a calendar table is kept"
 
 
 def test_merge_semantic_fk_needs_a_concept_on_the_target_table(world) -> None:

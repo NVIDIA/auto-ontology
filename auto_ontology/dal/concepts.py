@@ -20,13 +20,28 @@ from collections.abc import Iterable, Mapping
 import logging
 from typing import Any
 
-from sqlalchemy import Subquery, delete, func, select, update
+from sqlalchemy import ColumnElement, Subquery, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.semantic.date_format import DATE_TYPE_TOKENS
 
 logger = logging.getLogger(__name__)
+
+
+def is_date_column(column=s.catalog_column) -> ColumnElement[bool]:
+    """Whether *column* holds dates: a date/time type, or a profiled date format.
+
+    The format catches dates stored as text, as SQLite stores them. Two
+    columns of dates share values without referencing each other, so an
+    inferred key or FK never lands on one.
+    """
+    data_type = func.lower(func.coalesce(column.c.data_type, ""))
+    return or_(
+        column.c.format.is_not(None),
+        *(data_type.contains(token) for token in DATE_TYPE_TOKENS),
+    )
 
 
 def semantic_fk_targets(
@@ -211,10 +226,11 @@ def ensure_concept_key(concept_id: str, column_id: str) -> str | None:
     only when it belongs to *concept_id*. Otherwise the
     column must belong to one of the Concept's member tables; a new key named
     after the column is created with the column as its member on that table.
-    Returns ``None`` when the column is on no member table, or was profiled
-    non-unique and is not the table's single-column primary key: a key is an
+    Returns ``None`` when the column is on no member table, or is not the
+    table's single-column primary key and was profiled non-unique: a key is an
     identity, and joining two references through a column that repeats would
-    relate rows that merely share a value.
+    relate rows that merely share a value. A date column (:func:`is_date_column`)
+    is a key only when declared: the primary key, or a declared FK's target.
     """
     with write_transaction():
         existing = fetch_column_key_id(column_id)
@@ -223,13 +239,22 @@ def ensure_concept_key(concept_id: str, column_id: str) -> str | None:
         is_pk = (func.cardinality(s.catalog_table.c.pk) == 1) & (
             s.catalog_table.c.pk[1] == s.catalog_column.c.name
         )
+        is_declared_target = (
+            select(s.column__foreign_key.c.target_column_id)
+            .where(s.column__foreign_key.c.target_column_id == s.catalog_column.c.id)
+            .exists()
+        )
         columns = store().query_read(
             select(s.catalog_column.c.table_id, s.catalog_column.c.name)
             .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
             .where(
                 s.catalog_column.c.id == column_id,
                 _table_concept(s.catalog_column.c.table_id) == concept_id,
-                s.catalog_column.c.is_unique.isnot(False) | is_pk,
+                is_pk
+                | (
+                    s.catalog_column.c.is_unique.isnot(False)
+                    & (~is_date_column() | is_declared_target)
+                ),
             )
         )
         if not columns:

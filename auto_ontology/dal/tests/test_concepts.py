@@ -210,6 +210,46 @@ def test_members_and_key_writes_agree_on_a_tables_concept(world) -> None:
     assert members[table_id]["concept_id"] == c.fetch_table_concept_id(table_id)
 
 
+def _date_typed(world, column: str) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns[column])
+        .values(data_type="date")
+    )
+
+
+def test_an_inferred_key_is_never_a_date(world) -> None:
+    world.table(
+        "visits", ("visit_id", "visited_on"), pk="visit_id", unique=("visited_on",)
+    )
+    _date_typed(world, "visits.visited_on")
+    concept = c.ensure_term_concept(world.term("Visit", "visits"))
+
+    assert c.ensure_concept_key(concept, world.columns["visits.visited_on"]) is None
+
+
+def test_a_declared_date_key_is_kept(world) -> None:
+    """A calendar table keyed on its date, and a declared FK's date target."""
+    world.table("calendar", ("day", "label"), pk="day")
+    _date_typed(world, "calendar.day")
+    world.table("rates", ("rate_id", "as_of"), pk="rate_id", unique=("as_of",))
+    _date_typed(world, "rates.as_of")
+    world.table("orders", ("order_id", "ordered_on"), pk="order_id")
+    store().query_write(
+        s.column__foreign_key.insert().values(
+            source_column_id=world.columns["orders.ordered_on"],
+            target_column_id=world.columns["rates.as_of"],
+        )
+    )
+
+    calendar = c.ensure_term_concept(world.term("Calendar", "calendar"))
+    rates = c.ensure_term_concept(world.term("Rate", "rates"))
+
+    assert c.fetch_column_key_id(world.columns["calendar.day"]) is not None
+    assert c.ensure_concept_key(calendar, world.columns["calendar.day"])
+    assert c.ensure_concept_key(rates, world.columns["rates.as_of"])
+
+
 def test_a_repeating_column_cannot_be_a_key(world) -> None:
     world.table("orders", ("order_id", "status"), pk="order_id", repeating=("status",))
     concept_id = c.ensure_term_concept(world.term("Order", "orders"))

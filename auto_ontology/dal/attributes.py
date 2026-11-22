@@ -37,6 +37,7 @@ from auto_ontology.dal.concepts import (
     fetch_column_key_id,
     fetch_key_concept_id,
     fetch_table_concept_id,
+    is_date_column,
     semantic_fk_targets,
 )
 from auto_ontology.dal.datasources import fetch_col_table_contexts
@@ -423,7 +424,8 @@ def find_unlinked_fk_columns(
 
     A Concept key column is the entity's identity, not a reference to another
     entity, so it is a candidate only with a declared foreign key — a table
-    whose key also references another entity's, such as a 1:1 extension.
+    whose key also references another entity's, such as a 1:1 extension. A
+    date column is likewise a candidate only with a declared foreign key.
 
     The work list for FK resolution. Scoped to one database when asked, for the
     same reason as ``fetch_all_tables_without_term``: several databases share a
@@ -476,7 +478,8 @@ def find_unlinked_fk_columns(
                 s.column__foreign_key.c.target_column_id.is_not(None),
                 ~select(s.concept_key__column.c.key_id)
                 .where(s.concept_key__column.c.column_id == s.catalog_column.c.id)
-                .exists(),
+                .exists()
+                & ~is_date_column(),
             ),
         )
     )
@@ -719,7 +722,8 @@ def merge_semantic_fk_to_column(
     Refuses — writes nothing, returns ``False`` — when the two columns are the
     same, belong to different ingested databases, when the source column is a
     Concept key column itself (an identity, not a reference) — unless the FK
-    is *declared* and targets a different Concept — or when the target's table
+    is *declared* and targets a different Concept — when an FK that is not
+    *declared* has a date column at either end, or when the target's table
     has no Concept. This is the one place a ``SEMANTIC_FK`` edge
     is created, so it is the one place that has to enforce that it never
     crosses a database boundary: a path built from such an edge would later
@@ -730,6 +734,13 @@ def merge_semantic_fk_to_column(
     if not _same_database(src_column_id, target_column_id):
         logger.warning(
             "merge_semantic_fk: refusing cross-database edge %s -> %s",
+            src_column_id,
+            target_column_id,
+        )
+        return False
+    if not declared and _date_columns([src_column_id, target_column_id]):
+        logger.info(
+            "merge_semantic_fk: refusing inferred edge %s -> %s on a date column",
             src_column_id,
             target_column_id,
         )
@@ -771,6 +782,17 @@ def merge_semantic_fk_to_column(
             )
         )
     return bool(rows) and rows[0]["key_id"] == key_id
+
+
+def _date_columns(column_ids: list[str]) -> set[str]:
+    return {
+        row["id"]
+        for row in store().query_read(
+            select(s.catalog_column.c.id).where(
+                s.catalog_column.c.id.in_(column_ids), is_date_column()
+            )
+        )
+    }
 
 
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
