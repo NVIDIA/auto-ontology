@@ -422,15 +422,6 @@ RETRIEVE_TOOL = {
     },
 }
 
-#: Optional on every tool that runs SQL; ignored with one database connected.
-_DATABASE_PARAMETER = {
-    "type": "string",
-    "description": (
-        "The database the query's tables are in, as retrieve labels them. "
-        "Needed only when the same table name is in more than one database."
-    ),
-}
-
 RUN_SQL_TOOL = {
     "type": "function",
     "function": {
@@ -442,8 +433,7 @@ RUN_SQL_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "sql": {"type": "string", "description": "One SELECT query."},
-                "database": _DATABASE_PARAMETER,
+                "sql": {"type": "string", "description": "One SELECT query."}
             },
             "required": ["sql"],
         },
@@ -470,7 +460,6 @@ SUBMIT_TOOL = {
                     "type": "string",
                     "description": "Any choice the question left open, and why.",
                 },
-                "database": _DATABASE_PARAMETER,
             },
             "required": ["sql", "response"],
         },
@@ -544,7 +533,6 @@ FINAL_RUN_SQL_TOOL = {
                 "assumptions": SUBMIT_TOOL["function"]["parameters"]["properties"][
                     "assumptions"
                 ],
-                "database": _DATABASE_PARAMETER,
             },
             "required": ["sql"],
         },

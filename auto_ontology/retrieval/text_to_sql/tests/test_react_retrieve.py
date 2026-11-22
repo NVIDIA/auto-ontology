@@ -915,21 +915,6 @@ def test_a_concept_the_limit_dropped_is_shown_by_a_later_search(
     assert "concept-1" in ctx.shown_concepts
 
 
-def test_table_header_names_its_database_only_when_several_could_own_it() -> None:
-    table = {"schema_name": "main", "name": "orders", "database_name": "northwind"}
-    one = ToolContext(None, [object()])
-    several = ToolContext(None, [object(), object()])
-    targeted = ToolContext(None, [object(), object()], database_name="northwind")
-
-    assert not tool._labels_databases(one)
-    assert not tool._labels_databases(targeted)
-    assert tool._labels_databases(several)
-    assert tool._table_block(table, set(), False, True).startswith(
-        "TABLE main.orders (database: northwind)"
-    )
-    assert "(database:" not in tool._table_block(table, set(), False)
-
-
 def test_tables_of_unconnected_databases_are_not_offered() -> None:
     connected = ToolContext(
         None, [SimpleNamespace(database_name="a"), SimpleNamespace(database_name="b")]
@@ -938,3 +923,66 @@ def test_tables_of_unconnected_databases_are_not_offered() -> None:
     assert tool._in_database(connected, {"database_name": "a"})
     assert not tool._in_database(connected, {"database_name": "gone"})
     assert tool._in_database(connected, {"name": "no_database_recorded"})
+
+
+def _vote(monkeypatch: pytest.MonkeyPatch, databases: list[str]) -> None:
+    """Search results: one table per entry, best match first, in those databases."""
+    tables = [
+        {"id": f"t{i}", "database_name": name} for i, name in enumerate(databases)
+    ]
+    monkeypatch.setattr(tool, "_meaning_hits", lambda *_: [])
+    monkeypatch.setattr(tool, "_uncovered_physical_hits", lambda *_: [])
+    monkeypatch.setattr(tool, "_name_hits", lambda *_: [])
+    monkeypatch.setattr(
+        tool, "_resolve_tables", lambda *_: ([t["id"] for t in tables], {})
+    )
+    monkeypatch.setattr(tool, "fetch_tables_by_ids", lambda ids: tables)
+
+
+def _two_databases(**kwargs: object) -> ToolContext:
+    return ToolContext(
+        None,
+        [SimpleNamespace(database_name="shop"), SimpleNamespace(database_name="works")],
+        **kwargs,
+    )
+
+
+def test_the_best_match_chooses_the_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    _vote(monkeypatch, ["shop", "works", "works"])
+
+    assert tool.choose_database(_two_databases(), "orders last month") == "shop"
+
+
+def test_several_matches_outvote_one_better_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _vote(monkeypatch, ["shop", "works", "works", "works"])
+
+    assert tool.choose_database(_two_databases(), "orders last month") == "works"
+
+
+def test_unconnected_databases_do_not_vote(monkeypatch: pytest.MonkeyPatch) -> None:
+    _vote(monkeypatch, ["gone", "gone", "works"])
+
+    assert tool.choose_database(_two_databases(), "orders") == "works"
+
+
+def test_no_database_is_chosen_when_it_is_already_known(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _vote(monkeypatch, ["shop"])
+    one = ToolContext(None, [SimpleNamespace(database_name="shop")])
+
+    assert tool.choose_database(_two_databases(database_name="works"), "q") is None
+    assert tool.choose_database(one, "q") is None
+    assert tool.choose_database(_two_databases(), "") is None
+
+
+def test_a_failed_search_chooses_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_: object) -> list[dict]:
+        raise RuntimeError("embedding service down")
+
+    _vote(monkeypatch, ["shop"])
+    monkeypatch.setattr(tool, "_meaning_hits", fail)
+
+    assert tool.choose_database(_two_databases(), "orders") is None

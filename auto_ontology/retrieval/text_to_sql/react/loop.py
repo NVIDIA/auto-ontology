@@ -85,7 +85,6 @@ def submit(
     response: str = "",
     assumptions: str = "",
     resubmit: str = "submit this version",
-    database: str = "",
 ) -> tuple[str, Submission | None]:
     """Check and run a final query; the submission when it ran cleanly.
 
@@ -108,9 +107,9 @@ def submit(
                 None,
             )
         return "Accepted.", Submission("", response, assumptions, None)
-    connector = connector_for(ctx, sql, database)
+    connector = connector_for(ctx, sql)
     if connector is None:
-        return no_database_error(ctx, sql, database), None
+        return no_database_error(ctx, sql), None
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
@@ -166,15 +165,12 @@ def _can_run_queries(ctx: ToolContext) -> bool:
 
 
 def _submit_draft(
-    ctx: ToolContext,
-    draft: tuple[str, str] | None,
-    calls: int,
-    trajectory: list[dict[str, Any]],
+    ctx: ToolContext, draft: str | None, calls: int, trajectory: list[dict[str, Any]]
 ) -> EpisodeResult | None:
     """Submit the latest drafted query when the budget ended the episode."""
     if not draft:
         return None
-    observation, submission = submit(ctx, draft[0], database=draft[1])
+    observation, submission = submit(ctx, draft)
     trajectory.append({"role": "draft_submission", "content": observation})
     if submission is None:
         return None
@@ -193,7 +189,7 @@ def _dispatch(
         ToolName.RETRIEVE: lambda query="", kinds=None, purpose="sql": _retrieve(
             ctx, query, kinds, purpose
         ),
-        ToolName.RUN_SQL: lambda sql="", database="": run_sql(ctx, sql, database),
+        ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
         ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
             ctx, page, pattern, offset
         ),
@@ -209,7 +205,7 @@ def _dispatch(
                 ctx, **final_args, resubmit="run this version with final=true"
             )
         if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
-            args = {k: v for k, v in args.items() if k in ("sql", "database")}
+            args = {k: v for k, v in args.items() if k == "sql"}
         if name == ToolName.PREDICT:
             return predict(ctx)
         return handlers[name](**args), None
@@ -273,7 +269,7 @@ def run_episode(
     calls = 0
     nudges = 0
     made: set[str] = set()
-    draft: tuple[str, str] | None = None
+    draft: str | None = None
     out_of_queries = False
 
     while True:
@@ -346,7 +342,7 @@ def run_episode(
                 name in (ToolName.RUN_SQL, ToolName.SUBMIT)
                 and (args.get("sql") or "").strip()
             ):
-                draft = (args["sql"], str(args.get("database") or ""))
+                draft = args["sql"]
             key = _call_key(name, args)
             answer: Submission | Prediction | None
             answers = prompts.is_answer(name, args)

@@ -101,6 +101,9 @@ _PER_LABEL_K: dict[str, int] = {
 _PHYSICAL_SEARCH_K: dict[str, int] = {Labels.TABLE: 10, Labels.COLUMN: 20}
 _PHYSICAL_KEEP: dict[str, int] = {Labels.TABLE: 3, Labels.COLUMN: 5}
 
+# Tables that vote on the database: enough that one stray match is outvoted.
+_DATABASE_VOTES = 10
+
 _NAME_SEARCH_LIMIT = 10
 _TERM_TABLE_LIMIT = 3
 _JOIN_PAIRS_PER_CALL = 10
@@ -327,20 +330,46 @@ def _in_database(ctx: ToolContext, table: dict) -> bool:
     )
 
 
+def choose_database(ctx: ToolContext, question: str) -> str | None:
+    """The connected database the tables best matching *question* are in.
+
+    Searched once before the episode, when several databases are connected
+    and the caller named none, so that the episode searches and runs in one
+    database: a query whose table name two databases share then still has
+    somewhere to run. Each table votes for its database, the best match the
+    most. ``None`` when nothing matched, and the episode searches them all.
+    """
+    question = (question or "").strip()
+    if ctx.database_name or len(ctx.connectors) <= 1 or not question:
+        return None
+    connected = {getattr(c, "database_name", None) for c in ctx.connectors}
+    labels = resolve_kinds(None)
+    try:
+        hits = _merge_hits(
+            _meaning_hits(ctx, question, labels),
+            _uncovered_physical_hits(ctx, question, labels),
+            _name_hits(ctx, question, labels),
+        )
+        table_ids, _ = _resolve_tables(ctx, hits)
+        tables = {str(t["id"]): t for t in fetch_tables_by_ids(table_ids)}
+    except Exception:  # noqa: BLE001 - the episode can still search every database
+        logger.warning("Could not choose a database for the question", exc_info=True)
+        return None
+    votes: dict[str, float] = {}
+    rank = 0
+    for table_id in table_ids:
+        database_name = (tables.get(table_id) or {}).get("database_name")
+        if not database_name or database_name not in connected:
+            continue
+        rank += 1
+        votes[database_name] = votes.get(database_name, 0.0) + 1.0 / rank
+        if rank == _DATABASE_VOTES:
+            break
+    return max(sorted(votes), key=votes.__getitem__) if votes else None
+
+
 def _qualified(table: dict) -> str:
     return ".".join(p for p in (table.get("schema_name"), table.get("name")) if p)
-
-
-def _labels_databases(ctx: ToolContext) -> bool:
-    """Whether a table's database is worth naming: more than one could own it."""
-    return not ctx.database_name and len(ctx.connectors) > 1
-
-
-def _header(table: dict, show_database: bool) -> str:
-    header = f"TABLE {_qualified(table)}"
-    if show_database and table.get("database_name"):
-        header += f" (database: {table['database_name']})"
-    return header
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -409,10 +438,8 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
     return chosen, len(columns) - len(chosen)
 
 
-def _table_block(
-    table: dict, matched: set[str], seen_before: bool, show_database: bool = False
-) -> str:
-    header = _header(table, show_database)
+def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
+    header = f"TABLE {_qualified(table)}"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     if seen_before:
@@ -435,16 +462,14 @@ def _table_block(
     return "\n".join(lines)
 
 
-def _short_table_block(
-    table: dict, matched: set[str], show_database: bool = False
-) -> str:
+def _short_table_block(table: dict, matched: set[str]) -> str:
     """*table* in a few lines, for when its full block does not fit.
 
     Keeps the description and the columns a query most likely needs -- the
     matched ones, the key and the foreign keys -- without their descriptions,
     and says how to see the rest.
     """
-    header = _header(table, show_database)
+    header = f"TABLE {_qualified(table)}"
     if table.get("description"):
         header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
     keys = {str(k) for k in table.get("pk") or []}
@@ -788,11 +813,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # Most useful first, since the limit shortens or only names what comes
     # last: new tables, how they join, definitions that carry SQL, then tables
     # seen before. Each block carries the tables it names.
-    show_database = _labels_databases(ctx)
     new_blocks = {
-        str(t["id"]): _table_block(
-            t, matched.get(str(t["id"]), set()), False, show_database
-        )
+        str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
@@ -812,10 +834,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if (block := _definition_block(hit)) is not None
     ]
     named += definitions
-    earlier = [
-        (_table_block(t, matched[str(t["id"])], True, show_database), t)
-        for t in revisited
-    ]
+    earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
         **{new_blocks[str(t["id"])]: _qualified(t) for t in new_tables},
@@ -828,7 +847,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         )
     short_blocks = {
         new_blocks[str(t["id"])]: _short_table_block(
-            t, matched.get(str(t["id"]), set()), show_database
+            t, matched.get(str(t["id"]), set())
         )
         for t in new_tables
     }

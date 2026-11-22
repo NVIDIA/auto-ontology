@@ -359,9 +359,10 @@ def test_connector_for_routes_by_the_tables_the_sql_reads() -> None:
     assert tool.connector_for(ctx, "SELECT 1 FROM main.missing") is None
 
 
-def test_a_name_in_two_databases_asks_the_model_to_choose(
+def test_a_name_in_two_databases_has_nowhere_to_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Choosing the database before the episode is what keeps this rare."""
     shop, works = _connectors("shop", "adventureworks")
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
     ctx = show_shop_tables(ToolContext(None, [shop, works]))
@@ -375,11 +376,10 @@ def test_a_name_in_two_databases_asks_the_model_to_choose(
     assert tool.connector_for(ctx, sql) is None
     assert tool.run_sql(ctx, sql).startswith(
         "Error: the tables this query reads are in more than one database "
-        "(adventureworks, shop)."
+        "(adventureworks, shop)"
     )
-    assert tool.connector_for(ctx, sql, "AdventureWorks") is works
-    assert tool.run_sql(ctx, sql, "adventureworks").startswith("1 rows")
-    assert "no connected database is named 'nope'" in tool.run_sql(ctx, sql, "nope")
+    ctx.database_name = "adventureworks"
+    assert tool.connector_for(ctx, sql) is works
 
 
 def test_catalog_for_loads_only_the_connectors_database(
