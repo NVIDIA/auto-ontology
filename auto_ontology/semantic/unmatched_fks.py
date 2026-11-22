@@ -17,7 +17,10 @@ junction table, whose columns were all keys, is the usual case.
 from __future__ import annotations
 
 import logging
+import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 from auto_ontology.dal.attributes import (
@@ -33,7 +36,8 @@ from auto_ontology.semantic.deterministic import (
 )
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import SemanticEmbedder
-from auto_ontology.semantic.models import ColumnAttributeSpec
+from auto_ontology.semantic.models import ColumnAttributeSpec, TableTermsResult
+from auto_ontology.semantic.pipeline import _OrderedCommitQueue, _OrderedCommitSlot
 from auto_ontology.semantic.term_extractor import (
     apply_display_names_to_specs,
     extract_term,
@@ -47,6 +51,11 @@ from auto_ontology.utils.sample_values import parse_sample_values
 from auto_ontology.vdb.records import write_embedded_rows
 
 logger = logging.getLogger(__name__)
+
+# Tables are independent until their writes, which run one at a time in table
+# order (``_OrderedCommitQueue``); LLM load is bounded by the compile's
+# in-flight limit, not by this.
+_WORKERS = 4
 
 
 def attach_unmatched_fk_columns(
@@ -69,20 +78,40 @@ def attach_unmatched_fk_columns(
         logger.info("attach_unmatched_fk_columns: no unmatched suspected FK columns")
         return 0
 
-    written = 0
-    for table_id, column_names in sorted(by_table.items()):
-        if is_cancelled():
-            logger.info("attach_unmatched_fk_columns: cancelled")
-            break
+    queue = _OrderedCommitQueue()
+    cancel_logged = threading.Event()
+
+    def _run(position: int, table_id: str, column_names: set[str]) -> int:
+        commit_slot = _OrderedCommitSlot(queue, position)
         try:
-            written += _attach_table(
-                table_id, column_names, embedder, domain_summary=domain_summary
+            if is_cancelled():
+                if not cancel_logged.is_set():
+                    cancel_logged.set()
+                    logger.info("attach_unmatched_fk_columns: cancelled")
+                return 0
+            return _attach_table(
+                table_id,
+                column_names,
+                embedder,
+                domain_summary=domain_summary,
+                commit_slot=commit_slot,
             )
         except Exception:
             logger.exception(
                 "attach_unmatched_fk_columns: failed for table %s", table_id
             )
-    return written
+            return 0
+        finally:
+            commit_slot.skip_if_unused()
+
+    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+        futures = [
+            pool.submit(_run, position, table_id, column_names)
+            for position, (table_id, column_names) in enumerate(
+                sorted(by_table.items())
+            )
+        ]
+        return sum(future.result() for future in futures)
 
 
 def _attach_table(
@@ -91,7 +120,9 @@ def _attach_table(
     embedder: SemanticEmbedder | None,
     *,
     domain_summary: DomainSummary | None,
+    commit_slot: AbstractContextManager[Any] | None = None,
 ) -> int:
+    """Attach *column_names* of one table; only the writes are serialized."""
     table = fetch_table_by_id(table_id)
     if table is None:
         return 0
@@ -106,14 +137,21 @@ def _attach_table(
     if not specs:
         return 0
 
-    with term_commit_lock:
+    terms, _ = fetch_terms_and_attributes_for_table(table_id)
+    term_result = (
+        None if terms else _extract_new_term(table, ctx, specs, domain_summary)
+    )
+
+    with commit_slot or nullcontext(), term_commit_lock:
         terms, _ = fetch_terms_and_attributes_for_table(table_id)
         if terms:
             written = _attach_to_term(table, terms, specs)
         else:
-            written = _attach_to_new_term(table, ctx, specs, domain_summary)
-        if written and embedder is not None:
-            _embed_table_terms(table, embedder)
+            if term_result is None:
+                term_result = _extract_new_term(table, ctx, specs, domain_summary)
+            written = _commit_new_term(table, term_result, specs)
+    if written and embedder is not None:
+        _embed_table_terms(table, embedder)
     return written
 
 
@@ -149,14 +187,23 @@ def _attach_to_term(
     return written
 
 
-def _attach_to_new_term(
+def _extract_new_term(
     table: dict[str, Any],
     ctx: dict[str, Any],
     specs: list[ColumnAttributeSpec],
     domain_summary: DomainSummary | None,
-) -> int:
+) -> TableTermsResult:
+    """The LLM's Term for a table that has none, with display names applied."""
     term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
+    return term_result
+
+
+def _commit_new_term(
+    table: dict[str, Any],
+    term_result: TableTermsResult,
+    specs: list[ColumnAttributeSpec],
+) -> int:
     spec_by_column = {spec.source_column: spec for spec in specs}
     term_names: list[str] = []
     attr_names: list[str] = []

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
@@ -233,3 +234,39 @@ def test_cancellation_stops_between_tables(store) -> None:
         assert unmatched_fks.attach_unmatched_fk_columns("hr") == 0
 
     store["merge"].assert_not_called()
+
+
+def test_tables_extract_in_parallel_and_write_in_table_order(store) -> None:
+    """The LLM call runs outside the Term lock; writes keep the table order."""
+    store["unlinked"].return_value = [
+        _unlinked("employees", "manager_id"),
+        _unlinked("employee_project", "employee_id"),
+    ]
+    writes: list[str] = []
+    store["merge"].side_effect = lambda **kwargs: writes.append(kwargs["table_id"])
+    store["upsert"].side_effect = lambda name, description, table_id, **_: (
+        writes.append(table_id) or ("t2", name)
+    )
+
+    def slow_extract(*_args, **_kwargs) -> TableTermsResult:
+        assert not unmatched_fks.term_commit_lock.locked()
+        time.sleep(0.3)
+        return TableTermsResult(
+            terms=[
+                TermProposal(
+                    name="Employee Assignment",
+                    description="Who works on what",
+                    attributes=[
+                        TermAttributeAssignment(
+                            source_column="employee_id", display_name="Employee"
+                        )
+                    ],
+                )
+            ]
+        )
+
+    store["extract"].side_effect = slow_extract
+
+    unmatched_fks.attach_unmatched_fk_columns("hr")
+
+    assert writes == ["employee_project", "employees"]
