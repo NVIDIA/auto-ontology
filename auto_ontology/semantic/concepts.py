@@ -159,11 +159,19 @@ def resolve_concepts(database_name: str) -> int:
 
         survivor_key = ensure_concept_key(survivor, base["column_id"])
         absorbed_key = ensure_concept_key(absorbed, part["column_id"])
-        key_pairs = (
-            {absorbed_key: survivor_key} if survivor_key and absorbed_key else {}
-        )
+        if survivor_key is None or absorbed_key is None:
+            logger.info(
+                "resolve_concepts: %s.%s or %s.%s cannot be a key; not merged",
+                base["table_name"],
+                base["column_name"],
+                part["table_name"],
+                part["column_name"],
+            )
+            continue
         name = decision.name if survivor not in renamed else None
-        if merge_concepts(survivor, absorbed, key_pairs=key_pairs, name=name):
+        if merge_concepts(
+            survivor, absorbed, key_pairs={absorbed_key: survivor_key}, name=name
+        ):
             merged += 1
             renamed.add(survivor)
             logger.info(
@@ -194,6 +202,10 @@ def _candidate_pairs(
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     """One ``(base, part)`` key pair per related table pair, declared first.
 
+    A declared FK pairs any two candidate columns. A shared name pairs only a
+    table's primary key when it has one, and never another unique column of
+    that table. Within each, pairs on primary keys come first.
+
     The base is the side a declared FK points at — the satellite references
     the core table — and otherwise the alphabetically first table, so the
     surviving Concept is the same on every compile.
@@ -202,25 +214,32 @@ def _candidate_pairs(
     for row in rows:
         by_table[row["table_id"]].append(row)
     table_ids = sorted(by_table, key=lambda t: (by_table[t][0]["table_name"], t))
+    has_pk = {t for t, columns in by_table.items() if any(c["is_pk"] for c in columns)}
 
-    pairs: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+    def by_name(row: dict[str, Any]) -> bool:
+        return bool(row["is_pk"]) or row["table_id"] not in has_pk
+
+    pairs: list[tuple[tuple[int, int], dict[str, Any], dict[str, Any]]] = []
     for i, left_table in enumerate(table_ids):
         for right_table in table_ids[i + 1 :]:
-            best: tuple[int, dict[str, Any], dict[str, Any]] | None = None
+            best: tuple[tuple[int, int], dict[str, Any], dict[str, Any]] | None = None
             for left in by_table[left_table]:
                 for right in by_table[right_table]:
                     if left["family_id"] != right["family_id"]:
                         continue
                     if _declared_between(left, right):
-                        rank = 0
+                        tier = 0
                     elif (
-                        _normalized(left["column_name"])
+                        by_name(left)
+                        and by_name(right)
+                        and _normalized(left["column_name"])
                         == _normalized(right["column_name"])
                         and _normalized(left["column_name"]) not in _GENERIC_KEY_NAMES
                     ):
-                        rank = 1
+                        tier = 1
                     else:
                         continue
+                    rank = (tier, 2 - bool(left["is_pk"]) - bool(right["is_pk"]))
                     if left.get("fk_target_column_id") == right["column_id"]:
                         base, part = right, left
                     else:

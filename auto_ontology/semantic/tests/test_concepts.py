@@ -215,3 +215,52 @@ def test_no_llm_means_no_merge() -> None:
     ):
         assert concepts.resolve_concepts("db") == 0
     merge.assert_not_called()
+
+
+def test_no_merge_when_the_shared_column_cannot_be_a_key() -> None:
+    """A merge without a shared key would leave a keyless Concept behind."""
+    rows = [_row("customer", "birth_date"), _row("customer_ext", "birth_date")]
+    with (
+        _resolving(rows) as (merge, _),
+        patch.object(concepts, "ensure_concept_key", return_value=None),
+    ):
+        assert concepts.resolve_concepts("db") == 0
+    merge.assert_not_called()
+
+
+def test_a_shared_name_pairs_a_tables_pk_when_it_has_one() -> None:
+    """``birth_date`` sorts before ``customer_id`` but is not the identity."""
+    rows = [
+        _row("customer", "birth_date", is_pk=False),
+        _row("customer", "customer_id"),
+        _row("customer_ext", "birth_date", is_pk=False),
+        _row("customer_ext", "customer_id"),
+    ]
+    with _resolving(rows) as (merge, _):
+        assert concepts.resolve_concepts("db") == 1
+
+    assert merge.call_args.kwargs["key_pairs"] == {
+        "key-customer_ext.customer_id": "key-customer.customer_id"
+    }
+
+
+def test_a_non_pk_column_is_not_paired_by_name_on_a_table_with_a_pk() -> None:
+    rows = [
+        _row("customer", "customer_id"),
+        _row("customer", "email", is_pk=False),
+        _row("customer_ext", "ext_id"),
+        _row("customer_ext", "email", is_pk=False),
+    ]
+    with _resolving(rows) as (merge, llm):
+        assert concepts.resolve_concepts("db") == 0
+    llm.assert_not_called()
+    merge.assert_not_called()
+
+
+def test_a_table_without_a_pk_pairs_its_unique_columns_by_name() -> None:
+    rows = [
+        _row("customer", "customer_id"),
+        _row("customer_ext", "customer_id", is_pk=False),
+    ]
+    with _resolving(rows) as (merge, _):
+        assert concepts.resolve_concepts("db") == 1
