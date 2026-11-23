@@ -953,15 +953,13 @@ def test_date_shards_collapse_into_one_wildcard_table() -> None:
 
     assert frame["table_name"].tolist() == [
         "ga_sessions_*",
-        "ga_sessions_20160801",
         "visitors",
         "v_sessions_20170801",
     ]
     description = frame["description"].tolist()[0]
-    assert "2 date-sharded tables ga_sessions_20170731 ... ga_sessions_20170801" in (
+    assert "3 date-sharded tables ga_sessions_20160801 ... ga_sessions_20170801" in (
         description
     )
-    assert "also matches ga_sessions_20160801" in description
     assert description.endswith("Latest day")
 
 
@@ -975,11 +973,7 @@ def test_a_wildcard_table_has_the_latest_shard_columns_and_table_suffix() -> Non
 
     assert wildcard["column_name"].tolist() == ["visitId", "date", TABLE_SUFFIX_COLUMN]
     assert wildcard["ordinal_position"].tolist()[-1] == 3
-    assert set(frame["table_name"]) == {
-        "ga_sessions_*",
-        "ga_sessions_20160801",
-        "visitors",
-    }
+    assert set(frame["table_name"]) == {"ga_sessions_*", "visitors"}
 
 
 def test_keys_of_the_latest_shard_belong_to_the_wildcard() -> None:
@@ -989,8 +983,7 @@ def test_keys_of_the_latest_shard_belong_to_the_wildcard() -> None:
     frame = database.get_pks()
 
     assert frame[["table_name", "column_name"]].values.tolist() == [
-        ["ga_sessions_*", "visitId"],
-        ["ga_sessions_20160801", "visitId"],
+        ["ga_sessions_*", "visitId"]
     ]
 
 
@@ -1016,3 +1009,88 @@ def test_a_struct_that_gained_fields_still_reads_through_the_wildcard() -> None:
     )
 
     assert [f.shards for f in families] == [("ga_20160801", "ga_20170801")]
+
+
+# ----------------------------------------------------------------------
+# First-rows reads
+# ----------------------------------------------------------------------
+
+
+class _StoredTable:
+    def __init__(self, table_type: str = "TABLE") -> None:
+        self.table_type = table_type
+        self.schema = [SchemaField("id", "INT64"), SchemaField("name", "STRING")]
+
+
+class _ListingClient(_FakeClient):
+    def __init__(self, table_type: str = "TABLE") -> None:
+        super().__init__(lambda sql: _FakeRows(["id"], [[9]]))
+        self._stored = _StoredTable(table_type)
+        self.listed: list[tuple[list[str], int]] = []
+
+    def get_table(self, table_id: str) -> Any:
+        assert table_id == "bigquery-public-data.ga.visitors"
+        return self._stored
+
+    def list_rows(
+        self, table: Any, selected_fields: Any, max_results: int, timeout: Any
+    ) -> list[_FakeRow]:
+        self.listed.append(([f.name for f in selected_fields], max_results))
+        return [_FakeRow([1, "a"][: len(selected_fields)])]
+
+
+def _listing(table_type: str = "TABLE") -> tuple[BigQueryDatabase, _ListingClient]:
+    database = _database(schema="ga")
+    return database, _wire(database, _ListingClient(table_type))
+
+
+def test_reading_first_rows_lists_them_instead_of_querying() -> None:
+    """As a query it would scan, and bill, every row of the table."""
+    database, client = _listing()
+
+    frame = database.execute(
+        "SELECT * FROM `bigquery-public-data`.`ga`.`visitors` LIMIT 1000"
+    )
+
+    assert client.statements == []
+    assert client.listed == [(["id", "name"], 1000)]
+    assert frame.values.tolist() == [[1, "a"]]
+
+
+def test_first_rows_of_named_columns_are_listed_too() -> None:
+    database, client = _listing()
+
+    frame = database.execute(
+        "SELECT `id` FROM `bigquery-public-data.ga.visitors` LIMIT 5"
+    )
+
+    assert client.listed == [(["id"], 5)]
+    assert frame.columns.tolist() == ["id"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT id FROM `bigquery-public-data.ga.visitors` WHERE id > 1 LIMIT 5",
+        "SELECT DISTINCT id FROM `bigquery-public-data.ga.visitors` LIMIT 5",
+        "SELECT id FROM `bigquery-public-data.ga.visitors` ORDER BY id LIMIT 5",
+        "SELECT COUNT(*) FROM `bigquery-public-data.ga.visitors` LIMIT 5",
+        "SELECT id FROM `bigquery-public-data.ga.visitors`",
+    ],
+)
+def test_anything_more_than_first_rows_runs_as_a_query(sql: str) -> None:
+    database, client = _listing()
+
+    database.execute(sql)
+
+    assert client.listed == []
+    assert len(client.statements) == 1
+
+
+def test_a_view_runs_as_a_query() -> None:
+    database, client = _listing("VIEW")
+
+    database.execute("SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5")
+
+    assert client.listed == []
+    assert len(client.statements) == 1

@@ -37,9 +37,7 @@ These properties of the engine shape this connector:
   ``_TABLE_SUFFIX`` pseudo-column. Hundreds of near-identical shards would
   otherwise crowd search, and a query naming the wildcard would match none of
   them. :meth:`~BigQueryDatabase.qualify` points the wildcard at its newest
-  shard, so profiling reads one day rather than scanning every shard. A
-  wildcard reads with the newest shard's schema, so a shard with a column the
-  newest lacks stays a table of its own.
+  shard, so profiling reads one day rather than scanning every shard.
 * **Unenforced keys.** BigQuery stores primary and foreign keys as metadata
   only. They are reported anyway, because they are the modeller's own statement
   of how tables join. Foreign keys are read from the table resource rather than
@@ -107,6 +105,9 @@ _TABLE_TYPES = {
     "VIEW": TableTypes.VIEW,
     "MATERIALIZED VIEW": TableTypes.MATERIALIZED_VIEW,
 }
+
+# The clauses a first-rows read may have; anything else needs a real query.
+_SAMPLE_CLAUSES = frozenset({"expressions", "from", "from_", "limit"})
 
 _TABLE_SCHEMA = ["table_schema", "table_name", "table_type", "description"]
 
@@ -203,16 +204,12 @@ class ShardFamily:
         start, end = first[len(self.prefix) :], last[len(self.prefix) :]
         note = (
             f"Wildcard table over {len(self.shards)} date-sharded tables {first} "
-            f"... {last}, all read with this schema (a column a shard lacks is "
-            f"NULL in its rows). Select shards with the "
+            f"... {last}, all with this schema. Select shards with the "
             f"{TABLE_SUFFIX_COLUMN} pseudo-column, e.g. WHERE {TABLE_SUFFIX_COLUMN} "
             f"BETWEEN '{start}' AND '{end}'."
         )
         if self.also_matches:
-            note += (
-                f" The wildcard also matches {', '.join(self.also_matches)}; "
-                f"filter on {TABLE_SUFFIX_COLUMN} to leave them out."
-            )
+            note += f" The wildcard also matches {', '.join(self.also_matches)}."
         return note
 
 
@@ -638,7 +635,18 @@ class BigQueryDatabase(SQLDatabase):
         With *timeout_s*, the job carries ``job_timeout_ms`` so BigQuery stops it
         server-side; the client waits a little longer before cancelling it
         itself, in case the server-side stop is late.
+
+        A statement that only reads a table's first rows -- what profiling
+        sends -- is read with ``tabledata.list`` instead, which bills nothing:
+        as a query it would scan every row of the columns it names, ``LIMIT``
+        or not, and a large table would hit the bytes-billed cap.
         """
+        if not parameters:
+            sample = self._table_sample(sql)
+            if sample is not None:
+                frame = self._read_rows(*sample, timeout_s=timeout_s)
+                if frame is not None:
+                    return frame
         job = self.client.query(
             self._qualify_datasets(sql),
             job_config=self._job_config(parameters, timeout_s),
@@ -663,6 +671,74 @@ class BigQueryDatabase(SQLDatabase):
         if not columns:
             return pd.DataFrame()
         return pd.DataFrame([list(row.values()) for row in rows], columns=columns)
+
+    def _table_sample(self, sql: str) -> tuple[str, list[str] | None, int] | None:
+        """``(table id, columns or None for all, limit)`` when *sql* reads first rows."""
+        try:
+            statement = sqlglot.parse_one(sql, read="bigquery")
+        except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
+            return None
+        if not isinstance(statement, exp.Select):
+            return None
+        if any(v for k, v in statement.args.items() if k not in _SAMPLE_CLAUSES):
+            return None
+        source = statement.args.get("from_") or statement.args.get("from")
+        limit = statement.args.get("limit")
+        table = source.this if source is not None else None
+        count = limit.expression if limit is not None else None
+        if (
+            not isinstance(table, exp.Table)
+            or not table.db
+            or "*" in table.name
+            or not isinstance(count, exp.Literal)
+            or not count.is_int
+        ):
+            return None
+        columns: list[str] | None = []
+        for item in statement.expressions:
+            if isinstance(item, exp.Star):
+                columns = None
+            elif (
+                isinstance(item, exp.Column) and not item.table and columns is not None
+            ):
+                columns.append(item.name)
+            else:
+                return None
+        owner = table.catalog or self._owner(table.db)
+        return f"{owner}.{table.db}.{table.name}", columns, int(count.this)
+
+    def _read_rows(
+        self,
+        table_id: str,
+        columns: list[str] | None,
+        limit: int,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame | None:
+        """The first *limit* rows of a stored table; ``None`` to run it as a query.
+
+        Views and external tables have no stored rows to list, and anything the
+        listing cannot answer falls back to the query it was asked as.
+        """
+        try:
+            table = self.client.get_table(table_id)
+            if table.table_type != "TABLE" or not table.schema:
+                return None
+            by_name = {field.name.casefold(): field for field in table.schema}
+            if columns is None:
+                fields = list(table.schema)
+            elif all(name.casefold() in by_name for name in columns):
+                fields = [by_name[name.casefold()] for name in columns]
+            else:
+                return None
+            rows = self.client.list_rows(
+                table, selected_fields=fields, max_results=limit, timeout=timeout_s
+            )
+            names = columns if columns is not None else [f.name for f in fields]
+            return pd.DataFrame([list(row.values()) for row in rows], columns=names)
+        except Exception:
+            logger.debug("Listing %s failed; running it as a query", table_id)
+            return None
 
     # ------------------------------------------------------------------
     # Schema introspection
@@ -722,24 +798,9 @@ class BigQueryDatabase(SQLDatabase):
             names.setdefault(str(schema), []).append(str(table))
         self._families = {}
         for schema, tables in names.items():
-            columns = self._shard_columns(schema) if shard_families(tables) else None
             self._families[schema.casefold()] = {
-                f.wildcard: f for f in shard_families(tables, columns)
+                f.wildcard: f for f in shard_families(tables)
             }
-
-    def _shard_columns(self, dataset: str) -> dict[str, dict[str, str]]:
-        """Column name to type for every shard-named table, to compare schemas."""
-        frame = self.execute(
-            f"""
-            SELECT table_name, column_name, data_type
-            FROM {self._information_schema(dataset, "COLUMNS")}
-            WHERE REGEXP_CONTAINS(table_name, r'\\D\\d{{4,8}}$')
-            """
-        )
-        columns: dict[str, dict[str, str]] = {}
-        for table, column, kind in frame.itertuples(index=False, name=None):
-            columns.setdefault(str(table), {})[str(column)] = str(kind)
-        return columns
 
     def _family(self, schema: str, table: str) -> ShardFamily | None:
         if "*" not in table:
