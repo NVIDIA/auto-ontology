@@ -410,9 +410,15 @@ export const ExplorationView = () => {
 		};
 	}, [layer, selectedDatabaseId]);
 
-	useEffect(() => {
+	// The URL names the active node (deep links, back/forward, the layer
+	// switch). When it changes, state follows it. That is adjusted while
+	// rendering rather than in an effect, so there is no committed frame that
+	// still holds the previous node's id.
+	const [syncedUrlNodeId, setSyncedUrlNodeId] = useState(activeNodeIdFromUrl);
+	if (syncedUrlNodeId !== activeNodeIdFromUrl) {
+		setSyncedUrlNodeId(activeNodeIdFromUrl);
 		setActiveNodeId(activeNodeIdFromUrl);
-	}, [activeNodeIdFromUrl]);
+	}
 
 	// Every ref set above that tracks a kind of node/connection expansion,
 	// together — the single list `handleToggleLayer` below clears in full
