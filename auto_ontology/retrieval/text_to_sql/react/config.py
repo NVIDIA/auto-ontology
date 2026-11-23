@@ -72,6 +72,17 @@ def max_tables_per_retrieve() -> int:
     return _int_env("TEXT_TO_SQL_REACT_MAX_TABLES_PER_RETRIEVE", 6)
 
 
+def join_routes() -> int:
+    """Join routes ``retrieve`` offers per table pair, between 1 and 5.
+
+    At 1 (the default) it shows the single route ``find_join_path`` returns.
+    Above 1 it ranks the routes up to one hop longer than the shortest and
+    lists every one it finds, up to this many, so the model can pick the route
+    whose meaning fits the question when two routes are equally short.
+    """
+    return max(1, min(5, _int_env("TEXT_TO_SQL_REACT_JOIN_ROUTES", 1)))
+
+
 def siblings_enabled() -> bool:
     """Whether ``retrieve`` names the near-copies of each table it shows.
 

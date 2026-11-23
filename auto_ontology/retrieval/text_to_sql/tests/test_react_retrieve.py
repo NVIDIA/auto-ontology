@@ -682,6 +682,288 @@ def test_a_bridge_on_a_join_route_is_in_view(
     assert ctx.was_shown("sales", "order_links")
 
 
+def _hop(left: tuple[str, str], right: tuple[str, str]) -> dict:
+    return {
+        "source_schema": left[0],
+        "source_table": left[1],
+        "source_column": "id",
+        "target_schema": right[0],
+        "target_table": right[1],
+        "target_column": "id",
+    }
+
+
+ORDERS_T, CUSTOMERS_T = ("sales", "orders"), ("crm", "customers")
+VIA_STAFF = [_hop(ORDERS_T, ("hr", "staff")), _hop(("hr", "staff"), CUSTOMERS_T)]
+VIA_STORE = [_hop(ORDERS_T, ("ops", "store")), _hop(("ops", "store"), CUSTOMERS_T)]
+
+
+@pytest.fixture
+def ranked(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+    """Ask for three routes between tables two hops apart; stub the ranked lookup
+    with two."""
+    seen: dict[str, list[Any]] = {"ranked": []}
+
+    def find_join_paths(
+        anchor: str, dest: str, *, k: int, boost_table_ids: set[str]
+    ) -> list[dict]:
+        seen["ranked"].append((anchor, dest, k, set(boost_table_ids)))
+        return [{"path": VIA_STAFF}, {"path": VIA_STORE}]
+
+    monkeypatch.setattr(tool.config, "join_routes", lambda: 3)
+    monkeypatch.setattr(
+        tool, "find_join_routes", lambda _a, _d: [{"hops": VIA_STAFF, "default": True}]
+    )
+    monkeypatch.setattr(tool, "find_join_paths", find_join_paths)
+    return seen
+
+
+def test_one_route_by_default_never_ranks(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tables two hops apart, so only the setting keeps the ranked lookup off."""
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_JOIN_ROUTES", raising=False)
+    lookups: list[tuple[str, str]] = []
+
+    def two_hops(anchor: str, dest: str) -> list[dict]:
+        lookups.append((anchor, dest))
+        return [{"hops": VIA_STAFF, "default": True}]
+
+    monkeypatch.setattr(tool, "find_join_routes", two_hops)
+    monkeypatch.setattr(
+        tool, "find_join_paths", lambda *a, **k: pytest.fail("ranked lookup")
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    assert "routes, best ranked first" not in text
+    assert len(lookups) == 1
+    assert ctx.join_paths == [{"path": VIA_STAFF}]
+
+
+def test_directly_joined_tables_keep_their_direct_pairs_unranked(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tool.config, "join_routes", lambda: 3)
+    monkeypatch.setattr(
+        tool, "find_join_paths", lambda *a, **k: pytest.fail("ranked lookup")
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    assert "routes, best ranked first" not in text
+    assert len(calls["join"]) == 1
+
+
+def test_tied_routes_are_offered_best_first(ranked: dict) -> None:
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    head = "JOIN crm.customers ↔ sales.orders: 2 routes, best ranked first."
+    assert head in text
+    staff = text.index("  1. sales.orders.id = hr.staff.id")
+    store = text.index("  2. sales.orders.id = ops.store.id")
+    assert text.index(head) < staff < store
+
+
+def test_every_offered_route_is_in_view_but_only_the_best_is_linked(
+    ranked: dict,
+) -> None:
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    tool.retrieve(ctx, "customer status")
+
+    assert ctx.was_shown("hr", "staff")
+    assert ctx.was_shown("ops", "store")
+    assert ctx.join_paths == [{"path": VIA_STAFF}]
+
+
+def test_tables_the_model_searched_for_boost_the_ranking(ranked: dict) -> None:
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    tool.retrieve(ctx, "customer status")
+
+    [(_anchor, _dest, k, boost)] = ranked["ranked"]
+    assert k == 3
+    assert boost == {"t-orders", "t-customers"}
+
+
+def test_a_single_ranked_route_reads_like_the_default(
+    ranked: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tool, "find_join_paths", lambda *a, **k: [{"path": VIA_STAFF}])
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    assert (
+        "JOIN crm.customers ↔ sales.orders: "
+        "sales.orders.id = hr.staff.id → hr.staff.id = crm.customers.id"
+    ) in text
+
+
+def test_the_best_loaded_route_is_linked_when_the_top_one_is_not(
+    ranked: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    direct = [_hop(ORDERS_T, CUSTOMERS_T)]
+    monkeypatch.setattr(
+        tool, "find_join_paths", lambda *a, **k: [{"path": VIA_STAFF}, {"path": direct}]
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    text = tool.retrieve(ctx, "customer status")
+
+    assert "  1. sales.orders.id = hr.staff.id" in text
+    assert ctx.join_paths == [{"path": direct}]
+
+
+STAFF = {
+    "id": "t-staff",
+    "name": "staff",
+    "schema_name": "hr",
+    "database_name": "shop",
+    # Long enough that the limit below cuts or shortens it, never shows it whole.
+    "description": "Clerks who handle rentals. " * 30,
+    "columns": [{"name": "staff_id", "data_type": "INT"}],
+}
+
+
+def test_predict_can_apply_every_link_when_the_limit_cuts_a_bridge(
+    ranked: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The top-ranked orders/customers route runs through `hr.staff`, which
+    this retrieve found but the observation limit cut, so it is not in
+    `seen_tables` and `predict` will not load it. That pair must link the route
+    `predict` can apply; pairs that end at `hr.staff` keep their own route."""
+    from auto_ontology.retrieval import kumo
+    from auto_ontology.retrieval.kumo import rag
+    from auto_ontology.retrieval.text_to_sql.react.predict import predict
+
+    staff_t = ("hr", "staff")
+    ref = {"orders": ORDERS_T, "customers": CUSTOMERS_T, "staff": staff_t}
+
+    def path(*tables: tuple[str, str]) -> list[dict]:
+        return [_hop(a, b) for a, b in zip(tables, tables[1:])]
+
+    def ends(anchor: str, dest: str) -> tuple[tuple[str, str], tuple[str, str]]:
+        # The stubbed column ids are "<table>.<column>".
+        return ref[anchor.split(".")[0]], ref[dest.split(".")[0]]
+
+    requested: set[frozenset[tuple[str, str]]] = set()
+
+    def routes(anchor: str, dest: str) -> list[dict]:
+        a, b = ends(anchor, dest)
+        requested.add(frozenset((a, b)))
+        if staff_t in (a, b):
+            return [{"hops": path(a, b), "default": True}]
+        return [{"hops": path(a, staff_t, b), "default": True}]
+
+    def ranked_paths(
+        anchor: str, dest: str, *, k: int, boost_table_ids: set[str]
+    ) -> list[dict]:
+        a, b = ends(anchor, dest)
+        assert staff_t not in (a, b), "a one-hop pair is never ranked"
+        return [{"path": path(a, staff_t, b)}, {"path": path(a, b)}]
+
+    monkeypatch.setattr(tool, "find_join_routes", routes)
+    monkeypatch.setattr(tool, "find_join_paths", ranked_paths)
+    tables = {**TABLES, STAFF["id"]: STAFF}
+    monkeypatch.setattr(
+        tool, "fetch_tables_by_ids", lambda ids: [tables[i] for i in ids if i in tables]
+    )
+    columns = {
+        **ATTRIBUTE_COLUMNS,
+        "a-staff": {"col_name": "staff_id", "table_id": "t-staff"},
+    }
+    monkeypatch.setattr(
+        tool,
+        "fetch_attr_column_contexts",
+        lambda ids, **_: {i: columns[i] for i in ids if i in columns},
+    )
+    hits = {
+        "customer and clerk": [
+            STATUS_ATTRIBUTE,
+            {"id": "a-staff", "label": "ColumnAttribute", "name": "Clerk"},
+        ]
+    }
+    meaning = tool._get_candidates_information
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda r, q, *a, **k: (
+            [dict(h) for h in hits[q]] if q in hits else meaning(r, q, *a, **k)
+        ),
+    )
+    built: dict[str, Any] = {}
+
+    class Built:
+        """Stands in for a KumoRFM ``PredictionContext``."""
+
+    def build(
+        connectors: list[Any],
+        tables: list[dict],
+        join_paths: list[dict] | None = None,
+        examples: list[dict] | None = None,
+    ) -> Built:
+        built.update(tables=tables, join_paths=join_paths)
+        return Built()
+
+    monkeypatch.setattr(kumo, "PredictionContext", Built)
+    monkeypatch.setattr(kumo, "build_prediction_context", build)
+    monkeypatch.setattr(kumo, "run_prediction", lambda *a, **k: {"response": "ok"})
+    monkeypatch.setattr(rag, "fetch_pql_examples", lambda _r, _q: [])
+
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "300")
+    tool.retrieve(ctx, "customer and clerk")
+    # Found and joined, but cut by the limit: not loaded.
+    assert set(ctx.seen_tables) == {"t-orders", "t-customers"}
+    assert frozenset((staff_t, ORDERS_T)) in requested
+
+    predict(ctx)
+
+    loaded = {(t.get("schema_name"), t["name"]) for t in built["tables"]}
+    links: dict[frozenset[tuple[str, str]], list[dict]] = {}
+    for link in built["join_paths"]:
+        hops = link["path"]
+        first = (hops[0]["source_schema"], hops[0]["source_table"])
+        last = (hops[-1]["target_schema"], hops[-1]["target_table"])
+        links[frozenset((first, last))] = hops
+    # Every link connects the pair it was asked for, one per pair.
+    assert set(links) == requested
+    assert len(built["join_paths"]) == len(requested)
+
+    def tables_of(hops: list[dict]) -> set[tuple[str, str]]:
+        return {
+            (hop[f"{side}_schema"], hop[f"{side}_table"])
+            for hop in hops
+            for side in ("source", "target")
+        }
+
+    # The loaded pair links its direct route, not the one through hr.staff.
+    assert tables_of(links[frozenset((ORDERS_T, CUSTOMERS_T))]) == {
+        ORDERS_T,
+        CUSTOMERS_T,
+    }
+    # Every pair whose ends predict loads gets a link predict can apply.
+    for pair, hops in links.items():
+        if pair <= loaded:
+            assert tables_of(hops) <= loaded, hops
+
+
+@pytest.mark.parametrize(("raw", "routes"), [("", 1), ("3", 3), ("0", 1), ("9", 5)])
+def test_join_routes_setting_is_bounded(
+    monkeypatch: pytest.MonkeyPatch, raw: str, routes: int
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_JOIN_ROUTES", raw)
+
+    assert tool.config.join_routes() == routes
+
+
 def test_a_table_only_a_definition_names_is_in_view(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
