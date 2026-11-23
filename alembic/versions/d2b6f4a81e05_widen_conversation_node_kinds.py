@@ -27,7 +27,7 @@ wider one allows, which is how this was found -- an extraction run died on
 constraint permitted it.
 
 Revision ID: d2b6f4a81e05
-Revises: a1c7e3f20b94
+Revises: c4f1a9d27b63
 Create Date: 2026-10-21 11:48:00.000000
 
 """
@@ -38,7 +38,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d2b6f4a81e05"
-down_revision: Union[str, Sequence[str], None] = "a1c7e3f20b94"
+down_revision: Union[str, Sequence[str], None] = "c4f1a9d27b63"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
