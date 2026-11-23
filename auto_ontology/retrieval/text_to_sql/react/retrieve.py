@@ -27,11 +27,10 @@ One call does three things, all through existing data-access functions:
 3. **Expand one step along the graph** — a term's tables
    (:func:`fetch_term_table_pairs`) and an attribute's owning column
    (:func:`fetch_attr_column_contexts`), each table with its columns, stored
-   values and semantic FKs (:func:`fetch_tables_by_ids`), the join routes from
+   values and semantic FKs (:func:`fetch_tables_by_ids`), the join route from
    every new table to the tables earlier calls already showed
-   (:func:`find_join_routes`), the other parts of every split entity a new
-   table belongs to (:func:`fetch_concept_members`), and the near-copies of
-   every new table (:mod:`.siblings`).
+   (:func:`find_join_path`), and the near-copies of every new table
+   (:mod:`.siblings`).
 
 The model sees only tables and columns, with their descriptions.
 
@@ -49,9 +48,8 @@ import sqlglot
 from sqlglot import exp
 
 from auto_ontology.catalog.constants import Labels
-from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_routes
+from auto_ontology.dal.attributes import fetch_attr_column_contexts, find_join_path
 from auto_ontology.dal.candidates import expand_info
-from auto_ontology.dal.concepts import fetch_concept_members
 from auto_ontology.dal.datasources import (
     fetch_schema_ids_for_database,
     fetch_tables_by_ids,
@@ -468,7 +466,7 @@ def _definition_block(hit: dict) -> str | None:
 
 
 def _anchor_column_id(ctx: ToolContext, table: dict) -> str | None:
-    """Any column id on *table*, which is all :func:`find_join_routes` needs."""
+    """Any column id on *table*, which is all :func:`find_join_path` needs."""
     table_id = str(table["id"])
     if table_id not in ctx.anchor_column_ids:
         columns = table.get("columns") or []
@@ -489,8 +487,7 @@ def _hop_text(hop: dict) -> str:
     right = ".".join(
         p for p in (hop.get("target_schema"), hop.get("target_table")) if p
     )
-    text = f"{left}.{hop.get('source_column')} = {right}.{hop.get('target_column')}"
-    return f"{text} [key {hop['key']}]" if hop.get("key") else text
+    return f"{left}.{hop.get('source_column')} = {right}.{hop.get('target_column')}"
 
 
 def _hop_tables(hops: list[dict]) -> set[tuple[str | None, str | None]]:
@@ -536,10 +533,7 @@ def _join_lines(
 ) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
     """Join routes from each new table to every table already in view.
 
-    Two tables one hop apart get every direct column pair, the default first;
-    the others get their one shortest route. Each line comes with every table
-    on its routes, bridges included. Only the first route is kept in
-    ``ctx.join_paths``.
+    Each route comes with every table on it, bridges included.
     """
     lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
     lookups = 0
@@ -557,81 +551,14 @@ def _join_lines(
             dest = _anchor_column_id(ctx, other)
             if not anchor or not dest:
                 continue
-            routes = find_join_routes(anchor, dest)
-            if not routes:
-                continue
-            ctx.join_paths.append({"path": routes[0]["hops"]})
-            head = f"JOIN {_qualified(table)} ↔ {_qualified(other)}"
-            if len(routes) == 1:
-                line = f"{head}: " + " → ".join(_hop_text(h) for h in routes[0]["hops"])
-            else:
-                line = f"{head}, one of:" + "".join(
-                    "\n  "
-                    + " → ".join(_hop_text(h) for h in route["hops"])
-                    + (" (default)" if route["default"] else "")
-                    for route in routes
+            hops = find_join_path(anchor, dest)
+            if hops:
+                ctx.join_paths.append({"path": hops})
+                line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
+                    _hop_text(h) for h in hops
                 )
-            tables: set[tuple[str | None, str | None]] = set()
-            for route in routes:
-                tables |= _hop_tables(route["hops"])
-            lines.append((line, tables))
+                lines.append((line, _hop_tables(hops)))
     return lines
-
-
-def _concept_lines(
-    ctx: ToolContext, new_tables: list[dict]
-) -> list[tuple[str, set[tuple[str | None, str | None]], str]]:
-    """One line per split entity a new table is part of, with every part.
-
-    A Concept with several members is one entity whose fields are spread over
-    their tables, so each part is joined on its own key column. The line
-    carries every member, so all of them count as shown, and the Concept's id:
-    the caller records it as shown only if the line survives the limit.
-    """
-    if not new_tables:
-        return []
-    try:
-        concepts = fetch_concept_members(str(t["id"]) for t in new_tables)
-    except Exception:
-        logger.warning("retrieve: concept lookup failed", exc_info=True)
-        return []
-    lines: list[tuple[str, set[tuple[str | None, str | None]], str]] = []
-    listed: set[str] = set()
-    for table in new_tables:
-        concept = concepts.get(str(table["id"]))
-        if not concept or len(concept["members"]) < 2:
-            continue
-        if concept["concept_id"] in ctx.shown_concepts | listed:
-            continue
-        listed.add(concept["concept_id"])
-        members = " + ".join(_qualified_member(m) for m in concept["members"])
-        keys = [
-            " = ".join(
-                f"{_qualified_member(c)}.{c['column_name']}" for c in key["columns"]
-            )
-            for key in concept["keys"]
-            if len(key["columns"]) > 1
-        ]
-        line = f"CONCEPT {concept['concept_name']}: {members}"
-        if keys:
-            line += ", joined on " + "; ".join(keys)
-        lines.append(
-            (
-                line,
-                {
-                    (m.get("schema_name"), m.get("table_name"))
-                    for m in concept["members"]
-                },
-                concept["concept_id"],
-            )
-        )
-    return lines
-
-
-def _qualified_member(member: dict) -> str:
-    return ".".join(
-        p for p in (member.get("schema_name"), member.get("table_name")) if p
-    )
 
 
 def _cap(
@@ -767,8 +694,6 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
         (new_blocks[str(t["id"])], own(t)) for t in new_tables
     ]
-    concept_lines = _concept_lines(ctx, new_tables)
-    named += [(line, tables) for line, tables, _ in concept_lines]
     named += _join_lines(ctx, new_tables)
     if config.siblings_enabled():
         named += [
@@ -814,7 +739,4 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if block in result or short_blocks.get(block, "\0") in result:
             for schema, name in tables:
                 ctx.show_table(schema, name)
-    ctx.shown_concepts.update(
-        concept_id for line, _, concept_id in concept_lines if line in result
-    )
     return result

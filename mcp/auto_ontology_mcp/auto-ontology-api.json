@@ -9056,30 +9056,6 @@
         "title": "ColumnSummary",
         "type": "object"
       },
-      "ConceptRef": {
-        "additionalProperties": true,
-        "description": "The Concept a term belongs to, and every term that is a member of it.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "term_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Term Ids",
-            "type": "array"
-          }
-        },
-        "required": ["id", "name"],
-        "title": "ConceptRef",
-        "type": "object"
-      },
       "ConnectionBody": {
         "properties": {
           "connection": {
@@ -10420,7 +10396,7 @@
       },
       "GraphLink": {
         "additionalProperties": true,
-        "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.\n``SAME_CONCEPT`` links two terms that are members of one Concept, whether\nor not they share a table.",
+        "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
         "properties": {
           "relationship_types": {
             "items": {
@@ -11578,16 +11554,6 @@
               }
             ],
             "title": "Column Attributes Count"
-          },
-          "concept": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConceptRef"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "description": {
             "anyOf": [

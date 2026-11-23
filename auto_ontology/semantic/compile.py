@@ -15,7 +15,6 @@ from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attribu
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
-from auto_ontology.semantic.concepts import resolve_concepts
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 from auto_ontology.semantic.term_families import resolve_term_families
 from auto_ontology.semantic.unmatched_fks import attach_unmatched_fk_columns
@@ -82,7 +81,7 @@ def _run_semantic_compilation(
     if is_cancelled():
         logger.info(
             "Semantic compilation cancelled (database=%r) — skipping the term "
-            "family, concept, FK, unmatched-FK, SqlAttribute, bridge-table and "
+            "family, FK, unmatched-FK, SqlAttribute, bridge-table and "
             "attribute-description stages; "
             "%d table(s) "
             "compiled in %.1fs",
@@ -97,12 +96,6 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     family_count = resolve_term_families(database_name, embedder)
     logger.info("Term families found: %d", family_count)
-
-    logger.info("=" * 60)
-    logger.info("Resolving concepts…")
-    logger.info("=" * 60)
-    concept_merges = resolve_concepts(database_name)
-    logger.info("Concept merges applied: %d", concept_merges)
 
     logger.info("=" * 60)
     logger.info("Resolving semantic FK edges…")

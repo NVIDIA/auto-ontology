@@ -32,7 +32,6 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
-from auto_ontology.dal.tests.fk_links import link_semantic_fk  # noqa: E402
 from auto_ontology.dal import terms as t  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
@@ -660,7 +659,11 @@ def test_attributes_carry_their_columns_and_zones(world) -> None:
     world.table("invoices", columns=("order_id",))
     term = world.term("Order", represents=("orders",))
     attr = world.column_attribute("order-id", "Order", table="orders", column="id")
-    link_semantic_fk(world.columns["invoices.order_id"], attr)
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["invoices.order_id"],
+        attribute_id=attr,
+    )
     zone_id = world.zone("Sales", table="orders")
 
     row = t.fetch_column_attributes_by_term_id(term)[0]
@@ -702,7 +705,11 @@ def related(world):
     attr = world.column_attribute(
         "customer-id", "Customer", table="customers", column="id"
     )
-    link_semantic_fk(world.columns["orders.customer_id"], attr)
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["orders.customer_id"],
+        attribute_id=attr,
+    )
     return world
 
 
