@@ -232,3 +232,14 @@ def test_table_info_fallback_when_table_xinfo_returns_empty(
     legacy_cols = cols[cols["table_name"] == "legacy"]
     assert legacy_cols["column_name"].tolist() == ["id", "name"]
     assert legacy_cols["ordinal_position"].tolist() == [1, 2]
+
+
+def test_table_listing_only_excludes_the_reserved_prefix(tmp_path) -> None:
+    path = tmp_path / "catalog.sqlite"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE SQLiteOrders (id INTEGER PRIMARY KEY AUTOINCREMENT)"
+        )
+    connection.close()
+    with SQLiteDatabase(str(path)) as db:
+        assert db.get_tables()["table_name"].tolist() == ["SQLiteOrders"]

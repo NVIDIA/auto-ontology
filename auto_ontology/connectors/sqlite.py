@@ -157,7 +157,7 @@ class SQLiteDatabase(SQLDatabase):
                 END AS table_type
             FROM sqlite_master
             WHERE type IN ('table', 'view')
-              AND name NOT LIKE 'sqlite_%'
+              AND lower(name) NOT GLOB 'sqlite_*'
             ORDER BY name
             """
         )
