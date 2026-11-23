@@ -109,17 +109,21 @@ def _revisions(nodes: Sequence[dict[str, Any]]) -> list[SemanticEdge]:
     #: through each shared subject. The claim is the same claim each time.
     emitted: set[tuple[str, str]] = set()
     for (key, _subject), group in grouped.items():
-        # Distinct values only. Two rows with the same value are the same
-        # reading stated twice, which is not a revision of anything.
-        by_value: dict[str, dict[str, Any]] = {}
-        for node in group:
+        # A reading that repeats the value just before it is the same reading
+        # stated twice, not a revision. Only the one just before: going back to
+        # an earlier value -- 3000, then 4800, then 3000 -- is a revision, and
+        # deduplicating across the whole group would make 4800 current.
+        ordered: list[dict[str, Any]] = []
+        for node in sorted(group, key=_last_turn):
             value = (node.get("value") or "").strip().casefold()
-            if value and value not in by_value:
-                by_value[value] = node
-        if len(by_value) < 2:
+            if not value:
+                continue
+            if ordered and value == (ordered[-1].get("value") or "").strip().casefold():
+                continue
+            ordered.append(node)
+        if len(ordered) < 2:
             continue
 
-        ordered = sorted(by_value.values(), key=_last_turn)
         for earlier, later in itertools.pairwise(ordered):
             same_turn = _last_turn(earlier) == _last_turn(later)
             source, target = (earlier, later) if same_turn else (later, earlier)

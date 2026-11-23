@@ -403,6 +403,22 @@ def test_three_readings_chain_rather_than_pair_up() -> None:
     assert {(e.source_id, e.target_id) for e in edges} == {("b", "a"), ("c", "b")}
 
 
+def test_going_back_to_an_earlier_value_is_a_revision() -> None:
+    """3000, then 4800, then 3000 again: the last 3000 is current."""
+    rows = [
+        _statement("later", attribute_key="cap", value="3000", turn_indexes=[9]),
+        _statement("first", attribute_key="cap", value="3000", turn_indexes=[1]),
+        _statement("middle", attribute_key="cap", value="4800", turn_indexes=[5]),
+    ]
+
+    edges, _ = derive_edges(rows)
+
+    assert {(e.source_id, e.role, e.target_id) for e in edges} == {
+        ("middle", "supersedes", "first"),
+        ("later", "supersedes", "middle"),
+    }
+
+
 def test_dated_events_order_by_date_not_by_turn() -> None:
     """A transcript often mentions two events in the opposite order to the one
     they occurred in."""
