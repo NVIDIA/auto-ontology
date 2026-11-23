@@ -77,12 +77,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema.
 
-    Rows using the two new kinds have to go first. They are not representable
-    under the narrower check and there is no honest kind to move them to --
-    calling a goal a ``state`` is the thing this migration exists to stop.
+    The two new kinds have to go first. They are not representable under the
+    narrower check and there is no honest kind to move them to -- calling a
+    goal a ``state`` is the thing this migration exists to stop. So they are
+    removed from ``kinds``, and only a node left with no kind is deleted; one
+    that is also a ``fact`` or an ``event`` keeps that, and its edges.
     """
     op.execute(
-        "DELETE FROM conversation_node "
+        "UPDATE conversation_node "
+        "SET kinds = array_remove(array_remove(kinds, 'target'), 'proposed') "
         "WHERE kinds && ARRAY['target', 'proposed']::text[]"
     )
+    op.execute("DELETE FROM conversation_node WHERE cardinality(kinds) = 0")
     _replace(BEFORE)

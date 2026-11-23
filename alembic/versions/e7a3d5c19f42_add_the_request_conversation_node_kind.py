@@ -54,7 +54,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema.
 
-    Rows using ``request`` are not representable under the narrower check.
+    ``request`` is not representable under the narrower check, so it is removed
+    from ``kinds``, and only a node left with no kind is deleted.
     """
-    op.execute("DELETE FROM conversation_node WHERE kinds && ARRAY['request']::text[]")
+    op.execute(
+        "UPDATE conversation_node SET kinds = array_remove(kinds, 'request') "
+        "WHERE kinds && ARRAY['request']::text[]"
+    )
+    op.execute("DELETE FROM conversation_node WHERE cardinality(kinds) = 0")
     _replace(BEFORE)
