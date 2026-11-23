@@ -144,7 +144,7 @@ def _parse_connection_string(
     return (
         {
             "server_hostname": parsed.hostname,
-            "http_path": unquote(http_path),
+            "http_path": http_path,
             "access_token": access_token,
             "catalog": catalog,
             # The connector fetches a telemetry feature flag on every connect.
