@@ -135,10 +135,10 @@ def resolve_connector_for_sql(
     candidates = databases_for_sql(tables, connectors, sql)
     if len(candidates) != 1:
         return None
-    return connector_named(candidates[0], connectors)
+    return _connector_named(candidates[0], connectors)
 
 
-def connector_named(
+def _connector_named(
     database_name: str, connectors: list[SQLDatabase]
 ) -> SQLDatabase | None:
     """The connector for *database_name*, matched exactly, then ignoring case."""
@@ -215,7 +215,6 @@ def _referenced_tables(
 
 
 __all__ = [
-    "connector_named",
     "databases_for_sql",
     "resolve_connector_for_sql",
     "resolve_connector_from_tables",

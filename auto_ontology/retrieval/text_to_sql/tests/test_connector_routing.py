@@ -9,12 +9,12 @@ import pytest
 from auto_ontology.connectors.base import SQLDatabase
 
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
-    connector_named,
     databases_for_sql,
     resolve_connector_for_sql,
     resolve_connector_from_tables,
     resolve_target_database_name,
 )
+from auto_ontology.retrieval.text_to_sql.connector_routing import _connector_named
 
 
 def _connector(database_name: str, dialect: str = "sqlite") -> SQLDatabase:
@@ -79,8 +79,8 @@ def test_a_table_name_in_several_databases_is_not_guessed() -> None:
 def test_connector_named_ignores_case() -> None:
     shop, works = _connector("shop"), _connector("AdventureWorks")
 
-    assert connector_named("adventureworks", [shop, works]) is works
-    assert connector_named("missing", [shop, works]) is None
+    assert _connector_named("adventureworks", [shop, works]) is works
+    assert _connector_named("missing", [shop, works]) is None
 
 
 def test_routes_all_tables_to_their_database() -> None:
