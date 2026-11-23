@@ -433,9 +433,12 @@ class TestDetach:
 
 
 class _Denial:
-    def __init__(self, name, description="said so", evidence="", value=""):
+    def __init__(
+        self, name, description="said so", evidence="", value="", kind="retraction"
+    ):
         self.name, self.description = name, description
         self.evidence, self.value = evidence, value
+        self.kind = kind
 
 
 TURN_35 = "I've never actually obtained an API key for this project."
