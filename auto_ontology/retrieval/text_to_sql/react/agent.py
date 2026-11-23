@@ -20,7 +20,6 @@ from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.loop import run_episode
 from auto_ontology.retrieval.text_to_sql.react.mode import ToolName, episode_mode
-from auto_ontology.retrieval.text_to_sql.react.retrieve import choose_database
 from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -78,9 +77,6 @@ class ReactSQLAgent(BaseAgent):
             prediction_llm=state.get("llm"),
             custom_prompts=state.get("custom_prompts") or "",
         )
-        if chosen := choose_database(ctx, ctx.question):
-            ctx.database_name = chosen
-            record_thought(path_state, STEP_NAME, f"Searching database {chosen}.")
         connector = connector_for(ctx)
         # A connector that charges for queries says so through cost_status.
         cost_status = getattr(connector, "cost_status", None)

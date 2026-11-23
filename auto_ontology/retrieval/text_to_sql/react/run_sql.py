@@ -386,8 +386,7 @@ def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResu
 def connector_for(ctx: ToolContext, sql: str | None = None) -> SQLDatabase | None:
     """The database the episode's SQL runs on.
 
-    The target database when there is one -- named by the caller or chosen
-    from the question before the episode -- otherwise the only one
+    The target database when the caller named one; otherwise the only one
     configured, or the connector that owns the tables ``retrieve`` has shown.
     When those span several databases, *sql* decides: the one database
     holding every table it reads.

@@ -362,7 +362,6 @@ def test_connector_for_routes_by_the_tables_the_sql_reads() -> None:
 def test_a_name_in_two_databases_has_nowhere_to_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Choosing the database before the episode is what keeps this rare."""
     shop, works = _connectors("shop", "adventureworks")
     monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
     ctx = show_shop_tables(ToolContext(None, [shop, works]))

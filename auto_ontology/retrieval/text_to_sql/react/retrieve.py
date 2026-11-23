@@ -101,9 +101,6 @@ _PER_LABEL_K: dict[str, int] = {
 _PHYSICAL_SEARCH_K: dict[str, int] = {Labels.TABLE: 10, Labels.COLUMN: 20}
 _PHYSICAL_KEEP: dict[str, int] = {Labels.TABLE: 3, Labels.COLUMN: 5}
 
-# Tables that vote on the database: enough that one stray match is outvoted.
-_DATABASE_VOTES = 10
-
 _NAME_SEARCH_LIMIT = 10
 _TERM_TABLE_LIMIT = 3
 _JOIN_PAIRS_PER_CALL = 10
@@ -328,44 +325,6 @@ def _in_database(ctx: ToolContext, table: dict) -> bool:
     return any(
         getattr(c, "database_name", None) == database_name for c in ctx.connectors
     )
-
-
-def choose_database(ctx: ToolContext, question: str) -> str | None:
-    """The connected database the tables best matching *question* are in.
-
-    Searched once before the episode, when several databases are connected
-    and the caller named none, so that the episode searches and runs in one
-    database: a query whose table name two databases share then still has
-    somewhere to run. Each table votes for its database, the best match the
-    most. ``None`` when nothing matched, and the episode searches them all.
-    """
-    question = (question or "").strip()
-    if ctx.database_name or len(ctx.connectors) <= 1 or not question:
-        return None
-    connected = {getattr(c, "database_name", None) for c in ctx.connectors}
-    labels = resolve_kinds(None)
-    try:
-        hits = _merge_hits(
-            _meaning_hits(ctx, question, labels),
-            _uncovered_physical_hits(ctx, question, labels),
-            _name_hits(ctx, question, labels),
-        )
-        table_ids, _ = _resolve_tables(ctx, hits)
-        tables = {str(t["id"]): t for t in fetch_tables_by_ids(table_ids)}
-    except Exception:  # noqa: BLE001 - the episode can still search every database
-        logger.warning("Could not choose a database for the question", exc_info=True)
-        return None
-    votes: dict[str, float] = {}
-    rank = 0
-    for table_id in table_ids:
-        database_name = (tables.get(table_id) or {}).get("database_name")
-        if not database_name or database_name not in connected:
-            continue
-        rank += 1
-        votes[database_name] = votes.get(database_name, 0.0) + 1.0 / rank
-        if rank == _DATABASE_VOTES:
-            break
-    return max(sorted(votes), key=votes.__getitem__) if votes else None
 
 
 def _qualified(table: dict) -> str:
