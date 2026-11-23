@@ -143,3 +143,10 @@ def test_qualify_without_a_schema_is_the_bare_table() -> None:
 def test_qualify_quotes_a_name_with_a_space() -> None:
     # An unknown dialect still quotes; a bare identifier is what loses the table.
     assert _Fake().qualify("main", "Sales Orders") == '"main"."Sales Orders"'
+
+
+def test_duckdb_history_window() -> None:
+    with connectors.DuckDBDatabase(":memory:", read_only=False) as db:
+        history = db.get_queries(hours=6)
+        assert history.empty
+        assert set(history.columns) == {"query_text", "end_time"}
