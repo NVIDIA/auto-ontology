@@ -1274,6 +1274,48 @@ def test_key_value_probe_reads_the_lowest_distinct_values() -> None:
     )
 
 
+def test_row_sample_uses_the_dialect_row_limit() -> None:
+    # Oracle has no LIMIT. Hard-coding it failed the sample, which the caller
+    # treats as "no profile", so every table compiled without sample values.
+    connector = _mock_connector("oracle")
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = pd.DataFrame()
+    table = {"id": "t1", "name": "ORDERS", "schema_name": "SALES"}
+
+    calculate_columns_profiling(
+        table,
+        [{"name": "STATUS", "data_type": "VARCHAR2"}],
+        connector,
+        probe_distinct_values=False,
+    )
+
+    assert connector.execute.call_args_list[0][0][0] == (
+        'SELECT * FROM "SALES"."ORDERS" FETCH FIRST 1000 ROWS ONLY'
+    )
+
+
+def test_distinct_probe_uses_the_dialect_row_limit() -> None:
+    connector = _mock_connector("oracle")
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = pd.DataFrame({"STATUS": ["open"]})
+
+    _distinct_values_if_low_cardinality(connector, '"SALES"."ORDERS"', "STATUS", 25)
+
+    assert connector.execute.call_args.args[0].endswith("FETCH FIRST 26 ROWS ONLY")
+
+
+def test_key_value_probe_uses_the_dialect_row_limit() -> None:
+    connector = _mock_connector("oracle")
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = pd.DataFrame({"ID": [1]})
+
+    probe_ascending_distinct_values(connector, "SALES", "ORDERS", "ID")
+
+    assert connector.execute.call_args.args[0].endswith(
+        'ORDER BY "ID" FETCH FIRST 20 ROWS ONLY'
+    )
+
+
 @pytest.mark.parametrize("empty", [pd.DataFrame(), pd.DataFrame({"id": []})])
 def test_key_value_probe_of_a_column_with_no_values_returns_none_of_them(
     empty: pd.DataFrame,

@@ -54,6 +54,7 @@ from auto_ontology.semantic.term_extractor import (
     extract_term,
 )
 from auto_ontology.utils.sql_identifiers import quoted_identifier
+from auto_ontology.utils.sql_limits import with_row_limit
 
 if TYPE_CHECKING:
     from auto_ontology.connectors.base import SQLDatabase
@@ -391,12 +392,16 @@ def _distinct_values_if_low_cardinality(
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
-    quoted = quoted_identifier(col_name, getattr(connector, "dialect", None))
+    dialect = getattr(connector, "dialect", None)
+    quoted = quoted_identifier(col_name, dialect)
     try:
         df = execute_capped(
             connector,
-            f"SELECT DISTINCT {quoted} FROM {qualified} "
-            f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}",
+            with_row_limit(
+                f"SELECT DISTINCT {quoted} FROM {qualified} WHERE {quoted} IS NOT NULL",
+                cap + 1,
+                dialect,
+            ),
         )
     except Exception as exc:
         # Falling back to the row sample's top-N is a fine outcome, but a probe
@@ -436,13 +441,18 @@ def probe_ascending_distinct_values(
     """
     if _sampling_breaker.is_open(connector):
         return None
-    quoted = quoted_identifier(column_name, getattr(connector, "dialect", None))
+    dialect = getattr(connector, "dialect", None)
+    quoted = quoted_identifier(column_name, dialect)
     qualified = connector.qualify(schema_name, table_name)
     try:
         df = execute_capped(
             connector,
-            f"SELECT DISTINCT {quoted} FROM {qualified} WHERE {quoted} IS NOT NULL "
-            f"ORDER BY {quoted} LIMIT {KEY_DISTINCT_VALUES_LIMIT}",
+            with_row_limit(
+                f"SELECT DISTINCT {quoted} FROM {qualified} "
+                f"WHERE {quoted} IS NOT NULL ORDER BY {quoted}",
+                KEY_DISTINCT_VALUES_LIMIT,
+                dialect,
+            ),
         )
     except Exception as exc:
         _sampling_breaker.record_failure(connector, exc)
@@ -576,7 +586,11 @@ def calculate_columns_profiling(
     try:
         df = execute_capped(
             connector,
-            f"SELECT {select_list} FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}",
+            with_row_limit(
+                f"SELECT {select_list} FROM {qualified}",
+                _PROFILING_SAMPLE_LIMIT,
+                getattr(connector, "dialect", None),
+            ),
         )
     except Exception as exc:
         _sampling_breaker.record_failure(connector, exc)
