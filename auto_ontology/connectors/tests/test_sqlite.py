@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -234,7 +235,7 @@ def test_table_info_fallback_when_table_xinfo_returns_empty(
     assert legacy_cols["ordinal_position"].tolist() == [1, 2]
 
 
-def test_quoted_relation_names(tmp_path) -> None:
+def test_quoted_relation_names(tmp_path: Path) -> None:
     path = tmp_path / "quoted.sqlite"
     conn = sqlite3.connect(path)
     conn.executescript(
