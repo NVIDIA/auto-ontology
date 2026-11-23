@@ -21,6 +21,7 @@ and the rows without parsing prose.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -195,13 +196,19 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
         steps = 0
 
         try:
-            async with client.stream(
-                "POST",
-                "/api/chat/completions",
-                json=body,
-                headers={"Accept": "text/event-stream"},
-                timeout=settings.chat_timeout_s,
-            ) as response:
+            # httpx's timeout is per read, and the backend sends a ": ping"
+            # every 0.25s while a run is pending, so only a deadline on the
+            # whole run stops it waiting forever.
+            async with (
+                asyncio.timeout(settings.chat_timeout_s),
+                client.stream(
+                    "POST",
+                    "/api/chat/completions",
+                    json=body,
+                    headers={"Accept": "text/event-stream"},
+                    timeout=settings.chat_timeout_s,
+                ) as response,
+            ):
                 await _raise_for_status(response)
 
                 async for line in response.aiter_lines():
@@ -226,7 +233,7 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
                         raise ToolError(
                             f"Auto Ontology agent failed: {event.get('message') or 'unknown'}"
                         )
-        except httpx.TimeoutException as exc:
+        except (httpx.TimeoutException, TimeoutError) as exc:
             raise ToolError(
                 f"Auto Ontology did not answer within {settings.chat_timeout_s:.0f}s. "
                 "Raise AUTO_ONTOLOGY_MCP_CHAT_TIMEOUT_S, or ask a narrower question."

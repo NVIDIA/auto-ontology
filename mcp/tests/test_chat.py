@@ -257,6 +257,23 @@ def test_names_the_knob_when_a_run_times_out() -> None:
         _call(_server(handler, chat_timeout_s=5.0), {"question": "q"})
 
 
+def test_heartbeats_do_not_extend_the_run_past_its_timeout() -> None:
+    # The backend writes ": ping" every 0.25s while a run is pending, so a
+    # per-read timeout never fires; the limit has to cover the whole run.
+    async def heartbeats() -> Any:
+        for _ in range(60):  # 3s of pings, then the stream ends with no result
+            yield b": ping\n\n"
+            await asyncio.sleep(0.05)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=heartbeats(), headers={"content-type": "text/event-stream"}
+        )
+
+    with pytest.raises(ToolError, match="did not answer within 1s"):
+        _call(_server(handler, chat_timeout_s=1.0), {"question": "q"})
+
+
 def test_sends_only_the_question_when_nothing_else_is_given() -> None:
     # conversation_id changes backend behaviour and permissions; sending it as
     # a null is not the same as omitting it.
