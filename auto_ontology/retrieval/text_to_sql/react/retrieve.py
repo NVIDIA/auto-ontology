@@ -105,7 +105,6 @@ _NAME_SEARCH_LIMIT = 10
 _TERM_TABLE_LIMIT = 3
 _JOIN_PAIRS_PER_CALL = 10
 _MAX_DESCRIPTION_CHARS = 160
-_MAX_DEFINITION_CHARS = 500
 _MAX_SAMPLE_VALUES = 5
 
 # A word the model most likely copied from a schema rather than wrote in
@@ -457,12 +456,12 @@ def _definition_block(hit: dict) -> str | None:
         if description:
             line += f" — {description}"
         if hit.get("sql"):
-            line += f"\n  SQL: {_clip(hit['sql'], _MAX_DEFINITION_CHARS)}"
+            line += f"\n  SQL: {hit['sql']}"
         return line
     if label == Labels.CUSTOM_ANALYSIS:
         line = f"ANALYSIS {name}" + (f" — {description}" if description else "")
         if hit.get("sql"):
-            line += f"\n  SQL: {_clip(hit['sql'], _MAX_DEFINITION_CHARS)}"
+            line += f"\n  SQL: {hit['sql']}"
         return line
     return None
 
@@ -514,20 +513,6 @@ def _sql_tables(sql: str | None) -> set[tuple[str | None, str | None]]:
         for statement in statements
         if statement is not None
         for table in statement.find_all(exp.Table)
-    }
-
-
-def _tables_in_view(sql: str | None) -> set[tuple[str | None, str | None]]:
-    """The tables a definition's SQL names *and* the model is shown.
-
-    The SQL is clipped for display (see :func:`_definition_block`), so a table
-    named only past the cut was never seen and must not count as in view.
-    """
-    shown = _clip(sql, _MAX_DEFINITION_CHARS).lower()
-    return {
-        (schema, name)
-        for schema, name in _sql_tables(sql)
-        if name and re.search(rf"(?<![\w$]){re.escape(name.lower())}(?![\w$])", shown)
     }
 
 
@@ -776,7 +761,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             for line, tables in sibling_lines(ctx, new_tables)
         ]
     definitions = [
-        (block, _tables_in_view(hit.get("sql")))
+        (block, _sql_tables(hit.get("sql")))
         for hit in hits
         if (block := _definition_block(hit)) is not None
     ]

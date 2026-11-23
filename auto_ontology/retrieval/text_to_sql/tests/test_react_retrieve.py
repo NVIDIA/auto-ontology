@@ -710,7 +710,7 @@ def test_a_quoted_table_name_ending_in_punctuation_is_in_view(
     assert not ctx.was_shown("finance", "refunds")
 
 
-def test_a_table_named_only_past_the_clipped_sql_is_not_in_view(
+def test_a_table_named_after_500_characters_in_saved_sql_is_in_view(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     padding = ", ".join(f"c{i}" for i in range(300))
@@ -719,16 +719,16 @@ def test_a_table_named_only_past_the_clipped_sql_is_not_in_view(
         "JOIN finance.hidden_ledger h ON h.id = r.id"
     )
     assert long_sql.index("hidden_ledger") > 500
-    clipped = {**REVENUE, "sql": long_sql}
+    analysis = {**REVENUE, "sql": long_sql}
     monkeypatch.setattr(
-        tool, "_get_candidates_information", lambda *a, **k: [dict(clipped)]
+        tool, "_get_candidates_information", lambda *a, **k: [dict(analysis)]
     )
     ctx = _ctx()
 
     text = tool.retrieve(ctx, "refunds")
 
-    assert "hidden_ledger" not in text
-    assert not ctx.was_shown("finance", "hidden_ledger")
+    assert long_sql in text
+    assert ctx.was_shown("finance", "hidden_ledger")
 
 
 ORDERS_ARCHIVE = {
