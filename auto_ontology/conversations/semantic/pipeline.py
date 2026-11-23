@@ -358,6 +358,14 @@ def populate_conversation_graph(
     _check_writable(graph.nodes)
     name_of = {normalise_name(node.name): node for node in graph.nodes}
 
+    # A reset wipes both collections at the embed, so there is nothing to find.
+    stale_nodes, stale_paths = (
+        ([], [])
+        if reset_vectors
+        else _stale_vectors(
+            database_name=database_name, conversation_id=conversation_id
+        )
+    )
     node_ids = semantic_store.replace_graph(
         database_name=database_name,
         conversation_id=conversation_id,
@@ -397,6 +405,12 @@ def populate_conversation_graph(
             for edge in graph.edges
         ],
     )
+    # After the write rather than before it: a failed write rolls back to the
+    # old graph, which still needs its vectors.
+    if stale_nodes or stale_paths:
+        _forget_vectors(
+            database_name=database_name, node_ids=stale_nodes, path_ids=stale_paths
+        )
 
     # The ids that landed, paired back with the fields derivation reads.
     stored = [
@@ -573,6 +587,57 @@ def _forget_paths(*, database_name: str, nodes: list[dict]) -> None:
         )
         return
     logger.info("Dropped %d path vector(s) of the edges being replaced.", len(stale))
+
+
+def _stale_vectors(
+    *, database_name: str, conversation_id: str
+) -> tuple[list[str], list[str]]:
+    """The node and path vector ids of the graph a rebuild is about to replace.
+
+    ``replace_graph`` gives every node a new id, so nothing the next embed
+    writes overwrites these; left behind, they match rows that no longer exist.
+    Read before the write, because a path's id is composed from its endpoints
+    and there is no way back to it afterwards.
+    """
+    from auto_ontology.conversations.semantic.paths import path_rows
+
+    nodes = semantic_store.fetch_nodes(database_name, conversation_id=conversation_id)
+    if not nodes:
+        return [], []
+    ids = [str(row["id"]) for row in nodes]
+    paths = [row["id"] for row in path_rows(nodes, semantic_store.fetch_edges(ids))]
+    return ids, paths
+
+
+def _forget_vectors(
+    *, database_name: str, node_ids: list[str], path_ids: list[str]
+) -> None:
+    """Delete the vectors :func:`_stale_vectors` found, by id.
+
+    By id rather than by resetting the collections, for the reason
+    :func:`_forget_paths` gives: other transcripts share the ``database_name``.
+    """
+    from auto_ontology.vdb import get_conversation_semantic_vdb, get_one_hop_path_vdb
+
+    for what, factory, stale in (
+        ("node", get_conversation_semantic_vdb, node_ids),
+        ("path", get_one_hop_path_vdb, path_ids),
+    ):
+        if not stale:
+            continue
+        try:
+            vdb = factory(database_name=database_name)
+            for vector_id in stale:
+                vdb.delete_by_id(vector_id)
+        except Exception:
+            logger.exception(
+                "Could not drop %d stale %s vector(s) -- retrieval may still "
+                "match rows the rebuild replaced.",
+                len(stale),
+                what,
+            )
+            continue
+        logger.info("Dropped %d %s vector(s) of the replaced graph.", len(stale), what)
 
 
 def _check_writable(nodes: list) -> None:
