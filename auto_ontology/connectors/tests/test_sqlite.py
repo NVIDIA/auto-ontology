@@ -14,6 +14,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -235,7 +236,7 @@ def test_table_info_fallback_when_table_xinfo_returns_empty(
     assert legacy_cols["ordinal_position"].tolist() == [1, 2]
 
 
-def test_close_releases_worker_connections(tmp_path) -> None:
+def test_close_releases_worker_connections(tmp_path: Path) -> None:
     path = tmp_path / "workers.sqlite"
     sqlite3.connect(path).close()
     db = SQLiteDatabase(str(path))
