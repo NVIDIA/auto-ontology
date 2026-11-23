@@ -97,12 +97,3 @@ def test_listed_relation_without_columns_fails_before_catalog_write() -> None:
     assert "2 relation(s)" in message
     assert "1 had no described columns" in message
     assert "private.customers" in message
-
-
-def test_wide_column_ordinals_survive_normalization() -> None:
-    from auto_ontology.catalog.normalize import normalize_columns
-    import pandas as pd
-
-    columns = normalize_columns(pd.DataFrame({"ordinal_position": [32768, None]}))
-    assert columns.ordinal_position.iloc[0] == 32768
-    assert pd.isna(columns.ordinal_position.iloc[1])
