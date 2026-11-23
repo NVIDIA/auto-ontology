@@ -12,6 +12,7 @@
 
 import { TagItemType } from '@/enums/tags';
 import type { TagItem } from '@/types/tags';
+import { termHref } from '@/lib/termHref';
 
 const focusUrl = (page: string, focusId: string): string =>
 	`${page}?focus=${encodeURIComponent(focusId)}`;
@@ -30,12 +31,14 @@ const catalogPath = (...ids: (string | null)[]): string | null =>
 
 /**
  * An attribute, whose page is a section of its term's and so needs both ids:
- * the term in `focus`, the attribute in the param that says which kind it is.
+ * the term, and the attribute under the param that says which kind it is.
  */
-const attributePath = (param: string, termId: string | null, attrId: string): string | null =>
-	termId == null || termId === ''
-		? null
-		: `${focusUrl('/terms', termId)}&${param}=${encodeURIComponent(attrId)}`;
+const attributePath = (
+	param: 'sqlAttr' | 'colAttr',
+	termId: string | null,
+	attrId: string,
+): string | null =>
+	termId == null || termId === '' ? null : termHref(termId, { [param]: attrId });
 
 /**
  * The page for one tagged object, or null when there is nowhere to send.
@@ -49,7 +52,7 @@ const attributePath = (param: string, termId: string | null, attrId: string): st
 export const tagItemPath = (item: TagItem): string | null => {
 	switch (item.type) {
 		case TagItemType.Term:
-			return focusUrl('/terms', item.id);
+			return termHref(item.id);
 		case TagItemType.Table:
 			return catalogPath(item.database_id, item.schema_id, item.id);
 		case TagItemType.Column:

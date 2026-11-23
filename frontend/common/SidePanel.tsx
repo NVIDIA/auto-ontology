@@ -18,6 +18,7 @@ import { AUTO_GENERATED_LABEL } from '@/constants/tags';
 import { Size, ButtonTheme } from '@/enums/button';
 import { ownerChoices } from '@/lib/owners';
 import { ownerQueries } from '@/lib/queries/owners';
+import { SectionTitle } from '@/common/SectionChrome';
 import type {
 	ComposerEntityTagsSection,
 	ComposerOwnerOption,
@@ -104,16 +105,21 @@ const useLiveOwnerOptions = (section: ComposerOwnerSection): ComposerOwnerOption
 };
 
 const PanelBlock = ({
+	id,
 	title,
 	editing = false,
 	children,
 }: {
+	/** Section id the title row's controls are keyed by; defaults to the title. */
+	id?: string;
 	title: string;
 	editing?: boolean;
 	children: ReactNode;
 }) => (
 	<section className="min-w-0">
-		<h2 className="mb-2 text-sm font-semibold text-heading dark:text-zinc-100">{title}</h2>
+		<div className="mb-2 flex min-w-0 items-center">
+			<SectionTitle id={id ?? title}>{title}</SectionTitle>
+		</div>
 		<div
 			className={`min-w-0 rounded-lg border bg-white p-3.5 dark:bg-zinc-950 ${
 				editing
@@ -210,7 +216,7 @@ const OwnerBulk = ({
 	const canEdit = editing && section.editable !== false;
 	const owner = options.find((option) => option.id === section.ownerId);
 	return (
-		<PanelBlock title={section.title} editing={canEdit}>
+		<PanelBlock id={section.id} title={section.title} editing={canEdit}>
 			{canEdit ? (
 				<OwnerEditor section={section} options={options} onChange={onChange} />
 			) : (
@@ -312,7 +318,7 @@ const TagBulk = ({
 }) => {
 	const canEdit = editing && section.editable !== false;
 	return (
-		<PanelBlock title={section.title} editing={canEdit}>
+		<PanelBlock id={section.id} title={section.title} editing={canEdit}>
 			{canEdit ? (
 				<TagEditor section={section} onChange={onChange} />
 			) : (
@@ -328,7 +334,8 @@ export const SidePanel = ({
 	onChange,
 }: {
 	bulks: SidePanelBulk[];
-	isEditing: boolean;
+	/** Whole panel at once, or per section id (owner, tags). */
+	isEditing: boolean | ((sectionId: string) => boolean);
 	onChange: (id: string, value: string | string[]) => void;
 }) => (
 	<div className="flex w-full min-w-0 flex-col gap-5 px-4 py-5">
@@ -338,7 +345,9 @@ export const SidePanel = ({
 					<OwnerBulk
 						key={bulk.section.id}
 						section={bulk.section}
-						editing={isEditing}
+						editing={
+							typeof isEditing === 'function' ? isEditing(bulk.section.id) : isEditing
+						}
 						onChange={onChange}
 					/>
 				);
@@ -348,7 +357,9 @@ export const SidePanel = ({
 					<TagBulk
 						key={bulk.section.id}
 						section={bulk.section}
-						editing={isEditing}
+						editing={
+							typeof isEditing === 'function' ? isEditing(bulk.section.id) : isEditing
+						}
 						onChange={onChange}
 					/>
 				);

@@ -53,6 +53,8 @@ import { HoverNodeCard } from './HoverNodeCard';
 import { ActiveDataCard, buildDataGraph } from './ExplorationData';
 import { ExplorationLoader } from './ExplorationLoader';
 import { ActiveTermCard, buildSemanticGraph } from './ExplorationSemantic';
+import { TermSearch } from './TermSearch';
+import { TermsView } from '@/components/termsPage';
 
 const EMPTY_GRAPH: ExplorationGraph = { nodes: [], links: [] };
 
@@ -594,7 +596,7 @@ export const ExplorationView = () => {
 						kind: 'term',
 						name: term.name,
 						description: term.description,
-						viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
+						viewHref: `/exploration?semanticId=${encodeURIComponent(term.id)}`,
 					});
 				});
 
@@ -735,7 +737,7 @@ export const ExplorationView = () => {
 					kind: 'term',
 					name: relatedTermNode.name,
 					description: relatedTermNode.description,
-					viewHref: `/terms?focus=${encodeURIComponent(relatedTermNode.id)}`,
+					viewHref: `/exploration?semanticId=${encodeURIComponent(relatedTermNode.id)}`,
 				});
 			});
 
@@ -765,7 +767,7 @@ export const ExplorationView = () => {
 								? catalogPathFromFocusId(
 										`${attribute.primary_column.db_id}|${attribute.primary_column.schema_id}|${attribute.primary_column.table_id}|${attribute.primary_column.id}`,
 									)
-								: `/terms?focus=${encodeURIComponent(termEntity.id)}`,
+								: `/exploration?semanticId=${encodeURIComponent(termEntity.id)}`,
 						// Carried through so `expandColumnAttributeNode` can graft
 						// this attribute's own `HAS_ATTRIBUTE` Column on without a
 						// second request — `undefined` (and so unexpandable) when
@@ -799,7 +801,7 @@ export const ExplorationView = () => {
 						description: attribute.description,
 						// No catalog Column backs a SqlAttribute (it's computed, not
 						// stored) — the only place to view it further is the Term.
-						viewHref: `/terms?focus=${encodeURIComponent(termEntity.id)}`,
+						viewHref: `/exploration?semanticId=${encodeURIComponent(termEntity.id)}`,
 					});
 				});
 			}
@@ -977,7 +979,7 @@ export const ExplorationView = () => {
 					kind: 'term',
 					name: term.name ?? '',
 					description: term.description,
-					viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
+					viewHref: `/exploration?semanticId=${encodeURIComponent(term.id)}`,
 				});
 			}
 
@@ -1273,7 +1275,7 @@ export const ExplorationView = () => {
 					kind: 'term',
 					name: term.name ?? '',
 					description: term.description,
-					viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
+					viewHref: `/exploration?semanticId=${encodeURIComponent(term.id)}`,
 				});
 			}
 
@@ -1462,7 +1464,7 @@ export const ExplorationView = () => {
 						// `sql` entity reusing its parent attribute's `viewHref`.
 						viewHref:
 							attribute.term_id != null
-								? `/terms?focus=${encodeURIComponent(attribute.term_id)}`
+								? `/exploration?semanticId=${encodeURIComponent(attribute.term_id)}`
 								: sqlEntity.viewHref,
 					});
 				});
@@ -1966,6 +1968,15 @@ export const ExplorationView = () => {
 		setHoveredNodePosition(hoveredNode);
 	}, []);
 
+	// A node opened by URL rather than by a click on the canvas — a deep link,
+	// or a Related Terms chip in the term panel — is brought into view too.
+	// `focusNode` is a no-op for an id the graph didn't load.
+	useEffect(() => {
+		if (controller != null && activeNodeIdFromUrl != null) {
+			controller.focusNode(activeNodeIdFromUrl);
+		}
+	}, [controller, activeNodeIdFromUrl]);
+
 	const graph = layer === ExplorationLayer.Semantic ? semanticGraph : dataGraph;
 	const loading = layer === ExplorationLayer.Semantic ? semanticLoading : dataLoading;
 	const error = layer === ExplorationLayer.Semantic ? semanticError : dataError;
@@ -1990,6 +2001,12 @@ export const ExplorationView = () => {
 				: null,
 		[activeNode, activeNodeId, expandedNodesById],
 	);
+	// On the Semantic layer the selected term's full detail opens beside the
+	// graph. That includes a term picked from search that the capped graph
+	// didn't load, which has no node to highlight but still has a detail page.
+	// A grafted expansion node (a column, a SQL attribute…) keeps its own card.
+	const termPanelId =
+		layer === ExplorationLayer.Semantic && activeExpansionEntity == null ? activeNodeId : null;
 	// A Term expansion entity (see `expandTableNode`) only ever carries its
 	// bare name/description — `semanticGraph` is loaded unconditionally up
 	// front regardless of `layer` (see the effect above) and already has the
@@ -2125,207 +2142,197 @@ export const ExplorationView = () => {
 		'bg-[radial-gradient(circle,#e4e4e7_1px,transparent_1px)] bg-[size:8px_8px] dark:bg-[radial-gradient(circle,#3f3f46_1px,transparent_1px)]';
 
 	return (
-		<main
-			className={`relative h-full min-h-0 w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950 ${graphBackground}`}
-		>
-			{/* `pointer-events-none` on the row (re-enabled per child below) so the
+		<div className="flex h-full min-h-0 w-full overflow-hidden">
+			<main
+				className={`relative h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-zinc-50 dark:bg-zinc-950 ${graphBackground}`}
+			>
+				{/* `pointer-events-none` on the row (re-enabled per child below) so the
 			empty space `justify-between` leaves in the middle of this strip lets
 			clicks/drags on the canvas through to Sigma instead of being swallowed
 			by this absolutely-positioned row's own invisible hit box — otherwise
 			any node whose top edge falls under this strip becomes undraggable. */}
-			<div className="pointer-events-none absolute left-4 right-4 top-4 z-20 flex items-start justify-between gap-4">
-				<div className="pointer-events-auto flex items-start gap-2">
-					<div className="relative w-72">
-						<SearchInput
-							value={search}
-							onChange={setSearch}
-							placeholder={
-								layer === ExplorationLayer.Semantic
-									? 'Search terms…'
-									: 'Search data objects…'
-							}
-							aria-label={
-								layer === ExplorationLayer.Semantic
-									? 'Search terms in exploration'
-									: 'Search data objects in exploration'
-							}
-							className="h-10 bg-white shadow-md dark:bg-zinc-900"
-						/>
-						{filteredNodes.length > 0 && (
-							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-								{filteredNodes.map((node) => (
-									<li key={node.id}>
-										<SelectButton
-											theme={SelectButtonTheme.ListItem}
-											onClick={() => {
-												setSearch('');
-												handleSelectNode(node.id);
-											}}
-										>
-											<Icon
-												name={
-													node.layer === ExplorationLayer.Semantic
-														? IconName.Terms
-														: catalogNodeInfo[node.nodeType].icon
-												}
-												className={`h-4 w-4 shrink-0 ${
-													node.layer === ExplorationLayer.Semantic
-														? 'text-[#76b900]'
-														: 'text-[#3b82b6]'
-												}`}
-											/>
-											<Text text={node.name} />
-										</SelectButton>
-									</li>
-								))}
-							</ul>
+				<div className="pointer-events-none absolute left-4 right-4 top-4 z-20 flex items-start justify-between gap-4">
+					<div className="pointer-events-auto flex items-start gap-2">
+						{layer === ExplorationLayer.Semantic ? (
+							<TermSearch onPick={handleSelectNode} />
+						) : (
+							<div className="relative w-72">
+								<SearchInput
+									value={search}
+									onChange={setSearch}
+									placeholder="Search data objects…"
+									aria-label="Search data objects in exploration"
+									className="h-10 bg-white shadow-md dark:bg-zinc-900"
+								/>
+								{filteredNodes.length > 0 && (
+									<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+										{filteredNodes.map((node) => (
+											<li key={node.id}>
+												<SelectButton
+													theme={SelectButtonTheme.ListItem}
+													onClick={() => {
+														setSearch('');
+														handleSelectNode(node.id);
+													}}
+												>
+													<Icon
+														name={
+															node.layer === ExplorationLayer.Semantic
+																? IconName.Terms
+																: catalogNodeInfo[node.nodeType]
+																		.icon
+														}
+														className={`h-4 w-4 shrink-0 ${
+															node.layer === ExplorationLayer.Semantic
+																? 'text-[#76b900]'
+																: 'text-[#3b82b6]'
+														}`}
+													/>
+													<Text text={node.name} />
+												</SelectButton>
+											</li>
+										))}
+									</ul>
+								)}
+							</div>
 						)}
+						<ViewToggle layer={layer} onToggle={handleToggleLayer} />
 					</div>
-					<ViewToggle layer={layer} onToggle={handleToggleLayer} />
-				</div>
-				<div className="pointer-events-auto flex items-start gap-2">
-					<DatabaseFilter
-						selected={selectedDatabaseId}
-						onChange={handleDatabaseFilterChange}
-					/>
-					<ZoomControls controller={controller} />
-				</div>
-			</div>
-
-			{loading && <ExplorationLoader overlay />}
-
-			{!loading && error != null && (
-				<div className="flex h-full items-center justify-center px-6 text-center">
-					<div className="rounded-xl border border-red-200 bg-white px-8 py-6 text-sm text-red-700 shadow-lg dark:border-red-900/50 dark:bg-zinc-900 dark:text-red-300">
-						Couldn&apos;t load exploration: {error}
+					<div className="pointer-events-auto flex items-start gap-2">
+						<DatabaseFilter
+							selected={selectedDatabaseId}
+							onChange={handleDatabaseFilterChange}
+						/>
+						<ZoomControls controller={controller} />
 					</div>
 				</div>
-			)}
 
-			{!loading && error == null && graph.nodes.length === 0 && (
-				<EmptyState
-					variant={EmptyStateVariant.Borderless}
-					icon={IconName.Exploration}
-					title={
-						layer === ExplorationLayer.Semantic
-							? selectedDatabaseId !== null
-								? 'No Terms Match This Filter'
-								: 'No Terms Created Yet'
-							: selectedDatabaseId !== null
-								? 'No Data Objects Match This Filter'
-								: 'No Data Objects Found'
-					}
-				/>
-			)}
+				{loading && <ExplorationLoader overlay />}
 
-			{!loading && error == null && graph.nodes.length > 0 && (
-				<GraphCanvas
-					graph={graph}
-					activeNodeId={activeNodeId}
-					highlightedPath={highlightedPath}
-					onSelectNode={handleSelectNode}
-					onSelectEdge={handleSelectEdge}
-					onClickNode={handleSelectNode}
-					onDoubleClickNode={handleDoubleClickNode}
-					onHoverNode={handleHoverNode}
-					onControllerChange={handleControllerChange}
-				/>
-			)}
+				{!loading && error != null && (
+					<div className="flex h-full items-center justify-center px-6 text-center">
+						<div className="rounded-xl border border-red-200 bg-white px-8 py-6 text-sm text-red-700 shadow-lg dark:border-red-900/50 dark:bg-zinc-900 dark:text-red-300">
+							Couldn&apos;t load exploration: {error}
+						</div>
+					</div>
+				)}
 
-			{hoveredNode != null && hoveredNodePosition != null && (
-				<HoverNodeCard
-					node={hoveredNode}
-					x={hoveredNodePosition.x}
-					y={hoveredNodePosition.y}
-				/>
-			)}
-
-			{activeNode?.layer === ExplorationLayer.Semantic && (
-				<ActiveTermCard
-					key={activeNode.id}
-					node={activeNode}
-					onClose={() => handleSelectNode(null)}
-					onView={() => router.push(`/terms?focus=${encodeURIComponent(activeNode.id)}`)}
-					onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
-					onShowColumnAttributes={() => setColumnAttributesNodeId(activeNode.id)}
-					onShowSqlAttributes={() => setSqlAttributesNodeId(activeNode.id)}
-				/>
-			)}
-
-			{activeNode?.layer === ExplorationLayer.Data && (
-				<ActiveDataCard
-					key={activeNode.id}
-					node={activeNode}
-					onClose={() => handleSelectNode(null)}
-					onView={() =>
-						router.push(
-							`/data?focus=${encodeURIComponent(
-								`${activeNode.databaseId}|${activeNode.schemaId}|${activeNode.id}`,
-							)}`,
-						)
-					}
-					onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
-					onShowColumns={() => setDataDetailsType('columns')}
-					onShowQueries={() => setDataDetailsType('queries')}
-					onShowTerms={() => setDataDetailsType('terms')}
-				/>
-			)}
-
-			{activeNode == null && activeExpansionTermNode != null && (
-				<ActiveTermCard
-					key={activeExpansionTermNode.id}
-					node={activeExpansionTermNode}
-					onClose={() => handleSelectNode(null)}
-					onView={() =>
-						router.push(
-							`/terms?focus=${encodeURIComponent(activeExpansionTermNode.id)}`,
-						)
-					}
-					onShowRelationships={() => setRelationshipsNodeId(activeExpansionTermNode.id)}
-					onShowColumnAttributes={() =>
-						setColumnAttributesNodeId(activeExpansionTermNode.id)
-					}
-					onShowSqlAttributes={() => setSqlAttributesNodeId(activeExpansionTermNode.id)}
-				/>
-			)}
-
-			{activeNode == null &&
-				activeExpansionTermNode == null &&
-				activeExpansionEntity != null && (
-					<ActiveExpansionCard
-						key={activeExpansionEntity.id}
-						node={activeExpansionEntity}
-						onClose={() => handleSelectNode(null)}
-						onView={() => router.push(activeExpansionEntity.viewHref)}
+				{!loading && error == null && graph.nodes.length === 0 && (
+					<EmptyState
+						variant={EmptyStateVariant.Borderless}
+						icon={IconName.Exploration}
+						title={
+							layer === ExplorationLayer.Semantic
+								? selectedDatabaseId !== null
+									? 'No Terms Match This Filter'
+									: 'No Terms Created Yet'
+								: selectedDatabaseId !== null
+									? 'No Data Objects Match This Filter'
+									: 'No Data Objects Found'
+						}
 					/>
 				)}
 
-			<div className="absolute bottom-4 right-4 z-20 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-				<p className="text-xs text-secondary dark:text-zinc-400">
-					Viewing:{' '}
-					{layer === ExplorationLayer.Semantic ? 'Semantic Objects' : 'Data Objects'}
-				</p>
-				{layer === ExplorationLayer.Semantic ? (
-					<div className="mt-2 flex flex-col gap-1.5">
-						<LegendItem
-							kind="term"
-							icon={IconName.Terms}
-							label="Terms"
-							count={graph.nodes.length}
+				{!loading && error == null && graph.nodes.length > 0 && (
+					<GraphCanvas
+						graph={graph}
+						activeNodeId={activeNodeId}
+						highlightedPath={highlightedPath}
+						onSelectNode={handleSelectNode}
+						onSelectEdge={handleSelectEdge}
+						onClickNode={handleSelectNode}
+						onDoubleClickNode={handleDoubleClickNode}
+						onHoverNode={handleHoverNode}
+						onControllerChange={handleControllerChange}
+					/>
+				)}
+
+				{hoveredNode != null && hoveredNodePosition != null && (
+					<HoverNodeCard
+						node={hoveredNode}
+						x={hoveredNodePosition.x}
+						y={hoveredNodePosition.y}
+					/>
+				)}
+
+				{activeNode?.layer === ExplorationLayer.Data && (
+					<ActiveDataCard
+						key={activeNode.id}
+						node={activeNode}
+						onClose={() => handleSelectNode(null)}
+						onView={() =>
+							router.push(
+								`/data?focus=${encodeURIComponent(
+									`${activeNode.databaseId}|${activeNode.schemaId}|${activeNode.id}`,
+								)}`,
+							)
+						}
+						onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
+						onShowColumns={() => setDataDetailsType('columns')}
+						onShowQueries={() => setDataDetailsType('queries')}
+						onShowTerms={() => setDataDetailsType('terms')}
+					/>
+				)}
+
+				{activeNode == null && activeExpansionTermNode != null && (
+					<ActiveTermCard
+						key={activeExpansionTermNode.id}
+						node={activeExpansionTermNode}
+						onClose={() => handleSelectNode(null)}
+						onView={() =>
+							router.push(
+								`/exploration?semanticId=${encodeURIComponent(activeExpansionTermNode.id)}`,
+							)
+						}
+						onShowRelationships={() =>
+							setRelationshipsNodeId(activeExpansionTermNode.id)
+						}
+						onShowColumnAttributes={() =>
+							setColumnAttributesNodeId(activeExpansionTermNode.id)
+						}
+						onShowSqlAttributes={() =>
+							setSqlAttributesNodeId(activeExpansionTermNode.id)
+						}
+					/>
+				)}
+
+				{activeNode == null &&
+					activeExpansionTermNode == null &&
+					activeExpansionEntity != null && (
+						<ActiveExpansionCard
+							key={activeExpansionEntity.id}
+							node={activeExpansionEntity}
+							onClose={() => handleSelectNode(null)}
+							onView={() => router.push(activeExpansionEntity.viewHref)}
 						/>
-						<div className="flex items-center gap-3">
+					)}
+
+				<div className="absolute bottom-4 right-4 z-20 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+					<p className="text-xs text-secondary dark:text-zinc-400">
+						Viewing:{' '}
+						{layer === ExplorationLayer.Semantic ? 'Semantic Objects' : 'Data Objects'}
+					</p>
+					{layer === ExplorationLayer.Semantic ? (
+						<div className="mt-2 flex flex-col gap-1.5">
 							<LegendItem
-								kind="columnAttribute"
-								icon={IconName.Key}
-								label="Column Attribute"
+								kind="term"
+								icon={IconName.Terms}
+								label="Terms"
+								count={graph.nodes.length}
 							/>
-							<LegendItem
-								kind="sqlAttribute"
-								icon={IconName.ChartLine}
-								label="SQL Attribute"
-							/>
-						</div>
-						{/* A Term's own expansion (see `expandTermNode`) grafts on Data
+							<div className="flex items-center gap-3">
+								<LegendItem
+									kind="columnAttribute"
+									icon={IconName.Key}
+									label="Column Attribute"
+								/>
+								<LegendItem
+									kind="sqlAttribute"
+									icon={IconName.ChartLine}
+									label="SQL Attribute"
+								/>
+							</div>
+							{/* A Term's own expansion (see `expandTermNode`) grafts on Data
 						objects too — its Tables directly, and (via a Table/
 						ColumnAttribute in turn) their Schema/Columns and any Sql query
 						behind a SqlAttribute (which can, in turn, graft the
@@ -2333,105 +2340,124 @@ export const ExplorationView = () => {
 						`expandSqlNode`) — so this legend covers those same five
 						Data-layer kinds here as well, same as the Data-layer section
 						below. */}
-						<div className="flex items-center gap-3">
-							<LegendItem kind="table" icon={IconName.Table} label="Table" />
-							<LegendItem kind="schema" icon={IconName.Schema} label="Schema" />
-							<LegendItem kind="column" icon={IconName.Column} label="Column" />
-						</div>
-						<div className="flex items-center gap-3">
-							<LegendItem kind="sql" icon={IconName.CodeBracket} label="SQL" />
-							<LegendItem
-								kind="customAnalysis"
-								icon={IconName.ChartBar}
-								label="Custom Analysis"
-							/>
-						</div>
-					</div>
-				) : (
-					<div className="mt-2 flex flex-col gap-1.5">
-						<div className="flex items-center gap-3">
-							{[
-								{ type: TableType.BASE_TABLE, label: 'Tables' },
-								{ type: TableType.VIEW, label: 'Views' },
-								{ type: TableType.MATERIALIZED_VIEW, label: 'Materialized' },
-							].map((item) => (
+							<div className="flex items-center gap-3">
+								<LegendItem kind="table" icon={IconName.Table} label="Table" />
+								<LegendItem kind="schema" icon={IconName.Schema} label="Schema" />
+								<LegendItem kind="column" icon={IconName.Column} label="Column" />
+							</div>
+							<div className="flex items-center gap-3">
+								<LegendItem kind="sql" icon={IconName.CodeBracket} label="SQL" />
 								<LegendItem
-									key={item.type}
-									kind="table"
-									icon={catalogNodeInfo[item.type].icon}
-									label={item.label}
-									count={dataLayerTableTypeCounts?.[item.type] ?? 0}
+									kind="customAnalysis"
+									icon={IconName.ChartBar}
+									label="Custom Analysis"
 								/>
-							))}
+							</div>
 						</div>
-						<div className="flex items-center gap-3">
-							<LegendItem kind="schema" icon={IconName.Schema} label="Schema" />
-							<LegendItem kind="column" icon={IconName.Column} label="Column" />
-							<LegendItem kind="sql" icon={IconName.CodeBracket} label="SQL" />
-							<LegendItem
-								kind="customAnalysis"
-								icon={IconName.ChartBar}
-								label="Custom Analysis"
-							/>
-						</div>
-						{/* A Table's own expansion (see `expandTableNode`) grafts on
+					) : (
+						<div className="mt-2 flex flex-col gap-1.5">
+							<div className="flex items-center gap-3">
+								{[
+									{ type: TableType.BASE_TABLE, label: 'Tables' },
+									{ type: TableType.VIEW, label: 'Views' },
+									{ type: TableType.MATERIALIZED_VIEW, label: 'Materialized' },
+								].map((item) => (
+									<LegendItem
+										key={item.type}
+										kind="table"
+										icon={catalogNodeInfo[item.type].icon}
+										label={item.label}
+										count={dataLayerTableTypeCounts?.[item.type] ?? 0}
+									/>
+								))}
+							</div>
+							<div className="flex items-center gap-3">
+								<LegendItem kind="schema" icon={IconName.Schema} label="Schema" />
+								<LegendItem kind="column" icon={IconName.Column} label="Column" />
+								<LegendItem kind="sql" icon={IconName.CodeBracket} label="SQL" />
+								<LegendItem
+									kind="customAnalysis"
+									icon={IconName.ChartBar}
+									label="Custom Analysis"
+								/>
+							</div>
+							{/* A Table's own expansion (see `expandTableNode`) grafts on
 						Semantic objects too — its linked Terms directly, and (via a
 						Term in turn) their Column/SQL Attributes — so this legend
 						covers those same three Semantic-layer kinds here as well,
 						same as the Semantic-layer section above. */}
-						<div className="flex items-center gap-3">
-							<LegendItem kind="term" icon={IconName.Terms} label="Term" />
-							<LegendItem
-								kind="columnAttribute"
-								icon={IconName.Key}
-								label="Column Attribute"
-							/>
-							<LegendItem
-								kind="sqlAttribute"
-								icon={IconName.ChartLine}
-								label="SQL Attribute"
-							/>
+							<div className="flex items-center gap-3">
+								<LegendItem kind="term" icon={IconName.Terms} label="Term" />
+								<LegendItem
+									kind="columnAttribute"
+									icon={IconName.Key}
+									label="Column Attribute"
+								/>
+								<LegendItem
+									kind="sqlAttribute"
+									icon={IconName.ChartLine}
+									label="SQL Attribute"
+								/>
+							</div>
 						</div>
-					</div>
-				)}
-			</div>
+					)}
+				</div>
 
-			{activeSemanticConnectionEntity != null && (
-				<ActiveExpansionCard
-					key={selectedSemanticEdgeId}
-					node={activeSemanticConnectionEntity}
-					onClose={() => {
-						// Closing the card only deselects/un-highlights this
-						// connection — same as closing a node's own card
-						// (`handleSelectNode(null)`) never collapses that
-						// node's expansion. Collapsing a connection is only
-						// ever the explicit toggle in `handleSelectEdge`
-						// (clicking the same edge again).
-						setSelectedSemanticEdgeId(null);
-						setHighlightedPath(null);
-					}}
-					onView={() => {}}
+				{activeSemanticConnectionEntity != null && (
+					<ActiveExpansionCard
+						key={selectedSemanticEdgeId}
+						node={activeSemanticConnectionEntity}
+						onClose={() => {
+							// Closing the card only deselects/un-highlights this
+							// connection — same as closing a node's own card
+							// (`handleSelectNode(null)`) never collapses that
+							// node's expansion. Collapsing a connection is only
+							// ever the explicit toggle in `handleSelectEdge`
+							// (clicking the same edge again).
+							setSelectedSemanticEdgeId(null);
+							setHighlightedPath(null);
+						}}
+						onView={() => {}}
+					/>
+				)}
+				<RelationshipsModal
+					node={relationshipsNode}
+					onClose={() => setRelationshipsNodeId(null)}
+					onFocus={handleSelectNode}
+					focusableNodeIds={graphNodeIds}
 				/>
+				<DataDetailsModal
+					target={activeNode?.layer === ExplorationLayer.Data ? activeNode : null}
+					type={dataDetailsType}
+					onClose={() => setDataDetailsType(null)}
+				/>
+				<ColumnAttributesModal
+					term={columnAttributesNode}
+					onClose={() => setColumnAttributesNodeId(null)}
+				/>
+				<SqlAttributesModal
+					term={sqlAttributesNode}
+					onClose={() => setSqlAttributesNodeId(null)}
+				/>
+			</main>
+			{termPanelId != null && (
+				<aside
+					aria-label="Term details"
+					className="relative flex h-full w-[520px] max-w-[50%] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+				>
+					<button
+						type="button"
+						aria-label="Close term details"
+						onClick={() => handleSelectNode(null)}
+						className="absolute right-3 top-3 z-10 rounded p-1 text-secondary hover:bg-zinc-100 hover:text-heading dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					>
+						<Icon name={IconName.Close} className="h-4 w-4" />
+					</button>
+					<div className="flex min-h-0 flex-1 flex-col">
+						<TermsView />
+					</div>
+				</aside>
 			)}
-			<RelationshipsModal
-				node={relationshipsNode}
-				onClose={() => setRelationshipsNodeId(null)}
-				onFocus={handleSelectNode}
-				focusableNodeIds={graphNodeIds}
-			/>
-			<DataDetailsModal
-				target={activeNode?.layer === ExplorationLayer.Data ? activeNode : null}
-				type={dataDetailsType}
-				onClose={() => setDataDetailsType(null)}
-			/>
-			<ColumnAttributesModal
-				term={columnAttributesNode}
-				onClose={() => setColumnAttributesNodeId(null)}
-			/>
-			<SqlAttributesModal
-				term={sqlAttributesNode}
-				onClose={() => setSqlAttributesNodeId(null)}
-			/>
-		</main>
+		</div>
 	);
 };

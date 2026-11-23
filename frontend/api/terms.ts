@@ -11,6 +11,7 @@ import type {
 	Term,
 	TermCount,
 	TermDetail,
+	TermSearchResult,
 } from '@/types/terms';
 import type { PageParams, ResponseWithError } from './types';
 
@@ -87,7 +88,18 @@ export type TermsListParams = PageParams & {
 	query?: string;
 };
 
+type SearchResult = {
+	data: TermSearchResult[];
+	count: number;
+	/** False when the embedding service failed and only name matches came back. */
+	semantic: boolean;
+};
+type SearchResponse = ResponseWithError<SearchResult>;
+
 export const termsApi = {
+	/** Terms by name, then by meaning, for a search box's dropdown. */
+	search: (q: string, limit = 10): Promise<SearchResponse> =>
+		requests.get<SearchResult>('terms/search', { q, limit }),
 	list: (params?: TermsListParams): Promise<ListResponse> =>
 		requests.get<ListResult>('terms', {
 			...(params?.query ? { query: params.query } : {}),

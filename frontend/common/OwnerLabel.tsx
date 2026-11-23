@@ -14,6 +14,41 @@ const initials = (name: string): string => {
 	return letters.join('').toUpperCase() || '?';
 };
 
+/** Just the owner's circle: initials for a person, a group icon for a group. */
+export const OwnerAvatar = ({
+	owner,
+	className = 'h-6 w-6',
+}: {
+	owner?: OwnerLabelOwner | null;
+	className?: string;
+}) => {
+	if (owner == null) {
+		return (
+			<span
+				className={`inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-400 text-secondary dark:border-zinc-500 dark:text-zinc-400 ${className}`}
+			>
+				<Icon name={IconName.User} className="h-3.5 w-3.5" />
+			</span>
+		);
+	}
+	if (owner.kind === 'group') {
+		return (
+			<span
+				className={`inline-flex shrink-0 items-center justify-center rounded-full text-white ${groupColorClass(owner.color)} ${className}`}
+			>
+				<Icon name={IconName.Users} className="h-3.5 w-3.5" />
+			</span>
+		);
+	}
+	return (
+		<span
+			className={`inline-flex shrink-0 items-center justify-center rounded-full bg-[#76b900] text-[10px] font-semibold text-white ${className}`}
+		>
+			{initials(owner.name)}
+		</span>
+	);
+};
+
 /** The owner's name, or "Unassigned" when the id names nobody. */
 export const OwnerLabel = ({ owner }: { owner?: OwnerLabelOwner | null }) => {
 	if (owner == null) {

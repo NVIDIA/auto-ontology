@@ -2,31 +2,25 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Suspense } from 'react';
-import { Icon, IconName } from '@/common/icons';
-import { TermsLoadingSkeleton, TermsView } from '@/components/termsPage';
+import { redirect } from 'next/navigation';
 
-export default function TermsPage() {
-	return (
-		<Suspense
-			fallback={
-				<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-					<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-						<Icon
-							name={IconName.Terms}
-							className="h-5 w-5 text-body dark:text-zinc-300"
-						/>
-						<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-							Terms
-						</h1>
-					</header>
-					<div className="flex-1 px-6 py-6">
-						<TermsLoadingSkeleton />
-					</div>
-				</div>
-			}
-		>
-			<TermsView />
-		</Suspense>
-	);
+import { termHref } from '@/lib/termHref';
+
+const first = (value: string | string[] | undefined): string | undefined =>
+	Array.isArray(value) ? value[0] : value;
+
+/**
+ * Terms now open on the Exploration page, beside their node in the graph.
+ * Old links — bookmarks, tag pages, shared URLs — keep working: `focus`
+ * becomes `semanticId`, and `sqlAttr`/`colAttr` carry over unchanged.
+ */
+export default async function TermsPage({
+	searchParams,
+}: {
+	searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+	const params = await searchParams;
+	const focus = first(params.focus);
+	if (!focus) redirect('/exploration');
+	redirect(termHref(focus, { sqlAttr: first(params.sqlAttr), colAttr: first(params.colAttr) }));
 }

@@ -1,0 +1,10 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { withPermission } from '@/auth/with-auth';
+import { proxyToBackend } from '@/auth/proxy-backend';
+
+// termsApi.search — Terms by name, then by meaning, for the Exploration search
+// box. `q` and `limit` pass straight through.
+export const GET = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));
