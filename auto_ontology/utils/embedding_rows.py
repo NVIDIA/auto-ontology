@@ -82,11 +82,23 @@ class CatalogEmbeddingRowsOp:
         # their columns merged into one bucket — which would both bloat each
         # table's text and double-emit every column row per duplicate.
         columns_by_table: dict[tuple[str, str], list[Any]] = {}
+        declared = {
+            (str(t.get("table_schema", "")), str(t.get("table_name", "")))
+            for _, t in tables_df.iterrows()
+        }
+        folded: dict[tuple[str, str], list[tuple[str, str]]] = {}
+        for schema, name in declared:
+            folded.setdefault((schema.lower(), name.lower()), []).append((schema, name))
         for _, col in columns_df.iterrows():
             key = (
-                str(col.get("table_schema", "")).lower(),
-                str(col.get("table_name", "")).lower(),
+                str(col.get("table_schema", "")),
+                str(col.get("table_name", "")),
             )
+            if key not in declared:
+                owners = folded.get((key[0].lower(), key[1].lower()), [])
+                if len(owners) != 1:
+                    continue
+                key = owners[0]
             columns_by_table.setdefault(key, []).append(col)
 
         rows: list[dict[str, Any]] = []
@@ -97,9 +109,7 @@ class CatalogEmbeddingRowsOp:
                 "" if pd.isna(v := table.get("description")) else str(v).strip()
             )
             schema_name = str(table.get("table_schema", ""))
-            columns = columns_by_table.get(
-                (schema_name.lower(), table_name.lower()), []
-            )
+            columns = columns_by_table.get((schema_name, table_name), [])
 
             table_text = build_table_text(
                 table_name=table_name,

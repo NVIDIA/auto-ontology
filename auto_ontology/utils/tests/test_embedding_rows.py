@@ -332,3 +332,31 @@ def test_non_tuple_input_names_the_database() -> None:
 def test_calling_the_op_is_process() -> None:
     pair = (pd.DataFrame(), pd.DataFrame())
     assert list(_op()(pair).columns) == _COLS
+
+
+def test_case_distinct_embedding_owners() -> None:
+    tables = _tables(
+        {"id": "t1", "table_name": "Sales", "table_schema": "s"},
+        {"id": "t2", "table_name": "sales", "table_schema": "s"},
+    )
+    columns = pd.DataFrame(
+        [
+            {
+                "id": "a",
+                "table_name": "Sales",
+                "table_schema": "s",
+                "column_name": "retail",
+            },
+            {
+                "id": "b",
+                "table_name": "sales",
+                "table_schema": "s",
+                "column_name": "wholesale",
+            },
+        ]
+    )
+    out = _op().process((tables, columns))
+    assert len(out) == 4
+    texts = {row.metadata["id"]: row.text for row in out.itertuples()}
+    assert "retail" in texts["t1"] and "wholesale" not in texts["t1"]
+    assert "wholesale" in texts["t2"] and "retail" not in texts["t2"]
