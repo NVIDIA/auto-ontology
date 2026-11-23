@@ -418,8 +418,11 @@ def replace_graph(
             )
             by_name[node["normalized_name"]] = str(rows[0]["id"])
 
-        written = 0
         unresolved: list[str] = []
+        # Merged on the primary key before the insert. Two names can resolve
+        # to one node -- consolidation merges them -- and a single duplicate
+        # would fail the key and roll back the whole transcript.
+        merged: dict[tuple[str, str, str], dict[str, Any]] = {}
         for edge in edges:
             source, target = by_name.get(edge["source"]), by_name.get(edge["target"])
             if not source or not target:
@@ -427,19 +430,30 @@ def replace_graph(
                     f"{edge['source']!r} --{edge['role']}--> {edge['target']!r}"
                 )
                 continue
-            written += 1
+            turns = set(edge.get("turn_indexes") or [])
+            key = (source, target, edge["role"])
+            if (kept := merged.get(key)) is not None:
+                kept["turn_indexes"] |= turns
+                kept["evidence"] = kept["evidence"] or edge.get("evidence") or None
+                continue
+            merged[key] = {
+                "source_id": source,
+                "target_id": target,
+                "role": edge["role"],
+                "statement": edge.get("statement"),
+                "turn_indexes": turns,
+                "evidence": edge.get("evidence") or None,
+            }
+
+        for row in merged.values():
             handle.query_write(
                 insert(s.conversation_edge).values(
-                    source_id=source,
-                    target_id=target,
+                    **{**row, "turn_indexes": sorted(row["turn_indexes"])},
                     type="knowledge",
-                    role=edge["role"],
-                    statement=edge.get("statement"),
-                    turn_indexes=sorted(edge.get("turn_indexes") or []),
-                    evidence=edge.get("evidence") or None,
                     derived=False,
                 )
             )
+        written = len(merged)
 
     # What landed, not what was handed over. An edge naming a node that is not
     # in the write is skipped above, and reporting the input count made a pass
