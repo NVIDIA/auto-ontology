@@ -30,7 +30,6 @@ from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
-from auto_ontology.dal.tests.fk_links import link_semantic_fk  # noqa: E402
 from auto_ontology.dal.sql_fragments import (  # noqa: E402
     column_description_expr,
     table_description_expr,
@@ -82,21 +81,6 @@ def _attribute(prefix: str, description: str | None) -> str:
         term_name="Customer",
         table_id="",
     )
-
-
-def _reference(fixture: dict, attribute: str) -> None:
-    """The fixture column holds a semantic FK to a column owning *attribute*."""
-    target = _insert(
-        s.catalog_column,
-        table_id=fixture["table"],
-        name=f"ref-{uuid.uuid4().hex[:6]}",
-    )
-    store().query_write(
-        s.column__has_attribute.insert().values(
-            column_id=target, attribute_id=attribute
-        )
-    )
-    link_semantic_fk(fixture["column"], attribute)
 
 
 def _describe_column(column_id: str) -> str | None:
@@ -164,13 +148,21 @@ def test_has_attribute_beats_semantic_fk(fixture) -> None:
             column_id=fixture["column"], attribute_id=owned
         )
     )
-    _reference(fixture, referenced)
+    store().query_write(
+        s.column__semantic_fk.insert().values(
+            column_id=fixture["column"], attribute_id=referenced
+        )
+    )
     assert _describe_column(fixture["column"]) == "owned"
 
 
 def test_falls_back_to_semantic_fk_when_that_is_all_there_is(fixture) -> None:
     referenced = _attribute(fixture["prefix"], "referenced")
-    _reference(fixture, referenced)
+    store().query_write(
+        s.column__semantic_fk.insert().values(
+            column_id=fixture["column"], attribute_id=referenced
+        )
+    )
     assert _describe_column(fixture["column"]) == "referenced"
 
 

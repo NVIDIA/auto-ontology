@@ -72,12 +72,6 @@ Use only tables and columns a retrieve result showed you. A SIMILAR line names \
 tables that hold nearly the same data; compare them with run_sql before you \
 choose one.
 
-When a JOIN line lists several ways to join two tables, use the one the \
-question means; with no reason to choose, use the default. Prefer joining on \
-the same key: when tables in your query already join on a key, join more \
-tables to that entity on the same key when a JOIN or CONCEPT line offers it, \
-rather than on a different column.
-
 SELECT the requested outputs from left to right in the same order the question \
 and its clarifications name them. When a breakdown asks for counts and \
 percentages across several categories, put all the counts first and then all \
