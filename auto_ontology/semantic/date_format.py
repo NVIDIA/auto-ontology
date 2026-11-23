@@ -105,7 +105,10 @@ def _parses_all(pattern: str, values: list[str]) -> bool:
     entirely.
     """
     century_known = "%Y" in pattern
+    compact_width = {"%Y%m%d": 8, "%Y%m": 6, "%y%m%d": 6}.get(pattern)
     for value in values:
+        if compact_width and len(value) != compact_width:
+            return False
         try:
             parsed = datetime.strptime(value, pattern)
         except ValueError:

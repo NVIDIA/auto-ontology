@@ -124,3 +124,8 @@ def test_non_string_values_are_read_through_their_rendering() -> None:
 )
 def test_is_date_type(declared: str | None, expected: bool) -> None:
     assert is_date_type(declared) is expected
+
+
+def test_compact_months_at_year_end_keep_six_digit_format() -> None:
+    assert infer_date_format(["202311", "202312"]) == "YYYYMM"
+    assert infer_date_format(["20231101", "20231201"]) == "YYYYMMDD"
