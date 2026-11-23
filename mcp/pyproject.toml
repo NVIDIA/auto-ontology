@@ -50,4 +50,5 @@ dev = ["pytest>=8"]
 # Patched version of a transitive dependency flagged by nSpect.
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via mcp)
+    "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2 (via httpx)
 ]

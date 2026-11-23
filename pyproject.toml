@@ -86,6 +86,8 @@ package = true
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors)
     "urllib3>=2.8.0",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore)
+    "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2 (via requests, httpx)
+    "pyasn1>=0.6.5",  # GHSA-2qm8-x737-gmw5, GHSA-9m75-vc3g-4x39 (via pyasn1-modules, pyjks)
 ]
 
 [[tool.uv.index]]
