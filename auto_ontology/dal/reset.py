@@ -31,7 +31,13 @@ from sqlalchemy import delete, select, union
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.vdb import get_conversation_vdb, get_data_vdb, get_semantic_vdb
+from auto_ontology.vdb import (
+    get_conversation_semantic_vdb,
+    get_conversation_vdb,
+    get_data_vdb,
+    get_one_hop_path_vdb,
+    get_semantic_vdb,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -364,13 +370,19 @@ def _delete_data_rows(database_name: str | None = None) -> int:
 def _delete_data_vectors(database_name: str | None) -> int:
     """The non-transactional half — see :func:`_delete_semantic_vectors`.
 
-    Covers both data-tier collections. The catalog's rows are swept by the
+    Covers every data-tier collection: the catalog's, the conversation turns',
+    and the conversation graph's nodes and paths. Their rows are swept by the
     cascade off ``catalog_database``, but vectors are not foreign keys and
-    nothing removes them implicitly -- a conversation collection left out here
-    would keep answering searches for turns whose rows are gone.
+    nothing removes them implicitly -- a collection left out here would keep
+    answering searches for rows that are gone.
     """
     data_deleted = 0
-    for vdb in (get_data_vdb(), get_conversation_vdb()):
+    for vdb in (
+        get_data_vdb(),
+        get_conversation_vdb(),
+        get_conversation_semantic_vdb(),
+        get_one_hop_path_vdb(),
+    ):
         if database_name is None:
             data_deleted += vdb.delete_all()
         else:
