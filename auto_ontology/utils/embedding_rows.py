@@ -24,6 +24,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from auto_ontology.catalog.constants import Labels
+from auto_ontology.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,9 @@ class CatalogEmbeddingRowsOp:
                 column_description = (
                     "" if pd.isna(v := column.get("description")) else str(v).strip()
                 )
-                sample_values = (column.get("sample_values") or [])[:5]
+                sample_values = (
+                    parse_sample_values(column.get("sample_values")) or []
+                )[:5]
                 column_text = build_column_text(
                     column_name=column_name,
                     column_description=column_description,

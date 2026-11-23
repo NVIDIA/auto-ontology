@@ -332,3 +332,28 @@ def test_non_tuple_input_names_the_database() -> None:
 def test_calling_the_op_is_process() -> None:
     pair = (pd.DataFrame(), pd.DataFrame())
     assert list(_op()(pair).columns) == _COLS
+
+
+def test_stored_samples_in_embeddings_are_values_not_characters() -> None:
+    tables = _tables({"id": "t", "table_name": "orders", "table_schema": "s"})
+    columns = pd.DataFrame(
+        [
+            {
+                "id": "c1",
+                "table_schema": "s",
+                "table_name": "orders",
+                "column_name": "status",
+                "sample_values": '["paid","open"]',
+            },
+            {
+                "id": "c2",
+                "table_schema": "s",
+                "table_name": "orders",
+                "column_name": "total",
+                "sample_values": pd.NA,
+            },
+        ]
+    )
+    out = _op().process((tables, columns))
+    assert out.iloc[1]["text"].endswith("sample_values: paid, open")
+    assert "sample_values:" not in out.iloc[2]["text"]
