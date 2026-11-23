@@ -117,7 +117,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "table_schema": "category",
         "table_name": "category",
         "column_name": "string",
-        "ordinal_position": "Int16",
+        "ordinal_position": "Int32",
         "data_type": "category",
         # "boolean", not "bool": the nullable dtype, because a connector that
         # cannot determine nullability leaves it NULL.
