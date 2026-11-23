@@ -232,3 +232,17 @@ def test_table_info_fallback_when_table_xinfo_returns_empty(
     legacy_cols = cols[cols["table_name"] == "legacy"]
     assert legacy_cols["column_name"].tolist() == ["id", "name"]
     assert legacy_cols["ordinal_position"].tolist() == [1, 2]
+
+
+def test_quoted_relation_names(tmp_path) -> None:
+    path = tmp_path / "quoted.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        'CREATE TABLE "sale""items" (id INTEGER PRIMARY KEY);'
+        'CREATE TABLE "line""items" (item INTEGER REFERENCES "sale""items");'
+    )
+    conn.close()
+    with SQLiteDatabase(str(path)) as db:
+        assert set(db.get_columns().column_name) == {"id", "item"}
+        assert db.get_pks().column_name.tolist() == ["id"]
+        assert _references(db) == {('line"items', "item", 'sale"items', "id")}
