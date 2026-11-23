@@ -135,11 +135,20 @@ const AcronymsSection = () => {
 	const [confirmDelete, setConfirmDelete] = useState<Acronym | null>(null);
 	const [name, setName] = useState('');
 	const [description, setDescription] = useState('');
-	const [nameExists, setNameExists] = useState(false);
-	const [checkingName, setCheckingName] = useState(false);
-	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// The last answer from the name check, keyed by the name it was asked about.
+	const [nameCheck, setNameCheck] = useState<{ name: string; exists: boolean } | null>(null);
 
 	const isEditing = editingAcronym !== null;
+
+	// A name is only checked when there is one and it is not the acronym's own.
+	const trimmedName = name.trim();
+	const needsNameCheck =
+		trimmedName !== '' && !(isEditing && trimmedName === editingAcronym.name);
+	// Checking is whatever has no answer yet for the name now typed, so it
+	// needs no state of its own and cannot be left stuck on by a stale reply.
+	const nameCheckSettled = nameCheck?.name === trimmedName;
+	const nameExists = needsNameCheck && nameCheckSettled && nameCheck.exists;
+	const checkingName = needsNameCheck && !nameCheckSettled;
 
 	const fetchAcronyms = useCallback(async () => {
 		setLoading(true);
@@ -153,36 +162,40 @@ const AcronymsSection = () => {
 		}
 	}, []);
 
+	// First load. `loading` already starts true, so nothing is set up front.
 	useEffect(() => {
-		fetchAcronyms();
-	}, [fetchAcronyms]);
+		let cancelled = false;
+		acronymsApi
+			.get()
+			.then((data) => {
+				if (!cancelled) setAcronyms(data);
+			})
+			.catch(() => {
+				if (!cancelled) setAcronyms([]);
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	useEffect(() => {
-		const trimmed = name.trim();
-		if (!trimmed || (isEditing && trimmed === editingAcronym.name)) {
-			setNameExists(false);
-			setCheckingName(false);
-			return;
-		}
+		if (!needsNameCheck) return;
 
-		setCheckingName(true);
-		if (debounceRef.current) clearTimeout(debounceRef.current);
-
-		debounceRef.current = setTimeout(async () => {
+		const timer = setTimeout(async () => {
+			let exists = false;
 			try {
-				const { exists } = await acronymsApi.checkName(trimmed);
-				setNameExists(exists);
+				({ exists } = await acronymsApi.checkName(trimmedName));
 			} catch {
-				setNameExists(false);
-			} finally {
-				setCheckingName(false);
+				exists = false;
 			}
+			setNameCheck({ name: trimmedName, exists });
 		}, 1000);
 
-		return () => {
-			if (debounceRef.current) clearTimeout(debounceRef.current);
-		};
-	}, [name, isEditing, editingAcronym]);
+		return () => clearTimeout(timer);
+	}, [trimmedName, needsNameCheck]);
 
 	const openAddModal = () => {
 		setEditingAcronym(null);
@@ -203,9 +216,7 @@ const AcronymsSection = () => {
 		setEditingAcronym(null);
 		setName('');
 		setDescription('');
-		setNameExists(false);
-		setCheckingName(false);
-		if (debounceRef.current) clearTimeout(debounceRef.current);
+		setNameCheck(null);
 	};
 
 	const canSubmit = name.trim() && description.trim() && !nameExists && !checkingName;
@@ -450,21 +461,25 @@ export default function SemanticInputSettingsPage() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	const fetchPrompts = useCallback(async () => {
-		try {
-			setError(null);
-			const data = await promptsApi.get();
-			setPrompts(data);
-		} catch {
-			setError('Failed to load custom prompts.');
-		} finally {
-			setLoading(false);
-		}
-	}, []);
-
+	// First load. `loading` starts true and `error` starts null, so nothing is
+	// set up front.
 	useEffect(() => {
-		fetchPrompts();
-	}, [fetchPrompts]);
+		let cancelled = false;
+		promptsApi
+			.get()
+			.then((data) => {
+				if (!cancelled) setPrompts(data);
+			})
+			.catch(() => {
+				if (!cancelled) setError('Failed to load custom prompts.');
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const handleCreate = async (content: string) => {
 		try {
