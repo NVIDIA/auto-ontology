@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'win32'",
@@ -300,7 +300,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.2" },
     { name = "snowflake-connector-python", specifier = ">=4.7.2" },
     { name = "sqlalchemy", specifier = ">=2.0.52" },
-    { name = "sqlglot", specifier = ">=30.17.0" },
+    { name = "sqlglot", specifier = ">=30.17.0,<30.22" },
     { name = "thrift", specifier = ">=0.24.0" },
     { name = "thrift-sasl", specifier = ">=0.4.3" },
     { name = "tqdm", specifier = ">=4.70.0" },

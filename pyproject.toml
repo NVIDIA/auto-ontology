@@ -54,7 +54,8 @@ dependencies = [
     # nemo-retriever.
     "langchain-nvidia-ai-endpoints>=1.4.3",
     "langchain-core>=1.6.1",
-    "sqlglot>=30.17.0",
+    # 30.22 removed the schema inference the column extractor relies on (#578).
+    "sqlglot>=30.17.0,<30.22",
     "numpy>=2.5.2",
     "requests>=2.34.2",
     "tqdm>=4.70.0",
