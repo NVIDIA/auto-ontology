@@ -17,7 +17,6 @@ from __future__ import annotations
 from sqlalchemy import ColumnElement, func, select
 
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.concepts import semantic_fk_attribute_links
 
 
 def name_contains(column: ColumnElement, search: str) -> ColumnElement:
@@ -69,7 +68,7 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     """A column's description, falling back through its attributes.
 
     Prefers the column's own description; then a ``HAS_ATTRIBUTE`` attribute's;
-    then one a ``SEMANTIC_FK`` references through its Concept key. The order matters and is not alphabetical: an
+    then a ``SEMANTIC_FK`` one's. The order matters and is not alphabetical: an
     attribute the column *is* an instance of describes it better than one it
     merely *references*.
 
@@ -84,7 +83,7 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     return func.coalesce(
         _non_blank(column.c.description),
         _attribute_description(column.c.id, s.column__has_attribute),
-        _attribute_description(column.c.id, semantic_fk_attribute_links()),
+        _attribute_description(column.c.id, s.column__semantic_fk),
     )
 
 

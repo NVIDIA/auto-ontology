@@ -30,7 +30,6 @@ from sqlalchemy import and_, func, literal, select
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.concepts import fetch_term_concepts, semantic_fk_attribute_links
 
 # Private on purpose, and imported across modules on purpose: these are the one
 # definition of a table's column/sql/term counts, and the SQL shared them the
@@ -59,7 +58,6 @@ from auto_ontology.semantic.constants import (
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
     REL_REPRESENTS,
-    REL_SAME_CONCEPT,
     REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
@@ -267,10 +265,8 @@ def _attribute_link():
     with the type carried along, because every reader that walks a column to its
     attribute has to walk both -- a foreign-key-shaped column (a ``user_id``) is
     linked by SEMANTIC_FK rather than HAS_ATTRIBUTE -- while still being able to
-    say which one it actually took. A SEMANTIC_FK reaches the attributes of
-    its Concept key's member columns.
+    say which one it actually took.
     """
-    referencing = semantic_fk_attribute_links("exploration_fk_attribute")
     return (
         select(
             s.column__has_attribute.c.column_id,
@@ -279,8 +275,8 @@ def _attribute_link():
         )
         .union(
             select(
-                referencing.c.column_id,
-                referencing.c.attribute_id,
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
                 literal(REL_SEMANTIC_FK).label("rel_type"),
             )
         )
@@ -1327,15 +1323,6 @@ def fetch_semantic_exploration_graph(
                 types.update(paths_by_pair.get((term_id, table_id), ()))
                 types.update(paths_by_pair.get((other_id, table_id), ()))
 
-    concepts = fetch_term_concepts(visible)
-    for term_id in visible:
-        concept = concepts.get(term_id)
-        for other_id in concept["term_ids"] if concept else ():
-            if other_id != term_id and other_id in visible:
-                key = tuple(sorted((term_id, other_id)))
-                link_keys.add(key)
-                link_types.setdefault(key, set()).add(REL_SAME_CONCEPT)
-
     nodes = sorted(
         (
             {
@@ -1347,7 +1334,6 @@ def fetch_semantic_exploration_graph(
                 "relationship_count": degree.get(term["id"], 0),
                 "column_attributes_count": column_counts.get(term["id"], 0),
                 "sql_attributes_count": sql_counts.get(term["id"], 0),
-                "concept": concepts.get(term["id"]),
             }
             for term in terms
         ),

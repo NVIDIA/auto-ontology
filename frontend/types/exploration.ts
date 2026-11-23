@@ -17,16 +17,6 @@ export type ExplorationTermNode = Omit<
 	relationshipCount: number;
 	columnAttributesCount: number;
 	sqlAttributesCount: number;
-	/** The Concept this Term is a member of, `null` when it has none. */
-	concept: ExplorationConceptRef | null;
-};
-
-/** A Concept: the Terms that are one real-world entity, possibly split across tables. */
-export type ExplorationConceptRef = {
-	id: string;
-	name: string;
-	/** Every member Term, this one included. */
-	termIds: string[];
 };
 
 export type ExplorationDataNode = {
@@ -90,7 +80,6 @@ export type SemanticGraphNodeDto = {
 	relationship_count: number;
 	column_attributes_count: number;
 	sql_attributes_count: number;
-	concept: { id: string; name: string; term_ids: string[] } | null;
 };
 
 /** Server DTO for a data (Table) node in the Exploration graph endpoint. */

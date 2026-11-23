@@ -537,8 +537,6 @@ def _join_group_row(column_id: str, column_name: str) -> dict:
         "source_column_id": column_id,
         "source_column_name": column_name,
         "source_column_description": f"The {column_name} role.",
-        "target_concept_id": "customer-concept",
-        "target_key_id": "customer-key",
         "target_attribute_id": "customer-attribute",
         "target_attribute_name": "Customer ID",
         "target_table_id": "customers-table",
@@ -568,7 +566,7 @@ def test_single_semantic_fk_is_default_without_llm() -> None:
     get_llm_client.assert_not_called()
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-concept",
+        "customer-attribute",
         "customer-id-column",
     )
 
@@ -603,7 +601,7 @@ def test_llm_selects_default_from_parallel_semantic_fks() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-concept",
+        "customer-attribute",
         "customer-column",
     )
 
@@ -638,7 +636,7 @@ def test_invalid_llm_selection_uses_deterministic_default() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-concept",
+        "customer-attribute",
         "a-column",
     )
 
@@ -665,7 +663,7 @@ def test_missing_llm_uses_deterministic_default() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-concept",
+        "customer-attribute",
         "a-column",
     )
 
@@ -780,8 +778,11 @@ def test_declared_fk_is_trusted_without_a_join(name: str, target: str) -> None:
             return_value=candidates,
         ),
         patch(
-            "auto_ontology.semantic.semantic_fk.merge_semantic_fk_to_column",
-            return_value=True,
+            "auto_ontology.semantic.semantic_fk.find_column_attribute_by_column_id",
+            return_value="attr",
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
         ) as merge,
         patch("auto_ontology.semantic.semantic_fk._join_returns_rows") as join,
         patch(
@@ -791,39 +792,8 @@ def test_declared_fk_is_trusted_without_a_join(name: str, target: str) -> None:
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 1
 
-    merge.assert_called_once_with("col-1", target, declared=True)
+    merge.assert_called_once_with("col-1", "attr")
     join.assert_not_called()
-
-
-def test_a_declared_fk_that_cannot_be_keyed_is_left_unresolved() -> None:
-    """The declared target is the one answer; inference is not tried instead."""
-    candidates = [
-        {
-            "id": "col-1",
-            "name": "customer_id",
-            "table_name": "orders",
-            "table_id": "orders-table",
-            "fk_target_col_id": "customers-id",
-        }
-    ]
-    with (
-        patch(
-            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
-            return_value=candidates,
-        ),
-        patch(
-            "auto_ontology.semantic.semantic_fk.merge_semantic_fk_to_column",
-            return_value=False,
-        ),
-        patch("auto_ontology.semantic.semantic_fk._build_retriever") as retriever,
-        patch(
-            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
-            return_value=[],
-        ),
-    ):
-        assert semantic_fk.resolve_semantic_fks("database") == 0
-
-    retriever.assert_not_called()
 
 
 def test_declared_fk_onto_the_column_itself_is_rejected() -> None:
