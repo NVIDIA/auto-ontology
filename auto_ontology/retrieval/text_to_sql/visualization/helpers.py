@@ -8,23 +8,28 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# A number written as text: an optional minus, no leading zero, and commas only
+# as thousands separators. "02134" (a ZIP code) and "1,2" are not numbers.
+_NUMBER_TEXT = re.compile(
+    r"-?(?:0|[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*)(?:\.\d*)?|-?\.\d+", re.ASCII
+)
+
 
 def clean_and_convert(value: Any) -> Any:
-    """Strip commas/spaces and coerce numeric-looking strings to int/float."""
+    """Strip spaces and coerce strings that read as numbers to int/float."""
     if isinstance(value, str):
-        cleaned = value.replace(",", "").strip()
-        if cleaned.replace(".", "", 1).isdigit() or (
-            cleaned.startswith("-") and cleaned[1:].replace(".", "", 1).isdigit()
-        ):
-            number = float(cleaned)
+        cleaned = value.strip()
+        if _NUMBER_TEXT.fullmatch(cleaned):
+            number = float(cleaned.replace(",", ""))
             return int(number) if number == int(number) else number
-        return value.strip()
+        return cleaned
     if isinstance(value, (int, float)) and pd.notnull(value):
         return int(value) if value == int(value) else float(value)
     return value
@@ -37,7 +42,16 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     out = df.map(lambda x: x.strip() if isinstance(x, str) else x)
     out = out.replace("NULL", pd.NA)
     out = out.dropna(how="all")
-    return out.apply(lambda col: col.map(clean_and_convert))
+    return out.apply(_clean_column)
+
+
+def _clean_column(col: pd.Series) -> pd.Series:
+    # One text cell that is not a number (a name, or a code such as "02134")
+    # makes the column text: converting only its number-like cells would merge
+    # "02134" with "2134" and mix types within the column.
+    if any(isinstance(v, str) and not _NUMBER_TEXT.fullmatch(v) for v in col):
+        return col.map(lambda v: v if isinstance(v, str) else clean_and_convert(v))
+    return col.map(clean_and_convert)
 
 
 def _norm_col(name: str) -> str:
