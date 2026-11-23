@@ -39,10 +39,8 @@ from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
-from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
-    resolve_connector_for_sql,
     resolve_connector_from_tables,
 )
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
@@ -422,21 +420,6 @@ def _values_digest_for(session: InteractiveSessionState, sql: str) -> str | None
     return path_state.get("result_values_digest")
 
 
-def _session_connector(
-    session: InteractiveSessionState, sql: str
-) -> SQLDatabase | None:
-    """The connector *sql* runs on; None, not an error, when it cannot be told.
-
-    ``relevant_tables`` is every table the agent was shown, which can span
-    databases even though the SQL reads only one.
-    """
-    tables = session.path_state.get("relevant_tables") or []
-    try:
-        return resolve_connector_from_tables(tables, session.connectors)
-    except ValueError:
-        return resolve_connector_for_sql(tables, session.connectors, sql)
-
-
 def _align_mixed_numeric_types(session: InteractiveSessionState, sql: str) -> str:
     """When a query returns a mix of ``decimal`` and ``float`` columns, align the
     ``float`` columns to ``numeric``.
@@ -451,7 +434,9 @@ def _align_mixed_numeric_types(session: InteractiveSessionState, sql: str) -> st
     if not kinds or not ({"decimal", "float"} <= set(kinds)):
         return sql
 
-    connector = _session_connector(session, sql)
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
     if connector is None:
         return sql
     aligned = flip_numeric_output_types(
@@ -523,7 +508,9 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
         )
         return _align_mixed_numeric_types(session, sql)
 
-    connector = _session_connector(session, sql)
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
     if connector is None:
         return sql
     flipped = flip_numeric_output_types(
@@ -560,7 +547,9 @@ def _retry_double_without_a_recorded_type(
     still has the other side left: ``double precision``. The rewritten
     statement is kept only when it executes.
     """
-    connector = _session_connector(session, sql)
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
     if connector is None:
         return sql
     flipped = flip_numeric_output_types(
@@ -844,7 +833,9 @@ def _real_column_names(session: InteractiveSessionState, sql: str) -> set[str]:
     cached = session.path_state.get("real_column_names")
     if cached is not None:
         return set(cached)
-    connector = _session_connector(session, sql)
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
     if connector is None:
         return set()
     try:
@@ -899,7 +890,9 @@ def _submit_if_it_runs(
     """
     if not rewritten or rewritten == sql:
         return sql, None
-    connector = _session_connector(session, sql)
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
     if connector is None:
         return sql, None
     try:
