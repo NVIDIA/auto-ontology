@@ -81,7 +81,8 @@ def _parse_hit_metadata(hit: dict) -> dict:
         return raw
     if isinstance(raw, str):
         try:
-            return json.loads(raw)
+            decoded = json.loads(raw)
+            return decoded if isinstance(decoded, dict) else {}
         except json.JSONDecodeError:
             # Ingestion sometimes stores Python repr (single-quoted keys) — not valid JSON.
             try:

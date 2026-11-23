@@ -231,3 +231,12 @@ def test_every_column_the_table_text_writes_is_read_back() -> None:
         },
         {"name": "note"},
     ]
+
+
+def test_non_object_json_metadata_does_not_drop_valid_hits() -> None:
+    from auto_ontology.retrieval.data_access.semantic_search import (
+        _hits_to_semantic_rows,
+    )
+
+    hits = [{"metadata": value} for value in ("null", "[]", '"text"', '{"id":"keep"}')]
+    assert [row["id"] for row in _hits_to_semantic_rows(hits)] == ["keep"]
