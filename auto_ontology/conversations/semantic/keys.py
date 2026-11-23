@@ -224,8 +224,13 @@ def _render(candidates: dict[str, list[dict[str, Any]]]) -> str:
 
 def _accept(
     groups: Sequence[KeyGroup], candidates: dict[str, list[dict[str, Any]]]
-) -> dict[str, str]:
+) -> dict[tuple[str, str], str]:
     """Resolve the answer into a key rewrite, rejecting anything not asked about.
+
+    Keyed on ``(subject, key)``, and only for the subjects that carry the whole
+    group. The same key on another subject is a different property that happens
+    to share a name, and renaming it there would let derivation chain the two
+    into a revision.
 
     Four ways to be rejected, each of which would otherwise merge two keys the
     question never put together: a key no subject offered, a key in two groups,
@@ -249,7 +254,7 @@ def _accept(
             if turns:
                 first_turn[key] = min(first_turn.get(key, min(turns)), min(turns))
 
-    rewrite: dict[str, str] = {}
+    rewrite: dict[tuple[str, str], str] = {}
     claimed: set[str] = set()
     for group in groups:
         keys = [key.strip() for key in group.keys if key.strip()]
@@ -258,7 +263,12 @@ def _accept(
         if claimed.intersection(keys):
             logger.warning("Key group %s reuses an already-grouped key.", keys)
             continue
-        if not any(set(keys) <= carried for carried in keys_by_subject.values()):
+        subjects = [
+            subject
+            for subject, carried in keys_by_subject.items()
+            if set(keys) <= carried
+        ]
+        if not subjects:
             logger.warning("Key group %s is not carried by one subject.", keys)
             continue
         canonical = min(set(keys), key=lambda k: (first_turn.get(k, 10**9), k))
@@ -269,9 +279,10 @@ def _accept(
             canonical,
         )
         claimed.update(keys)
-        for key in set(keys):
-            if key != canonical:
-                rewrite[key] = canonical
+        for subject in subjects:
+            for key in set(keys):
+                if key != canonical:
+                    rewrite[(subject, key)] = canonical
     return rewrite
 
 
@@ -322,9 +333,11 @@ def reconcile_keys(statements: Sequence[dict[str, Any]]) -> int:
     changed = 0
     for row in statements:
         key = (row.get("attribute_key") or "").strip()
-        if key in rewrite:
-            row["attribute_key"] = rewrite[key]
-            changed += 1
+        for subject in sorted(row.get("about") or ()):
+            if (subject, key) in rewrite:
+                row["attribute_key"] = rewrite[(subject, key)]
+                changed += 1
+                break
     logger.info(
         "Reconciled %d key(s) into %d canonical name(s).",
         changed,

@@ -36,6 +36,7 @@ from auto_ontology.conversations.semantic.keys import (
     _accept,
     _candidates,
     _valued,
+    reconcile_keys,
 )
 from auto_ontology.conversations.semantic.note import note_text
 from auto_ontology.conversations.semantic.relate import (
@@ -255,7 +256,7 @@ class TestKeyAcceptance:
         groups = [KeyGroup(keys=["api_response_time", "fetch_latency"])]
 
         assert _accept(groups, self.CANDIDATES) == {
-            "api_response_time": "fetch_latency"
+            ("Weather app", "api_response_time"): "fetch_latency"
         }
 
     def test_a_group_spanning_two_subjects_is_refused(self) -> None:
@@ -275,11 +276,44 @@ class TestKeyAcceptance:
         ]
 
         assert _accept(groups, self.CANDIDATES) == {
-            "api_response_time": "fetch_latency"
+            ("Weather app", "api_response_time"): "fetch_latency"
         }
 
     def test_a_group_of_one_is_not_a_group(self) -> None:
         assert _accept([KeyGroup(keys=["fetch_latency"])], self.CANDIDATES) == {}
+
+
+def test_a_merge_renames_the_key_only_on_the_subject_it_was_found_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same key on another subject is another property sharing its name."""
+    from auto_ontology.conversations.semantic import keys
+    from auto_ontology.utils import llm_invoke
+
+    def row(key: str, about: str, turn: int) -> dict:
+        return {
+            "attribute_key": key,
+            "value": f"{turn}ms",
+            "kinds": ["state"],
+            "turn_indexes": [turn],
+            "about": [about],
+        }
+
+    weather_first = row("fetch_latency", "Weather app", 19)
+    weather_later = row("api_response_time", "Weather app", 75)
+    autocomplete = row("api_response_time", "Autocomplete feature", 80)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_: None)
+    monkeypatch.setattr(
+        llm_invoke,
+        "invoke_with_structured_output",
+        lambda *_: keys.KeyGroups(
+            groups=[KeyGroup(keys=["fetch_latency", "api_response_time"])]
+        ),
+    )
+
+    assert reconcile_keys([weather_first, weather_later, autocomplete]) == 1
+    assert weather_later["attribute_key"] == "fetch_latency"
+    assert autocomplete["attribute_key"] == "api_response_time"
 
 
 def test_a_thing_is_identified_by_its_name_alone() -> None:
