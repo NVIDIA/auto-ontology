@@ -734,3 +734,16 @@ def test_an_enum_naming_date_is_not_coerced_to_null() -> None:
     frame = db.execute("SELECT kind FROM t")
 
     assert frame["kind"].tolist() == ["Date", "Time"]
+
+
+def test_bracketed_endpoint_port_round_trip() -> None:
+    host = "https://[2001:db8::1]:9440"
+    for options, expected in [({}, 9440), ({"port": "8443"}, 8443)]:
+        parsed = _parse_connection_string(
+            build_connection_string(_connection(host=host, **options))
+        )
+        assert (parsed["host"], parsed["port"], parsed["http_scheme"]) == (
+            "2001:db8::1",
+            expected,
+            "https",
+        )
