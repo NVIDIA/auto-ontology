@@ -74,10 +74,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from auto_ontology.conversations.semantic.extract import GraphDraft
 
 logger = logging.getLogger(__name__)
 
@@ -445,7 +448,9 @@ class SubjectReport:
         return sum(1 for item in self.wrong if item.moved)
 
 
-def check_subjects(graph: Any, turns: Sequence[Mapping[str, Any]]) -> SubjectReport:
+def check_subjects(
+    graph: GraphDraft, turns: Sequence[Mapping[str, Any]]
+) -> SubjectReport:
     """Confirm every keyed reading's subject, and retarget the ones that are wrong.
 
     Before the write, for the same reason :func:`resolve_mutual` is: nothing
@@ -639,7 +644,7 @@ class MutualAnswers(BaseModel):
     answers: list[MutualAnswer] = Field(default_factory=list)
 
 
-def resolve_mutual(graph: Any) -> int:
+def resolve_mutual(graph: GraphDraft) -> int:
     """Drop the wrong half of every containment recorded in both directions.
 
     Before the graph is written rather than after, which is the whole reason

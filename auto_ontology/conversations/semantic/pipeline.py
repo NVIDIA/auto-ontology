@@ -45,6 +45,8 @@ from auto_ontology.conversations.semantic.audit import (
 from auto_ontology.conversations.semantic.consolidate import consolidate_graph
 from auto_ontology.conversations.semantic.derive import derive_edges
 from auto_ontology.conversations.semantic.extract import (
+    GraphDraft,
+    NodeDraft,
     extract_graph,
     node_text,
     normalise_name,
@@ -54,7 +56,11 @@ from auto_ontology.conversations.semantic.relate import relate_nodes
 from auto_ontology.conversations.semantic.subject_agent import assign_subjects_agentic
 from auto_ontology.conversations.semantic.subjects import assign_subjects
 from auto_ontology.dal.schema import CONVERSATION_NODE_KINDS
-from auto_ontology.conversations.semantic.windows import WINDOW_CHARS, build_windows
+from auto_ontology.conversations.semantic.windows import (
+    WINDOW_CHARS,
+    Window,
+    build_windows,
+)
 from auto_ontology.conversations.store import fetch_turns
 
 logger = logging.getLogger(__name__)
@@ -520,7 +526,7 @@ def populate_conversation_graph(
     )
 
 
-def _turn_texts(windows: list) -> dict[int, str]:
+def _turn_texts(windows: list[Window]) -> dict[int, str]:
     """Turn index to turn text, taken from the windows themselves.
 
     From the windows rather than from ``fetch_turns`` so that the verifier reads
@@ -534,7 +540,9 @@ def _turn_texts(windows: list) -> dict[int, str]:
     return texts
 
 
-def _attach_subjects(stored: list[dict], statements: list[dict]) -> None:
+def _attach_subjects(
+    stored: list[dict[str, Any]], statements: list[dict[str, Any]]
+) -> None:
     """Put each statement's subject on its row, for adjudication to compare.
 
     Read back from the store rather than from the extraction drafts, so that
@@ -640,7 +648,7 @@ def _forget_vectors(
         logger.info("Dropped %d %s vector(s) of the replaced graph.", len(stale), what)
 
 
-def _check_writable(nodes: list) -> None:
+def _check_writable(nodes: list[NodeDraft]) -> None:
     """Check the drafted nodes against the table's constraints, all at once.
 
     The write is one statement per node inside one transaction, so Postgres
@@ -683,7 +691,7 @@ def _check_writable(nodes: list) -> None:
         )
 
 
-def _reconcile_draft_keys(graph) -> int:
+def _reconcile_draft_keys(graph: GraphDraft) -> int:
     """Settle the property keys on the draft, before the nodes are written.
 
     This ran after the write for a long time, on the stored rows, because the
@@ -724,7 +732,7 @@ def _reconcile_draft_keys(graph) -> int:
     return merged
 
 
-def _disambiguate(nodes: list) -> None:
+def _disambiguate(nodes: list[NodeDraft]) -> None:
     """Rename any node whose name another node already has, in place.
 
     One name per transcript is required twice over: by
@@ -775,7 +783,7 @@ def _disambiguate(nodes: list) -> None:
         seen.add(normalise_name(renamed))
 
 
-def _embed_names(nodes: list) -> dict[str, list[float]]:
+def _embed_names(nodes: list[NodeDraft]) -> dict[str, list[float]]:
     """Embed each thing's name, for the consolidation pass only.
 
     Names alone, and only for things: see
