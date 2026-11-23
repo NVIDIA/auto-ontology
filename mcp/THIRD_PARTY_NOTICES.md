@@ -141,7 +141,7 @@ accompanies each upstream project at the URLs above.
 | dotenv | ^17.4.2 | BSD-2-Clause | https://github.com/motdotla/dotenv |
 | graphology | ^0.26.0 | MIT | https://github.com/graphology/graphology |
 | jose | ^6.1.0 | MIT | https://github.com/panva/jose |
-| Next.js (next) | 16.3.8 | MIT | https://github.com/vercel/next.js |
+| Next.js (next) | 16.4.6 | MIT | https://github.com/vercel/next.js |
 | node-postgres (pg) | ^8.20.0 | MIT | https://github.com/brianc/node-postgres |
 | React (react) | 19.2.4 | MIT | https://github.com/facebook/react |
 | React DOM (react-dom) | 19.2.4 | MIT | https://github.com/facebook/react |
