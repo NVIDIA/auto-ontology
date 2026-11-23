@@ -143,3 +143,23 @@ def test_qualify_without_a_schema_is_the_bare_table() -> None:
 def test_qualify_quotes_a_name_with_a_space() -> None:
     # An unknown dialect still quotes; a bare identifier is what loses the table.
     assert _Fake().qualify("main", "Sales Orders") == '"main"."Sales Orders"'
+
+
+def test_duckdb_discovery_stays_bound_after_attach() -> None:
+    with connectors.DuckDBDatabase(":memory:", read_only=False) as db:
+        db.execute("CREATE TABLE orders (local_id INTEGER)")
+        db.execute("CREATE VIEW order_view AS SELECT local_id FROM orders")
+        db.execute("ATTACH ':memory:' AS other")
+        db.execute("USE other")
+        db.execute("CREATE TABLE orders (foreign_id INTEGER)")
+        db.execute("CREATE VIEW order_view AS SELECT foreign_id FROM orders")
+        assert db.get_tables().table_name.tolist().count("orders") == 1
+        columns = db.get_columns()
+        assert columns.loc[columns.table_name == "orders", "column_name"].tolist() == [
+            "local_id"
+        ]
+        views = db.get_views()
+        definitions = views.loc[
+            views.table_name == "order_view", "view_definition"
+        ].tolist()
+        assert len(definitions) == 1 and "local_id" in definitions[0]
