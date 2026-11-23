@@ -29,7 +29,7 @@ These properties of the engine shape this connector:
   per dataset rather than a ``UNION`` across them.
 * **Billing by bytes scanned.** ``LIMIT`` does not reduce what a query scans,
   so a profiling probe on a wide table can cost real money. Every job carries
-  ``maximum_bytes_billed`` (10 GiB unless the URL overrides it); a query over
+  ``maximum_bytes_billed`` (40 GiB unless the URL overrides it); a query over
   the cap fails before it runs instead of being billed.
 * **Date-sharded tables are one wildcard table.** ``events_20210101``,
   ``events_20210102``, ... are queried together as ``events_*``, so the catalog
@@ -88,7 +88,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAXIMUM_BYTES_BILLED = 10 * 1024**3
+DEFAULT_MAXIMUM_BYTES_BILLED = 40 * 1024**3
 
 # Attached to every job, so query history can skip the connector's own
 # statements and billing exports can attribute them.

@@ -80,7 +80,7 @@ project:
 bigquery://my-billing-project/austin?dataset=bigquery-public-data.austin_311&dataset=bigquery-public-data.austin_crime
 ```
 
-Every query job is capped at 10 GiB billed (`maximum_bytes_billed=` overrides
+Every query job is capped at 40 GiB billed (`maximum_bytes_billed=` overrides
 it); a profiling query over the cap fails without being billed, and that column
 is left unprofiled. Query history is read from `JOBS_BY_PROJECT` only when
 `location` is set, and needs `bigquery.jobs.listAll`.
