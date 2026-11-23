@@ -62,8 +62,51 @@ def upserts() -> Iterator[list[tuple[Any, ...]]]:
     with (
         patch("auto_ontology.conversations.ingest.upsert_row", side_effect=_upsert),
         patch("auto_ontology.conversations.ingest.write_transaction", _no_transaction),
+        patch(
+            "auto_ontology.conversations.ingest._delete_turns_not_in",
+            return_value=[],
+        ),
     ):
         yield calls
+
+
+def test_turns_the_new_transcript_lacks_are_deleted(upserts: list) -> None:
+    """A shorter re-ingest must not leave the old tail behind."""
+    with patch(
+        "auto_ontology.conversations.ingest._delete_turns_not_in", return_value=[]
+    ) as delete:
+        ingest_conversation(_conversation(2), database_name="beam_42")
+
+    assert delete.call_args.kwargs == {
+        "database_id": "db-1",
+        "conversation_id": "42",
+        "keep": [0, 1],
+    }
+
+
+def test_the_vectors_of_deleted_turns_are_dropped(upserts: list) -> None:
+    vdb = _FakeVdb()
+    with (
+        patch(
+            "auto_ontology.conversations.ingest._delete_turns_not_in",
+            return_value=["turn-2", "turn-3"],
+        ),
+        patch(
+            "auto_ontology.conversations.ingest.get_conversation_vdb",
+            return_value=vdb,
+        ) as get_vdb,
+    ):
+        ingest_conversation(_conversation(2), database_name="shared")
+
+    assert get_vdb.call_args.kwargs == {"database_name": "shared"}
+    assert vdb.deleted == ["turn-2", "turn-3"]
+
+
+def test_nothing_removed_leaves_the_vectors_alone(upserts: list) -> None:
+    with patch("auto_ontology.conversations.ingest.get_conversation_vdb") as get_vdb:
+        ingest_conversation(_conversation(2), database_name="shared")
+
+    get_vdb.assert_not_called()
 
 
 def test_writes_the_database_then_every_turn(upserts: list) -> None:
@@ -147,9 +190,14 @@ def test_a_blank_database_name_is_refused(upserts: list) -> None:
 class _FakeVdb:
     def __init__(self, written: int = 0) -> None:
         self._written = written
+        self.deleted: list[str] = []
 
     def run(self, records: Any) -> int:
         return self._written
+
+    def delete_by_id(self, node_id: str) -> int:
+        self.deleted.append(node_id)
+        return 1
 
 
 @contextlib.contextmanager

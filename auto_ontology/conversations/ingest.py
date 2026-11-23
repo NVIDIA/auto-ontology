@@ -74,7 +74,8 @@ def ingest_conversation(
     within the database. Re-ingesting an edited transcript updates the turns
     in place; inserting would leave the previous run's rows behind, and a
     retrieval that returns both copies of an exchange looks exactly like a
-    conversation in which it happened twice.
+    conversation in which it happened twice. Turns the new transcript no
+    longer has are deleted, with their vectors.
 
     The whole transcript is written in one transaction. A half-written
     conversation is worse than none: the gap is invisible to retrieval, which
@@ -111,8 +112,63 @@ def ingest_conversation(
                 on_match=values,
             )
             rows.append({"id": turn_id, **values})
+        # The upsert only reaches turns the new transcript has. A shorter or
+        # re-split one would otherwise leave the old tail behind, and retrieval
+        # would answer from turns that are no longer in the conversation.
+        removed = _delete_turns_not_in(
+            database_id=database_id,
+            conversation_id=conversation.conversation_id,
+            keep=[turn.index for turn in conversation.turns],
+        )
 
+    # After the commit: a rolled-back write still has these turns, and their
+    # vectors with them.
+    if removed:
+        _forget_turn_vectors(database_name=database_name, turn_ids=removed)
     return pd.DataFrame(rows, columns=TURN_COLUMNS)
+
+
+def _delete_turns_not_in(
+    *, database_id: str, conversation_id: str, keep: list[int]
+) -> list[str]:
+    """Delete the conversation's turns outside *keep*, returning their ids."""
+    from sqlalchemy import and_, delete
+
+    from auto_ontology.dal import schema as s
+    from auto_ontology.dal.session import store
+
+    rows = store().query_write(
+        delete(s.conversation)
+        .where(
+            and_(
+                s.conversation.c.database_id == database_id,
+                s.conversation.c.conversation_id == conversation_id,
+                s.conversation.c.turn_index.notin_(keep),
+            )
+        )
+        .returning(s.conversation.c.id)
+    )
+    return [str(row["id"]) for row in rows]
+
+
+def _forget_turn_vectors(*, database_name: str, turn_ids: list[str]) -> None:
+    """Delete the vectors of removed turns, by id.
+
+    By id rather than relying on a reset, because a ``database_name`` shared by
+    several conversations is ingested with ``reset=False``.
+    """
+    try:
+        vdb = get_conversation_vdb(database_name=database_name)
+        for turn_id in turn_ids:
+            vdb.delete_by_id(turn_id)
+    except Exception:
+        logger.exception(
+            "Could not drop the vectors of %d removed turn(s) -- retrieval may "
+            "still return them.",
+            len(turn_ids),
+        )
+        return
+    logger.info("Dropped %d removed turn(s) and their vectors.", len(turn_ids))
 
 
 def run_conversation_ingest(
