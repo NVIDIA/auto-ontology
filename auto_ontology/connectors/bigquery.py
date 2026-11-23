@@ -177,7 +177,7 @@ def type_fits(old: str, new: str | None) -> bool:
             exp.DataType.build(old, dialect="bigquery"),
             exp.DataType.build(new, dialect="bigquery"),
         )
-    except (sqlglot.errors.ParseError, ValueError):
+    except (sqlglot.errors.SqlglotError, ValueError):
         return False
 
 
@@ -276,7 +276,22 @@ def _decode_credentials(encoded: str) -> dict[str, Any]:
         raise ValueError("BigQuery credentials are not a valid JSON key") from exc
     if not isinstance(info, dict) or info.get("type") != "service_account":
         raise ValueError("BigQuery credentials must be a service-account JSON key")
-    return info
+    # google-auth posts a signed assertion to the key's ``token_uri`` and puts
+    # the reply in its error, so any other host would let whoever writes a
+    # connection make the server call it.
+    token_uri = str(info.get("token_uri") or _GOOGLE_TOKEN_URI).strip()
+    if token_uri not in _GOOGLE_TOKEN_URIS:
+        raise ValueError(
+            "BigQuery credentials must use Google's token endpoint "
+            f"({_GOOGLE_TOKEN_URI})"
+        )
+    return {**info, "token_uri": token_uri}
+
+
+_GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+_GOOGLE_TOKEN_URIS = frozenset(
+    {_GOOGLE_TOKEN_URI, "https://accounts.google.com/o/oauth2/token"}
+)
 
 
 _BYTE_UNITS = {
@@ -592,11 +607,9 @@ class BigQueryDatabase(SQLDatabase):
         if not foreign:
             return sql
         try:
-            import sqlglot
-            from sqlglot import exp
-
             statements = sqlglot.parse(sql, read="bigquery")
-        except Exception:
+        except (sqlglot.errors.SqlglotError, ValueError):
+            logger.debug("Could not parse SQL to qualify its datasets; sent as is")
             return sql
 
         changed = False

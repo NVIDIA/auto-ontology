@@ -47,6 +47,7 @@ KEY = {
     "project_id": PROJECT,
     "client_email": "reader@my-project.iam.gserviceaccount.com",
     "private_key": "-----BEGIN PRIVATE KEY-----\nabc+/=\n-----END PRIVATE KEY-----\n",
+    "token_uri": "https://oauth2.googleapis.com/token",
 }
 
 
@@ -195,10 +196,41 @@ def test_raw_json_credentials_are_accepted_in_a_hand_written_url() -> None:
     assert _decode_credentials(json.dumps(KEY)) == KEY
 
 
+def test_a_key_without_a_token_endpoint_gets_googles() -> None:
+    key = {k: v for k, v in KEY.items() if k != "token_uri"}
+    assert _decode_credentials(json.dumps(key)) == KEY
+
+
 def test_credentials_must_be_a_service_account_key() -> None:
     encoded = base64.urlsafe_b64encode(b'{"type": "authorized_user"}').decode()
     with pytest.raises(ValueError, match="service-account"):
         _decode_credentials(encoded)
+
+
+@pytest.mark.parametrize(
+    "token_uri",
+    [
+        "https://oauth2.googleapis.com/token",
+        "https://accounts.google.com/o/oauth2/token",
+    ],
+)
+def test_a_key_may_name_googles_token_endpoint(token_uri: str) -> None:
+    key = {**KEY, "token_uri": token_uri}
+    assert _decode_credentials(json.dumps(key))["token_uri"] == token_uri
+
+
+@pytest.mark.parametrize(
+    "token_uri",
+    [
+        "http://169.254.169.254/computeMetadata/v1/token",
+        "https://oauth2.googleapis.com.evil.example/token",
+        "http://oauth2.googleapis.com/token",
+    ],
+)
+def test_a_key_naming_another_token_endpoint_is_refused(token_uri: str) -> None:
+    key = {**KEY, "token_uri": token_uri}
+    with pytest.raises(ValueError, match="token endpoint"):
+        _decode_credentials(json.dumps(key))
 
 
 def test_the_path_names_the_database() -> None:

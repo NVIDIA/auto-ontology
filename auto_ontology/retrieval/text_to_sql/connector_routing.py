@@ -203,7 +203,7 @@ def _referenced_tables(
     for dialect in dialects:
         try:
             statement = sqlglot.parse_one(sql, read=dialect)
-        except (sqlglot.errors.ParseError, ValueError):
+        except (sqlglot.errors.SqlglotError, ValueError):
             continue
         derived = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
         return [

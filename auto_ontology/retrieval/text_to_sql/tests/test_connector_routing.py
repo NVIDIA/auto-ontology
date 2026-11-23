@@ -42,6 +42,17 @@ def test_sql_decides_when_the_shown_tables_span_databases() -> None:
     assert resolve_connector_for_sql(shown, [census, works], "SELECT 1 FROM x") is None
 
 
+def test_sql_that_does_not_tokenize_routes_nowhere() -> None:
+    census, works = _connector("census"), _connector("adventureworks")
+    shown = [
+        _table("census", "acs", "state_2014"),
+        _table("adventureworks", "main", "salesorderheader"),
+    ]
+
+    sql = "SELECT 'unterminated FROM main.salesorderheader"
+    assert resolve_connector_for_sql(shown, [census, works], sql) is None
+
+
 def test_sql_routing_ignores_cte_names() -> None:
     first, second = _connector("first"), _connector("second")
     shown = [_table("first", "main", "totals"), _table("second", "main", "orders")]
