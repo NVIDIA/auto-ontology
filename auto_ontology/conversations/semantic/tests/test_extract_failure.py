@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A window that fails extraction stops the build before anything is kept.
+
+The draft is cached and then replaces the stored graph, so a skipped window
+would swap a complete graph for one missing that window's turns.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from auto_ontology.conversations.semantic import extract, pipeline
+from auto_ontology.conversations.semantic import store as semantic_store
+from auto_ontology.conversations.semantic.extract import (
+    GraphExtractionResult,
+    extract_graph,
+)
+from auto_ontology.conversations.semantic.windows import build_windows
+
+
+def _turns(count: int) -> list[dict]:
+    return [
+        {"turn_index": i, "question": "q" * 400, "answer": "", "time_anchor": None}
+        for i in range(count)
+    ]
+
+
+@pytest.fixture
+def second_window_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = iter([GraphExtractionResult(), None])
+    monkeypatch.setattr(extract, "_extract_window", lambda *_: next(calls))
+
+
+def test_a_failed_window_raises_and_names_its_turns(
+    second_window_fails: None,
+) -> None:
+    windows = build_windows(_turns(2), max_chars=500)
+    assert len(windows) == 2
+
+    with pytest.raises(RuntimeError, match=r"window 2 of 2 \(turns 1-1\)"):
+        extract_graph(windows)
+
+
+def test_a_failed_window_is_neither_cached_nor_written(
+    second_window_fails: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(pipeline, "fetch_turns", lambda *_, **__: _turns(2))
+    written: list[str] = []
+    monkeypatch.setattr(
+        semantic_store, "replace_graph", lambda **kw: written.append(kw) or {}
+    )
+    cache = tmp_path / "draft.json"
+
+    with pytest.raises(RuntimeError):
+        pipeline.populate_conversation_graph(
+            database_name="beam",
+            conversation_id="2",
+            window_chars=500,
+            draft_cache=cache,
+        )
+
+    assert not cache.exists()
+    assert written == []
