@@ -410,6 +410,68 @@ def _query_parameter(value: Any) -> Any:
     return ScalarQueryParameter(None, "STRING", str(value))
 
 
+class BytesBilledLimitExceeded(RuntimeError):
+    """BigQuery refused a query that would bill more than ``maximum_bytes_billed``.
+
+    Nothing was billed: BigQuery estimates the scan before it runs the query.
+    """
+
+    def __init__(
+        self, required: int | None, cap: int | None, errors: list | None = None
+    ) -> None:
+        self.required = required
+        self.cap = cap
+        self.errors = errors or []
+        scan = (
+            f"it would scan {_human_bytes(required)}"
+            if required
+            else "it scans too much"
+        )
+        limit = f", over the {_human_bytes(cap)} cap" if cap else ""
+        super().__init__(
+            f"Query exceeded limit for bytes billed: {scan}{limit}. Nothing was "
+            "billed. Scan less: filter _TABLE_SUFFIX or the partition column, "
+            "and select only the columns you need instead of *."
+        )
+
+
+def _human_bytes(size: int | None) -> str:
+    value = float(size or 0)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TiB"
+
+
+_BYTES_REQUIRED = re.compile(r"(\d+) or higher required", re.I)
+_BYTES_LIMIT = re.compile(r"limit for bytes billed: (\d+)", re.I)
+
+
+def _bytes_billed_limit(
+    exc: BaseException, cap: int | None
+) -> BytesBilledLimitExceeded | None:
+    """*exc* restated with its sizes in GiB, when it is the bytes-billed refusal."""
+    errors = getattr(exc, "errors", None) or []
+    text = str(exc)
+    if not (
+        any(
+            isinstance(error, dict)
+            and error.get("reason") == "bytesBilledLimitExceeded"
+            for error in errors
+        )
+        or "exceeded limit for bytes billed" in text.lower()
+    ):
+        return None
+    required = _BYTES_REQUIRED.search(text)
+    limit = _BYTES_LIMIT.search(text)
+    return BytesBilledLimitExceeded(
+        int(required.group(1)) if required else None,
+        int(limit.group(1)) if limit else cap,
+        list(errors),
+    )
+
+
 def _is_job_timeout(exc: BaseException) -> bool:
     """True when BigQuery stopped the job at its ``job_timeout_ms``."""
     errors = getattr(exc, "errors", None) or []
@@ -678,6 +740,9 @@ class BigQueryDatabase(SQLDatabase):
         except Exception as exc:
             if timeout_s is not None and _is_job_timeout(exc):
                 raise StatementTimeout.since(timeout_s, started) from exc
+            refused = _bytes_billed_limit(exc, self._maximum_bytes_billed)
+            if refused is not None:
+                raise refused from exc
             raise
 
         columns = [field.name for field in (rows.schema or [])]

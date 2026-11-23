@@ -27,6 +27,7 @@ from google.cloud.bigquery.table import ColumnReference, ForeignKey, TableRefere
 from auto_ontology.catalog.constants import TableTypes
 from auto_ontology.connectors.base import StatementTimeout
 from auto_ontology.connectors.bigquery import (
+    BytesBilledLimitExceeded,
     DEFAULT_MAXIMUM_BYTES_BILLED,
     TABLE_SUFFIX_COLUMN,
     BigQueryDatabase,
@@ -500,6 +501,38 @@ def test_other_errors_propagate_unchanged() -> None:
 
     with pytest.raises(BadRequest):
         database.execute("SELECT nope", timeout_s=1)
+
+
+def test_a_query_over_the_byte_cap_says_how_much_it_would_scan() -> None:
+    from google.api_core.exceptions import InternalServerError
+
+    text = (
+        "Query exceeded limit for bytes billed: 21474836480. "
+        "189457760256 or higher required."
+    )
+    error = InternalServerError(
+        text, errors=[{"reason": "bytesBilledLimitExceeded", "message": text}]
+    )
+    database = _database()
+    _wire(database, _FakeClient(lambda sql: error))
+
+    with pytest.raises(BytesBilledLimitExceeded) as caught:
+        database.execute("SELECT * FROM big.events")
+
+    message = str(caught.value)
+    assert "would scan 176.4 GiB, over the 20.0 GiB cap" in message
+    assert "exceeded limit for bytes billed" in message.lower()
+    assert "_TABLE_SUFFIX" in message
+    assert caught.value.errors[0]["reason"] == "bytesBilledLimitExceeded"
+    assert caught.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    ("size", "text"),
+    [(512, "512.0 B"), (11 * 1024**2, "11.0 MiB"), (5 * 1024**4, "5.0 TiB")],
+)
+def test_byte_sizes_are_shown_in_a_readable_unit(size: int, text: str) -> None:
+    assert BytesBilledLimitExceeded(size, None).args[0].count(text) == 1
 
 
 # ----------------------------------------------------------------------
