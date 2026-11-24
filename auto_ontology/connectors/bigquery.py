@@ -701,12 +701,7 @@ class BigQueryDatabase(SQLDatabase):
         that already names its projects reaches BigQuery byte for byte. SQL
         sqlglot cannot parse is passed through for BigQuery to judge.
         """
-        foreign = {
-            name: owner
-            for name, owner in self._owners.items()
-            if owner != self._project
-        }
-        if not foreign:
+        if all(owner == self._project for owner in self._owners.values()):
             return sql
         try:
             statements = sqlglot.parse(sql, read="bigquery")
@@ -721,8 +716,10 @@ class BigQueryDatabase(SQLDatabase):
             for table in statement.find_all(exp.Table):
                 if table.catalog or not table.db:
                     continue
-                owner = _by_dataset(foreign, table.db)
-                if owner is not None:
+                # Resolved against every named dataset, so an exact local
+                # match is never traded for a case-twin in another project.
+                owner = _by_dataset(self._owners, table.db)
+                if owner is not None and owner != self._project:
                     table.set("catalog", exp.to_identifier(owner))
                     changed = True
         if not changed:

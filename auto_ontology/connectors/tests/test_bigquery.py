@@ -893,6 +893,18 @@ def test_dataset_ids_that_differ_only_in_case_stay_distinct() -> None:
     assert picked.qualify("SALES", "t") == "`billing`.`SALES`.`t`"
 
 
+def test_sql_on_a_billing_dataset_is_not_sent_to_its_case_twin() -> None:
+    url = "bigquery://billing?dataset=billing.Sales&dataset=other.sales"
+    database = BigQueryDatabase(url)
+    client = _wire(database, _FakeClient())
+
+    database.execute("SELECT COUNT(*) FROM Sales.orders")
+    database.execute("SELECT COUNT(*) FROM sales.orders")
+
+    assert "other" not in client.statements[0]
+    assert "other.sales.orders" in client.statements[1]
+
+
 def test_a_dataset_named_in_another_case_resolves_when_unambiguous() -> None:
     database = BigQueryDatabase(PUBLIC_URL, schemas=["AUSTIN_CRIME"])
 
