@@ -71,7 +71,7 @@ _NUMBER = re.compile(
     r"(?<![\w.\-/#])(?<!\d:)"
     r"(?P<sign>-?)[$€£]?(?P<digits>\d[\d,]*(?:\.\d+)?)"
     r"(?:(?P<percent>\s?%|\s(?:percent|pct)\b)"
-    r"|(?P<scale>[kmb]\b|bn\b|\s(?:thousand|million|billion|trillion)\b))?"
+    r"|(?P<scale>\s?(?:[kmb]|bn)\b|\s(?:thousand|million|billion|trillion)\b))?"
     r"(?![\w\-/%]|[.:]\d)",
     re.IGNORECASE,
 )
@@ -121,14 +121,19 @@ def _numbers(text: str) -> list[_Cited]:
         if match.group("sign"):
             number = -number
         decimals = len(digits.split(".")[1]) if "." in digits else 0
-        suffix = (match.group("scale") or "").strip()
+        raw_suffix = match.group("scale") or ""
+        suffix = raw_suffix.strip()
         scale = _SCALES.get(suffix.lower(), 1.0)
+        # "300m" may be metres and "3 B" a grade: either reading supports the
+        # number, and a small one is not checked.
+        ambiguous = suffix == "m" or (
+            raw_suffix[:1].isspace() and suffix.lower() in {"k", "m", "b", "bn"}
+        )
         percent = bool(match.group("percent"))
-        bare = not decimals and not percent and scale == 1.0
+        bare = not decimals and not percent and (scale == 1.0 or ambiguous)
         half_unit = 0.5 * 10.0**-decimals
         readings = [(number * scale, half_unit * scale)]
-        if suffix == "m":
-            # "300m" may be metres: either reading supports the number.
+        if ambiguous:
             readings.append((number, half_unit))
         found.append(
             _Cited(
@@ -239,7 +244,7 @@ def _checked(response: str, question: str, sql: str) -> list[_Cited]:
         for c in _numbers(_prose(response))
         if not c.year
         and not c.after_rank_word
-        and not (c.bare_integer and abs(c.readings[0][0]) <= _SMALL)
+        and not (c.bare_integer and any(abs(n) <= _SMALL for n, _ in c.readings))
         and not any(n in stated for n, _ in c.readings)
     ]
 
