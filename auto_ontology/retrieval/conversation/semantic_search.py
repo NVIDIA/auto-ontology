@@ -95,7 +95,14 @@ class SemanticHits:
         return sum(1 for turn in self.turns if turn.distance is None)
 
 
-def _matched_ids(query: str, *, database_name: str, top_k: int) -> list[str]:
+def _query_vector(query: str) -> list[float] | None:
+    vectors = embed_texts([query], get_embed_params(), "query")
+    return vectors[0] if vectors else None
+
+
+def _matched_ids(
+    vector: list[float] | None, *, database_name: str, top_k: int
+) -> list[str]:
     """Node ids matching *query*, nearest first, the subject excluded.
 
     Things and statements share one collection, so one search reaches both.
@@ -114,11 +121,7 @@ def _matched_ids(query: str, *, database_name: str, top_k: int) -> list[str]:
     its own. Guarded here rather than left to the slice so the off-switch costs
     neither an embedding nor a query.
     """
-    if top_k <= 0:
-        return []
-    vectors = embed_texts([query], get_embed_params(), "query")
-    vector = vectors[0] if vectors else None
-    if vector is None:
+    if top_k <= 0 or vector is None:
         return []
 
     hits = get_conversation_semantic_vdb(database_name=database_name).retrieval(
@@ -137,7 +140,7 @@ def _matched_ids(query: str, *, database_name: str, top_k: int) -> list[str]:
 
 
 def _matched_path_endpoints(
-    query: str, *, database_name: str, path_k: int
+    vector: list[float] | None, *, database_name: str, path_k: int
 ) -> list[str]:
     """Node ids sitting on the paths that match *query*, nearest path first.
 
@@ -169,11 +172,7 @@ def _matched_path_endpoints(
     without reordering it: a relation is placed by its closest path, and
     arriving later only means every nearer relation was already counted.
     """
-    if path_k <= 0:
-        return []
-    vectors = embed_texts([query], get_embed_params(), "query")
-    vector = vectors[0] if vectors else None
-    if vector is None:
+    if path_k <= 0 or vector is None:
         return []
 
     hits = get_one_hop_path_vdb(database_name=database_name).retrieval(
@@ -251,10 +250,14 @@ def search_semantic(
     if not stripped:
         return SemanticHits()
 
+    # Embedded once for all three routes, and not at all when every one is off.
+    wanted = node_k > 0 or path_k > 0 or (hybrid and top_k > 0)
+    vector = _query_vector(stripped) if wanted else None
+
     # A missing collection is a memory without a semantic layer, not a failed
     # search: logged and treated as no match, so the turn route still answers.
     try:
-        matched = _matched_ids(stripped, database_name=database_name, top_k=node_k)
+        matched = _matched_ids(vector, database_name=database_name, top_k=node_k)
     except Exception:
         logger.warning(
             "Node search failed in %s -- continuing without it.",
@@ -264,7 +267,7 @@ def search_semantic(
         matched = []
     try:
         from_paths = _matched_path_endpoints(
-            stripped, database_name=database_name, path_k=path_k
+            vector, database_name=database_name, path_k=path_k
         )
     except Exception:
         logger.warning(
@@ -322,9 +325,13 @@ def search_semantic(
         for row in rows
     }
 
-    if hybrid:
+    if hybrid and vector is not None:
         for hit in search_turns(
-            stripped, database_name=database_name, top_k=top_k, widen=widen
+            stripped,
+            database_name=database_name,
+            top_k=top_k,
+            widen=widen,
+            vector=vector,
         ):
             key = (hit.conversation_id, hit.turn_index)
             existing = turns.get(key)

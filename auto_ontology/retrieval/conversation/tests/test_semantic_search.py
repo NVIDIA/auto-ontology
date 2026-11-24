@@ -22,6 +22,9 @@ from auto_ontology.retrieval.conversation.semantic_search import (
 )
 
 
+_VECTOR = [0.1, 0.2]
+
+
 def _hit(row_id: str, type_: str, distance: float) -> dict:
     return {
         "text": f"{type_}: {row_id}",
@@ -99,13 +102,34 @@ def test_a_missing_semantic_layer_falls_through_to_the_turn_route() -> None:
     assert hits.nodes == []
 
 
+def test_one_search_embeds_the_query_once() -> None:
+    from auto_ontology.retrieval.conversation.semantic_search import search_semantic
+
+    module = "auto_ontology.retrieval.conversation.semantic_search"
+    store = f"{module}.semantic_store"
+    with (
+        patch(f"{module}.get_embed_params"),
+        patch(f"{module}.embed_texts", return_value=[_VECTOR]) as embedded,
+        patch(f"{module}.get_conversation_semantic_vdb", return_value=_FakeVdb([])),
+        patch(f"{module}.get_one_hop_path_vdb", return_value=_FakeVdb([])),
+        patch(f"{store}.fetch_nodes", return_value=[]),
+        patch(f"{store}.fetch_edges", return_value=[]),
+        patch(f"{store}.fetch_half_edges", return_value=[]),
+        patch(f"{module}.search_turns", return_value=[]) as turns,
+    ):
+        search_semantic("rate limit", database_name="mem")
+
+    assert embedded.call_count == 1
+    assert turns.call_args.kwargs["vector"] == _VECTOR
+
+
 def test_the_subject_node_is_not_answered_with() -> None:
     """Its description summarises the transcript, so it overlaps any question
     about it while adding nothing the turns do not already say."""
     hits = [_hit("subject", "Subject", 0.11), _hit("a", "Metric", 0.22)]
 
     with _stub(hits):
-        assert _matched_ids("q", database_name="mem", top_k=2) == ["a"]
+        assert _matched_ids(_VECTOR, database_name="mem", top_k=2) == ["a"]
 
 
 def test_the_excluded_subject_does_not_consume_a_slot() -> None:
@@ -121,7 +145,7 @@ def test_the_excluded_subject_does_not_consume_a_slot() -> None:
     ]
 
     with _stub(hits) as vdb:
-        assert _matched_ids("q", database_name="mem", top_k=2) == ["a", "b"]
+        assert _matched_ids(_VECTOR, database_name="mem", top_k=2) == ["a", "b"]
     assert vdb.top_k is not None and vdb.top_k > 2
 
 
@@ -130,14 +154,14 @@ def test_no_more_rows_are_returned_than_were_asked_for() -> None:
     hits = [_hit(name, "Metric", 0.1) for name in ("a", "b", "c", "d", "e")]
 
     with _stub(hits):
-        assert len(_matched_ids("q", database_name="mem", top_k=2)) == 2
+        assert len(_matched_ids(_VECTOR, database_name="mem", top_k=2)) == 2
 
 
 def test_a_matching_path_contributes_both_of_its_endpoints() -> None:
     """A path vector matches a question that names the relation and neither
     end, so the ends have to be pulled in behind it."""
     with _stub([], paths=[_path_hit("project", "flask", 0.12)]):
-        found = _matched_path_endpoints("q", database_name="mem", path_k=5)
+        found = _matched_path_endpoints(_VECTOR, database_name="mem", path_k=5)
 
     assert found == ["project", "flask"]
 
@@ -146,7 +170,7 @@ def test_path_endpoints_come_source_first() -> None:
     """The source of a supersedes is the current value and of a precedes the
     earlier event -- the half worth keeping when the budget runs out."""
     with _stub([], paths=[_path_hit("current", "stale", 0.1)]):
-        found = _matched_path_endpoints("q", database_name="mem", path_k=5)
+        found = _matched_path_endpoints(_VECTOR, database_name="mem", path_k=5)
 
     assert found.index("current") < found.index("stale")
 
@@ -155,14 +179,14 @@ def test_an_endpoint_on_two_matching_paths_is_listed_once() -> None:
     paths = [_path_hit("a", "b", 0.1), _path_hit("a", "c", 0.2)]
 
     with _stub([], paths=paths):
-        found = _matched_path_endpoints("q", database_name="mem", path_k=5)
+        found = _matched_path_endpoints(_VECTOR, database_name="mem", path_k=5)
 
     assert found == ["a", "b", "c"]
 
 
 def test_the_path_route_can_be_switched_off() -> None:
     with _stub([], paths=[_path_hit("a", "b", 0.1)]):
-        assert _matched_path_endpoints("q", database_name="mem", path_k=0) == []
+        assert _matched_path_endpoints(_VECTOR, database_name="mem", path_k=0) == []
 
 
 def _node(conversation_id: str, *turn_indexes: int) -> dict[str, Any]:

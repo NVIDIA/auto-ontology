@@ -65,6 +65,7 @@ def search_turns(
     database_name: str,
     top_k: int = 10,
     widen: int = 0,
+    vector: list[float] | None = None,
 ) -> list[TurnHit]:
     """Find the turns bearing on *query*, in the order they were said.
 
@@ -74,6 +75,9 @@ def search_turns(
     consume the *top_k* budget: the result can hold more than ``top_k`` turns,
     and the extras are flagged by a ``distance`` of ``None``.
 
+    *vector* is the query's embedding when the caller already has it, so a
+    search running several routes embeds the query once.
+
     Returns an empty list when the query embeds to nothing or the memory holds
     no turns; neither is an error, and both are what an empty memory looks
     like before anything has been ingested into it.
@@ -82,8 +86,9 @@ def search_turns(
     if not stripped or top_k <= 0:
         return []
 
-    vectors = embed_texts([stripped], get_embed_params(), "query")
-    vector = vectors[0] if vectors else None
+    if vector is None:
+        vectors = embed_texts([stripped], get_embed_params(), "query")
+        vector = vectors[0] if vectors else None
     if vector is None:
         return []
 
