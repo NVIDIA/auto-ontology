@@ -444,10 +444,18 @@ class _CitationResult(BaseModel):
     )
 
 
-def _render_claims(nodes: Sequence[NodeDraft]) -> str:
+def _render_claims(nodes: Sequence[NodeDraft], turns: Mapping[int, str]) -> str:
+    """The claims, each labelled with the turns whose text is below it.
+
+    Only those. A claim can cite a turn this run has no text for -- the graph
+    outlives any one window of the transcript -- and listing it invites a
+    verdict on evidence the model was never shown.
+    """
     lines = []
     for number, node in enumerate(nodes, start=1):
-        cites = ", ".join(str(index) for index in sorted(node.turn_indexes))
+        cites = ", ".join(
+            str(index) for index in sorted(node.turn_indexes) if index in turns
+        )
         reading = f" [{node.key} = {node.value}]" if node.key else ""
         lines.append(
             f"{number}. {node.name}{reading}\n"
@@ -477,7 +485,7 @@ def _check_citations(
             HumanMessage(
                 content=(
                     f"TURNS:\n\n{_render_turns(shown, turns)}\n\n"
-                    f"CLAIMS:\n{_render_claims(nodes)}"
+                    f"CLAIMS:\n{_render_claims(nodes, turns)}"
                 )
             ),
         ],
@@ -496,12 +504,14 @@ def _check_citations(
             logger.warning("Ignoring verdict for claim %d: not shown.", item.claim)
             continue
         node = nodes[item.claim - 1]
-        # The turn has to be one this claim actually cites. A verdict on a turn
-        # it never cited is about a pair that was never put to the model, and
-        # acting on it would detach a citation nobody questioned.
-        if item.turn not in node.turn_indexes:
+        # The turn has to be one this claim cites and one whose text went into
+        # the prompt. A verdict on a turn it never cited is about a pair that
+        # was never put to the model; a verdict on a turn with no text is about
+        # a pair the model could not have read. Acting on either would detach a
+        # citation on evidence nobody saw.
+        if item.turn not in node.turn_indexes or item.turn not in turns:
             logger.warning(
-                "Ignoring verdict on turn %d for %r: not cited by it.",
+                "Ignoring verdict on turn %d for %r: not cited by it, or not shown.",
                 item.turn,
                 node.name,
             )

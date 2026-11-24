@@ -388,12 +388,28 @@ class TestNodeCitations:
                     value="85%",
                     description="The suite covers 85%.",
                 )
-            ]
+            ],
+            {5: "five", 9: "nine"},
         )
 
         assert "[test_coverage_pct = 85%]" in rendered
         assert "The suite covers 85%." in rendered
         assert "cited from turns: 5, 9" in rendered
+
+    def test_a_cited_turn_with_no_text_is_not_offered_for_a_verdict(self) -> None:
+        """The graph outlives any one window of the transcript, so a claim can
+        cite a turn this run was not given."""
+        rendered = _render_claims([statement("a", {5, 9, 12})], {5: "five", 9: "nine"})
+
+        assert "cited from turns: 5, 9" in rendered
+
+    def test_a_verdict_on_a_turn_with_no_text_is_ignored(self, answer: Answer) -> None:
+        answer([_CItem(1, 9, "denies")])
+        node = statement("a", {1, 2, 9})
+
+        report = verify_node_citations([node], {1: "x", 2: "y"})
+
+        assert report.checked == 0
 
     def test_turns_are_shown_to_the_model(self, answer: Answer) -> None:
         asked = answer([_CItem(1, 1, "supports")])
