@@ -161,9 +161,11 @@ def _infer_single_table_columns(expression: exp.Expression) -> None:
             # taken for the clause it sits in.
             # Only a clause that belongs directly to the SELECT counts: an ORDER BY
             # inside a window or WITHIN GROUP is not one of its output clauses.
-            # A name inside a function call (``HAVING SUM(a)``) is an input column,
-            # not a reference to an output alias, so a function ends the search too.
-            clause = column.find_ancestor(exp.Func, exp.Select, *_OUTPUT_CLAUSES)
+            # A name inside an aggregate (``HAVING SUM(a)``) is an input column,
+            # not a reference to an output alias, so an aggregate ends the search
+            # too.  A scalar function (``ORDER BY ABS(total)``) does not: it may
+            # still be applied to an output alias.
+            clause = column.find_ancestor(exp.AggFunc, exp.Select, *_OUTPUT_CLAUSES)
             if (
                 isinstance(clause, _OUTPUT_CLAUSES)
                 and isinstance(clause.parent, exp.Select)

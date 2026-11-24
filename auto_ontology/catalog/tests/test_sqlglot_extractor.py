@@ -88,6 +88,16 @@ def test_extract_tables_and_columns_aggregate_argument_named_like_an_output() ->
     assert result.tables["t"].columns == {"a", "b"}
 
 
+def test_extract_tables_and_columns_scalar_function_of_an_output_alias() -> None:
+    """``ORDER BY ABS(total)`` reads the output alias, not a column of the table."""
+    result = extract_tables_and_columns(
+        "SELECT SUM(b) AS total, c FROM t GROUP BY c ORDER BY ABS(total)",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"b", "c"}
+
+
 def test_extract_tables_and_columns_duplicate_alias_keeps_the_tables() -> None:
     """A query sqlglot can't resolve still returns the tables it names."""
     result = extract_tables_and_columns(
