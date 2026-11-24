@@ -73,7 +73,7 @@ import re
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, TypeVar
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
@@ -89,6 +89,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_V = TypeVar("_V")
+
 DEFAULT_MAXIMUM_BYTES_BILLED = 40 * 1024**3
 
 # Attached to every job, so query history can skip the connector's own
@@ -99,6 +101,8 @@ _JOB_LABELS = {"source": "auto-ontology"}
 # server's ``job_timeout_ms`` fires first and the job is stopped rather than the
 # client abandoning a job that keeps running (and billing).
 _TIMEOUT_GRACE_S = 10.0
+# How long a timed-out statement waits on its job's cancellation request.
+_CANCEL_TIMEOUT_S = 5.0
 
 _QUERY_HISTORY_LIMIT = 10_000
 _MAX_QUERY_JOB_HOURS = 6
@@ -110,6 +114,8 @@ _TABLE_TYPES = {
 
 # The clauses a first-rows read may have; anything else needs a real query.
 _SAMPLE_CLAUSES = frozenset({"expressions", "from", "from_", "limit"})
+# Time travel and TABLESAMPLE sit on the table, not the statement.
+_SAMPLE_TABLE_PARTS = frozenset({"this", "db", "catalog", "alias"})
 
 _TABLE_SCHEMA = ["table_schema", "table_name", "table_type", "description"]
 
@@ -261,6 +267,18 @@ def shard_families(
     return families
 
 
+def _by_dataset(items: dict[str, _V], dataset: str) -> _V | None:
+    """The entry for *dataset*'s exact ID, else the only one differing in case.
+
+    BigQuery dataset IDs are case-sensitive, so ``Sales`` and ``sales`` can
+    both exist; a name in another case is tolerated only when unambiguous.
+    """
+    if dataset in items:
+        return items[dataset]
+    folded = [v for k, v in items.items() if k.casefold() == dataset.casefold()]
+    return folded[0] if len(folded) == 1 else None
+
+
 def _first(query: dict[str, list[str]], key: str) -> str | None:
     """Return the first value for *key*, URL-decoded, or ``None``."""
     value = query.get(key, [None])[0]
@@ -281,6 +299,11 @@ def _decode_credentials(encoded: str) -> dict[str, Any]:
             raise ValueError(
                 "BigQuery credentials are not valid base64-encoded JSON"
             ) from exc
+    return _service_account_key(text)
+
+
+def _service_account_key(text: str) -> dict[str, Any]:
+    """Parse a service-account JSON key, refusing any other kind of key."""
     try:
         info = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -370,7 +393,7 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
         if not dataset:
             raise ValueError(f"BigQuery dataset {raw!r} must be [project.]dataset")
         # A two-part name in SQL can only resolve to one of them.
-        previous = owners.setdefault(dataset.casefold(), owner)
+        previous = owners.setdefault(dataset, owner)
         if previous != owner:
             raise ValueError(
                 f"BigQuery dataset {dataset!r} is named in both {previous!r} and "
@@ -540,17 +563,13 @@ class BigQueryDatabase(SQLDatabase):
         pinned = self._settings["schema"]
         if not allowlist and pinned:
             allowlist = [str(pinned)]
-        wanted = {name.casefold() for name in allowlist}
-
         named: list[tuple[str, str]] = list(self._settings["datasets"])
-        self._owners: dict[str, str] = {
-            dataset.casefold(): owner for owner, dataset in named
-        }
+        self._owners: dict[str, str] = {dataset: owner for owner, dataset in named}
         if named:
+            by_id = {dataset: (owner, dataset) for owner, dataset in named}
+            wanted = {_by_dataset(by_id, name) for name in allowlist}
             self._scope: list[tuple[str, str]] | None = [
-                (owner, dataset)
-                for owner, dataset in named
-                if not wanted or dataset.casefold() in wanted
+                pair for pair in named if not allowlist or pair in wanted
             ]
         elif allowlist:
             self._scope = [(self._project, name) for name in sorted(set(allowlist))]
@@ -561,7 +580,7 @@ class BigQueryDatabase(SQLDatabase):
             logger.info("BigQuery ingestion restricted to datasets: %s", allowlist)
 
         self._client: "Client | None" = None
-        # Dataset (casefolded) -> wildcard name -> family, read on first use.
+        # Dataset -> wildcard name -> family, read on first use.
         self._families: dict[str, dict[str, ShardFamily]] | None = None
 
     # ------------------------------------------------------------------
@@ -578,16 +597,21 @@ class BigQueryDatabase(SQLDatabase):
         from google.oauth2 import service_account
 
         info = self._settings["credentials"]
-        if info is not None:
-            return service_account.Credentials.from_service_account_info(
-                info, scopes=Client.SCOPE
-            )
         path = self._settings["credentials_file"]
-        if path:
-            return service_account.Credentials.from_service_account_file(
-                path, scopes=Client.SCOPE
-            )
-        return None
+        if info is None and path:
+            try:
+                with open(path, encoding="utf-8") as key_file:
+                    text = key_file.read()
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ValueError(
+                    f"BigQuery credentials file {path} cannot be read"
+                ) from exc
+            info = _service_account_key(text)
+        if info is None:
+            return None
+        return service_account.Credentials.from_service_account_info(
+            info, scopes=Client.SCOPE
+        )
 
     @property
     def client(self) -> "Client":
@@ -648,7 +672,7 @@ class BigQueryDatabase(SQLDatabase):
 
     def _owner(self, dataset: str) -> str:
         """The project holding *dataset*: the one the URL names, else billing."""
-        return self._owners.get(dataset.casefold(), self._project)
+        return _by_dataset(self._owners, dataset) or self._project
 
     def qualify(self, schema: Optional[str], table: str) -> str:
         """Prepend the dataset's project: BigQuery names are ``project.dataset.table``.
@@ -697,7 +721,7 @@ class BigQueryDatabase(SQLDatabase):
             for table in statement.find_all(exp.Table):
                 if table.catalog or not table.db:
                     continue
-                owner = foreign.get(table.db.casefold())
+                owner = _by_dataset(foreign, table.db)
                 if owner is not None:
                     table.set("catalog", exp.to_identifier(owner))
                     changed = True
@@ -725,33 +749,50 @@ class BigQueryDatabase(SQLDatabase):
 
         With *timeout_s*, the job carries ``job_timeout_ms`` so BigQuery stops it
         server-side; the client waits a little longer before cancelling it
-        itself, in case the server-side stop is late.
+        itself, in case the server-side stop is late. The listing below, the
+        query that may follow it, and the wait for its result all share that
+        one budget.
 
         A statement that only reads a table's first rows -- what profiling
         sends -- is read with ``tabledata.list`` instead, which bills nothing:
         as a query it would scan every row of the columns it names, ``LIMIT``
         or not, and a large table would hit the bytes-billed cap.
         """
+        started = time.monotonic()
+
+        def left() -> float | None:
+            """The rest of the one budget every request of the statement shares."""
+            if timeout_s is None:
+                return None
+            remaining = timeout_s - (time.monotonic() - started)
+            if remaining <= 0:
+                raise StatementTimeout.since(timeout_s, started)
+            return remaining
+
         if not parameters:
             sample = self._table_sample(sql)
             if sample is not None:
-                frame = self._read_rows(*sample, timeout_s=timeout_s)
+                frame = self._read_rows(*sample, timeout_s=left())
                 if frame is not None:
                     return frame
+        budget = left()
         job = self.client.query(
             self._qualify_datasets(sql),
-            job_config=self._job_config(parameters, timeout_s),
+            job_config=self._job_config(parameters, budget),
+            timeout=budget,
         )
-        started = time.monotonic()
         try:
+            budget = left()
             rows = job.result(
-                timeout=None if timeout_s is None else timeout_s + _TIMEOUT_GRACE_S
+                timeout=None if budget is None else budget + _TIMEOUT_GRACE_S
             )
-        except concurrent.futures.TimeoutError as exc:
+        except (concurrent.futures.TimeoutError, StatementTimeout) as exc:
             try:
-                job.cancel()
+                job.cancel(timeout=_CANCEL_TIMEOUT_S)
             except Exception:
                 logger.debug("Failed to cancel BigQuery job %s", job.job_id)
+            if isinstance(exc, StatementTimeout):
+                raise
             raise StatementTimeout.since(timeout_s or 0.0, started) from exc
         except Exception as exc:
             if timeout_s is not None and _is_job_timeout(exc):
@@ -784,20 +825,22 @@ class BigQueryDatabase(SQLDatabase):
             not isinstance(table, exp.Table)
             or not table.db
             or "*" in table.name
+            or any(v for k, v in table.args.items() if k not in _SAMPLE_TABLE_PARTS)
             or not isinstance(count, exp.Literal)
             or not count.is_int
         ):
             return None
+        items = statement.expressions
         columns: list[str] | None = []
-        for item in statement.expressions:
-            if isinstance(item, exp.Star):
-                columns = None
-            elif (
-                isinstance(item, exp.Column) and not item.table and columns is not None
-            ):
-                columns.append(item.name)
-            else:
+        if len(items) == 1 and isinstance(items[0], exp.Star):
+            # EXCEPT and REPLACE live on the star; only a bare one reads as is.
+            if any(items[0].args.values()):
                 return None
+            columns = None
+        elif all(isinstance(i, exp.Column) and not i.table for i in items):
+            columns = [i.name for i in items]
+        else:
+            return None
         owner = table.catalog or self._owner(table.db)
         return f"{owner}.{table.db}.{table.name}", columns, int(count.this)
 
@@ -815,7 +858,7 @@ class BigQueryDatabase(SQLDatabase):
         listing cannot answer falls back to the query it was asked as.
         """
         try:
-            table = self.client.get_table(table_id)
+            table = self.client.get_table(table_id, timeout=timeout_s)
             if table.table_type != "TABLE" or not table.schema:
                 return None
             by_name = {field.name.casefold(): field for field in table.schema}
@@ -891,20 +934,23 @@ class BigQueryDatabase(SQLDatabase):
         ].itertuples(index=False, name=None):
             into = tables if str(kind).upper() == "BASE TABLE" else views
             into.setdefault(str(schema), []).append(str(name))
-        self._families = {}
-        for schema, names in tables.items():
-            self._families[schema.casefold()] = {
+        # Assigned whole, so a concurrent reader never takes a half-built map
+        # for the loaded cache.
+        self._families = {
+            schema: {
                 f.wildcard: f
                 for f in shard_families(names, views=views.get(schema, ()))
             }
+            for schema, names in tables.items()
+        }
 
     def _family(self, schema: str, table: str) -> ShardFamily | None:
         if "*" not in table:
             return None
-        return self._shard_families().get(schema.casefold(), {}).get(table)
+        return (_by_dataset(self._shard_families(), schema) or {}).get(table)
 
     def _shard_owners(self) -> dict[tuple[str, str], ShardFamily]:
-        """``(dataset, shard)`` -> its family, casefolded dataset."""
+        """``(dataset, shard)`` -> its family."""
         return {
             (schema, shard): family
             for schema, families in self._shard_families().items()
@@ -924,7 +970,7 @@ class BigQueryDatabase(SQLDatabase):
         for schema, table in frame[[schema_col, table_col]].itertuples(
             index=False, name=None
         ):
-            family = owners.get((str(schema).casefold(), str(table)))
+            family = owners.get((str(schema), str(table)))
             keep.append(family is None or table == family.latest)
             names.append(table if family is None else family.wildcard)
         frame = frame.assign(**{table_col: names})
@@ -972,7 +1018,7 @@ class BigQueryDatabase(SQLDatabase):
         families = self._shard_families()
         frame["description"] = [
             f"{family.note()} {description or ''}".strip()
-            if (family := families.get(str(schema).casefold(), {}).get(str(table)))
+            if (family := families.get(str(schema), {}).get(str(table)))
             else description
             for schema, table, description in frame[
                 ["table_schema", "table_name", "description"]
@@ -1032,9 +1078,7 @@ class BigQueryDatabase(SQLDatabase):
                 ),
             }
             for schema in frame["table_schema"].drop_duplicates()
-            for family in self._shard_families()
-            .get(str(schema).casefold(), {})
-            .values()
+            for family in self._shard_families().get(str(schema), {}).values()
             if (
                 (frame["table_schema"] == schema)
                 & (frame["table_name"] == family.wildcard)
@@ -1173,7 +1217,7 @@ class BigQueryDatabase(SQLDatabase):
         owners = self._shard_owners()
         frame["referenced_table"] = [
             family.wildcard
-            if (family := owners.get((str(schema).casefold(), str(table))))
+            if (family := owners.get((str(schema), str(table))))
             else table
             for schema, table in frame[
                 ["referenced_schema", "referenced_table"]

@@ -15,6 +15,7 @@ import concurrent.futures
 import datetime as dt
 import decimal
 import json
+from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -105,8 +106,9 @@ class _FakeJob:
             raise self._outcome
         return self._outcome
 
-    def cancel(self) -> None:
+    def cancel(self, timeout: float | None = None) -> None:
         self.cancelled = True
+        self.cancel_timeout = timeout
 
 
 class _FakeDataset:
@@ -129,7 +131,9 @@ class _FakeClient:
         self.jobs: list[_FakeJob] = []
         self.closed = False
 
-    def query(self, sql: str, job_config: Any = None) -> _FakeJob:
+    def query(
+        self, sql: str, job_config: Any = None, timeout: float | None = None
+    ) -> _FakeJob:
         self.statements.append(sql)
         self.configs.append(job_config)
         job = _FakeJob(self._answer(sql))
@@ -139,7 +143,7 @@ class _FakeClient:
     def list_datasets(self, project: str | None = None) -> list[_FakeDataset]:
         return [_FakeDataset(name) for name in self._datasets]
 
-    def get_table(self, table_id: str) -> Any:
+    def get_table(self, table_id: str, timeout: float | None = None) -> Any:
         return self._tables[table_id]
 
     def close(self) -> None:
@@ -371,17 +375,50 @@ def test_an_explicit_key_is_used_rather_than_default_credentials() -> None:
     assert client_cls.call_args.kwargs["location"] == "US"
 
 
-def test_a_key_file_is_loaded_from_disk() -> None:
+def test_a_key_file_is_loaded_from_disk(tmp_path: Path) -> None:
+    key_file = tmp_path / "sa.json"
+    key_file.write_text(json.dumps(KEY))
     with (
         patch(
-            "google.oauth2.service_account.Credentials.from_service_account_file"
-        ) as from_file,
+            "google.oauth2.service_account.Credentials.from_service_account_info"
+        ) as from_info,
         patch("google.cloud.bigquery.Client") as client_cls,
     ):
-        BigQueryDatabase("bigquery://p?credentials_file=/secrets/sa.json").client
+        BigQueryDatabase(f"bigquery://p?credentials_file={key_file}").client
 
-    assert from_file.call_args.args[0] == "/secrets/sa.json"
-    assert client_cls.call_args.kwargs["credentials"] is from_file.return_value
+    assert from_info.call_args.args[0] == KEY
+    assert client_cls.call_args.kwargs["credentials"] is from_info.return_value
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ({**KEY, "token_uri": "https://attacker.example/token"}, "token endpoint"),
+        ({**KEY, "type": "authorized_user"}, "service-account"),
+        ("not json", "valid JSON key"),
+    ],
+)
+def test_a_key_file_gets_the_inline_key_checks(
+    tmp_path: Path, contents: object, message: str
+) -> None:
+    key_file = tmp_path / "sa.json"
+    key_file.write_text(contents if isinstance(contents, str) else json.dumps(contents))
+    database = BigQueryDatabase(f"bigquery://p?credentials_file={key_file}")
+
+    with pytest.raises(ValueError, match=message):
+        database.client
+
+
+def test_a_missing_key_file_is_reported_without_falling_back(tmp_path: Path) -> None:
+    database = BigQueryDatabase(f"bigquery://p?credentials_file={tmp_path}/no.json")
+
+    with (
+        patch("google.cloud.bigquery.Client") as client_cls,
+        pytest.raises(ValueError, match="cannot be read"),
+    ):
+        database.client
+
+    client_cls.assert_not_called()
 
 
 def test_no_credentials_defers_to_application_default() -> None:
@@ -498,8 +535,8 @@ def test_a_timeout_is_sent_to_the_server_and_waited_on_with_grace() -> None:
 
     database.execute("SELECT 1", timeout_s=30)
 
-    assert int(client.configs[0].job_timeout_ms) == 30_000
-    assert client.jobs[0].result_timeout == 40.0
+    assert int(client.configs[0].job_timeout_ms) == pytest.approx(30_000, abs=500)
+    assert client.jobs[0].result_timeout == pytest.approx(40.0, abs=0.5)
 
 
 def test_a_client_side_timeout_cancels_the_job() -> None:
@@ -510,6 +547,7 @@ def test_a_client_side_timeout_cancels_the_job() -> None:
         database.execute("SELECT 1", timeout_s=1)
 
     assert client.jobs[0].cancelled
+    assert client.jobs[0].cancel_timeout is not None
 
 
 def test_a_server_side_timeout_is_a_statement_timeout() -> None:
@@ -841,6 +879,49 @@ def test_the_allowlist_narrows_named_datasets() -> None:
     database = BigQueryDatabase(PUBLIC_URL, schemas=["austin_crime"])
 
     assert database._datasets() == ["austin_crime"]  # noqa: SLF001
+
+
+def test_dataset_ids_that_differ_only_in_case_stay_distinct() -> None:
+    """BigQuery dataset IDs are case-sensitive; Sales and sales can coexist."""
+    url = "bigquery://billing?dataset=one.Sales&dataset=two.sales"
+
+    picked = BigQueryDatabase(url, schemas=["Sales"])
+
+    assert picked._datasets() == ["Sales"]  # noqa: SLF001
+    assert picked.qualify("Sales", "t") == "`one`.`Sales`.`t`"
+    assert picked.qualify("sales", "t") == "`two`.`sales`.`t`"
+    assert picked.qualify("SALES", "t") == "`billing`.`SALES`.`t`"
+
+
+def test_a_dataset_named_in_another_case_resolves_when_unambiguous() -> None:
+    database = BigQueryDatabase(PUBLIC_URL, schemas=["AUSTIN_CRIME"])
+
+    assert database._datasets() == ["austin_crime"]  # noqa: SLF001
+    assert database.qualify("Austin_311", "requests").startswith(
+        "`bigquery-public-data`."
+    )
+
+
+def test_shard_families_of_case_twin_datasets_stay_apart() -> None:
+    rows = [
+        ["Sales", "events_20260101", "BASE TABLE", None],
+        ["Sales", "events_20260102", "BASE TABLE", None],
+        ["sales", "events_20260101", "BASE TABLE", None],
+    ]
+    database = BigQueryDatabase("bigquery://billing?dataset=Sales&dataset=sales")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: _FakeRows(
+                ["table_schema", "table_name", "table_type", "description"], rows
+            )
+        ),
+    )
+
+    families = database._shard_families()  # noqa: SLF001
+
+    assert list(families["Sales"]) == ["events_*"]
+    assert families["sales"] == {}
 
 
 def test_introspection_reads_each_dataset_in_its_own_project() -> None:
@@ -1213,7 +1294,7 @@ class _ListingClient(_FakeClient):
         self._stored = _StoredTable(table_type)
         self.listed: list[tuple[list[str], int]] = []
 
-    def get_table(self, table_id: str) -> Any:
+    def get_table(self, table_id: str, timeout: float | None = None) -> Any:
         assert table_id == "bigquery-public-data.ga.visitors"
         return self._stored
 
@@ -1261,6 +1342,14 @@ def test_first_rows_of_named_columns_are_listed_too() -> None:
         "SELECT id FROM `bigquery-public-data.ga.visitors` ORDER BY id LIMIT 5",
         "SELECT COUNT(*) FROM `bigquery-public-data.ga.visitors` LIMIT 5",
         "SELECT id FROM `bigquery-public-data.ga.visitors`",
+        "SELECT * EXCEPT (id) FROM `bigquery-public-data.ga.visitors` LIMIT 5",
+        "SELECT * REPLACE (1 AS id) FROM `bigquery-public-data.ga.visitors` LIMIT 5",
+        "SELECT id, * FROM `bigquery-public-data.ga.visitors` LIMIT 5",
+        "SELECT *, id FROM `bigquery-public-data.ga.visitors` LIMIT 5",
+        "SELECT id FROM `bigquery-public-data.ga.visitors` FOR SYSTEM_TIME AS OF "
+        "TIMESTAMP '2026-01-01 00:00:00+00' LIMIT 5",
+        "SELECT id FROM `bigquery-public-data.ga.visitors` "
+        "TABLESAMPLE SYSTEM (10 PERCENT) LIMIT 5",
     ],
 )
 def test_anything_more_than_first_rows_runs_as_a_query(sql: str) -> None:
@@ -1270,6 +1359,30 @@ def test_anything_more_than_first_rows_runs_as_a_query(sql: str) -> None:
 
     assert client.listed == []
     assert len(client.statements) == 1
+
+
+def test_a_slow_listing_spends_the_budget_the_query_would_have_had(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Falling back to a query must not start the timeout over."""
+    clock = [100.0]
+    monkeypatch.setattr(
+        "auto_ontology.connectors.bigquery.time.monotonic", lambda: clock[0]
+    )
+    database, client = _listing()
+
+    def slow_failure(*args: Any, **kwargs: Any) -> list[_FakeRow]:
+        clock[0] += 31
+        raise RuntimeError("listing failed")
+
+    client.list_rows = slow_failure  # type: ignore[method-assign]
+
+    with pytest.raises(StatementTimeout):
+        database.execute(
+            "SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5", timeout_s=30
+        )
+
+    assert client.statements == []
 
 
 def test_a_view_runs_as_a_query() -> None:
