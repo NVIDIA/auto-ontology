@@ -37,10 +37,14 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _as_number(value: Any) -> float | None:
+def _as_number(value: Any) -> int | float | None:
     if _is_number(value):
-        return float(value)
+        return value
     if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            pass
         try:
             return float(value)
         except ValueError:
@@ -60,7 +64,7 @@ def _comparable(
     if key_values and all(_is_number(v) for v in key_values):
         fk_numbers = [_as_number(v) for v in fk_values]
         if all(n is not None for n in fk_numbers):
-            return fk_numbers, [float(v) for v in key_values]
+            return fk_numbers, key_values
     return (
         [render_sample_value(v) for v in fk_values],
         [render_sample_value(v) for v in key_values],
