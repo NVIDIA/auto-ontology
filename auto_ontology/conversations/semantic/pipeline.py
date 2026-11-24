@@ -33,7 +33,6 @@ import logging
 import time
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from auto_ontology.conversations.semantic import store as semantic_store
@@ -165,7 +164,6 @@ def populate_conversation_graph(
     relate: bool = True,
     reset_vectors: bool = False,
     window_chars: int = WINDOW_CHARS,
-    draft_cache: Path | None = None,
     verify: bool = False,
     subject_agent: bool = False,
 ) -> GraphResult:
@@ -185,13 +183,6 @@ def populate_conversation_graph(
     for one turn per call, which is cognee's unit: a chunk there is a single
     user-assistant turn. The default packs several turns together, which on a
     BEAM transcript came out as one to four of them -- the turns are long.
-
-    *draft_cache* is a file to read the extraction draft from, and to write it
-    to when it is not there or no longer matches. For retrying the stages after
-    extraction, which is where the tuning happens and where an hour of model
-    calls has twice been lost to a bug in a stage that costs seconds. Off by
-    default, and it should stay off in a measured run: a cached draft is a claim
-    about what the current code does, and a measurement wants it tested.
 
     *verify* reads the extracted graph back against the turns it came from.
     Edges whose own turns contradict them are **dropped**; edges merely
@@ -227,27 +218,7 @@ def populate_conversation_graph(
     )
 
     ledger = _Ledger(conversation_id)
-    graph = None
-    digest = ""
-    if draft_cache is not None:
-        from auto_ontology.conversations.semantic.draft_cache import (
-            fingerprint,
-            load_draft,
-        )
-
-        digest = fingerprint(windows)
-        graph = load_draft(draft_cache, digest)
-
-    if graph is None:
-        graph = extract_graph(windows)
-        if draft_cache is not None:
-            from auto_ontology.conversations.semantic.draft_cache import save_draft
-
-            # Before consolidation, which mutates the draft: the saved point has
-            # to be the output of extraction alone, or the fingerprint stops
-            # describing what produced the file.
-            save_draft(draft_cache, digest, graph)
-
+    graph = extract_graph(windows)
     ledger.note("extract", graph, found=f"{len(windows)} window(s)")
 
     if verify:

@@ -4,13 +4,11 @@
 
 """A window that fails extraction stops the build before anything is kept.
 
-The draft is cached and then replaces the stored graph, so a skipped window
-would swap a complete graph for one missing that window's turns.
+The draft replaces the stored graph, so a skipped window would swap a complete
+graph for one missing that window's turns.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
@@ -46,23 +44,18 @@ def test_a_failed_window_raises_and_names_its_turns(
         extract_graph(windows)
 
 
-def test_a_failed_window_is_neither_cached_nor_written(
-    second_window_fails: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_a_failed_window_is_not_written(
+    second_window_fails: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(pipeline, "fetch_turns", lambda *_, **__: _turns(2))
     written: list[str] = []
     monkeypatch.setattr(
         semantic_store, "replace_graph", lambda **kw: written.append(kw) or {}
     )
-    cache = tmp_path / "draft.json"
 
     with pytest.raises(RuntimeError):
         pipeline.populate_conversation_graph(
-            database_name="beam",
-            conversation_id="2",
-            window_chars=500,
-            draft_cache=cache,
+            database_name="beam", conversation_id="2", window_chars=500
         )
 
-    assert not cache.exists()
     assert written == []

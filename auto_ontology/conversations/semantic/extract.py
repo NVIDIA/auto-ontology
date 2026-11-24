@@ -824,7 +824,7 @@ def extract_graph(windows: list[Window]) -> GraphDraft:
             raise RuntimeError(
                 f"Extraction failed on window {position} of {len(windows)} "
                 f"(turns {window.turn_indexes[0]}-{window.turn_indexes[-1]}) "
-                "after retries; nothing was cached or written."
+                "after retries; nothing was written."
             )
 
         anchor_by_turn = dict(zip(window.turn_indexes, window.anchors))
