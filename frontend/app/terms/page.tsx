@@ -17,7 +17,7 @@ export default function TermsPage() {
 							className="h-5 w-5 text-body dark:text-zinc-300"
 						/>
 						<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-							Terms
+							Business Glossary
 						</h1>
 					</header>
 					<div className="flex-1 px-6 py-6">
