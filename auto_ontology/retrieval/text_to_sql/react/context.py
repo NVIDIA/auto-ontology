@@ -65,6 +65,11 @@ class ToolContext:
 
     ``empty_result_checked`` records that ``submit`` has held back one empty
     result to check its filters; the next one is accepted.
+
+    ``answer_numbers_checked`` records that ``submit`` already sent an answer
+    back for citing numbers its rows don't hold (#252), which it does once per
+    episode; ``last_answer_attempt`` is set by the loop when the model would
+    get no turn to answer again, so that check stays out of the way.
     """
 
     retriever: Any
@@ -95,6 +100,8 @@ class ToolContext:
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
     empty_result_checked: bool = False
+    answer_numbers_checked: bool = False
+    last_answer_attempt: bool = False
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:

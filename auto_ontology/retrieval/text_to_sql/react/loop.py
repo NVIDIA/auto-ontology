@@ -35,6 +35,7 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 )
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
+from auto_ontology.retrieval.text_to_sql.react.answer_numbers import numbers_check
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.empty_result import (
     empty_result_rejection,
@@ -141,7 +142,10 @@ def submit(
         ctx, connector, check.statement, db_response, resubmit
     ):
         return rejection, None
-    submission = Submission(sql, (response or "").strip(), assumptions, db_response)
+    response = (response or "").strip()
+    if (sent_back := numbers_check(ctx, sql, response, db_response)) is not None:
+        return sent_back, None
+    submission = Submission(sql, response, assumptions, db_response)
     ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission
 
@@ -371,6 +375,7 @@ def run_episode(
             else:
                 if calls >= budget:
                     answered_over_budget = True
+                ctx.last_answer_attempt = calls >= budget
                 made.add(key)
                 calls += 1
                 observation, answer = _dispatch(ctx, name, args, offered)
