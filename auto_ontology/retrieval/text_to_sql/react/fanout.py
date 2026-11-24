@@ -16,7 +16,8 @@ It only reports what the catalog proves. "Repeats" means profiling saw a
 value twice in the column's sample (``distinct_ratio`` below 1.0) and the
 column is not a declared single-column key. Everything else leaves the query
 alone: a join column with no measured ratio, a join on more than one column,
-an equality filter on the joined table (it may pick one row per key),
+any condition on the joined table besides the join (it may pick one row
+per key),
 derived tables, ``COUNT(DISTINCT ...)``, ``COUNT(*)``, window aggregates, and
 a ``GROUP BY`` that holds a unique key of the joined table. An aggregate over
 a subquery or CTE that already aggregated the detail is not affected, because
@@ -174,7 +175,8 @@ class _ScopeCheck:
             measured = self._measured(aggregate)
             if not measured:
                 continue
-            # ``SUM(x) FILTER (WHERE a.id = 2)`` may keep one row of ``a``.
+            # ``SUM(x) FILTER (WHERE a.id = 2)`` may keep one row of ``a``,
+            # so the tables its own filter names are not reported for it.
             filtered: set[str] = set()
             if isinstance(aggregate.parent, exp.Filter):
                 where = aggregate.parent.expression
@@ -287,18 +289,13 @@ class _ScopeCheck:
     def _may_pick_one_row(self, conjunct: exp.Expression) -> set[str]:
         """Sources whose rows *conjunct* may narrow to one per key.
 
-        An equality can (``currency = 'USD'``); a condition across sources or
-        through a subquery can do the same. A range or pattern filter on one
-        source cannot make its rows unique.
+        Any condition on a source can: an equality (``currency = 'USD'``), a
+        degenerate range (``BETWEEN 2 AND 2``), a validity window
+        (``valid_from <= d AND valid_to > d``), or a subquery that keeps the
+        latest row. Telling these from filters that keep several rows needs
+        data the catalog does not have, so none of them is a finding.
         """
-        referenced = self._referenced(conjunct)
-        if (
-            isinstance(conjunct, (exp.EQ, exp.NullSafeEQ, exp.In))
-            or len(referenced) > 1
-            or conjunct.find(exp.Select)
-        ):
-            return referenced
-        return set()
+        return self._referenced(conjunct)
 
     def _read_group_by(self) -> None:
         group = self.select.args.get("group")

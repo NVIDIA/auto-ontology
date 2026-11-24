@@ -196,8 +196,6 @@ def test_grouped_owner_sum_after_fanout_is_refused_and_wrong(
         "SELECT SUM(rate) FROM suppliers JOIN asn ON asn.supplier_id = suppliers.id",
         "SELECT SUM(s.rate) FROM suppliers s "
         "JOIN asn a ON CAST(a.supplier_id AS INTEGER) = s.id",
-        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
-        "WHERE a.qty > 3",
         "SELECT s.name FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
         "GROUP BY s.name HAVING SUM(s.rate) > 15",
         "WITH t AS (SELECT s.id, SUM(s.rate) AS r FROM suppliers s "
@@ -261,22 +259,11 @@ def test_aggregate_filter_spares_only_that_aggregate(
     profiles: dict[str, KeyProfile],
 ) -> None:
     sql = (
-        "SELECT SUM(s.rate) FILTER (WHERE a.id = 2), SUM(s.rate) FROM suppliers s "
+        "SELECT SUM(s.rate) FILTER (WHERE a.id > 2), SUM(s.rate) FROM suppliers s "
         "JOIN asn a ON a.supplier_id = s.id"
     )
 
     assert [f.aggregate for f in _fanouts(sql, profiles)] == ["SUM(s.rate)"]
-
-
-def test_aggregate_range_filter_does_not_spare_it(
-    profiles: dict[str, KeyProfile],
-) -> None:
-    sql = (
-        "SELECT SUM(s.rate) FILTER (WHERE a.id > 2) FROM suppliers s "
-        "JOIN asn a ON a.supplier_id = s.id"
-    )
-
-    assert [f.detail for f in _fanouts(sql, profiles)] == ["asn"]
 
 
 def test_grouping_by_a_cast_key_does_not_spare_it(
@@ -402,6 +389,14 @@ def test_owner_grain_and_pre_aggregation_pass_with_the_oracle_values(
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
         "WHERE a.id IN (1, 2)",
         "SELECT SUM(s.rate) FILTER (WHERE a.id = 2) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id",
+        # Any condition on the joined table may keep one row per key: a
+        # degenerate range, or a validity window.
+        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
+        "WHERE a.id BETWEEN 2 AND 2",
+        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
+        "AND a.qty <= 3 AND a.id > 2",
+        "SELECT SUM(s.rate) FILTER (WHERE a.id > 2) FROM suppliers s "
         "JOIN asn a ON a.supplier_id = s.id",
         # A correlated subquery that picks the latest row per owner.
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
