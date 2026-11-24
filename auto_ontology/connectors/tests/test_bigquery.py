@@ -32,6 +32,7 @@ from auto_ontology.connectors.bigquery import (
     DEFAULT_MAXIMUM_BYTES_BILLED,
     TABLE_SUFFIX_COLUMN,
     BigQueryDatabase,
+    TableShape,
     _COLUMN_SCHEMA,
     _TABLE_SCHEMA,
     _decode_credentials,
@@ -152,6 +153,46 @@ class _FakeClient:
 
     def close(self) -> None:
         self.closed = True
+
+
+def _is_shapes_query(sql: str) -> bool:
+    return "STARTS_WITH(table_name" in sql
+
+
+def _shape_rows(
+    tables: dict[str, dict[str, str]],
+    *,
+    required: dict[str, list[str]] | None = None,
+    partitioning: dict[str, str] | None = None,
+    clustering: dict[str, list[str]] | None = None,
+) -> _FakeRows:
+    """What the column query behind shard families reads for *tables*."""
+    return _FakeRows(
+        [
+            "table_name",
+            "column_name",
+            "data_type",
+            "is_nullable",
+            "is_partitioning_column",
+            "clustering_ordinal_position",
+        ],
+        [
+            [
+                table,
+                column,
+                kind,
+                "NO" if column in (required or {}).get(table, []) else "YES",
+                "YES" if (partitioning or {}).get(table) == column else "NO",
+                (
+                    (clustering or {}).get(table, []).index(column) + 1
+                    if column in (clustering or {}).get(table, [])
+                    else None
+                ),
+            ]
+            for table, columns in tables.items()
+            for column, kind in columns.items()
+        ],
+    )
 
 
 def _wire(database: BigQueryDatabase, client: _FakeClient) -> _FakeClient:
@@ -970,8 +1011,12 @@ def test_shard_families_of_case_twin_datasets_stay_apart() -> None:
     _wire(
         database,
         _FakeClient(
-            lambda sql: _FakeRows(
-                ["table_schema", "table_name", "table_type", "description"], rows
+            lambda sql: (
+                _shape_rows({name: {"id": "INT64"} for _, name, _, _ in rows})
+                if _is_shapes_query(sql)
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type", "description"], rows
+                )
             )
         ),
     )
@@ -1170,15 +1215,13 @@ _SHARDED_TABLES = [
 
 def _sharded_client() -> _FakeClient:
     def answer(sql: str) -> _FakeRows:
-        if "REGEXP_CONTAINS" in sql:
-            return _FakeRows(
-                ["table_name", "column_name", "data_type"],
-                [
-                    ["ga_sessions_20170801", "visitId", "STRING"],
-                    ["ga_sessions_20170801", "date", "STRING"],
-                    ["ga_sessions_20170731", "visitId", "STRING"],
-                    ["ga_sessions_20160801", "visitId", "INT64"],
-                ],
+        if _is_shapes_query(sql):
+            return _shape_rows(
+                {
+                    "ga_sessions_20170801": {"visitId": "STRING", "date": "STRING"},
+                    "ga_sessions_20170731": {"visitId": "STRING"},
+                    "ga_sessions_20160801": {"visitId": "STRING", "date": "STRING"},
+                }
             )
         if "INFORMATION_SCHEMA.COLUMNS" in sql:
             return _FakeRows(
@@ -1216,15 +1259,21 @@ def _sharded_client() -> _FakeClient:
     return _FakeClient(answer)
 
 
+def _shapes(columns: dict[str, dict[str, str]]) -> dict[str, TableShape]:
+    return {table: TableShape(names) for table, names in columns.items()}
+
+
 def test_a_shard_with_a_column_the_newest_lacks_stays_a_table_of_its_own() -> None:
     """The wildcard reads with the newest shard's columns, so that one is lost."""
     families = shard_families(
         ["trees_1995", "trees_2005", "trees_2015"],
-        {
-            "trees_1995": {"recordid": "INT64"},
-            "trees_2005": {"tree_id": "INT64"},
-            "trees_2015": {"tree_id": "INT64", "block_id": "INT64"},
-        },
+        _shapes(
+            {
+                "trees_1995": {"recordid": "INT64"},
+                "trees_2005": {"tree_id": "INT64"},
+                "trees_2015": {"tree_id": "INT64", "block_id": "INT64"},
+            }
+        ),
     )
 
     assert [(f.shards, f.also_matches) for f in families] == [
@@ -1232,21 +1281,97 @@ def test_a_shard_with_a_column_the_newest_lacks_stays_a_table_of_its_own() -> No
     ]
 
 
-def test_a_shard_with_a_changed_type_stays_a_table_of_its_own() -> None:
+def test_no_wildcard_is_formed_over_a_shard_with_a_changed_type() -> None:
+    """BigQuery fails the wildcard on it even when _TABLE_SUFFIX leaves it out."""
     families = shard_families(
         ["s_2018", "s_2019", "s_2020"],
-        {
-            "s_2018": {"a": "INT64"},
-            "s_2019": {"a": "STRING"},
-            "s_2020": {"a": "STRING"},
-        },
+        _shapes(
+            {
+                "s_2018": {"a": "INT64"},
+                "s_2019": {"a": "STRING"},
+                "s_2020": {"a": "STRING"},
+            }
+        ),
+    )
+
+    assert families == []
+
+
+def test_no_wildcard_is_formed_over_a_non_shard_with_a_changed_type() -> None:
+    families = shard_families(
+        ["ghcnd_2015", "ghcnd_2016", "ghcnd_countries"],
+        _shapes(
+            {
+                "ghcnd_2015": {"id": "STRING"},
+                "ghcnd_2016": {"id": "STRING"},
+                "ghcnd_countries": {"id": "INT64", "name": "STRING"},
+            }
+        ),
+    )
+
+    assert families == []
+
+
+def test_no_wildcard_is_formed_when_a_shard_lacks_a_required_column() -> None:
+    """A REQUIRED column cannot read as NULL in the shard that lacks it."""
+    shapes = _shapes({"s_2019": {"a": "INT64"}, "s_2020": {"a": "INT64"}})
+    shapes["s_2020"] = TableShape(
+        {"a": "INT64", "b": "INT64"}, required=frozenset({"b"})
+    )
+
+    assert shard_families(["s_2019", "s_2020"], shapes) == []
+
+
+@pytest.mark.parametrize(
+    "older",
+    [
+        TableShape({"day": "DATE"}),
+        TableShape({"day": "DATE"}, clustering=("day",)),
+    ],
+)
+def test_no_wildcard_is_formed_over_other_partitioning_or_clustering(
+    older: TableShape,
+) -> None:
+    newest = TableShape({"day": "DATE"}, partitioning=frozenset({"day"}))
+
+    assert (
+        shard_families(["s_2019", "s_2020"], {"s_2019": older, "s_2020": newest}) == []
+    )
+
+
+def test_a_table_dropped_before_its_columns_were_read_is_left_out() -> None:
+    """GA4 drops each day's intraday table; it no longer constrains the wildcard."""
+    families = shard_families(
+        ["events_20260101", "events_20260102", "events_intraday_20260102"],
+        _shapes(
+            {
+                "events_20260101": {"id": "INT64"},
+                "events_20260102": {"id": "INT64"},
+            }
+        ),
+    )
+
+    assert [(f.shards, f.also_matches) for f in families] == [
+        (("events_20260101", "events_20260102"), ())
+    ]
+
+
+def test_type_parameters_do_not_split_a_wildcard() -> None:
+    families = shard_families(
+        ["s_2019", "s_2020"],
+        _shapes(
+            {
+                "s_2019": {"name": "STRING(10)", "price": "NUMERIC(10, 2)"},
+                "s_2020": {"name": "STRING", "price": "NUMERIC"},
+            }
+        ),
     )
 
     assert [f.shards for f in families] == [("s_2019", "s_2020")]
 
 
 def test_a_family_left_with_one_shard_is_not_collapsed() -> None:
-    columns = {"s_2019": {"a": "INT64"}, "s_2020": {"b": "INT64"}}
+    columns = _shapes({"s_2019": {"a": "INT64"}, "s_2020": {"b": "INT64"}})
 
     assert shard_families(["s_2019", "s_2020"], columns) == []
 
@@ -1326,6 +1451,36 @@ def test_date_shards_collapse_into_one_wildcard_table() -> None:
     assert description.endswith("Latest day")
 
 
+def test_shards_the_wildcard_would_fail_on_stay_tables_of_their_own() -> None:
+    rows = [
+        ["ga", "events_20260101", "BASE TABLE", None],
+        ["ga", "events_20260102", "BASE TABLE", None],
+    ]
+    database = _database(schema="ga")
+    client = _wire(
+        database,
+        _FakeClient(
+            lambda sql: (
+                _shape_rows(
+                    {
+                        "events_20260101": {"id": "INT64"},
+                        "events_20260102": {"id": "STRING"},
+                    }
+                )
+                if _is_shapes_query(sql)
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type", "description"], rows
+                )
+            )
+        ),
+    )
+
+    frame = database.get_tables()
+
+    assert frame["table_name"].tolist() == ["events_20260101", "events_20260102"]
+    assert any("STARTS_WITH(table_name, 'events_')" in sql for sql in client.statements)
+
+
 def test_a_wildcard_table_has_the_latest_shard_columns_and_table_suffix() -> None:
     database = _database(schema="ga")
     _wire(database, _sharded_client())
@@ -1376,8 +1531,12 @@ def test_a_shard_that_lands_later_is_qualified_to_after_an_hour(
     _wire(
         database,
         _FakeClient(
-            lambda sql: _FakeRows(
-                ["table_schema", "table_name", "table_type", "description"], rows
+            lambda sql: (
+                _shape_rows({name: {"id": "STRING"} for _, name, _, _ in rows})
+                if _is_shapes_query(sql)
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type", "description"], rows
+                )
             )
         ),
     )
@@ -1395,10 +1554,12 @@ def test_a_struct_that_gained_fields_still_reads_through_the_wildcard() -> None:
     """GA360's ``hits`` gained nested fields over the years; older rows read NULL."""
     families = shard_families(
         ["ga_20160801", "ga_20170801"],
-        {
-            "ga_20160801": {"Hits": "ARRAY<STRUCT<hitNumber INT64>>"},
-            "ga_20170801": {"hits": "ARRAY<STRUCT<hitNumber INT64, isExit BOOL>>"},
-        },
+        _shapes(
+            {
+                "ga_20160801": {"Hits": "ARRAY<STRUCT<hitNumber INT64>>"},
+                "ga_20170801": {"hits": "ARRAY<STRUCT<hitNumber INT64, isExit BOOL>>"},
+            }
+        ),
     )
 
     assert [f.shards for f in families] == [("ga_20160801", "ga_20170801")]
@@ -1408,11 +1569,13 @@ def test_a_recreated_older_shard_gives_the_wildcard_its_schema() -> None:
     """BigQuery takes a wildcard's schema from the matching table created last."""
     families = shard_families(
         ["s_2018", "s_2019", "s_2020"],
-        {
-            "s_2018": {"c": "INT64"},
-            "s_2019": {"a": "INT64", "b": "INT64"},
-            "s_2020": {"a": "INT64"},
-        },
+        _shapes(
+            {
+                "s_2018": {"c": "INT64"},
+                "s_2019": {"a": "INT64", "b": "INT64"},
+                "s_2020": {"a": "INT64"},
+            }
+        ),
         created={
             "s_2018": dt.datetime(2018, 1, 1),
             "s_2019": dt.datetime(2026, 3, 1),
@@ -1452,6 +1615,13 @@ def _recreated_client() -> _FakeClient:
     }
 
     def answer(sql: str) -> _FakeRows:
+        if _is_shapes_query(sql):
+            return _shape_rows(
+                {
+                    name: dict.fromkeys(names, "STRING")
+                    for name, names in columns.items()
+                }
+            )
         if "INFORMATION_SCHEMA.COLUMNS" in sql:
             return _FakeRows(
                 _COLUMN_SCHEMA,
@@ -1521,6 +1691,13 @@ def test_a_non_shard_created_last_lends_the_wildcard_its_columns() -> None:
     }
 
     def answer(sql: str) -> _FakeRows:
+        if _is_shapes_query(sql):
+            return _shape_rows(
+                {
+                    name: dict.fromkeys(names, "STRING")
+                    for name, names in columns.items()
+                }
+            )
         if "INFORMATION_SCHEMA.COLUMNS" in sql:
             return _FakeRows(
                 _COLUMN_SCHEMA,

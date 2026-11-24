@@ -38,7 +38,10 @@ These properties of the engine shape this connector:
   pseudo-column. Hundreds of near-identical shards would otherwise crowd
   search, and a query naming the wildcard would match none of them.
   :meth:`~BigQueryDatabase.qualify` points the wildcard at that same table, so
-  profiling reads one day rather than scanning every shard.
+  profiling reads one day rather than scanning every shard. No wildcard is
+  formed over a prefix where some matching table would fail it (a changed
+  type, a missing ``REQUIRED`` column, other partitioning or clustering), and
+  a shard with a column that schema lacks stays a table of its own.
 * **Unenforced keys.** BigQuery stores primary and foreign keys as metadata
   only. They are reported anyway, because they are the modeller's own statement
   of how tables join. Foreign keys are read from the table resource rather than
@@ -215,6 +218,51 @@ def type_fits(old: str, new: str | None) -> bool:
         return False
 
 
+# ``STRING(10)``, ``NUMERIC(10, 2)``: a parameterized type is stored as its base
+# type, so its parameters do not keep a wildcard from reading it.
+_TYPE_PARAMETERS = re.compile(r"\(\s*\d+\s*(?:,\s*\d+\s*)?\)")
+
+
+@dataclass(frozen=True)
+class TableShape:
+    """What of a table decides whether a wildcard can read it."""
+
+    #: Column name to type.
+    columns: Mapping[str, str]
+    #: Casefolded names of the ``REQUIRED`` columns.
+    required: frozenset[str] = frozenset()
+    #: Casefolded names of the partitioning columns.
+    partitioning: frozenset[str] = frozenset()
+    #: Casefolded names of the clustering columns, in order.
+    clustering: tuple[str, ...] = ()
+
+    def breaks(self, schema: TableShape) -> bool:
+        """Whether a wildcard with *schema* fails on this table, whatever it selects.
+
+        BigQuery fails such a query when a column has another type, when a
+        ``REQUIRED`` column of the schema is missing (it cannot read as NULL),
+        or when partitioning or clustering differ -- even when a
+        ``_TABLE_SUFFIX`` filter leaves the table out.
+        """
+        ours = {
+            c.casefold(): _TYPE_PARAMETERS.sub("", t) for c, t in self.columns.items()
+        }
+        theirs = {
+            c.casefold(): _TYPE_PARAMETERS.sub("", t) for c, t in schema.columns.items()
+        }
+        return (
+            any(c in theirs and not type_fits(t, theirs[c]) for c, t in ours.items())
+            or not schema.required <= ours.keys()
+            or self.partitioning != schema.partitioning
+            or self.clustering != schema.clustering
+        )
+
+    def hides_from(self, schema: TableShape) -> bool:
+        """Whether this table has a column a wildcard with *schema* cannot select."""
+        theirs = {c.casefold() for c in schema.columns}
+        return any(c.casefold() not in theirs for c in self.columns)
+
+
 @dataclass(frozen=True)
 class ShardFamily:
     """Tables ``<prefix><date>`` that BigQuery reads together as ``<prefix>*``."""
@@ -246,7 +294,8 @@ class ShardFamily:
         start, end = first[len(self.prefix) :], last[len(self.prefix) :]
         note = (
             f"Wildcard table over {len(self.shards)} date-sharded tables {first} "
-            f"... {last}, all with this schema. Select shards with the "
+            f"... {last}, read with this schema (a column a shard lacks is "
+            f"NULL in its rows). Select shards with the "
             f"{TABLE_SUFFIX_COLUMN} pseudo-column, e.g. WHERE {TABLE_SUFFIX_COLUMN} "
             f"BETWEEN '{start}' AND '{end}'."
         )
@@ -257,24 +306,32 @@ class ShardFamily:
 
 def shard_families(
     names: list[str],
-    columns: dict[str, dict[str, str]] | None = None,
+    shapes: Mapping[str, TableShape] | None = None,
     views: Iterable[str] = (),
     created: Mapping[str, Any] | None = None,
 ) -> list[ShardFamily]:
     """Group date-sharded table names into wildcard families of two shards or more.
 
-    A wildcard query reads every shard with the schema of the matching table
-    *created* last (name to creation time), else of the newest shard: a column
-    a shard lacks reads as NULL, but one only another shard has cannot be
-    selected, and a changed type fails the query. Given each table's
-    *columns* (name to type), a shard with a column that schema does not have
-    the same way stays a table of its own, listed in ``also_matches``.
+    A wildcard query reads every table it matches with the schema of the one
+    *created* last (name to creation time), else of the newest shard. Given
+    each table's *shapes*:
 
-    BigQuery rejects a wildcard that matches a view, even when a
-    ``_TABLE_SUFFIX`` filter excludes it, so no family is formed over a prefix
-    any of *views* (relations other than base tables) starts with.
+    * a table the schema :meth:`~TableShape.breaks` on fails every query of
+      the wildcard, so no family is formed over its prefix;
+    * a shard with a column the schema lacks would lose it, so it stays a
+      table of its own, listed in ``also_matches``;
+    * a column a shard lacks reads as NULL, so it changes nothing.
+
+    A table without a shape was dropped between listing the tables and
+    reading their columns, and is left out. Without *shapes* the schemas are
+    not compared. BigQuery likewise rejects
+    a wildcard that matches a view, even when a ``_TABLE_SUFFIX`` filter
+    excludes it, so no family is formed over a prefix any of *views*
+    (relations other than base tables) starts with.
     """
     unique = sorted(set(names))
+    if shapes is not None:
+        unique = [n for n in unique if n in shapes]
     views = tuple(views)
     groups: dict[str, list[str]] = {}
     for name in unique:
@@ -292,16 +349,11 @@ def shard_families(
         ]
         dated = [n for n in matches if times.get(n) is not None]
         source = max(dated, key=lambda n: times[n]) if dated else shards[-1]
-        if columns is not None:
-            schema = {c.casefold(): t for c, t in columns.get(source, {}).items()}
-            shards = [
-                n
-                for n in shards
-                if all(
-                    type_fits(t, schema.get(c.casefold()))
-                    for c, t in columns.get(n, {}).items()
-                )
-            ]
+        if shapes is not None:
+            schema = shapes[source]
+            if any(shapes[n].breaks(schema) for n in matches):
+                continue
+            shards = [n for n in shards if not shapes[n].hides_from(schema)]
         if len(shards) < 2:
             continue
         also = tuple(n for n in unique if n.startswith(prefix) and n not in shards)
@@ -1057,17 +1109,67 @@ class BigQueryDatabase(SQLDatabase):
             into.setdefault(str(schema), []).append(str(name))
             if pd.notna(at):
                 created.setdefault(str(schema), {})[str(name)] = at
+        families: dict[str, dict[str, ShardFamily]] = {}
+        for schema, names in tables.items():
+            kwargs = {"views": views.get(schema, ()), "created": created.get(schema)}
+            candidates = shard_families(names, **kwargs)
+            if candidates:
+                shapes = self._table_shapes(schema, [f.prefix for f in candidates])
+                candidates = shard_families(names, shapes, **kwargs)
+            families[schema] = {f.wildcard: f for f in candidates}
         # Assigned whole, so a concurrent reader never takes a half-built map
         # for the loaded cache.
         self._families_read_at = time.monotonic()
-        self._families = {
-            schema: {
-                f.wildcard: f
-                for f in shard_families(
-                    names, views=views.get(schema, ()), created=created.get(schema)
-                )
-            }
-            for schema, names in tables.items()
+        self._families = families
+
+    def _table_shapes(self, dataset: str, prefixes: list[str]) -> dict[str, TableShape]:
+        """The shape of every table in *dataset* a wildcard over *prefixes* matches."""
+        matched = " OR ".join(
+            f"STARTS_WITH(table_name, {exp.Literal.string(p).sql(dialect='bigquery')})"
+            for p in prefixes
+        )
+        frame = self.execute(f"""
+            SELECT
+                table_name,
+                column_name,
+                data_type,
+                is_nullable,
+                is_partitioning_column,
+                clustering_ordinal_position
+            FROM {self._information_schema(dataset, "COLUMNS")}
+            WHERE {matched}
+            ORDER BY table_name, clustering_ordinal_position
+        """)
+        columns: dict[str, dict[str, str]] = {}
+        required: dict[str, set[str]] = {}
+        partitioning: dict[str, set[str]] = {}
+        clustering: dict[str, list[str]] = {}
+        for table, column, kind, nullable, partitions, cluster in frame[
+            [
+                "table_name",
+                "column_name",
+                "data_type",
+                "is_nullable",
+                "is_partitioning_column",
+                "clustering_ordinal_position",
+            ]
+        ].itertuples(index=False, name=None):
+            table, name = str(table), str(column).casefold()
+            columns.setdefault(table, {})[str(column)] = str(kind)
+            if str(nullable).upper() == "NO":
+                required.setdefault(table, set()).add(name)
+            if str(partitions).upper() == "YES":
+                partitioning.setdefault(table, set()).add(name)
+            if pd.notna(cluster):
+                clustering.setdefault(table, []).append(name)
+        return {
+            table: TableShape(
+                names,
+                frozenset(required.get(table, ())),
+                frozenset(partitioning.get(table, ())),
+                tuple(clustering.get(table, ())),
+            )
+            for table, names in columns.items()
         }
 
     def _family(self, schema: str, table: str) -> ShardFamily | None:
