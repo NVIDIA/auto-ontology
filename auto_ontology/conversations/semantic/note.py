@@ -314,6 +314,16 @@ _NEIGHBOUR_HEADINGS = {
     "refines": "refines",
 }
 
+#: The same relations read from the far end. None of these are symmetric, so
+#: an edge anchored on its target cannot borrow the outgoing phrasing: a part
+#: would come out claiming to contain the thing it belongs to.
+_NEIGHBOUR_HEADINGS_IN = {
+    "has_component": "is part of",
+    "built_with": "is used to build",
+    "covers": "is covered by",
+    "refines": "is refined by",
+}
+
 
 def neighbourhood_text(
     nodes: Sequence[dict[str, Any]],
@@ -338,17 +348,19 @@ def neighbourhood_text(
     Empty string when there is nothing across the boundary.
     """
     inside = {str(n["id"]): n for n in nodes if n.get("id")}
-    grouped: dict[tuple[str, str], list[str]] = {}
+    #: (anchor, role, read from the far end) -> the names on the other side.
+    grouped: dict[tuple[str, str, bool], list[str]] = {}
     for edge in half_edges:
         source, target = str(edge.get("source_id")), str(edge.get("target_id"))
+        incoming = source not in inside
         anchor, other = (
-            (source, edge.get("target_name"))
-            if source in inside
-            else (target, edge.get("source_name"))
+            (target, edge.get("source_name"))
+            if incoming
+            else (source, edge.get("target_name"))
         )
         if anchor not in inside or not other:
             continue
-        names = grouped.setdefault((anchor, str(edge.get("role"))), [])
+        names = grouped.setdefault((anchor, str(edge.get("role")), incoming), [])
         # By name. A containment relation extracted in both directions anchors
         # on the same node twice -- measured once in 778 edges, a feature and
         # one of its parts recorded as containing each other -- and the store
@@ -363,9 +375,22 @@ def neighbourhood_text(
     for node in nodes:
         anchor = str(node.get("id"))
         for role, phrasing in _NEIGHBOUR_HEADINGS.items():
-            names = grouped.get((anchor, role))
-            if names:
-                lines.append(f"- {node.get('name')} {phrasing}: {', '.join(names)}")
+            out = grouped.get((anchor, role, False), [])
+            # A far end recorded on both sides of the same relation is the
+            # contradictory pair above, and it reads here as the anchor both
+            # containing a thing and belonging to it. Shown the one way, as
+            # before -- which way is arbitrary, so it is the stated direction.
+            back = [
+                name
+                for name in grouped.get((anchor, role, True), [])
+                if name not in out
+            ]
+            for names, heading in (
+                (out, phrasing),
+                (back, _NEIGHBOUR_HEADINGS_IN[role]),
+            ):
+                if names:
+                    lines.append(f"- {node.get('name')} {heading}: {', '.join(names)}")
     if not lines:
         return ""
     return (

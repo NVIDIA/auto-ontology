@@ -1639,7 +1639,27 @@ class TestNeighbourhoodText:
             ],
         )
 
-        assert "Autocomplete is made up of: Weather app" in text
+        assert "Autocomplete is part of: Weather app" in text
+        assert "is made up of" not in text
+
+    def test_a_pair_recorded_both_ways_is_still_shown_one_way(self):
+        """The contradictory extraction, which reads here as the anchor both
+        containing a thing and belonging to it."""
+        from auto_ontology.conversations.semantic.note import neighbourhood_text
+
+        out = self._half("has_component", "Autocomplete", "Loading spinner")
+        back = {
+            "source_id": "out-Loading spinner",
+            "target_id": "a",
+            "role": "has_component",
+            "source_name": "Loading spinner",
+            "target_name": "Autocomplete",
+        }
+
+        text = neighbourhood_text(self.nodes, [out, back])
+
+        assert text.count("Loading spinner") == 1
+        assert "is part of" not in text
 
     def test_nothing_across_the_boundary_renders_nothing(self):
         from auto_ontology.conversations.semantic.note import neighbourhood_text
