@@ -251,10 +251,28 @@ def search_semantic(
     if not stripped:
         return SemanticHits()
 
-    matched = _matched_ids(stripped, database_name=database_name, top_k=node_k)
-    from_paths = _matched_path_endpoints(
-        stripped, database_name=database_name, path_k=path_k
-    )
+    # A missing collection is a memory without a semantic layer, not a failed
+    # search: logged and treated as no match, so the turn route still answers.
+    try:
+        matched = _matched_ids(stripped, database_name=database_name, top_k=node_k)
+    except Exception:
+        logger.warning(
+            "Node search failed in %s -- continuing without it.",
+            database_name,
+            exc_info=True,
+        )
+        matched = []
+    try:
+        from_paths = _matched_path_endpoints(
+            stripped, database_name=database_name, path_k=path_k
+        )
+    except Exception:
+        logger.warning(
+            "Path search failed in %s -- continuing without it.",
+            database_name,
+            exc_info=True,
+        )
+        from_paths = []
     # Directly matched nodes first, then the ones a path dragged in. The order
     # is the order the prompt lists them in, and a node the question named
     # should be read before one that arrived because something it sits on was

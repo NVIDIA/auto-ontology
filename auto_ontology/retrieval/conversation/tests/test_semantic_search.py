@@ -65,6 +65,40 @@ def _stub(hits: list[dict], paths: list[dict] | None = None) -> Iterator[_FakeVd
         yield vdb
 
 
+def test_a_missing_semantic_layer_falls_through_to_the_turn_route() -> None:
+    from auto_ontology.retrieval.conversation.search import TurnHit
+    from auto_ontology.retrieval.conversation.semantic_search import search_semantic
+
+    def missing(**_: Any) -> Any:
+        raise RuntimeError("collection does not exist")
+
+    turn = TurnHit(
+        conversation_id="2",
+        turn_index=7,
+        session_index=None,
+        time_anchor=None,
+        question="q",
+        answer="a",
+        distance=0.2,
+    )
+    module = "auto_ontology.retrieval.conversation.semantic_search"
+    store = f"{module}.semantic_store"
+    with (
+        patch(f"{module}.get_embed_params"),
+        patch(f"{module}.embed_texts", return_value=[[0.1, 0.2]]),
+        patch(f"{module}.get_conversation_semantic_vdb", side_effect=missing),
+        patch(f"{module}.get_one_hop_path_vdb", side_effect=missing),
+        patch(f"{store}.fetch_nodes", return_value=[]),
+        patch(f"{store}.fetch_edges", return_value=[]),
+        patch(f"{store}.fetch_half_edges", return_value=[]),
+        patch(f"{module}.search_turns", return_value=[turn]),
+    ):
+        hits = search_semantic("rate limit", database_name="mem")
+
+    assert hits.turns == [turn]
+    assert hits.nodes == []
+
+
 def test_the_subject_node_is_not_answered_with() -> None:
     """Its description summarises the transcript, so it overlaps any question
     about it while adding nothing the turns do not already say."""
