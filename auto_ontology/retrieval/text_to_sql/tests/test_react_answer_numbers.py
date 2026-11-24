@@ -72,6 +72,7 @@ def test_the_wwi_backorder_answer_from_another_query_is_caught() -> None:
         "Kestrel shipped 18.0k ASNs and 9.6 million units.",
         "Kestrel shipped roughly 9.55 million units across ~18,000 ASNs.",
         "Kestrel's units total $9.55M.",
+        "Kestrel's units total $9.55 M across 18 K ASNs.",
     ],
 )
 def test_the_kestrel_answer_from_its_rows_passes(response: str) -> None:
@@ -236,3 +237,8 @@ def test_a_scaled_number_is_compared_at_its_scale() -> None:
 
     assert contradicted_numbers("Revenue was $1.2M.", rows) == []
     assert contradicted_numbers("Revenue was $1.5M.", rows) == ["$1.5M"]
+
+
+def test_a_spaced_letter_that_may_not_be_a_scale_is_read_both_ways() -> None:
+    assert contradicted_numbers("It is 300 m long.", [{"length": 300}]) == []
+    assert contradicted_numbers("Group 3 B has 1,872.", [{"n": 583}]) == ["1,872"]
