@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 import pytest
 
@@ -32,7 +33,7 @@ def edge(source: str, role: str, target: str, turns: set[int]) -> EdgeDraft:
     return EdgeDraft(source=source, target=target, role=role, turn_indexes=set(turns))
 
 
-def statement(name: str, turns: set[int], **kwargs) -> NodeDraft:
+def statement(name: str, turns: set[int], **kwargs: Any) -> NodeDraft:
     return NodeDraft(
         name=name,
         type=kwargs.pop("type", "Metric"),
@@ -54,7 +55,7 @@ def thing(name: str, turns: set[int]) -> NodeDraft:
 
 
 class TestBatching:
-    def test_edges_citing_no_known_turn_are_not_checked(self):
+    def test_edges_citing_no_known_turn_are_not_checked(self) -> None:
         known = edge("a", "uses", "b", {1})
         stray = edge("c", "uses", "d", {99})
         batches, unchecked = _batch([known, stray], {1: "text"})
@@ -62,14 +63,14 @@ class TestBatching:
         assert unchecked == [stray]
         assert batches == [[known]]
 
-    def test_an_edge_with_no_turns_at_all_is_unchecked(self):
+    def test_an_edge_with_no_turns_at_all_is_unchecked(self) -> None:
         orphan = edge("a", "uses", "b", set())
         batches, unchecked = _batch([orphan], {1: "text"})
 
         assert unchecked == [orphan]
         assert batches == []
 
-    def test_batches_are_ordered_by_first_cited_turn(self):
+    def test_batches_are_ordered_by_first_cited_turn(self) -> None:
         late = edge("late", "uses", "x", {9})
         early = edge("early", "uses", "x", {1})
         batches, _ = _batch([late, early], {1: "one", 9: "nine"})
@@ -79,7 +80,7 @@ class TestBatching:
             "late",
         ]
 
-    def test_edge_count_caps_a_batch(self):
+    def test_edge_count_caps_a_batch(self) -> None:
         edges = [edge(f"n{i}", "uses", "x", {1}) for i in range(BATCH_EDGES + 5)]
         batches, _ = _batch(edges, {1: "short"})
 
@@ -87,21 +88,21 @@ class TestBatching:
         assert len(batches[0]) == BATCH_EDGES
         assert len(batches[1]) == 5
 
-    def test_text_budget_splits_long_turns(self):
+    def test_text_budget_splits_long_turns(self) -> None:
         turns = {index: "x" * 5000 for index in range(1, 5)}
         edges = [edge(f"n{i}", "uses", "x", {i}) for i in range(1, 5)]
         batches, _ = _batch(edges, turns)
 
         assert len(batches) > 1
 
-    def test_edges_sharing_a_turn_do_not_pay_for_it_twice(self):
+    def test_edges_sharing_a_turn_do_not_pay_for_it_twice(self) -> None:
         turns = {1: "x" * 7000}
         edges = [edge(f"n{i}", "uses", "x", {1}) for i in range(5)]
         batches, _ = _batch(edges, turns)
 
         assert len(batches) == 1
 
-    def test_every_checkable_edge_lands_in_exactly_one_batch(self):
+    def test_every_checkable_edge_lands_in_exactly_one_batch(self) -> None:
         turns = {index: f"turn {index}" for index in range(1, 30)}
         edges = [edge(f"n{i}", "uses", "x", {i}) for i in range(1, 30)]
         batches, unchecked = _batch(edges, turns)
@@ -118,14 +119,14 @@ class TestBatching:
 
 
 class TestRendering:
-    def test_turns_are_labelled_and_ordered(self):
+    def test_turns_are_labelled_and_ordered(self) -> None:
         rendered = _render_turns({3, 1}, {1: "first", 3: "third"})
 
         assert rendered == (
             '<turn n="1">\nfirst\n</turn>\n\n<turn n="3">\nthird\n</turn>'
         )
 
-    def test_edges_are_numbered_from_one(self):
+    def test_edges_are_numbered_from_one(self) -> None:
         rendered = _render_edges(
             [edge("a", "uses", "b", {1}), edge("c", "builds", "d", {2})]
         )
@@ -133,7 +134,7 @@ class TestRendering:
         assert rendered.startswith("1. a --uses--> b")
         assert "2. c --builds--> d" in rendered
 
-    def test_edges_show_the_turns_they_cite(self):
+    def test_edges_show_the_turns_they_cite(self) -> None:
         rendered = _render_edges([edge("a", "uses", "b", {5, 2})])
 
         assert "(from turn 2, 5)" in rendered
@@ -145,22 +146,26 @@ class TestRendering:
 
 
 class _Result:
-    def __init__(self, verdicts):
+    def __init__(self, verdicts: list[Any]) -> None:
         self.verdicts = verdicts
 
 
 class _Item:
-    def __init__(self, number, verdict, reason=""):
+    def __init__(self, number: int, verdict: str, reason: str = "") -> None:
         self.number, self.verdict, self.reason = number, verdict, reason
 
 
+#: Installs the model's verdicts; returns the prompts it was then asked.
+Answer = Callable[[list[Any]], list[str]]
+
+
 @pytest.fixture
-def answer(monkeypatch):
+def answer(monkeypatch: pytest.MonkeyPatch) -> Answer:
     """Make the model return a fixed verdict list, and record what it was asked."""
     asked: list[str] = []
 
-    def install(items):
-        def fake_invoke(_client, messages, _schema):
+    def install(items: list[Any]) -> list[str]:
+        def fake_invoke(_client: Any, messages: list[Any], _schema: Any) -> _Result:
             asked.append(messages[-1].content)
             return _Result(items)
 
@@ -176,7 +181,7 @@ def answer(monkeypatch):
 
 
 class TestVerify:
-    def test_verdicts_are_bucketed(self, answer):
+    def test_verdicts_are_bucketed(self, answer: Answer) -> None:
         answer(
             [
                 _Item(1, "supported"),
@@ -197,21 +202,23 @@ class TestVerify:
         assert [item.edge.source for item in report.absent] == ["e"]
         assert report.checked == 3
 
-    def test_the_reason_is_kept(self, answer):
+    def test_the_reason_is_kept(self, answer: Answer) -> None:
         answer([_Item(1, "unsupported", "  never deployed  ")])
 
         report = verify_edges([edge("a", "uses", "b", {1})], {1: "text"})
 
         assert report.unsupported[0].reason == "never deployed"
 
-    def test_a_verdict_for_an_unshown_relation_is_ignored(self, answer):
+    def test_a_verdict_for_an_unshown_relation_is_ignored(self, answer: Answer) -> None:
         answer([_Item(7, "unsupported")])
 
         report = verify_edges([edge("a", "uses", "b", {1})], {1: "text"})
 
         assert report.checked == 0
 
-    def test_a_relation_judged_twice_takes_the_first_verdict(self, answer):
+    def test_a_relation_judged_twice_takes_the_first_verdict(
+        self, answer: Answer
+    ) -> None:
         answer([_Item(1, "supported"), _Item(1, "unsupported")])
 
         report = verify_edges([edge("a", "uses", "b", {1})], {1: "text"})
@@ -219,7 +226,7 @@ class TestVerify:
         assert len(report.supported) == 1
         assert not report.unsupported
 
-    def test_an_unjudged_relation_is_in_no_bucket(self, answer):
+    def test_an_unjudged_relation_is_in_no_bucket(self, answer: Answer) -> None:
         answer([_Item(1, "supported")])
         edges = [edge("a", "uses", "b", {1}), edge("c", "uses", "d", {1})]
 
@@ -228,7 +235,7 @@ class TestVerify:
         assert report.checked == 1
         assert not report.unchecked  # it was asked about, just not answered
 
-    def test_the_turns_are_shown_to_the_model(self, answer):
+    def test_the_turns_are_shown_to_the_model(self, answer: Answer) -> None:
         asked = answer([_Item(1, "supported")])
 
         verify_edges([edge("a", "uses", "b", {4})], {4: "the real turn text"})
@@ -236,7 +243,7 @@ class TestVerify:
         assert "the real turn text" in asked[0]
         assert "a --uses--> b" in asked[0]
 
-    def test_only_the_cited_turns_are_shown(self, answer):
+    def test_only_the_cited_turns_are_shown(self, answer: Answer) -> None:
         asked = answer([_Item(1, "supported")])
 
         verify_edges([edge("a", "uses", "b", {1})], {1: "cited", 2: "uncited"})
@@ -244,7 +251,7 @@ class TestVerify:
         assert "cited" in asked[0]
         assert "uncited" not in asked[0]
 
-    def test_nothing_is_asked_when_no_edge_can_be_checked(self, answer):
+    def test_nothing_is_asked_when_no_edge_can_be_checked(self, answer: Answer) -> None:
         asked = answer([])
 
         report = verify_edges([edge("a", "uses", "b", {99})], {1: "text"})
@@ -252,7 +259,9 @@ class TestVerify:
         assert not asked
         assert len(report.unchecked) == 1
 
-    def test_no_verdicts_returned_leaves_every_edge_alone(self, monkeypatch):
+    def test_no_verdicts_returned_leaves_every_edge_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(
             "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
             lambda *_: None,
@@ -273,7 +282,7 @@ class TestVerify:
 
 
 class TestDrop:
-    def test_only_unsupported_edges_are_dropped(self, answer):
+    def test_only_unsupported_edges_are_dropped(self, answer: Answer) -> None:
         answer([_Item(1, "supported"), _Item(2, "unsupported"), _Item(3, "absent")])
         edges = [
             edge("a", "uses", "b", {1}),
@@ -285,12 +294,14 @@ class TestDrop:
 
         assert [item.source for item in kept] == ["a", "e"]
 
-    def test_an_empty_report_drops_nothing(self):
+    def test_an_empty_report_drops_nothing(self) -> None:
         edges = [edge("a", "uses", "b", {1})]
 
         assert drop_unsupported(edges, VerificationReport()) == edges
 
-    def test_identical_looking_edges_are_distinguished_drop(self, answer):
+    def test_identical_looking_edges_are_distinguished_drop(
+        self, answer: Answer
+    ) -> None:
         """Two edges can compare equal and still be separate graph entries."""
         answer([_Item(1, "supported"), _Item(2, "unsupported")])
         first = edge("a", "uses", "b", {1})
@@ -309,13 +320,13 @@ class TestDrop:
 
 
 class _CItem:
-    def __init__(self, claim, turn, verdict, reason=""):
+    def __init__(self, claim: int, turn: int, verdict: str, reason: str = "") -> None:
         self.claim, self.turn = claim, turn
         self.verdict, self.reason = verdict, reason
 
 
 class TestNodeCitations:
-    def test_single_turn_statements_are_not_checked(self, answer):
+    def test_single_turn_statements_are_not_checked(self, answer: Answer) -> None:
         asked = answer([])
 
         report = verify_node_citations([statement("a", {1})], {1: "text"})
@@ -323,7 +334,7 @@ class TestNodeCitations:
         assert not asked
         assert report.checked == 0
 
-    def test_things_are_not_checked_however_many_turns(self, answer):
+    def test_things_are_not_checked_however_many_turns(self, answer: Answer) -> None:
         asked = answer([])
 
         report = verify_node_citations(
@@ -333,7 +344,7 @@ class TestNodeCitations:
         assert not asked
         assert report.checked == 0
 
-    def test_a_denial_is_reported(self, answer):
+    def test_a_denial_is_reported(self, answer: Answer) -> None:
         answer([_CItem(1, 16, "supports"), _CItem(1, 35, "denies", "says never")])
         node = statement("API key obtained", {16, 35})
 
@@ -343,7 +354,7 @@ class TestNodeCitations:
         assert report.denies[0].reason == "says never"
         assert len(report.supports) == 1
 
-    def test_unrelated_and_denies_are_both_wrong(self, answer):
+    def test_unrelated_and_denies_are_both_wrong(self, answer: Answer) -> None:
         answer([_CItem(1, 1, "denies"), _CItem(1, 2, "unrelated")])
         node = statement("a", {1, 2})
 
@@ -351,7 +362,7 @@ class TestNodeCitations:
 
         assert len(report.wrong()) == 2
 
-    def test_a_verdict_on_an_uncited_turn_is_ignored(self, answer):
+    def test_a_verdict_on_an_uncited_turn_is_ignored(self, answer: Answer) -> None:
         answer([_CItem(1, 99, "denies")])
         node = statement("a", {1, 2})
 
@@ -359,14 +370,14 @@ class TestNodeCitations:
 
         assert report.checked == 0
 
-    def test_a_verdict_for_an_unshown_claim_is_ignored(self, answer):
+    def test_a_verdict_for_an_unshown_claim_is_ignored(self, answer: Answer) -> None:
         answer([_CItem(7, 1, "denies")])
 
         report = verify_node_citations([statement("a", {1, 2})], {1: "x", 2: "y"})
 
         assert report.checked == 0
 
-    def test_the_claim_is_rendered_with_its_key_and_turns(self):
+    def test_the_claim_is_rendered_with_its_key_and_turns(self) -> None:
         rendered = _render_claims(
             [
                 statement(
@@ -383,7 +394,7 @@ class TestNodeCitations:
         assert "The suite covers 85%." in rendered
         assert "cited from turns: 5, 9" in rendered
 
-    def test_turns_are_shown_to_the_model(self, answer):
+    def test_turns_are_shown_to_the_model(self, answer: Answer) -> None:
         asked = answer([_CItem(1, 1, "supports")])
 
         verify_node_citations([statement("a", {1, 2})], {1: "first body", 2: "second"})
@@ -393,7 +404,7 @@ class TestNodeCitations:
 
 
 class TestDetach:
-    def test_a_denied_turn_is_removed(self, answer):
+    def test_a_denied_turn_is_removed(self, answer: Answer) -> None:
         answer([_CItem(1, 16, "supports"), _CItem(1, 35, "denies")])
         node = statement("API key obtained", {16, 35})
 
@@ -401,7 +412,7 @@ class TestDetach:
         assert detach_bad_citations(report) == 1
         assert node.turn_indexes == {16}
 
-    def test_the_last_citation_is_never_removed(self, answer):
+    def test_the_last_citation_is_never_removed(self, answer: Answer) -> None:
         answer([_CItem(1, 1, "denies"), _CItem(1, 2, "denies")])
         node = statement("a", {1, 2})
 
@@ -410,7 +421,7 @@ class TestDetach:
 
         assert len(node.turn_indexes) == 1
 
-    def test_a_detached_turn_loses_its_verified_mark(self, answer):
+    def test_a_detached_turn_loses_its_verified_mark(self, answer: Answer) -> None:
         answer([_CItem(1, 35, "denies"), _CItem(1, 16, "supports")])
         node = statement("a", {16, 35})
         node.verified_turn_indexes = {16, 35}
@@ -419,10 +430,10 @@ class TestDetach:
 
         assert node.verified_turn_indexes == {16}
 
-    def test_an_empty_report_detaches_nothing(self):
+    def test_an_empty_report_detaches_nothing(self) -> None:
         assert detach_bad_citations(CitationReport()) == 0
 
-    def test_supported_citations_are_left_alone(self, answer):
+    def test_supported_citations_are_left_alone(self, answer: Answer) -> None:
         answer([_CItem(1, 1, "supports"), _CItem(1, 2, "supports")])
         node = statement("a", {1, 2})
 
@@ -453,7 +464,7 @@ class _Denial:
 TURN_35 = "I've never actually obtained an API key for this project."
 
 
-def _denies(node, turn=35):
+def _denies(node: NodeDraft, turn: int = 35) -> CitationReport:
     """A report with one ``denies`` verdict against *node*."""
     report = CitationReport()
     report.denies.append(
@@ -463,7 +474,7 @@ def _denies(node, turn=35):
 
 
 class TestBuildDenials:
-    def test_a_quoted_denial_becomes_a_statement(self, answer):
+    def test_a_quoted_denial_becomes_a_statement(self, answer: Answer) -> None:
         answer([])  # installs the patched client
         claim = statement("API key obtained", {16, 35}, description="Key obtained.")
         self._returns(
@@ -478,7 +489,9 @@ class TestBuildDenials:
         assert built[0].verified_turn_indexes == {35}
         assert built[0].kinds == ["fact"]
 
-    def test_a_quote_copied_from_the_fenced_turn_is_kept_as_said(self, answer):
+    def test_a_quote_copied_from_the_fenced_turn_is_kept_as_said(
+        self, answer: Answer
+    ) -> None:
         answer([])
         turn = "I no longer use </turn> as the delimiter."
         self._returns(
@@ -492,7 +505,7 @@ class TestBuildDenials:
         assert len(built) == 1
         assert built[0].evidence == "no longer use </turn> as"
 
-    def test_a_quote_not_in_the_turn_is_discarded(self, answer):
+    def test_a_quote_not_in_the_turn_is_discarded(self, answer: Answer) -> None:
         answer([])
         self._returns(_Denial("Never obtained a key", evidence="I threw the key away"))
 
@@ -502,7 +515,7 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_an_empty_quote_is_discarded(self, answer):
+    def test_an_empty_quote_is_discarded(self, answer: Answer) -> None:
         answer([])
         self._returns(_Denial("Never obtained a key", evidence="  "))
 
@@ -512,7 +525,7 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_reusing_the_claims_name_is_discarded(self, answer):
+    def test_reusing_the_claims_name_is_discarded(self, answer: Answer) -> None:
         answer([])
         self._returns(_Denial("API key obtained", evidence="never actually obtained"))
 
@@ -522,7 +535,9 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_the_claims_key_is_reused_with_the_opposite_value(self, answer):
+    def test_the_claims_key_is_reused_with_the_opposite_value(
+        self, answer: Answer
+    ) -> None:
         answer([])
         claim = statement(
             "API key obtained", {16, 35}, key="api_key_obtained", value="yes"
@@ -536,7 +551,7 @@ class TestBuildDenials:
         assert built[0].key == "api_key_obtained"
         assert built[0].value == "no"
 
-    def test_a_value_is_dropped_when_the_claim_has_no_key(self, answer):
+    def test_a_value_is_dropped_when_the_claim_has_no_key(self, answer: Answer) -> None:
         answer([])
         self._returns(
             _Denial("Never obtained one", evidence="never actually", value="no")
@@ -549,7 +564,7 @@ class TestBuildDenials:
         assert built[0].key == ""
         assert built[0].value == ""
 
-    def test_a_missing_turn_is_skipped(self, answer):
+    def test_a_missing_turn_is_skipped(self, answer: Answer) -> None:
         answer([])
         self._returns(_Denial("Never obtained one", evidence="never actually"))
 
@@ -557,7 +572,7 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_no_answer_builds_nothing(self, monkeypatch):
+    def test_no_answer_builds_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
             lambda *_: None,
@@ -570,7 +585,9 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_an_unrelated_statement_on_the_turn_does_not_skip_it(self, answer):
+    def test_an_unrelated_statement_on_the_turn_does_not_skip_it(
+        self, answer: Answer
+    ) -> None:
         answer([])
         self._returns(_Denial("Never obtained one", evidence="never actually"))
         claim = statement("API key obtained", {16, 35}, key="api_key_obtained")
@@ -580,7 +597,9 @@ class TestBuildDenials:
 
         assert [node.name for node in built] == ["Never obtained one"]
 
-    def test_a_statement_the_model_says_is_the_retraction_skips_the_turn(self, answer):
+    def test_a_statement_the_model_says_is_the_retraction_skips_the_turn(
+        self, answer: Answer
+    ) -> None:
         answer([])
         self._returns(_Denial("", kind="recorded"))
         claim = statement(
@@ -592,7 +611,9 @@ class TestBuildDenials:
 
         assert built == []
 
-    def test_a_same_key_statement_about_another_thing_does_not_skip(self, answer):
+    def test_a_same_key_statement_about_another_thing_does_not_skip(
+        self, answer: Answer
+    ) -> None:
         answer([])
         self._returns(_Denial("Search caching off", evidence="never actually"))
         claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
@@ -602,7 +623,9 @@ class TestBuildDenials:
 
         assert [node.name for node in built] == ["Search caching off"]
 
-    def test_the_same_key_statements_are_shown_to_the_model(self, answer):
+    def test_the_same_key_statements_are_shown_to_the_model(
+        self, answer: Answer
+    ) -> None:
         answer([])
         seen: list = []
         claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
@@ -618,19 +641,19 @@ class TestBuildDenials:
         assert "STATEMENTS ALREADY TAKEN FROM THIS TURN" in seen[0]
         assert "Forecast caching on" in seen[0]
 
-    def test_recorded_with_nothing_listed_is_not_a_skip(self, answer):
+    def test_recorded_with_nothing_listed_is_not_a_skip(self, answer: Answer) -> None:
         answer([])
         self._returns(_Denial("", kind="recorded"))
         claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
 
         assert build_denials(_denies(claim), {35: TURN_35}, already=[claim]) == []
 
-    def test_an_empty_report_builds_nothing(self, answer):
+    def test_an_empty_report_builds_nothing(self, answer: Answer) -> None:
         answer([])
 
         assert build_denials(CitationReport(), {35: TURN_35}) == []
 
-    def _returns(self, item):
+    def _returns(self, item: _Denial) -> None:
         import auto_ontology.utils.llm_invoke as llm
 
         llm.invoke_with_structured_output = lambda *_: item
