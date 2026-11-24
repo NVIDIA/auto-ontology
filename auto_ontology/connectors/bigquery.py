@@ -55,9 +55,9 @@ Example
 -------
 ::
 
-    CONNECTION_STRINGS=bigquery://my-project?location=US&credentials=<base64 key>
-    CONNECTION_STRINGS=bigquery://my-project?schema=analytics&credentials_file=/secrets/sa.json
-    CONNECTION_STRINGS=bigquery://my-project/austin?dataset=bigquery-public-data.austin_311
+    CONNECTION_STRINGS='bigquery://my-project?location=US&credentials=BASE64_KEY'
+    CONNECTION_STRINGS='bigquery://my-project?schema=analytics&credentials_file=/secrets/sa.json'
+    CONNECTION_STRINGS='bigquery://my-project/austin?dataset=bigquery-public-data.austin_311'
 """
 
 from __future__ import annotations
