@@ -845,6 +845,13 @@ def build_denials(
                 item.turn_index,
             )
             continue
+        # Before the claim is marked answered, which is the point of no return:
+        # one repair is allowed per claim, so a node built with no name would
+        # both sit in the graph unnamed and spend the only chance a later turn
+        # had to deny the claim properly.
+        if not result.name.strip():
+            logger.warning("Discarding denial of %r: it has no name.", claim.name)
+            continue
         if _normalise(result.name) == _normalise(claim.name):
             logger.warning(
                 "Discarding denial of %r: it reuses the claim's own name.", claim.name

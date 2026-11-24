@@ -646,6 +646,17 @@ class TestBuildDenials:
 
         assert built == []
 
+    def test_a_nameless_denial_is_discarded_and_the_claim_stays_open(
+        self, answer: Answer
+    ) -> None:
+        """A blank name clears the self-name check, so nothing else stops it
+        from being built and spending the claim's one repair."""
+        answer([])
+        self._returns(_Denial(" ", evidence="never actually"))
+        claim = statement("API key obtained", {16, 35})
+
+        assert build_denials(_denies(claim), {35: TURN_35}) == []
+
     def test_two_claims_sharing_a_name_are_each_repaired(self, answer: Answer) -> None:
         """Extraction names statements before ``_disambiguate`` runs, so two
         readings of different properties can both be called 'Quota'."""
