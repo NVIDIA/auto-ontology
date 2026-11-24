@@ -181,13 +181,72 @@ def test_registry_creates_oracle_connector(driver: SimpleNamespace) -> None:
 
 def test_registry_passes_the_schema_allowlist(driver: SimpleNamespace) -> None:
     database = create_connector(_CONNECTION_STRING, schemas=["hr", " Sales "])
+    driver.results.append((["USERNAME"], [("HR",), ("SALES",)]))
 
     assert isinstance(database, OracleDatabase)
     database.get_tables()
 
     statement = driver.connections[-1].executed[0][0]
-    assert "UPPER(t.OWNER) IN ('HR', 'SALES')" in statement
+    assert "t.OWNER IN ('HR', 'SALES')" in statement
+    assert "UPPER(" not in statement
     assert "CURRENT_SCHEMA" not in statement
+
+
+@pytest.mark.parametrize(
+    ("requested", "existing", "expected"),
+    [
+        # Picked from get_schemas(): already exact.
+        (["HR"], ["HR", "hr"], ["HR"]),
+        (["hr"], ["HR", "hr"], ["hr"]),
+        # Typed bare, no schema by that exact name: Oracle reads it as upper case.
+        (["hr"], ["HR"], ["HR"]),
+        # Typed in double quotes: exact, never folded.
+        (['"hr"'], ["HR", "hr"], ["hr"]),
+        # Unknown names stay as given and match nothing.
+        (["nobody"], [], ["nobody"]),
+    ],
+)
+def test_schema_allowlist_matches_exact_schema_names(
+    driver: SimpleNamespace,
+    requested: list[str],
+    existing: list[str],
+    expected: list[str],
+) -> None:
+    database = OracleDatabase(_CONNECTION_STRING, schemas=requested)
+    driver.results.append((["USERNAME"], [(name,) for name in existing]))
+    driver.results.append((["X"], []))
+
+    database.get_columns()
+
+    lookup = driver.connections[-2].executed[0][0]
+    assert lookup.startswith("SELECT USERNAME FROM ALL_USERS WHERE USERNAME IN (")
+    statement = driver.connections[-1].executed[0][0]
+    names = ", ".join(f"'{name}'" for name in expected)
+    assert f"OWNER IN ({names})" in statement
+
+
+def test_schema_names_are_resolved_once(driver: SimpleNamespace) -> None:
+    database = OracleDatabase(_CONNECTION_STRING, schemas=["hr"])
+    driver.results.append((["USERNAME"], [("HR",)]))
+    driver.results.extend([(["X"], [])] * 2)
+
+    database.get_columns()
+    database.get_columns()
+
+    statements = [c.executed[0][0] for c in driver.connections if c.executed]
+    assert sum("FROM ALL_USERS" in s for s in statements) == 1
+
+
+def test_get_tables_keeps_index_organized_tables(driver: SimpleNamespace) -> None:
+    database = OracleDatabase(_CONNECTION_STRING)
+    driver.results.append((["X"], []))
+
+    database.get_tables()
+
+    statement = driver.connections[-1].executed[0][0]
+    # IOT_TYPE is 'IOT' for the table itself, and 'IOT_OVERFLOW' or
+    # 'IOT_MAPPING' for its storage, which stay out.
+    assert "(t.IOT_TYPE IS NULL OR t.IOT_TYPE = 'IOT')" in statement
 
 
 def test_introspection_defaults_to_the_connecting_users_schema(
@@ -397,5 +456,9 @@ def test_oracle_dialect_rules_replace_limit() -> None:
     assert rules == format_dialect_rules("oracle")
     assert "FETCH FIRST n ROWS ONLY" in rules
     assert "FROM DUAL" in rules
+    # 23ai has a native BOOLEAN type; only flags stored as text or numbers
+    # are compared against their stored values.
+    assert "BOOLEAN (Oracle 23ai and later) takes TRUE / FALSE" in rules
+    assert "There is no BOOLEAN column type" not in rules
     for dialect in ("sqlite", "postgres", "snowflake", "mysql", None):
         assert "Oracle-specific" not in format_dialect_rules(dialect)

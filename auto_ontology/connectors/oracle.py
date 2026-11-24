@@ -136,11 +136,12 @@ class OracleDatabase(SQLDatabase):
     ) -> None:
         self._connect_kwargs = _parse_connection_string(connection_string)
         self._database_name = str(self._connect_kwargs["service_name"])
-        # Compared upper-cased: Oracle folds unquoted identifiers to upper case,
-        # so a user typing "hr" must still match the schema named "HR".
+        # As given; matched to real schema names on first use, by
+        # ``_resolved_schema_names``.
         self._schema_names: list[str] = sorted(
-            {s.strip().upper() for s in (schemas or []) if s and s.strip()}
+            {s.strip() for s in (schemas or []) if s and s.strip()}
         )
+        self._resolved_schemas: list[str] | None = None
         if self._schema_names:
             logger.info(
                 "Oracle ingestion restricted to schemas: %s", self._schema_names
@@ -228,8 +229,44 @@ class OracleDatabase(SQLDatabase):
         """The ``WHERE`` condition selecting which schemas to introspect."""
         if not self._schema_names:
             return f"{column} = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')"
-        names = ", ".join(_quoted_literal(name) for name in self._schema_names)
-        return f"UPPER({column}) IN ({names})"
+        names = ", ".join(
+            _quoted_literal(name) for name in self._resolved_schema_names()
+        )
+        return f"{column} IN ({names})"
+
+    def _resolved_schema_names(self) -> list[str]:
+        """The allowlist as the exact schema names Oracle stores.
+
+        Schema names are case-sensitive: ``HR`` and a schema created as
+        ``"hr"`` are different schemas, so the filter compares exactly. A name
+        picked from ``get_schemas()`` is already exact. A typed name is read the
+        way Oracle reads an identifier: ``"hr"`` in double quotes is exact, and
+        a bare ``hr`` that is not itself a schema name means ``HR``.
+        """
+        if self._resolved_schemas is not None:
+            return self._resolved_schemas
+        quoted: set[str] = set()
+        bare: list[str] = []
+        for name in self._schema_names:
+            if len(name) > 2 and name.startswith('"') and name.endswith('"'):
+                quoted.add(name[1:-1])
+            else:
+                bare.append(name)
+        candidates = sorted(quoted | set(bare) | {name.upper() for name in bare})
+        literals = ", ".join(_quoted_literal(name) for name in candidates)
+        frame = self.execute(
+            f"SELECT USERNAME FROM ALL_USERS WHERE USERNAME IN ({literals})"
+        )
+        existing = set() if frame.empty else {str(n) for n in frame.iloc[:, 0]}
+        resolved = set(quoted)
+        for name in bare:
+            resolved.add(
+                name
+                if name in existing or name.upper() not in existing
+                else name.upper()
+            )
+        self._resolved_schemas = sorted(resolved)
+        return self._resolved_schemas
 
     def get_schemas(self) -> list[str]:
         """List the schemas the connecting user could ingest.
@@ -256,8 +293,10 @@ class OracleDatabase(SQLDatabase):
     def get_tables(self) -> pd.DataFrame:
         # ALL_TABLES also lists the container table behind each materialized
         # view, under the view's own name; those rows are reported once, as the
-        # materialized view. Nested-table storage, index-organized overflow
-        # segments and the recycle bin are storage details, not relations.
+        # materialized view. Nested-table storage, the overflow and mapping
+        # tables behind an index-organized table and the recycle bin are
+        # storage details, not relations; the index-organized table itself
+        # (IOT_TYPE = 'IOT') is an ordinary table.
         frame = self.execute(
             f"""
             SELECT
@@ -269,7 +308,7 @@ class OracleDatabase(SQLDatabase):
               AND t.NESTED = 'NO'
               AND t.SECONDARY = 'N'
               AND t.DROPPED = 'NO'
-              AND t.IOT_TYPE IS NULL
+              AND (t.IOT_TYPE IS NULL OR t.IOT_TYPE = 'IOT')
               AND NOT EXISTS (
                   SELECT 1 FROM ALL_MVIEWS m
                   WHERE m.OWNER = t.OWNER AND m.MVIEW_NAME = t.TABLE_NAME
