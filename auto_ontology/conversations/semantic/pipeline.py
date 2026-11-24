@@ -560,8 +560,8 @@ relate_nodes` get the subject by the same route and the shape the note sees at
         row["about"] = subjects.get(str(row["id"]), [])
 
 
-def _forget_paths(*, database_name: str, nodes: list[dict]) -> None:
-    """Drop the path vectors of the semantic edges about to be replaced.
+def _semantic_path_ids(nodes: list[dict[str, Any]]) -> list[str]:
+    """The path vector ids of the semantic edges about to be replaced.
 
     Re-adjudication deletes rows that already have vectors, and the edges it
     is most likely to drop are the wrong ones -- which is the point of running
@@ -574,27 +574,12 @@ def _forget_paths(*, database_name: str, nodes: list[dict]) -> None:
     is composed from its endpoints and there is no way back to it afterwards.
     """
     from auto_ontology.conversations.semantic.paths import path_rows
-    from auto_ontology.vdb import get_one_hop_path_vdb
 
     ids = [str(row["id"]) for row in nodes]
-    stale = [
+    return [
         row["id"]
         for row in path_rows(nodes, semantic_store.fetch_edges(ids, type_="semantic"))
     ]
-    if not stale:
-        return
-    try:
-        vdb = get_one_hop_path_vdb(database_name=database_name)
-        for path_id in stale:
-            vdb.delete_by_id(path_id)
-    except Exception:
-        logger.exception(
-            "Could not drop %d stale path vector(s) -- retrieval may still "
-            "match an edge this pass replaced.",
-            len(stale),
-        )
-        return
-    logger.info("Dropped %d path vector(s) of the edges being replaced.", len(stale))
 
 
 def _stale_vectors(
@@ -623,7 +608,7 @@ def _forget_vectors(
     """Delete the vectors :func:`_stale_vectors` found, by id.
 
     By id rather than by resetting the collections, for the reason
-    :func:`_forget_paths` gives: other transcripts share the ``database_name``.
+    :func:`_semantic_path_ids` gives: other transcripts share the ``database_name``.
     """
     from auto_ontology.vdb import get_conversation_semantic_vdb, get_one_hop_path_vdb
 
@@ -859,8 +844,12 @@ def relate_conversation(*, database_name: str, conversation_id: str) -> int:
 
     Only the semantic layer is replaced. The knowledge edges came out of the
     same read as the nodes and are as stable as they are.
+
+    The new edges are computed before anything is deleted, and the delete, the
+    reconciled keys and the new edges are written in one transaction, so a
+    failed model call leaves the previous edges in place.
     """
-    from sqlalchemy import and_, delete
+    from sqlalchemy import and_, delete, update
 
     from auto_ontology.dal import schema as sch
     from auto_ontology.dal.session import store, write_transaction
@@ -881,11 +870,22 @@ def relate_conversation(*, database_name: str, conversation_id: str) -> int:
         return 0
 
     _attach_subjects(nodes, statements)
+    keys_before = {str(row["id"]): row.get("attribute_key") for row in statements}
     reconcile_keys(statements)
+    rekeyed = [
+        row
+        for row in statements
+        if row.get("attribute_key") != keys_before[str(row["id"])]
+    ]
+    derived, decided = derive_edges(statements)
+    _embed_for_relate(statements)
+    ruled = relate_nodes(statements, skip=decided)
+
     ids = [str(row["id"]) for row in statements]
-    _forget_paths(database_name=database_name, nodes=nodes)
+    stale_paths = _semantic_path_ids(nodes)
     with write_transaction():
-        store().query_write(
+        handle = store()
+        handle.query_write(
             delete(sch.conversation_edge).where(
                 and_(
                     sch.conversation_edge.c.type == "semantic",
@@ -894,11 +894,19 @@ def relate_conversation(*, database_name: str, conversation_id: str) -> int:
                 )
             )
         )
+        for row in rekeyed:
+            handle.query_write(
+                update(sch.conversation_node)
+                .where(sch.conversation_node.c.id == str(row["id"]))
+                .values(attribute_key=row.get("attribute_key") or None)
+            )
+        written = semantic_store.write_edges(derived)
+        written += semantic_store.write_edges(ruled)
 
-    derived, decided = derive_edges(statements)
-    written = semantic_store.write_edges(derived)
-    _embed_for_relate(statements)
-    written += semantic_store.write_edges(relate_nodes(statements, skip=decided))
+    # After the commit: a rolled-back write keeps the old edges, and they still
+    # need their vectors.
+    if stale_paths:
+        _forget_vectors(database_name=database_name, node_ids=[], path_ids=stale_paths)
     _embed_paths(
         database_name=database_name, conversation_id=conversation_id, reset=False
     )
