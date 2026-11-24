@@ -822,3 +822,135 @@ def test_declared_fk_onto_the_column_itself_is_rejected() -> None:
         assert semantic_fk.resolve_semantic_fks("database") == 0
 
     merge.assert_not_called()
+
+
+# --------------------------------------------------------------------------
+# Warehouse containment probe for the LLM's pick
+# --------------------------------------------------------------------------
+
+
+def _probe_frame(total: int, held: int) -> pd.DataFrame:
+    return pd.DataFrame({"total": [total], "held": [held]})
+
+
+def _product_codes(start: int, stop: int) -> list[str]:
+    return [f"P{n}" for n in range(start, stop)]
+
+
+def test_pick_outside_the_stored_key_range_is_confirmed_in_the_warehouse() -> None:
+    """The key's lowest 20 codes say nothing about FK codes further up."""
+    keys = _keys([_key_row("products-code", "table-2", _product_codes(10000, 10020))])
+    column = _fk_column(_product_codes(15000, 15020), name="product_code")
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._llm_pick_hit",
+            return_value="products-code",
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.execute_capped",
+            return_value=_probe_frame(500, 500),
+        ) as probe,
+    ):
+        selected = semantic_fk._resolve_via_vdb(
+            column, _retriever(_hit("products-code", "table-2")), "database", keys
+        )
+
+    assert selected == "products-code"
+    probe.assert_called_once()
+
+
+def test_pick_whose_stored_overlap_is_only_orphans_is_confirmed_in_the_warehouse() -> (
+    None
+):
+    keys = _keys([_key_row("picked", "table-2", [100, 101, 102, 103])])
+    column = _fk_column([90, 91, 500, 501])
+    with patch(
+        "auto_ontology.semantic.semantic_fk.execute_capped",
+        return_value=_probe_frame(40, 38),
+    ):
+        selected = semantic_fk._confirm_by_values(
+            column, [90, 91, 500, 501], [_hit("picked", "table-2")], "picked", keys
+        )
+
+    assert selected == "picked"
+
+
+def test_pick_the_warehouse_finds_below_the_threshold_is_not_confirmed() -> None:
+    keys = _keys([_key_row("picked", "table-2", _product_codes(10000, 10020))])
+    column = _fk_column(_product_codes(15000, 15020), name="product_code")
+    with patch(
+        "auto_ontology.semantic.semantic_fk.execute_capped",
+        return_value=_probe_frame(500, 400),
+    ):
+        selected = semantic_fk._confirm_by_values(
+            column,
+            _product_codes(15000, 15020),
+            [_hit("picked", "table-2")],
+            "picked",
+            keys,
+        )
+
+    assert selected is None
+
+
+def test_a_probe_that_cannot_run_confirms_nothing_after_a_text_retry() -> None:
+    keys = _keys([_key_row("picked", "table-2", _product_codes(10000, 10020))])
+    column = _fk_column(_product_codes(15000, 15020), name="product_code")
+    with patch(
+        "auto_ontology.semantic.semantic_fk.execute_capped",
+        side_effect=RuntimeError("type mismatch"),
+    ) as probe:
+        selected = semantic_fk._confirm_by_values(
+            column,
+            _product_codes(15000, 15020),
+            [_hit("picked", "table-2")],
+            "picked",
+            keys,
+        )
+
+    assert selected is None
+    assert probe.call_count == 2
+    assert "CAST" in probe.call_args_list[1].args[1].upper()
+
+
+def test_hits_the_llm_did_not_pick_are_not_probed() -> None:
+    keys = _keys([_key_row("other", "table-2", _product_codes(10000, 10020))])
+    column = _fk_column(_product_codes(15000, 15020), name="product_code")
+    with patch("auto_ontology.semantic.semantic_fk.execute_capped") as probe:
+        selected = semantic_fk._confirm_by_values(
+            column,
+            _product_codes(15000, 15020),
+            [_hit("other", "table-2")],
+            None,
+            keys,
+        )
+
+    assert selected is None
+    probe.assert_not_called()
+
+
+def test_containment_probe_counts_distinct_fk_values_held_by_the_key() -> None:
+    connector = MagicMock()
+    connector.dialect = "postgres"
+    connector.qualify.side_effect = lambda schema, table: f'"{schema}"."{table}"'
+    sql = semantic_fk._containment_probe_sql(
+        connector,
+        {"name": "product_code", "table_name": "order_lines", "schema_name": "sales"},
+        {"column_name": "code", "table_name": "products", "schema_name": "sales"},
+        as_text=False,
+    )
+
+    assert sql == (
+        "SELECT COUNT(*) AS total, COUNT(k.v) AS held FROM "
+        '(SELECT DISTINCT "product_code" AS v FROM "sales"."order_lines" '
+        'WHERE "product_code" IS NOT NULL LIMIT 1000) f '
+        'LEFT JOIN (SELECT DISTINCT "code" AS v FROM "sales"."products") k '
+        "ON f.v = k.v"
+    )
+
+
+def test_probe_share_ignores_anything_but_a_frame() -> None:
+    assert semantic_fk._probe_share(MagicMock()) is None
+    assert semantic_fk._probe_share(pd.DataFrame()) is None
+    assert semantic_fk._probe_share(_probe_frame(0, 0)) is None
+    assert semantic_fk._probe_share(_probe_frame(4, 3)) == 0.75
