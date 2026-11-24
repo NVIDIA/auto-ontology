@@ -157,6 +157,12 @@ def main() -> None:
             timeout=60,
             env={
                 **os.environ,
+                # Axios honors both spellings. Keep developer exclusions while
+                # ensuring this loopback-only harness never probes a proxy.
+                **{
+                    key: ",".join(filter(None, (os.environ.get(key, ""), "127.0.0.1")))
+                    for key in ("no_proxy", "NO_PROXY")
+                },
                 "PYTHON_API_URL": f"http://127.0.0.1:{port}",
                 "MODEL_IMPORT_CONFLICT_YAML": yaml.safe_dump(document.model_dump()),
                 "MODEL_IMPORT_BOUND_YAML": bound_yaml,

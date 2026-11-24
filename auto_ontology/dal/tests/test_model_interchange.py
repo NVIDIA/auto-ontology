@@ -1391,3 +1391,86 @@ def test_gateway_snapshot_failure_still_cleans_committed_fixture() -> None:
             harness.main()
     connection.query_write.assert_called_once()
     assert fixtures() == before
+
+
+@pytest.mark.parametrize("repeat_first", [False, True])
+@pytest.mark.parametrize("replace", [False, True])
+def test_shared_attribute_repetition_preserves_first_persisted_key(
+    world: World, repeat_first: bool, replace: bool
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import ModelColumnAttribute
+
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    first = ModelColumnAttribute(
+        id=f"{world.prefix}-shared-new", name="Shared", column_id=world.order_id
+    )
+    repeat = first.model_copy(update={"column_id": world.customer_ref})
+    distinct = first.model_copy(
+        update={"id": f"{world.prefix}-distinct-new", "column_id": world.customer_ref}
+    )
+    term.columns_attributes = (
+        [first, repeat, distinct] if repeat_first else [first, distinct, repeat]
+    )
+    response = _post_document(document, replace=replace)
+    assert response.status_code == 200, response.text
+    assert response.json()["summary"]["created"]["column_attributes"] == 2
+    rows = store().query_read(
+        select(s.column_attribute).where(
+            s.column_attribute.c.imported_id.in_([first.id, distinct.id])
+        )
+    )
+    assert {r["imported_id"]: r["source_column"] for r in rows} == {
+        first.id: "id",
+        distinct.id: "customer_id",
+    }
+    assert _post_document(document, replace=replace).status_code == 200
+
+
+def test_large_import_identity_locks_have_a_fixed_bound() -> None:
+    from auto_ontology.dal.session import write_transaction
+
+    identities = [f"large-model-column-{index}" for index in range(20_000)]
+    with write_transaction():
+        for table in mi._IMPORT_LOCK_TABLES:
+            mi._lock_import_identities(table, identities)
+        locks = store().query_read(
+            "SELECT objid FROM pg_locks WHERE locktype = 'advisory' "
+            "AND pid = pg_backend_pid() AND classid = :namespace ORDER BY objid",
+            {"namespace": mi._IMPORT_LOCK_NAMESPACE},
+        )
+        assert len(locks) == len(mi._IMPORT_LOCK_TABLES) * mi._IMPORT_LOCK_BUCKETS
+        for table in mi._IMPORT_LOCK_TABLES:
+            mi._lock_import_identities(
+                table, [f"another-{identity}" for identity in identities]
+            )
+        assert (
+            store().query_read(
+                "SELECT objid FROM pg_locks WHERE locktype = 'advisory' "
+                "AND pid = pg_backend_pid() AND classid = :namespace ORDER BY objid",
+                {"namespace": mi._IMPORT_LOCK_NAMESPACE},
+            )
+            == locks
+        )
+
+
+@pytest.mark.parametrize("lower,upper", [("internal.local", "example.org"), ("", "")])
+def test_gateway_child_keeps_existing_proxy_exclusions(lower: str, upper: str) -> None:
+    from unittest.mock import patch
+    from dev_tools import verify_model_import_gateway as harness
+
+    def child(*args: Any, **kwargs: Any) -> None:
+        environment = kwargs["env"]
+        assert environment["no_proxy"].split(",") == ([lower] if lower else []) + [
+            "127.0.0.1"
+        ]
+        assert environment["NO_PROXY"].split(",") == ([upper] if upper else []) + [
+            "127.0.0.1"
+        ]
+
+    with (
+        patch.dict(os.environ, {"no_proxy": lower, "NO_PROXY": upper}),
+        patch.object(harness.subprocess, "run", side_effect=child) as run,
+    ):
+        harness.main()
+    run.assert_called_once()

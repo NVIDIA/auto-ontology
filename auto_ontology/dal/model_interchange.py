@@ -881,11 +881,9 @@ def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> 
                 and any(identities[0][k] != props[k] for k in keys if k != "name")
             ):
                 kind = "identity_path_mismatch"
-            elif effective_key in proposed_keys and not (
-                shared_declaration and proposed_keys[effective_key] == identity
-            ):
+            elif not shared_declaration and effective_key in proposed_keys:
                 kind = "duplicate_payload_path"
-            elif any(
+            elif not shared_declaration and any(
                 row["id"] not in {r["id"] for r in identities} for row in same_key
             ):
                 kind = "natural_name_conflict"
@@ -904,7 +902,8 @@ def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> 
             seen_ids[identity] = (table.name, definition)
             if len(identities) == 1:
                 claimed_live_ids.add((table.name, identities[0]["id"]))
-            proposed_keys[effective_key] = identity
+            if not shared_declaration:
+                proposed_keys[effective_key] = identity
             candidates = identities or same_key
             bindings[identity] = (
                 candidates[0]["id"] if len(candidates) == 1 else object()
@@ -1031,6 +1030,47 @@ def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> 
         raise ModelImportConflictError(conflicts)
 
 
+# Each import resolves the eight entity kinds in a fixed order. Disjoint
+# bucket ranges per table and sorted buckets within each batch preserve that
+# lock order, while bounding the total advisory-lock namespace to 8 * 64 entries.
+_IMPORT_LOCK_BUCKETS = 64
+_IMPORT_LOCK_NAMESPACE = 0x414F494D  # AOIM: Auto-Ontology import identities.
+_IMPORT_LOCK_TABLES = (
+    s.catalog_database,
+    s.catalog_schema,
+    s.catalog_table,
+    s.catalog_column,
+    s.term,
+    s.column_attribute,
+    s.sql_attribute,
+    s.custom_analysis,
+)
+
+
+def _lock_import_identities(table: Table, identities: list[str]) -> None:
+    """Serialize absent-ID resolution with bounded transaction-scoped locks."""
+    if not identities or session.get_engine().dialect.name != "postgresql":
+        return
+    table_offset = _IMPORT_LOCK_TABLES.index(table) * _IMPORT_LOCK_BUCKETS
+    buckets = sorted(
+        {
+            table_offset
+            + int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8], "big")
+            % _IMPORT_LOCK_BUCKETS
+            for identity in identities
+        }
+    )
+    # Bucket collisions intentionally serialize unrelated IDs. No catalog
+    # uniqueness constraint is added; identical source IDs always share a lock,
+    # regardless of parent, and catalog size cannot grow the lock namespace.
+    store().query_read(
+        "SELECT pg_advisory_xact_lock(:namespace, bucket) FROM "
+        "(SELECT unnest(CAST(:buckets AS integer[])) AS bucket "
+        "ORDER BY bucket) AS import_locks",
+        {"namespace": _IMPORT_LOCK_NAMESPACE, "buckets": buckets},
+    )
+
+
 def _resolve_entities_batch(
     table,
     items: list[tuple[str, dict[str, Any]]],
@@ -1055,29 +1095,7 @@ def _resolve_entities_batch(
         deduped.setdefault(imported_id, create_props)
     imported_ids = list(deduped)
 
-    if session.get_engine().dialect.name == "postgresql":
-        # Existing-row locks cannot protect an absent source ID. Serialize
-        # cooperating importers before reading, including when parents differ.
-        # Keep imported_id non-unique: collisions in stored catalogs remain
-        # reportable rather than imposing a new global schema constraint.
-        lock_ids = sorted(
-            {
-                int.from_bytes(
-                    hashlib.sha256(
-                        f"model-import:{table.name}:{identity}".encode()
-                    ).digest()[:8],
-                    "big",
-                    signed=True,
-                )
-                for identity in imported_ids
-            }
-        )
-        store().query_read(
-            "SELECT pg_advisory_xact_lock(lock_id) FROM "
-            "(SELECT unnest(CAST(:lock_ids AS bigint[])) AS lock_id "
-            "ORDER BY lock_id) AS import_locks",
-            {"lock_ids": lock_ids},
-        )
+    _lock_import_identities(table, imported_ids)
 
     parent_key = {
         s.catalog_schema: "database_id",

@@ -18,7 +18,9 @@ and imported IDs keep existing objects during replacement. Resolution also
 rejects ambiguities and catalog-parent mismatches that appear after preflight,
 and locks matched catalog parents through transaction completion. Batched
 transaction-scoped advisory locks serialize source-ID resolution before the
-read, including absent IDs; they add no uniqueness constraint. A resolver
+read, including absent IDs. A fixed 64 buckets per entity kind bounds the
+advisory-lock namespace to 512 entries regardless of catalog size; bucket
+collisions serialize unrelated IDs, and no uniqueness constraint is added. A resolver
 check also rejects distinct payload IDs claiming the same live row. The async
 route runs the complete synchronous import in a worker so unrelated requests
 remain responsive. Database integrity failures
@@ -29,13 +31,14 @@ parameters, and driver messages are excluded from the response.
 
 Validated locally against PostgreSQL 17 with the repository's Alembic migrations.
 The fix was refreshed against `main` at `a12fec75` on November 24, 2026.
-The full refreshed backend suite passed: **2,994 passed, 2 skipped** (live
+The full refreshed backend suite passed: **3,005 passed, 2 skipped** (live
 Databricks/MySQL tests). The **5 gateway tests** also passed. Ruff, frontend
 Prettier/ESLint, production frontend build, API schema generation, and Alembic
 schema-drift validation passed; no migration is needed.
 
 The focused identity tests also cover consistent repeated declarations of shared
-attributes and exact-ID catalog bindings with edited display labels. Matched
+attributes without reserving keys the writer skips, and exact-ID catalog
+bindings with edited display labels. Matched
 terms, column attributes, SQL attributes, and analyses are checked against
 their retained names because the current writers skip matched properties. Document-only
 conflicts explain how to assign distinct IDs/paths or remove duplicate entries.
@@ -71,6 +74,9 @@ module and replacement planning, so their merge order should be coordinated.
 
 Each gateway 409 checks a complete snapshot of the fixture database, schema,
 table, and column rows before the successful retry can hide a partial mutation.
+
+The harness preserves both proxy-exclusion variables and adds loopback to each;
+the gateway tests also pass with unreachable HTTP proxies configured.
 
 Gateway tests stub session resolution to supply admin/viewer/anonymous callers.
 They exercise real role permission checks and real backend HTTP/database calls;

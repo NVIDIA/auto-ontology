@@ -523,3 +523,38 @@ def test_ambiguous_live_id_guidance_requires_fixing_the_other_alias(
     assert (
         "remove or change the conflicting imported_id on the other object" in resolution
     )
+
+
+@pytest.mark.parametrize("repeat_first", [False, True])
+@pytest.mark.parametrize("collision", [False, True])
+def test_shared_repetition_does_not_reserve_an_unwritten_key(
+    catalog: Catalog, repeat_first: bool, collision: bool
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelColumn,
+        ModelColumnAttribute,
+        ModelTerm,
+    )
+
+    doc = document()
+    doc.data_layer.databases[0].schemas[0].tables[0].columns.append(
+        ModelColumn(id="other-column", name="customer_id")
+    )
+    first = ModelColumnAttribute(id="shared", name="Identifier", column_id="col")
+    repeat = first.model_copy(update={"column_id": "other-column"})
+    distinct = first.model_copy(
+        update={"id": "distinct", "column_id": "col" if collision else "other-column"}
+    )
+    attrs = [first, repeat, distinct] if repeat_first else [first, distinct, repeat]
+    doc.semantic_layer.terms.append(
+        ModelTerm(id="term", name="Order", columns_attributes=attrs)
+    )
+    if collision:
+        with pytest.raises(dal.ModelImportConflictError) as error:
+            dal._preflight_import(doc, replace=False)
+        assert any(
+            c["kind"] == "duplicate_payload_path" and c["proposed_id"] == "distinct"
+            for c in error.value.conflicts
+        )
+    else:
+        dal._preflight_import(doc, replace=False)
