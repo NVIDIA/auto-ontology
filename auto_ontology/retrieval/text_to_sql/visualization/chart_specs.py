@@ -169,11 +169,12 @@ def _aggregate(
     work[y_col] = y_numeric
 
     if hue_col:
-        x_order = (
-            sorted(work[x_col].unique())
-            if ordered
-            else list(dict.fromkeys(work[x_col].tolist()))
-        )
+        x_order = list(dict.fromkeys(work[x_col].tolist()))
+        if ordered:
+            try:
+                x_order = sorted(x_order)
+            except TypeError:
+                pass  # mixed types (e.g. ints and strings): keep first-seen order
         pivot = (
             work.groupby([x_col, hue_col], dropna=False, sort=ordered)[y_col]
             .sum()

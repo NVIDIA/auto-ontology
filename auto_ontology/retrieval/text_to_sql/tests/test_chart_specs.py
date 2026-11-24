@@ -310,3 +310,19 @@ def test_kpi_on_multiple_rows_falls_through_to_a_real_chart() -> None:
 def test_missing_columns_skip_the_chart() -> None:
     df = pd.DataFrame({"a": [1], "b": [2]})
     assert build_chart_spec(df, _plot(x="nope", y="b")) is None
+
+
+def test_line_chart_with_hue_tolerates_mixed_type_x_values() -> None:
+    """Ints and strings in x can't be sorted; the chart keeps first-seen order."""
+    df = pd.DataFrame(
+        {
+            "Period": [2, "n/a", 1, 2, "n/a", 1],
+            "Region": ["East", "East", "East", "West", "West", "West"],
+            "Sales": [10, 20, 30, 40, 50, 60],
+        }
+    )
+    spec = build_chart_spec(
+        df, _plot(x="Period", y="Sales", hue="Region", plot_type="line")
+    )
+    assert spec is not None
+    assert [d["Period"] for d in spec["data"]] == [2, "n/a", 1]
