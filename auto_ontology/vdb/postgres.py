@@ -39,9 +39,17 @@ _ROW_ID_NAMESPACE = uuid.UUID("6f1d3c52-8e0a-4b7e-9a51-2c4f0d7b9e13")
 
 
 def _row_id(metadata: dict[str, Any]) -> str | None:
-    """The row id for a record, or ``None`` to let the store pick one."""
-    record_id = str(metadata.get("id") or "").strip()
-    return str(uuid.uuid5(_ROW_ID_NAMESPACE, record_id)) if record_id else None
+    """The row id for a record, or ``None`` to let the store pick one.
+
+    Hashed exactly as given. ``'turn-1'`` and ``' turn-1'`` are two ids as far
+    as every other reader of this metadata is concerned, and folding them
+    together here would have the second write replace the first row outright.
+    An id that is only whitespace is no id, and the store picks instead.
+    """
+    record_id = str(metadata.get("id") or "")
+    if not record_id.strip():
+        return None
+    return str(uuid.uuid5(_ROW_ID_NAMESPACE, record_id))
 
 
 class _UnusableEmbeddings(Embeddings):

@@ -200,10 +200,23 @@ def test_an_upsert_replaces_the_vector_rather_than_adding_a_copy(vdb: Any) -> No
 
     assert _count(vdb) == 1
     with psycopg.connect(vdb.connection_string) as conn:
-        content = conn.execute(
-            f"SELECT langchain_metadata ->> 'id' FROM vdb.{vdb.collection_name}"
-        ).fetchone()[0]
+        content, vector = conn.execute(
+            f"SELECT langchain_metadata ->> 'id', embedding::text "
+            f"FROM vdb.{vdb.collection_name}"
+        ).fetchone()
     assert content == "t1"
+    # The second vector, not the first. One row with the right id is also what
+    # a write that did nothing on conflict would leave behind.
+    assert [float(value) for value in vector.strip("[]").split(",")] == _unit(1)
+
+
+def test_an_id_is_hashed_as_given(vdb: Any) -> None:
+    """Padding is part of the id everywhere else that reads this metadata, so
+    folding it away here would have one record replace the other."""
+    vdb.run(to_vdb_records([_turn("t1", "c1", 0)]), upsert=True)
+    vdb.run(to_vdb_records([_turn(" t1", "c1", 1)]), upsert=True)
+
+    assert _count(vdb) == 2
 
 
 def test_a_plain_write_still_appends(vdb: Any) -> None:
