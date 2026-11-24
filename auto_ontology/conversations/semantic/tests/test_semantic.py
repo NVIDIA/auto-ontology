@@ -405,6 +405,54 @@ def test_a_merge_renames_the_key_only_on_the_subject_it_was_found_on(
     assert autocomplete["attribute_key"] == "api_response_time"
 
 
+def _reconcile_with(monkeypatch: pytest.MonkeyPatch, group: KeyGroup, rows) -> int:
+    from auto_ontology.conversations.semantic import keys
+    from auto_ontology.utils import llm_invoke
+
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_: None)
+    monkeypatch.setattr(
+        llm_invoke,
+        "invoke_with_structured_output",
+        lambda *_: keys.KeyGroups(groups=[group]),
+    )
+    return reconcile_keys(rows)
+
+
+def _reading(key: str, value: str, turn: int, *about: str) -> dict:
+    return {
+        "attribute_key": key,
+        "value": value,
+        "kinds": ["state"],
+        "turn_indexes": [turn],
+        "about": list(about),
+    }
+
+
+def test_a_shared_row_is_not_renamed_into_another_subjects_property(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    on_a = _reading("x", "10", 1, "A")
+    shared = _reading("y", "20", 2, "A", "B")
+    on_b = _reading("x", "<30", 3, "B")
+
+    _reconcile_with(
+        monkeypatch, KeyGroup(subject="A", keys=["x", "y"]), [on_a, shared, on_b]
+    )
+
+    assert shared["attribute_key"] == "y"
+
+
+def test_a_shared_row_is_renamed_when_no_other_subject_has_the_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    on_a = _reading("x", "10", 1, "A")
+    shared = _reading("y", "20", 2, "A", "B")
+
+    _reconcile_with(monkeypatch, KeyGroup(subject="A", keys=["x", "y"]), [on_a, shared])
+
+    assert shared["attribute_key"] == "x"
+
+
 def test_a_thing_is_identified_by_its_name_alone() -> None:
     assert _node_key(_item(name="Flask", kinds=["object"]), ["object"]) == (
         "flask",

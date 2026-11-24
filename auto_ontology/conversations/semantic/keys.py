@@ -350,14 +350,25 @@ def reconcile_keys(statements: Sequence[dict[str, Any]]) -> int:
     if not rewrite:
         return 0
 
+    keys_on: dict[str, set[str]] = defaultdict(set)
+    for row in statements:
+        for subject in row.get("about") or ():
+            keys_on[subject].add((row.get("attribute_key") or "").strip())
+
     changed = 0
     for row in statements:
         key = (row.get("attribute_key") or "").strip()
-        for subject in sorted(row.get("about") or ()):
-            if (subject, key) in rewrite:
-                row["attribute_key"] = rewrite[(subject, key)]
-                changed += 1
-                break
+        subjects = list(row.get("about") or ())
+        targets = {rewrite[(s, key)] for s in subjects if (s, key) in rewrite}
+        if len(targets) != 1:
+            continue
+        (target,) = targets
+        # A row has one key across all its subjects. Renamed only if no other
+        # subject already reads under the new name, where it would chain into
+        # a property that subject never agreed was the same.
+        if all((s, key) in rewrite or target not in keys_on[s] for s in subjects):
+            row["attribute_key"] = target
+            changed += 1
     logger.info(
         "Reconciled %d key(s) into %d canonical name(s).",
         changed,
