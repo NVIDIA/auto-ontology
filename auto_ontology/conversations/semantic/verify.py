@@ -798,6 +798,19 @@ def build_denials(
                 claim.name,
             )
             continue
+        if result.kind == "recorded":
+            # Nothing was taken from this turn, so the prompt never listed the
+            # statements 'recorded' answers about and the answer settles
+            # nothing: neither that the retraction is already in the graph nor
+            # that the claim is merely recorded wrongly. Reported rather than
+            # read as the second, which is what falling through would do.
+            logger.warning(
+                "Turn %d answered %r with 'recorded' though nothing was taken "
+                "from it -- unresolved, citation detached, nothing added.",
+                item.turn_index,
+                claim.name,
+            )
+            continue
         if result.kind != "retraction":
             logger.info(
                 "Turn %d does not retract %r, it contradicts how it was "

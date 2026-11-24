@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -659,12 +660,24 @@ class TestBuildDenials:
         assert "STATEMENTS ALREADY TAKEN FROM THIS TURN" in seen[0]
         assert "Forecast caching on" in seen[0]
 
-    def test_recorded_with_nothing_listed_is_not_a_skip(self, answer: Answer) -> None:
+    def test_recorded_with_nothing_listed_is_reported_unresolved(
+        self, answer: Answer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The prompt lists the statements 'recorded' answers about only when
+        there are some, so with none the answer settles nothing -- neither that
+        the retraction is already held nor that the claim is merely wrong."""
         answer([])
         self._returns(_Denial("", kind="recorded"))
         claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
 
-        assert build_denials(_denies(claim), {35: TURN_35}, already=[claim]) == []
+        with caplog.at_level(logging.WARNING):
+            built = build_denials(_denies(claim), {35: TURN_35}, already=[claim])
+
+        assert built == []
+        assert "unresolved" in caplog.text
+        # Not read as the claim being recorded wrongly, which is the other
+        # answer this one would have fallen through to.
+        assert "contradicts how it was recorded" not in caplog.text
 
     def test_an_empty_report_builds_nothing(self, answer: Answer) -> None:
         answer([])
