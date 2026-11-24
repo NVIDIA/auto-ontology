@@ -335,26 +335,32 @@ def adjudicate(left: dict, right: dict) -> PairVerdict | None:
 def _orient(verdict: PairVerdict, left: dict, right: dict) -> tuple[dict, dict]:
     """Put the pair in the order the relation runs.
 
-    ``supersedes`` follows the turns whenever they differ, whatever the model
-    said: the later statement is the one that replaces, and that is read off
-    the transcript rather than judged. Otherwise the model's ``source`` is
-    taken when it gave one. When it did not, and the relation is one whose
-    direction matters, the turn numbers decide: the later statement
-    supersedes, the earlier one precedes. Falling back to the presentation
-    order would make the direction depend on which attribute the extractor
-    happened to find first.
+    ``supersedes`` follows the turns, whatever the model said, when every
+    citation of one statement comes after every citation of the other: the
+    later one is the one that replaces, and that is read off the transcript
+    rather than judged. When the citations interleave they do not say which
+    came first -- an old value recalled after its replacement is cited last
+    without being the newer one -- so the model's ``source`` is taken when it
+    gave one. When it did not, and the relation is one whose direction
+    matters, the latest citations decide: the later statement supersedes, the
+    earlier one precedes. Falling back to the presentation order would make the
+    direction depend on which attribute the extractor happened to find first.
     """
-    left_last = max(left.get("turn_indexes") or [-1])
-    right_last = max(right.get("turn_indexes") or [-1])
-    if verdict.role == "supersedes" and left_last != right_last:
-        return (left, right) if left_last > right_last else (right, left)
+    left_turns = left.get("turn_indexes") or [-1]
+    right_turns = right.get("turn_indexes") or [-1]
+    if verdict.role == "supersedes":
+        if max(left_turns) < min(right_turns):
+            return right, left
+        if max(right_turns) < min(left_turns):
+            return left, right
 
     if verdict.source == "B":
         return right, left
     if verdict.source == "A" or verdict.role not in DIRECTED:
         return left, right
+    left_last, right_last = max(left_turns), max(right_turns)
     if verdict.role == "supersedes":
-        return left, right
+        return (left, right) if left_last >= right_last else (right, left)
     return (left, right) if left_last <= right_last else (right, left)
 
 

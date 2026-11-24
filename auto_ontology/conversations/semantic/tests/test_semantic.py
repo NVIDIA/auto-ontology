@@ -875,6 +875,16 @@ def test_supersedes_runs_from_the_later_turn_whatever_the_model_said() -> None:
     assert (source["id"], target["id"]) == ("b", "a")
 
 
+def test_an_old_value_recalled_later_does_not_become_the_revision() -> None:
+    # Stated at 12, replaced at 48, mentioned again at 60: cited last, still old.
+    old = {"id": "a", "turn_indexes": [12, 60]}
+    new = {"id": "b", "turn_indexes": [48]}
+
+    source, target = _orient(PairVerdict(role="supersedes", source="B"), old, new)
+
+    assert (source["id"], target["id"]) == ("b", "a")
+
+
 def test_supersedes_within_one_turn_takes_the_models_side() -> None:
     left = {"id": "a", "turn_indexes": [12]}
     right = {"id": "b", "turn_indexes": [12]}
