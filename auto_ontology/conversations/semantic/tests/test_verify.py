@@ -630,6 +630,24 @@ class TestBuildDenials:
 
         assert built == []
 
+    def test_two_claims_sharing_a_name_are_each_repaired(self, answer: Answer) -> None:
+        """Extraction names statements before ``_disambiguate`` runs, so two
+        readings of different properties can both be called 'Quota'."""
+        answer([])
+        self._returns(_Denial("Quota never raised", evidence="never actually"))
+        first = statement("Quota", {35}, key="daily_quota", value="1000")
+        second = statement("Quota", {36}, key="burst_quota", value="50")
+        report = CitationReport()
+        for node, turn in ((first, 35), (second, 36)):
+            report.denies.append(
+                NodeCitation(node=node, turn_index=turn, verdict="denies", reason="")
+            )
+
+        built = build_denials(report, {35: TURN_35, 36: TURN_35})
+
+        assert len(built) == 2
+        assert {next(iter(node.turn_indexes)) for node in built} == {35, 36}
+
     def test_a_same_key_statement_about_another_thing_does_not_skip(
         self, answer: Answer
     ) -> None:

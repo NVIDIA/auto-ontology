@@ -748,7 +748,12 @@ def build_denials(
             spoken_for.setdefault(next(iter(node.turn_indexes)), []).append(node)
 
     built: list[NodeDraft] = []
-    answered: set[str] = set()
+    #: The claims already denied, by identity. Names repeat before
+    #: ``_disambiguate`` runs -- two readings of different properties can both
+    #: be called 'Quota' -- and keying on the name would let the first repair
+    #: stand for the second, which is a different claim denied by a different
+    #: turn.
+    answered: set[int] = set()
     for item in report.denies:
         body = turns.get(item.turn_index)
         if body is None:
@@ -763,7 +768,7 @@ def build_denials(
         # One retraction per claim, not per citation. Four turns denied one
         # 'caching with Map' node on the first live run, which would have put
         # four near-identical statements in the graph for a single conflict.
-        if claim.name in answered:
+        if id(claim) in answered:
             logger.info("Already recorded a denial of %r.", claim.name)
             continue
         reading = (
@@ -852,7 +857,7 @@ def build_denials(
                 evidence=result.evidence.strip(),
             )
         )
-        answered.add(claim.name)
+        answered.add(id(claim))
         logger.info(
             "Recorded %r, denying %r from turn %d.",
             built[-1].name,
