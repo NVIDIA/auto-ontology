@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import AbstractContextManager
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -835,7 +837,9 @@ def test_declared_fk_onto_the_column_itself_is_rejected() -> None:
 # --------------------------------------------------------------------------
 
 
-def _llm_answers(*selections: FkHitSelection):
+def _llm_answers(
+    *selections: FkHitSelection,
+) -> tuple[AbstractContextManager[Any], AbstractContextManager[Any]]:
     """Patch the model so successive picks return *selections* in order."""
     return (
         patch("auto_ontology.semantic.semantic_fk.get_llm_client"),
@@ -968,7 +972,15 @@ def test_an_empty_trace_has_no_evidence() -> None:
 
 
 def test_inferred_fk_is_stored_with_the_evidence_its_resolution_traced() -> None:
-    def resolve(col, retriever, database_name, keys, families, *, trace):
+    def resolve(
+        col: dict[str, Any],
+        retriever: object,
+        database_name: str,
+        keys: object,
+        families: object,
+        *,
+        trace: semantic_fk._Trace,
+    ) -> str:
         trace.method = "value_confirmed"
         trace.containment = 0.9
         trace.vector_distance = 0.2
@@ -1019,7 +1031,15 @@ def test_inferred_fk_is_stored_with_the_evidence_its_resolution_traced() -> None
 
 
 def test_an_inferred_fk_whose_join_returned_rows_records_it() -> None:
-    def resolve(col, retriever, database_name, keys, families, *, trace):
+    def resolve(
+        col: dict[str, Any],
+        retriever: object,
+        database_name: str,
+        keys: object,
+        families: object,
+        *,
+        trace: semantic_fk._Trace,
+    ) -> str:
         trace.method = "llm_pick"
         trace.vector_distance = 0.3
         return "attr"
