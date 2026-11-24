@@ -17,6 +17,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from typing import Any, Iterable, Optional
 
 import psycopg
@@ -28,6 +29,18 @@ from langchain_postgres import Column, PGEngine, PGVectorStore
 logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
+
+#: Namespace for row ids derived from a record's own ``id``. Fixed, so the same
+#: record maps to the same row on every run.
+_ROW_ID_NAMESPACE = uuid.UUID("6f1d3c52-8e0a-4b7e-9a51-2c4f0d7b9e13")
+
+
+def _row_id(metadata: dict[str, Any]) -> str | None:
+    """The row id for a record, or ``None`` to let the store pick one."""
+    record_id = str(metadata.get("id") or "").strip()
+    return str(uuid.uuid5(_ROW_ID_NAMESPACE, record_id)) if record_id else None
+
+
 _LABEL_METADATA_COLUMN = "label"
 
 
@@ -347,9 +360,16 @@ class PostgresVDB:
         self,
         records: list,
         batch_size: int = 500,
+        *,
+        upsert: bool = False,
         **kwargs: Any,
     ) -> int:
-        """Bulk-insert records, returning the number of rows written."""
+        """Bulk-insert records, returning the number of rows written.
+
+        With *upsert*, each row's id is derived from its metadata ``id``, so
+        writing a record again replaces its vector rather than adding a copy
+        beside it. Off by default: it relies on that ``id`` naming one row.
+        """
         documents: list[Document] = []
         embeddings: list[list[float]] = []
         skipped = 0
@@ -388,6 +408,7 @@ class PostgresVDB:
                 texts=[d.page_content for d in chunk_docs],
                 embeddings=chunk_embs,
                 metadatas=[d.metadata for d in chunk_docs],
+                ids=[_row_id(d.metadata) for d in chunk_docs] if upsert else None,
             )
             inserted += len(chunk_docs)
 
@@ -508,6 +529,39 @@ class PostgresVDB:
         )
         return deleted
 
+    def delete_by_conversation(self, database_name: str, conversation_id: str) -> int:
+        """Delete one transcript's rows in *database_name*; returns how many.
+
+        Narrower than :meth:`delete_by_database`, which would take every other
+        transcript sharing the database with it.
+        """
+        if not self._table_exists():
+            return 0
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        """
+                        DELETE FROM {table}
+                        WHERE {database} = %s
+                          AND langchain_metadata ->> 'conversation_id' = %s
+                        """
+                    ).format(
+                        table=sql.Identifier(self.schema_name, self.collection_name),
+                        database=sql.Identifier(_DATABASE_METADATA_COLUMN),
+                    ),
+                    (database_name, conversation_id),
+                )
+                deleted = cur.rowcount
+        logger.info(
+            "PostgresVDB.delete_by_conversation: deleted %d rows from %s for %s/%s",
+            deleted,
+            self.collection_name,
+            database_name,
+            conversation_id,
+        )
+        return deleted
+
     def retrieval(
         self,
         queries: list,
@@ -564,10 +618,10 @@ class PostgresVDB:
         )
         return results
 
-    def run(self, records: list) -> int:
+    def run(self, records: list, *, upsert: bool = False) -> int:
         """Create the collection if needed, then write records to it."""
         self.create_index()
-        return self.write_to_index(records)
+        return self.write_to_index(records, upsert=upsert)
 
     #: Seconds to wait for the pool to dispose before giving up on it.
     #:

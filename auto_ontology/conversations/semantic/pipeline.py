@@ -174,10 +174,11 @@ def populate_conversation_graph(
     whose revised values look like unrelated readings. Useful for getting the
     graph in place and measuring the node route before paying for ``refines``.
 
-    *reset_vectors* clears the semantic collection before writing. Off by
-    default because several transcripts normally share a ``database_name`` and
-    each would otherwise wipe the last; the first conversation of a fresh run
-    passes it once.
+    *reset_vectors* clears this transcript's node and path vectors before
+    writing; other transcripts sharing the ``database_name`` keep theirs. Off
+    by default because the old graph's vectors are dropped by id anyway, and
+    every vector is written under its own id, so a rebuild replaces rather
+    than adds.
 
     *window_chars* is how much turn text one extraction call is shown. Pass 1
     for one turn per call, which is cognee's unit: a chunk there is a single
@@ -423,7 +424,8 @@ def _write_graph(
     _check_writable(graph.nodes)
     name_of = {normalise_name(node.name): node for node in graph.nodes}
 
-    # A reset wipes both collections at the embed, so there is nothing to find.
+    # A reset wipes this transcript's vectors at the embed, so there is nothing
+    # to find.
     stale_nodes, stale_paths = (
         ([], [])
         if reset_vectors
@@ -1026,8 +1028,10 @@ def _embed(
                 conversation_id,
             )
             return 0
-        vdb = get_conversation_semantic_vdb(database_name=database_name, reset=reset)
-        return int(vdb.run(records))
+        vdb = get_conversation_semantic_vdb(database_name=database_name)
+        if reset:
+            vdb.delete_by_conversation(database_name, conversation_id)
+        return int(vdb.run(records, upsert=True))
     except Exception:
         logger.exception(
             "Could not index %d node(s) of conversation %s for search -- the "
@@ -1101,8 +1105,12 @@ def _embed_paths(*, database_name: str, conversation_id: str, reset: bool) -> in
                 conversation_id,
             )
             return 0
-        vdb = get_one_hop_path_vdb(database_name=database_name, reset=reset)
-        return int(vdb.run(prepared))
+        vdb = get_one_hop_path_vdb(database_name=database_name)
+        if reset:
+            vdb.delete_by_conversation(database_name, conversation_id)
+        # Under each path's own id, so re-embedding after re-adjudication
+        # replaces the paths it kept instead of adding a copy of each.
+        return int(vdb.run(prepared, upsert=True))
     except Exception:
         logger.exception(
             "Could not index the paths of conversation %s -- the graph itself "

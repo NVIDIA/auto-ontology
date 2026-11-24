@@ -179,10 +179,10 @@ def run_conversation_ingest(
 ) -> int:
     """Write, embed and index one conversation. Returns the rows written.
 
-    *reset* clears the database's existing vectors before the first write, as
-    tabular ingest does, so a re-ingest replaces rather than accumulates. Turn
-    it off when several conversations share one ``database_name`` -- otherwise
-    each one wipes the last.
+    A turn's vector is written under its turn's id, so a re-ingest replaces it
+    rather than adding a copy. *reset* also clears this conversation's other
+    vectors before the first write; the other conversations sharing the
+    ``database_name`` keep theirs either way.
     """
     database_name = database_name.strip()
     if not database_name:
@@ -213,8 +213,12 @@ def run_conversation_ingest(
             # write -- resetting up front would delete the stored turns and
             # then spend minutes embedding, so a bad key or a dead endpoint
             # would leave retrieval with nothing instead of the previous run.
-            vdb = get_conversation_vdb(database_name=database_name, reset=reset)
-        rows_written += vdb.run(records)
+            vdb = get_conversation_vdb(database_name=database_name)
+            if reset:
+                vdb.delete_by_conversation(
+                    database_name, str(conversation.conversation_id)
+                )
+        rows_written += vdb.run(records, upsert=True)
 
     logger.info(
         "Conversation ingestion finished for %s -- %d turn(s), "

@@ -162,15 +162,27 @@ def test_run_ingest_embeds_and_writes(upserts: list) -> None:
         written = run_conversation_ingest(_conversation(2), database_name="beam_42")
 
     assert written == 3
-    assert get_vdb.call_args.kwargs == {"database_name": "beam_42", "reset": True}
+    assert get_vdb.call_args.kwargs == {"database_name": "beam_42"}
+    # Under each turn's id, so a re-ingest replaces rather than adds a copy.
+    assert vdb.upserts == [True]
 
 
-def test_reset_can_be_turned_off_for_a_pooled_database(upserts: list) -> None:
-    """Several conversations under one name would otherwise wipe each other."""
-    with _embedding([pd.DataFrame([{"text": "t"}])], _FakeVdb()) as get_vdb:
+def test_reset_clears_only_this_conversation(upserts: list) -> None:
+    """Others sharing the database keep their vectors."""
+    vdb = _FakeVdb()
+    with _embedding([pd.DataFrame([{"text": "t"}])], vdb):
+        run_conversation_ingest(_conversation(1), database_name="shared")
+
+    assert vdb.cleared == [("shared", "42")]
+
+
+def test_reset_can_be_turned_off(upserts: list) -> None:
+    vdb = _FakeVdb()
+    with _embedding([pd.DataFrame([{"text": "t"}])], vdb):
         run_conversation_ingest(_conversation(1), database_name="shared", reset=False)
 
-    assert get_vdb.call_args.kwargs["reset"] is False
+    assert vdb.cleared == []
+    assert vdb.upserts == [True]
 
 
 def test_pgvector_is_untouched_when_nothing_embeds(upserts: list) -> None:
@@ -191,9 +203,16 @@ class _FakeVdb:
     def __init__(self, written: int = 0) -> None:
         self._written = written
         self.deleted: list[str] = []
+        self.cleared: list[tuple[str, str]] = []
+        self.upserts: list[bool] = []
 
-    def run(self, records: Any) -> int:
+    def run(self, records: Any, *, upsert: bool = False) -> int:
+        self.upserts.append(upsert)
         return self._written
+
+    def delete_by_conversation(self, database_name: str, conversation_id: str) -> int:
+        self.cleared.append((database_name, conversation_id))
+        return 1
 
     def delete_by_id(self, node_id: str) -> int:
         self.deleted.append(node_id)
