@@ -163,8 +163,9 @@ def _forget_turn_vectors(*, database_name: str, turn_ids: list[str]) -> None:
             vdb.delete_by_id(turn_id)
     except Exception:
         logger.exception(
-            "Could not drop the vectors of %d removed turn(s) -- retrieval may "
-            "still return them.",
+            "Could not drop the vectors of %d removed turn(s) -- search may "
+            "spend slots on them, but their text is read from Postgres by id "
+            "and those rows are gone, so it cannot return them.",
             len(turn_ids),
         )
         return

@@ -185,14 +185,17 @@ def populate_conversation_graph(
     user-assistant turn. The default packs several turns together, which on a
     BEAM transcript came out as one to four of them -- the turns are long.
 
-    *verify* reads the extracted graph back against the turns it came from.
-    Edges whose own turns contradict them are **dropped**; edges merely
-    uncited, and statements citing a turn that denies them, are reported and
-    kept. The asymmetry is deliberate: a wrong edge asserts something the
-    transcript does not say, while a wrong citation means a node is *missing*,
-    and removing things cannot add the one that is absent. Measured on one
-    transcript: 15 edges of 179 dropped, 8 citations of 123 flagged. Checks the
-    part of the graph no other pass examines -- everything else compares nodes.
+    *verify* reads the extracted graph back against the turns it came from, and
+    **changes the graph that is written**. Edges whose own turns contradict
+    them are dropped, and merely uncited ones are reported and kept: a wrong
+    edge asserts something the transcript does not say, while an uncited one is
+    a defect in its attribution. A statement citing a turn that denies it keeps
+    the statement -- removing it cannot add the one that is missing -- but a
+    retraction node is built from the denying turn, and the denied citation is
+    detached once another citation remains to carry the statement. Measured on
+    one transcript: 15 edges of 179 dropped, 8 citations of 123 flagged. Checks
+    the part of the graph no other pass examines -- everything else compares
+    nodes.
 
     *subject_agent* lets the subject pass read turns it was not shown before
     answering, instead of deciding from the batch alone. For the statements
