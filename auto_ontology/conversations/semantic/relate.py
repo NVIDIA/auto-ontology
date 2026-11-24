@@ -45,7 +45,6 @@ that ignores the direction inverts the answer:
 
 from __future__ import annotations
 
-import itertools
 import logging
 import threading
 import time
@@ -54,6 +53,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
@@ -190,11 +190,22 @@ def _options_block() -> str:
     return "\n".join(f"  {name} -- {gloss}" for name, gloss in ROLES.items())
 
 
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    left = sum(x * x for x in a) ** 0.5
-    right = sum(y * y for y in b) ** 0.5
-    return dot / (left * right) if left and right else 0.0
+#: Rows compared per matrix product, which bounds memory at
+#: ``_BLOCK x len(attributes)`` similarities however long the transcript.
+_BLOCK = 1024
+
+
+def _unit_vectors(attributes: Sequence[dict]) -> np.ndarray:
+    """One normalised row per attribute; zeros where a vector is missing."""
+    vectors = [row.get("vector") for row in attributes]
+    width = max((len(vector) for vector in vectors if vector), default=0)
+    matrix = np.zeros((len(vectors), width), dtype=np.float32)
+    for i, vector in enumerate(vectors):
+        if vector:
+            matrix[i] = vector
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    np.divide(matrix, norms, out=matrix, where=norms > 0)
+    return matrix
 
 
 def candidate_pairs(
@@ -222,27 +233,45 @@ def candidate_pairs(
     :mod:`derive` and arrive here only in *skip*; this clause is what still
     reaches the undated ones, where reading is the only way to order them.
     """
+    unit = _unit_vectors(attributes)
+    events = np.array(["event" in (row.get("kinds") or ()) for row in attributes])
+    columns = np.arange(len(attributes))
+    index = {str(row["id"]): i for i, row in enumerate(attributes)}
+    decided = [
+        (min(ends), max(ends))
+        for pair in skip or ()
+        if len(pair) == 2 and all(end in index for end in pair)
+        for ends in [[index[end] for end in pair]]
+    ]
     scored: list[tuple[int, int, float]] = []
-    skipped = 0
-    for i, j in itertools.combinations(range(len(attributes)), 2):
-        left, right = attributes[i], attributes[j]
-        if skip and frozenset((str(left["id"]), str(right["id"]))) in skip:
-            skipped += 1
-            continue
-        both_events = "event" in (left.get("kinds") or ()) and "event" in (
-            right.get("kinds") or ()
-        )
-        vectors = left.get("vector"), right.get("vector")
-        score = _cosine(*vectors) if all(vectors) else 0.0
-        if both_events or score >= similarity:
-            scored.append((i, j, score))
+    proposed = skipped = 0
+    for start in range(0, len(attributes), _BLOCK):
+        rows = np.arange(start, min(start + _BLOCK, len(attributes)))
+        scores = unit[rows] @ unit.T
+        wanted = (scores >= similarity) | (events[rows, None] & events[None, :])
+        wanted &= columns[None, :] > rows[:, None]
+        for i, j in decided:
+            if start <= i < start + len(rows) and wanted[i - start, j]:
+                wanted[i - start, j] = False
+                skipped += 1
+        hit_rows, hit_columns = np.nonzero(wanted)
+        hit_scores = scores[hit_rows, hit_columns]
+        proposed += len(hit_scores)
+        # Closest first, stable so ties keep pair order; only as many as the cap
+        # can use become Python tuples.
+        top = np.argsort(-hit_scores, kind="stable")[:max_pairs]
+        scored += [
+            (int(rows[hit_rows[k]]), int(hit_columns[k]), float(hit_scores[k]))
+            for k in top
+        ]
+        scored.sort(key=lambda pair: pair[2], reverse=True)
+        del scored[max_pairs:]
 
     if skipped:
         logger.info("Skipping %d pair(s) already decided from the rows.", skipped)
-    scored.sort(key=lambda pair: pair[2], reverse=True)
-    if len(scored) > max_pairs:
-        logger.info("Capping %d candidate pair(s) at %d.", len(scored), max_pairs)
-    return scored[:max_pairs]
+    if proposed > max_pairs:
+        logger.info("Capping %d candidate pair(s) at %d.", proposed, max_pairs)
+    return scored
 
 
 def _turns(attribute: dict) -> str:

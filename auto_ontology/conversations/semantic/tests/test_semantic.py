@@ -624,6 +624,49 @@ def test_the_adjudicator_sees_each_nodes_kinds(
     assert "fact/state" in sent[0]
 
 
+def test_candidate_scores_are_cosine_and_missing_vectors_score_zero() -> None:
+    rows = [
+        {"id": "a", "kinds": ["fact"], "vector": [3.0, 4.0]},
+        {"id": "b", "kinds": ["fact"], "vector": [6.0, 8.0]},
+        {"id": "c", "kinds": ["event"], "vector": None},
+        {"id": "d", "kinds": ["event"], "vector": [-4.0, 3.0]},
+    ]
+
+    pairs = {
+        (rows[i]["id"], rows[j]["id"]): score for i, j, score in candidate_pairs(rows)
+    }
+
+    assert pairs.keys() == {("a", "b"), ("c", "d")}
+    assert pairs[("a", "b")] == pytest.approx(1.0)
+    assert pairs[("c", "d")] == 0.0
+
+
+def test_blocked_comparison_matches_one_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import random
+
+    from auto_ontology.conversations.semantic import relate
+
+    rng = random.Random(0)
+    rows = [
+        {
+            "id": str(i),
+            "kinds": [rng.choice(["fact", "event"])],
+            "vector": [rng.random() for _ in range(8)],
+        }
+        for i in range(40)
+    ]
+    whole = candidate_pairs(rows, max_pairs=25)
+
+    monkeypatch.setattr(relate, "_BLOCK", 7)
+
+    blocked = candidate_pairs(rows, max_pairs=25)
+
+    assert [(i, j) for i, j, _ in blocked] == [(i, j) for i, j, _ in whole]
+    assert [s for _, _, s in blocked] == pytest.approx([s for _, _, s in whole])
+
+
 def test_decided_pairs_are_dropped_before_the_cap() -> None:
     """A pair derive already settled must not use up the adjudication budget."""
     rows = [
