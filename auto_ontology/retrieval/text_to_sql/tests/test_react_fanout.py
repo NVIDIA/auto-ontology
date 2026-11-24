@@ -534,7 +534,7 @@ def test_run_sql_note_fits_the_observation_limit(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The rows are clipped to leave room for the note, not the note dropped."""
-    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "600")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "400")
     sql = (
         "SELECT a.qty % 11 AS bucket, SUM(s.rate), MAX(s.name) FROM suppliers s "
         "JOIN asn a ON a.supplier_id = s.id GROUP BY a.qty % 11"
@@ -542,9 +542,44 @@ def test_run_sql_note_fits_the_observation_limit(
 
     text = run_sql_module.run_sql(ctx, sql)
 
-    assert len(text) == 600
+    assert len(text) == 400
     assert text.startswith("11 rows")
     assert "…\n\nNote: a join repeats" in text
+
+
+def test_two_findings_stay_within_a_small_limit(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "600")
+    sql = (
+        "SELECT s.id, SUM(sr.share), SUM(a.qty) FROM suppliers s "
+        "LEFT JOIN sourcing sr ON sr.supplier_id = s.id "
+        "LEFT JOIN asn a ON a.supplier_id = s.id GROUP BY s.id"
+    )
+
+    text = run_sql_module.run_sql(ctx, sql)
+
+    assert len(text) <= 600
+    assert text.startswith("3 rows")
+    assert "Note: a join repeats" in text
+
+
+def test_a_result_clipped_for_the_note_is_saved_for_grep(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows that fit alone but not beside the note go to a page, not nowhere."""
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "true")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "400")
+    sql = (
+        "SELECT a.qty % 11 AS bucket, SUM(s.rate), MAX(s.name) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id GROUP BY a.qty % 11"
+    )
+
+    text = run_sql_module.run_sql(ctx, sql)
+
+    assert len(text) <= 400
+    assert "Saved as page 1" in text.splitlines()[0]
+    assert len(ctx.pages[0]) == 11
 
 
 def test_episode_fixes_the_query_after_the_refusal(ctx: ToolContext) -> None:
