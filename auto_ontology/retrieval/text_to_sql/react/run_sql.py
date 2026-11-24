@@ -412,7 +412,11 @@ def no_database_error(ctx: ToolContext, sql: str) -> str:
             "tables only one of them has."
         )
     shown = sorted(
-        {str(t.get("database_name")) for t in ctx.seen_tables.values()} - {"None", ""}
+        {
+            str(name)
+            for t in ctx.seen_tables.values()
+            if (name := t.get("database_name"))
+        }
     )
     if len(shown) > 1:
         return (
