@@ -712,15 +712,16 @@ def build_denials(
         invoke_with_structured_output,
     )
 
-    # Turns extraction already gave a statement of their own. If the prompt
+    # Statements extraction drew from a single turn, by turn. If the prompt
     # produced 'Never obtained an API key' from turn 35, repairing turn 35 again
     # writes the same retraction twice; the extractor got there first, and one
-    # of the two nodes is then a duplicate the graph cannot pair cleanly.
-    spoken_for = {
-        next(iter(node.turn_indexes))
-        for node in already
-        if node.is_statement and len(node.turn_indexes) == 1
-    }
+    # of the two nodes is then a duplicate the graph cannot pair cleanly. Only
+    # a statement on the claim's own key counts: nearly every turn yields some
+    # statement, and one about something else does not answer this claim.
+    spoken_for: dict[int, list[NodeDraft]] = {}
+    for node in already:
+        if node.is_statement and node.key and len(node.turn_indexes) == 1:
+            spoken_for.setdefault(next(iter(node.turn_indexes)), []).append(node)
 
     built: list[NodeDraft] = []
     answered: set[str] = set()
@@ -728,14 +729,18 @@ def build_denials(
         body = turns.get(item.turn_index)
         if body is None:
             continue
-        if item.turn_index in spoken_for:
-            logger.info(
-                "Skipping turn %d: extraction already states it on its own.",
-                item.turn_index,
-            )
-            continue
 
         claim = item.node
+        if claim.key and any(
+            node is not claim and node.key == claim.key
+            for node in spoken_for.get(item.turn_index, ())
+        ):
+            logger.info(
+                "Skipping turn %d: extraction already states %r on its own.",
+                item.turn_index,
+                claim.key,
+            )
+            continue
         # One retraction per claim, not per citation. Four turns denied one
         # 'caching with Map' node on the first live run, which would have put
         # four near-identical statements in the graph for a single conflict.

@@ -547,6 +547,28 @@ class TestBuildDenials:
 
         assert built == []
 
+    def test_an_unrelated_statement_on_the_turn_does_not_skip_it(self, answer):
+        answer([])
+        self._returns(_Denial("Never obtained one", evidence="never actually"))
+        claim = statement("API key obtained", {16, 35}, key="api_key_obtained")
+        other = statement("Uses Flask", {35}, key="framework", value="flask")
+
+        built = build_denials(_denies(claim), {35: TURN_35}, already=[claim, other])
+
+        assert [node.name for node in built] == ["Never obtained one"]
+
+    def test_a_statement_on_the_claims_key_skips_the_turn(self, answer):
+        answer([])
+        self._returns(_Denial("Never obtained one", evidence="never actually"))
+        claim = statement(
+            "API key obtained", {16, 35}, key="api_key_obtained", value="yes"
+        )
+        stated = statement("No API key", {35}, key="api_key_obtained", value="no")
+
+        built = build_denials(_denies(claim), {35: TURN_35}, already=[claim, stated])
+
+        assert built == []
+
     def test_an_empty_report_builds_nothing(self, answer):
         answer([])
 
