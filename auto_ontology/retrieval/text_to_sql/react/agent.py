@@ -55,6 +55,16 @@ def _tool_thought(call: dict[str, Any]) -> str:
     return "Submitting the final query."
 
 
+def tables_in_database(tables: list[dict], database_name: str) -> list[dict]:
+    """*tables* of *database_name*, ignoring case as routing does, plus untagged ones."""
+    wanted = database_name.casefold()
+    return [
+        t
+        for t in tables
+        if not t.get("database_name") or str(t["database_name"]).casefold() == wanted
+    ]
+
+
 class ReactSQLAgent(BaseAgent):
     """Answer the question by letting the model search, query and submit."""
 
@@ -141,13 +151,10 @@ class ReactSQLAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        ran_on = ctx.submitted_database
-        if ran_on:
-            path_state["relevant_tables"] = [
-                t
-                for t in path_state["relevant_tables"]
-                if t.get("database_name") in (None, "", ran_on)
-            ]
+        if ctx.submitted_database:
+            path_state["relevant_tables"] = tables_in_database(
+                path_state["relevant_tables"], ctx.submitted_database
+            )
         path_state["sql_code"] = submission.sql
         path_state["sql_generation_result"] = SQLGenerationModel(
             thought=submission.assumptions or _NO_ASSUMPTIONS,
