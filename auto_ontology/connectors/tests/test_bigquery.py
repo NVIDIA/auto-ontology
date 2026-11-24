@@ -1276,6 +1276,36 @@ def test_qualifying_a_wildcard_reads_its_latest_shard() -> None:
     assert database.qualify("ga", "visitors").endswith("`ga`.`visitors`")
 
 
+def test_a_shard_that_lands_later_is_qualified_to_after_an_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [10_000.0]
+    monkeypatch.setattr(
+        "auto_ontology.connectors.bigquery.time.monotonic", lambda: clock[0]
+    )
+    rows = [
+        ["ga", "ga_sessions_20170731", "BASE TABLE", None],
+        ["ga", "ga_sessions_20170801", "BASE TABLE", None],
+    ]
+    database = _database(schema="ga")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: _FakeRows(
+                ["table_schema", "table_name", "table_type", "description"], rows
+            )
+        ),
+    )
+    assert database.qualify("ga", "ga_sessions_*").endswith("ga_sessions_20170801`")
+
+    rows.append(["ga", "ga_sessions_20170802", "BASE TABLE", None])
+    clock[0] += 60
+    assert database.qualify("ga", "ga_sessions_*").endswith("ga_sessions_20170801`")
+
+    clock[0] += 3600
+    assert database.qualify("ga", "ga_sessions_*").endswith("ga_sessions_20170802`")
+
+
 def test_a_struct_that_gained_fields_still_reads_through_the_wildcard() -> None:
     """GA360's ``hits`` gained nested fields over the years; older rows read NULL."""
     families = shard_families(

@@ -106,6 +106,10 @@ _TIMEOUT_GRACE_S = 10.0
 _CANCEL_TIMEOUT_S = 5.0
 
 _QUERY_HISTORY_LIMIT = 10_000
+
+# How long a long-lived connector trusts its shard families before re-reading
+# them, so a newly landed shard becomes the one a wildcard is qualified to.
+_FAMILIES_TTL_S = 3600.0
 _MAX_QUERY_JOB_HOURS = 6
 
 _TABLE_TYPES = {
@@ -597,6 +601,7 @@ class BigQueryDatabase(SQLDatabase):
         self._client: "Client | None" = None
         # Dataset -> wildcard name -> family, read on first use.
         self._families: dict[str, dict[str, ShardFamily]] | None = None
+        self._families_read_at = 0.0
 
     # ------------------------------------------------------------------
     # Transport
@@ -924,8 +929,9 @@ class BigQueryDatabase(SQLDatabase):
         )
 
     def _shard_families(self) -> dict[str, dict[str, ShardFamily]]:
-        """Every dataset's shard families, from metadata queries on first use."""
-        if self._families is None:
+        """Every dataset's shard families, re-read once they are an hour old."""
+        stale = time.monotonic() - self._families_read_at > _FAMILIES_TTL_S
+        if self._families is None or stale:
 
             def sql(dataset: str) -> str:
                 return f"""
@@ -948,6 +954,7 @@ class BigQueryDatabase(SQLDatabase):
             into.setdefault(str(schema), []).append(str(name))
         # Assigned whole, so a concurrent reader never takes a half-built map
         # for the loaded cache.
+        self._families_read_at = time.monotonic()
         self._families = {
             schema: {
                 f.wildcard: f
