@@ -618,6 +618,26 @@ def test_going_back_to_an_earlier_value_is_a_revision() -> None:
     }
 
 
+def test_every_repeat_of_a_replaced_value_is_replaced() -> None:
+    """3000, 4800, 4800 again, then 6000: only 6000 is current."""
+    rows = [
+        _statement("first", attribute_key="cap", value="3000", turn_indexes=[1]),
+        _statement("raised", attribute_key="cap", value="4800", turn_indexes=[5]),
+        _statement("restated", attribute_key="cap", value="4800", turn_indexes=[9]),
+        _statement("final", attribute_key="cap", value="6000", turn_indexes=[10]),
+    ]
+
+    edges, _ = derive_edges(rows)
+
+    assert {(e.source_id, e.role, e.target_id) for e in edges} == {
+        ("raised", "supersedes", "first"),
+        ("final", "supersedes", "raised"),
+        ("final", "supersedes", "restated"),
+    }
+    replaced = {e.target_id for e in edges if e.role == "supersedes"}
+    assert {"first", "raised", "restated", "final"} - replaced == {"final"}
+
+
 def test_a_repeat_keeps_its_turn_for_the_next_comparison() -> None:
     """4800 restated in turn 9 beside a 3000 is a conflict in turn 9, not a
     revision of the 4800 from turn 5."""

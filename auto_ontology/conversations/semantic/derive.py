@@ -110,48 +110,67 @@ def _revisions(nodes: Sequence[dict[str, Any]]) -> list[SemanticEdge]:
     emitted: set[tuple[str, str]] = set()
     for (key, _subject), group in grouped.items():
         # A reading that repeats the value just before it is the same reading
-        # stated twice, not a revision. Only the one just before: going back to
-        # an earlier value -- 3000, then 4800, then 3000 -- is a revision, and
-        # deduplicating across the whole group would make 4800 current. The
-        # repeat stays in the sequence with no edge to its twin, so the next
-        # reading is compared against the turn the value was last stated in.
+        # stated twice, not a revision, so consecutive repeats form one run with
+        # no edge inside it. Only consecutive: going back to an earlier value --
+        # 3000, then 4800, then 3000 -- is a revision, and deduplicating across
+        # the whole group would make 4800 current. A later value replaces
+        # every reading in the run, since one left without an incoming edge
+        # would read as current. One in the same turn as the run's last
+        # reading conflicts with that reading rather than replacing the run.
         ordered = [
             node
             for node in sorted(group, key=_last_turn)
             if (node.get("value") or "").strip()
         ]
-        if len(ordered) < 2:
-            continue
+        runs: list[list[dict[str, Any]]] = []
+        for node in ordered:
+            if runs and _same_value(runs[-1][-1], node):
+                runs[-1].append(node)
+            else:
+                runs.append([node])
 
-        for earlier, later in itertools.pairwise(ordered):
-            if _same_value(earlier, later):
-                continue
-            same_turn = _last_turn(earlier) == _last_turn(later)
-            source, target = (earlier, later) if same_turn else (later, earlier)
-            pair = (str(source["id"]), str(target["id"]))
-            if pair in emitted:
-                continue
-            emitted.add(pair)
-            edges.append(
-                SemanticEdge(
-                    source_id=str(source["id"]),
-                    target_id=str(target["id"]),
-                    role="contradicts" if same_turn else "supersedes",
-                    reason=(
-                        f"both state {key!r} in one turn, with different values"
-                        if same_turn
-                        else f"both state {key!r}: "
-                        f"{earlier.get('value')!r} then {later.get('value')!r}"
-                    ),
-                    distance=None,
-                    derived=True,
-                    turn_indexes=sorted(
-                        set(earlier.get("turn_indexes") or [])
-                        | set(later.get("turn_indexes") or [])
-                    ),
-                )
-            )
+        for replaced, replacing in itertools.pairwise(runs):
+            later = replacing[0]
+            if _last_turn(replaced[-1]) == _last_turn(later):
+                replaced = replaced[-1:]
+            for earlier in replaced:
+                _revise(edges, emitted, key, earlier, later)
     return edges
+
+
+def _revise(
+    edges: list[SemanticEdge],
+    emitted: set[tuple[str, str]],
+    key: str,
+    earlier: dict[str, Any],
+    later: dict[str, Any],
+) -> None:
+    """The edge between two readings of *key*, unless already emitted."""
+    same_turn = _last_turn(earlier) == _last_turn(later)
+    source, target = (earlier, later) if same_turn else (later, earlier)
+    pair = (str(source["id"]), str(target["id"]))
+    if pair in emitted:
+        return
+    emitted.add(pair)
+    edges.append(
+        SemanticEdge(
+            source_id=str(source["id"]),
+            target_id=str(target["id"]),
+            role="contradicts" if same_turn else "supersedes",
+            reason=(
+                f"both state {key!r} in one turn, with different values"
+                if same_turn
+                else f"both state {key!r}: "
+                f"{earlier.get('value')!r} then {later.get('value')!r}"
+            ),
+            distance=None,
+            derived=True,
+            turn_indexes=sorted(
+                set(earlier.get("turn_indexes") or [])
+                | set(later.get("turn_indexes") or [])
+            ),
+        )
+    )
 
 
 def _same_value(left: dict[str, Any], right: dict[str, Any]) -> bool:
