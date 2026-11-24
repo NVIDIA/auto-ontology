@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
@@ -97,7 +97,7 @@ def fetch_turns(
 def turn_count(database_name: str) -> int:
     """How many turns this memory holds."""
     rows = store().query_read(
-        select(s.conversation.c.id)
+        select(func.count().label("turns"))
         .select_from(
             s.conversation.join(
                 s.catalog_database,
@@ -106,4 +106,4 @@ def turn_count(database_name: str) -> int:
         )
         .where(s.catalog_database.c.name == database_name)
     )
-    return len(rows)
+    return int(rows[0]["turns"]) if rows else 0
