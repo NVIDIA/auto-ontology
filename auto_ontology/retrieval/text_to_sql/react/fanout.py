@@ -175,11 +175,11 @@ class _ScopeCheck:
             if not measured:
                 continue
             # ``SUM(x) FILTER (WHERE a.id = 2)`` may keep one row of ``a``.
-            filtered = (
-                self._referenced(aggregate.parent.expression)
-                if isinstance(aggregate.parent, exp.Filter)
-                else set()
-            )
+            filtered: set[str] = set()
+            if isinstance(aggregate.parent, exp.Filter):
+                where = aggregate.parent.expression
+                for conjunct in _conjuncts(getattr(where, "this", where)):
+                    filtered |= self._may_pick_one_row(conjunct)
             for alias, source in self.sources.items():
                 if alias in measured or alias in filtered:
                     continue
@@ -282,16 +282,23 @@ class _ScopeCheck:
                     self.keys[a].setdefault(left.name.lower(), left.name)
                     self.keys[b].setdefault(right.name.lower(), right.name)
                     return
+        self.uncertain |= self._may_pick_one_row(conjunct)
+
+    def _may_pick_one_row(self, conjunct: exp.Expression) -> set[str]:
+        """Sources whose rows *conjunct* may narrow to one per key.
+
+        An equality can (``currency = 'USD'``); a condition across sources or
+        through a subquery can do the same. A range or pattern filter on one
+        source cannot make its rows unique.
+        """
         referenced = self._referenced(conjunct)
-        # An equality can pick one row per key (``currency = 'USD'``); a
-        # condition across sources or through a subquery can do the same. A
-        # range or pattern filter on one source cannot make its rows unique.
         if (
             isinstance(conjunct, (exp.EQ, exp.NullSafeEQ, exp.In))
             or len(referenced) > 1
             or conjunct.find(exp.Select)
         ):
-            self.uncertain |= referenced
+            return referenced
+        return set()
 
     def _read_group_by(self) -> None:
         group = self.select.args.get("group")

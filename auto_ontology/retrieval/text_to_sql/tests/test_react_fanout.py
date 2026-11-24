@@ -268,6 +268,17 @@ def test_aggregate_filter_spares_only_that_aggregate(
     assert [f.aggregate for f in _fanouts(sql, profiles)] == ["SUM(s.rate)"]
 
 
+def test_aggregate_range_filter_does_not_spare_it(
+    profiles: dict[str, KeyProfile],
+) -> None:
+    sql = (
+        "SELECT SUM(s.rate) FILTER (WHERE a.id > 2) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id"
+    )
+
+    assert [f.detail for f in _fanouts(sql, profiles)] == ["asn"]
+
+
 def test_grouping_by_a_cast_key_does_not_spare_it(
     profiles: dict[str, KeyProfile],
 ) -> None:
