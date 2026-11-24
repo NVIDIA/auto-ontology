@@ -440,10 +440,11 @@ def submit_refusal(
     )
 
 
-def run_sql_hint(fanouts: list[Fanout]) -> str:
-    """A note for ``run_sql``'s result; the query ran, so it only warns."""
-    if not fanouts:
+def run_sql_hint(fanouts: list[Fanout], limit: int) -> str:
+    """A note of at most *limit* chars for ``run_sql``'s result; it only warns."""
+    if not fanouts or limit < 2:
         return ""
-    return (
+    hint = (
         f"\n\nNote: a join repeats the rows an aggregate adds up:\n- {_listed(fanouts)}"
     )
+    return hint if len(hint) <= limit else hint[: limit - 1] + "…"

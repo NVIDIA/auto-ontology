@@ -500,21 +500,25 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
         logger.info("ReAct run_sql failed: %s", error)
         return _clip(f"Error from the database: {' '.join(str(error).split())}")
     frame = _deduplicate_result_columns(frame)
+    hint = fanout.run_sql_hint(
+        join_fanouts(ctx, connector, check.statement),
+        config.max_observation_chars() // 2,
+    )
     text = render_rows(frame)
     if config.grep_enabled():
-        text = _save_page(ctx, frame, text)
-    hint = fanout.run_sql_hint(join_fanouts(ctx, connector, check.statement))
+        text = _save_page(ctx, frame, text, reserve=len(hint))
     return _clip(text, reserve=len(hint)) + hint
 
 
-def _save_page(ctx: ToolContext, frame: Any, text: str) -> str:
+def _save_page(ctx: ToolContext, frame: Any, text: str, reserve: int = 0) -> str:
     """Keep a result too long to show for ``grep``, and say so on its first line.
 
     The note goes on the summary line because clipping keeps the start.
+    *reserve* is room :func:`_clip` will keep for a note after the rows.
     """
     if (
         len(frame) <= config.max_result_rows()
-        and len(text) <= config.max_observation_chars()
+        and len(text) <= config.max_observation_chars() - reserve
     ):
         return text
     kept = frame.head(config.max_page_rows())
