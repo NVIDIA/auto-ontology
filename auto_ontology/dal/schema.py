@@ -434,21 +434,16 @@ conversation = Table(
     # it "next Tuesday" cannot be resolved to a date -- the transcript's own
     # ordering gives the sequence but never the calendar.
     Column("time_anchor", Text, nullable=True),
+    # Also the index for reading a conversation back in order, the common
+    # query: the semantic pass walks a transcript start to finish, and
+    # retrieval widens a hit to its neighbours. Postgres backs the constraint
+    # with a unique index on these columns, so a second index would only double
+    # the cost of every write.
     UniqueConstraint(
         "database_id",
         "conversation_id",
         "turn_index",
         name="uq_conversation_database_conversation_turn",
-    ),
-    # Reading a conversation back in order is the common query -- the semantic
-    # pass walks a transcript start to finish, and retrieval widens a hit to
-    # its neighbours. Without this that is a sort over every turn in the
-    # database.
-    Index(
-        "ix_conversation_database_conversation_turn",
-        "database_id",
-        "conversation_id",
-        "turn_index",
     ),
 )
 
