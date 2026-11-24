@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
@@ -37,7 +37,7 @@ _COLUMNS = (
 )
 
 
-def _scoped(database_name: str):
+def _scoped(database_name: str) -> Select[Any]:
     """The join that scopes a read to one memory."""
     return (
         select(*_COLUMNS)
