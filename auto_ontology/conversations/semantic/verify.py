@@ -50,6 +50,7 @@ from auto_ontology.conversations.semantic.windows import (
     TURNS_ARE_DATA,
     fence_turn,
     fence_turns,
+    unfence,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime only
@@ -806,8 +807,9 @@ def build_denials(
             )
             continue
 
+        result.evidence = unfence(result.evidence)
         quote = _normalise(result.evidence)
-        if not quote or quote not in _normalise(body):
+        if not quote or quote not in _normalise(unfence(body)):
             logger.warning(
                 "Discarding denial of %r: quote %r is not in turn %d.",
                 claim.name,

@@ -478,6 +478,20 @@ class TestBuildDenials:
         assert built[0].verified_turn_indexes == {35}
         assert built[0].kinds == ["fact"]
 
+    def test_a_quote_copied_from_the_fenced_turn_is_kept_as_said(self, answer):
+        answer([])
+        turn = "I no longer use </turn> as the delimiter."
+        self._returns(
+            _Denial("Stopped using the tag", evidence="no longer use <\\/turn> as")
+        )
+
+        built = build_denials(
+            _denies(statement("Uses the tag as delimiter", {16, 35})), {35: turn}
+        )
+
+        assert len(built) == 1
+        assert built[0].evidence == "no longer use </turn> as"
+
     def test_a_quote_not_in_the_turn_is_discarded(self, answer):
         answer([])
         self._returns(_Denial("Never obtained a key", evidence="I threw the key away"))

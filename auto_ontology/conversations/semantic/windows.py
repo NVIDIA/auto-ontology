@@ -92,13 +92,13 @@ class Window:
         A verbatim hit proves the link independently of the label the model
         returned, so it is the one piece of attribution that cannot be wrong.
         """
-        needle = _normalise(quote or "")
+        needle = _normalise(unfence(quote or ""))
         if len(needle) < _MIN_QUOTE_CHARS:
             return None
         matches = [
             index
             for index, body in zip(self.turn_indexes, self.texts)
-            if needle in _normalise(body)
+            if needle in _normalise(unfence(body))
         ]
         return matches[0] if len(matches) == 1 else None
 
@@ -119,8 +119,20 @@ def fence_turn(index: int, body: str, anchor: str | None = None) -> str:
     The anchor is stored text too, and is escaped as an attribute value.
     """
     said = f' said_on="{html.escape(anchor, quote=True)}"' if anchor else ""
-    body = body.replace("</turn", "<\\/turn")
+    body = body.replace("</turn", _ESCAPED_CLOSE)
     return f'<turn n="{index}"{said}>\n{body}\n</turn>'
+
+
+_ESCAPED_CLOSE = "<\\/turn"
+
+
+def unfence(text: str) -> str:
+    """*text* with :func:`fence_turn`'s escaping undone.
+
+    A model copies quotes from the fenced form, so one that spans an escaped
+    closing tag matches the transcript, and is stored, only once undone.
+    """
+    return text.replace(_ESCAPED_CLOSE, "</turn")
 
 
 def fence_turns(indexes: Iterable[int], texts: Mapping[int, str]) -> str:

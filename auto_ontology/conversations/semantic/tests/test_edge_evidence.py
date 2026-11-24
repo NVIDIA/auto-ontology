@@ -62,6 +62,11 @@ class TestFindingTheQuote:
         window = _window("we used localStorage here", "we used localStorage here too")
         assert window.find_quote("we used localStorage here") is None
 
+    def test_a_quote_copied_from_the_fenced_turn_still_resolves(self) -> None:
+        """The model sees the closing tag escaped and copies it that way."""
+        window = _window("I no longer use </turn> as the delimiter.")
+        assert window.find_quote("I no longer use <\\/turn> as the delimiter") == 0
+
 
 class TestBuckets:
     def test_an_edge_whose_quote_matched_is_not_reported(self) -> None:

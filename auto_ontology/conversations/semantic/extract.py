@@ -48,7 +48,11 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from auto_ontology.conversations.semantic.windows import TURNS_ARE_DATA, Window
+from auto_ontology.conversations.semantic.windows import (
+    TURNS_ARE_DATA,
+    Window,
+    unfence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -872,7 +876,7 @@ def extract_graph(windows: list[Window]) -> GraphDraft:
             if quoted is not None:
                 draft.verified_turn_indexes.add(quoted)
                 if not draft.evidence:
-                    draft.evidence = item.evidence.strip()
+                    draft.evidence = unfence(item.evidence).strip()
             # The date of the earliest turn this rests on. Earliest because an
             # event is dated by when it happened and the later turns citing it
             # are usually someone referring back to it.
@@ -910,7 +914,7 @@ def extract_graph(windows: list[Window]) -> GraphDraft:
             if quoted is not None:
                 edge.verified_turn_indexes.add(quoted)
             if not edge.evidence and item.evidence:
-                edge.evidence = item.evidence.strip()
+                edge.evidence = unfence(item.evidence).strip()
 
         logger.info(
             "Window %d/%d (turns %s-%s): %d node(s), %d edge(s) so far.",
