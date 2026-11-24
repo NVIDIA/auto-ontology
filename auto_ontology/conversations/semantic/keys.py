@@ -95,8 +95,9 @@ Conversation properties, grouped by the thing they are about. Each line is
 {subjects}
 
 Return the groups of two or more keys that name one property, each with the
-subject it is under. Use only keys listed above, each in at most one group, and
-never group keys from two different subjects.
+subject it is under. Use only keys listed above, each in at most one group per
+subject, and never group keys from two different subjects. When the same keys
+name one property under two subjects, return one group for each.
 """
 
 
@@ -237,7 +238,8 @@ def _accept(
     into a revision.
 
     The ways to be rejected, each of which would otherwise merge two keys the
-    question never put together: a key no subject offered, a key in two groups,
+    question never put together: a key no subject offered, a key in two groups
+    under one subject,
     a group of fewer than two keys, a group whose keys no single subject
     carries, a named subject that does not carry them, and no subject named
     when several carry them. A rejected group is dropped on its own -- unlike cognee's batch
@@ -260,13 +262,12 @@ def _accept(
                 first_turn[key] = min(first_turn.get(key, min(turns)), min(turns))
 
     rewrite: dict[tuple[str, str], str] = {}
-    claimed: set[str] = set()
+    #: Per subject: one key can be grouped under two subjects, never twice
+    #: under one.
+    claimed: set[tuple[str, str]] = set()
     for group in groups:
         keys = [key.strip() for key in group.keys if key.strip()]
         if len(set(keys)) < 2:
-            continue
-        if claimed.intersection(keys):
-            logger.warning("Key group %s reuses an already-grouped key.", keys)
             continue
         subjects = [
             subject
@@ -291,6 +292,9 @@ def _accept(
                 len(subjects),
             )
             continue
+        if any((subject, key) in claimed for subject in subjects for key in keys):
+            logger.warning("Key group %s reuses an already-grouped key.", keys)
+            continue
         canonical = min(set(keys), key=lambda k: (first_turn.get(k, 10**9), k))
         logger.info(
             "Keys %s name one property (%s) -- filing them under %r.",
@@ -298,7 +302,7 @@ def _accept(
             group.property_name or "unnamed",
             canonical,
         )
-        claimed.update(keys)
+        claimed.update((subject, key) for subject in subjects for key in keys)
         for subject in subjects:
             for key in set(keys):
                 if key != canonical:

@@ -387,6 +387,32 @@ class TestKeyAcceptance:
             ("Weather app", "api_response_time"): "fetch_latency"
         }
 
+    def test_one_merge_can_be_approved_under_each_subject(self) -> None:
+        keys = ["fetch_latency", "api_response_time"]
+        groups = [
+            KeyGroup(subject="Weather app", keys=keys),
+            KeyGroup(subject="Autocomplete feature", keys=keys),
+        ]
+
+        assert _accept(groups, self.SHARED) == {
+            ("Weather app", "api_response_time"): "fetch_latency",
+            ("Autocomplete feature", "api_response_time"): "fetch_latency",
+        }
+
+    def test_a_key_grouped_twice_under_one_subject_is_refused(self) -> None:
+        groups = [
+            KeyGroup(
+                subject="Weather app", keys=["fetch_latency", "api_response_time"]
+            ),
+            KeyGroup(
+                subject="Weather app", keys=["api_response_time", "fetch_latency"]
+            ),
+        ]
+
+        assert _accept(groups, self.SHARED) == {
+            ("Weather app", "api_response_time"): "fetch_latency"
+        }
+
     def test_a_group_with_no_subject_carried_by_two_is_refused(self) -> None:
         groups = [KeyGroup(keys=["fetch_latency", "api_response_time"])]
 
