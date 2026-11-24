@@ -81,13 +81,15 @@ allow-direct-references = true
 
 [tool.uv]
 package = true
-# Patched versions of transitive dependencies flagged by nSpect. Constraints,
+# Patched versions of transitive dependencies with known advisories (nSpect, OSV). Constraints,
 # so their dependents' upper bounds still apply.
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors)
     "urllib3>=2.8.0",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore)
     "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2 (via requests, httpx)
     "pyasn1>=0.6.5",  # GHSA-2qm8-x737-gmw5, GHSA-9m75-vc3g-4x39 (via pyasn1-modules, pyjks)
+    "oauthlib>=4.0.1",  # GHSA-3jp2-3mrg-2vxc, GHSA-7984-qgvg-3j9c, GHSA-hj66-6f7g-4r5v, GHSA-xpv3-w29h-x7cv (via databricks-sql-connector)
+    "filelock>=4.2.1",  # GHSA-v4x8-3wr5-3wq8, GHSA-cwqr-hh33-gh44 and ten more (via snowflake-connector-python)
 ]
 
 [[tool.uv.index]]
