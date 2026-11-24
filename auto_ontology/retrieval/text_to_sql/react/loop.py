@@ -117,6 +117,7 @@ def submit(
         # Running it would be refused, and a refusal is not a wrong query.
         unrun = QueryResponse(result=[], sliced=False)
         submission = Submission(sql, (response or "").strip(), assumptions, unrun)
+        ctx.submitted_database = getattr(connector, "database_name", None)
         return "Accepted without running it: no budget left for a query.", submission
     db_response = _run_sql(
         sql, connector, record_numeric_kinds=ctx.numeric_type_alignment

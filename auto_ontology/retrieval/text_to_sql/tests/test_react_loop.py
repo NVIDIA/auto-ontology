@@ -825,6 +825,7 @@ def test_out_of_budget_offers_only_submit_and_accepts_without_running(
     assert result.reason == "submitted"
     assert result.submission.sql == FINAL_SQL
     assert result.submission.db_response.result == []
+    assert ctx.submitted_database == ctx.connectors[0].database_name
     assert model.bound_tool_names[1] == ["submit"]
     assert model.seen[1][-1].content == prompts.NO_QUERIES_LEFT
 

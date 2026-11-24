@@ -40,7 +40,8 @@ class ToolContext:
     ``pages`` holds the ``run_sql`` results too long to show, for ``grep`` to
     search; page *n* is ``pages[n - 1]``.
 
-    ``submitted_database`` is the database the accepted submission ran on.
+    ``submitted_database`` is the database the accepted submission was written
+    for, whether it ran or was accepted unrun for lack of budget.
 
     ``shown_tables`` is every table a ``retrieve`` result named — in a table
     block, a JOIN route, a SIMILAR line or a definition's SQL — as lowercased
