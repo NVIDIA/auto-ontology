@@ -22,14 +22,10 @@ follow as the evidence behind it.
 
 from __future__ import annotations
 
-import logging
-
-from auto_ontology.retrieval.conversation import search_semantic
+from auto_ontology.retrieval.conversation import TurnHit, search_semantic
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.information import _clip, _cut, _fit
-
-logger = logging.getLogger(__name__)
 
 #: Turns shown in full; the rest get one line.
 #:
@@ -60,41 +56,41 @@ def _fence(tag: str, attributes: str, body: str) -> str:
     return f"<{tag}{attributes}>\n{body}\n</{tag}>"
 
 
-def _turn_block(hit: object) -> str:
+def _turn_block(hit: TurnHit) -> str:
     """One turn in full: where it was said, what was asked, what was answered."""
     return _fence(
         "turn",
         _turn_attributes(hit),
         "\n".join(
             [
-                f"ASKED: {_clip(hit.question, _TURN_CHARS)}",  # type: ignore[attr-defined]
-                f"ANSWERED: {_clip(hit.answer, _TURN_CHARS)}",  # type: ignore[attr-defined]
+                f"ASKED: {_clip(hit.question, _TURN_CHARS)}",
+                f"ANSWERED: {_clip(hit.answer, _TURN_CHARS)}",
             ]
         ),
     )
 
 
-def _turn_line(hit: object) -> str:
+def _turn_line(hit: TurnHit) -> str:
     """One turn as a single line: enough to ask for it, not enough to answer."""
     return _fence(
         "turn",
         _turn_attributes(hit),
-        f"ASKED: {_clip(hit.question, _LINE_CHARS)}",  # type: ignore[attr-defined]
+        f"ASKED: {_clip(hit.question, _LINE_CHARS)}",
     )
 
 
-def _turn_attributes(hit: object) -> str:
+def _turn_attributes(hit: TurnHit) -> str:
     """The turn number, with the session and date when the transcript had them.
 
     Session and turn numbers are kept because some questions are about the
     conversation rather than its subject -- when something was first raised,
     what came before what -- and those cannot be answered from the text alone.
     """
-    parts = [f' n="{hit.turn_index}"']  # type: ignore[attr-defined]
-    if hit.session_index is not None:  # type: ignore[attr-defined]
-        parts.append(f' session="{hit.session_index}"')  # type: ignore[attr-defined]
-    if hit.time_anchor:  # type: ignore[attr-defined]
-        parts.append(f' said_on="{hit.time_anchor}"')  # type: ignore[attr-defined]
+    parts = [f' n="{hit.turn_index}"']
+    if hit.session_index is not None:
+        parts.append(f' session="{hit.session_index}"')
+    if hit.time_anchor:
+        parts.append(f' said_on="{hit.time_anchor}"')
     return "".join(parts)
 
 
