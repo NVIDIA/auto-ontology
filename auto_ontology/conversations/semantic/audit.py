@@ -218,6 +218,16 @@ _TEMPLATE = """\
 {pairs}
 """
 
+_READINGS_TEMPLATE = """\
+## Transcript
+
+{text}
+
+## Readings
+
+{pairs}
+"""
+
 
 def audit_structure(
     nodes: Sequence[Mapping[str, Any]], edges: Sequence[Mapping[str, Any]]
@@ -534,13 +544,13 @@ def check_subjects(
     for start in range(0, len(ready), BATCH_PAIRS):
         batch = ready[start : start + BATCH_PAIRS]
         indexes = sorted({index for *_, cited in batch for index in cited})
-        prompt = _TEMPLATE.format(
+        prompt = _READINGS_TEMPLATE.format(
             text=fence_turns(indexes, texts),
             pairs="\n".join(
                 f"{number}. {described}"
                 for number, (_, _, _, described, _) in enumerate(batch, start=1)
             ),
-        ).replace("## Pairs", "## Readings")
+        )
         try:
             answer = invoke_with_structured_output(
                 get_llm_client(temperature=0.0, max_tokens=2048),
