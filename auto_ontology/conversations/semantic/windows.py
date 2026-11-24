@@ -98,7 +98,7 @@ class Window:
         matches = [
             index
             for index, body in zip(self.turn_indexes, self.texts)
-            if needle in _normalise(unfence(body))
+            if needle in _normalise(body)
         ]
         return matches[0] if len(matches) == 1 else None
 
@@ -119,20 +119,25 @@ def fence_turn(index: int, body: str, anchor: str | None = None) -> str:
     The anchor is stored text too, and is escaped as an attribute value.
     """
     said = f' said_on="{html.escape(anchor, quote=True)}"' if anchor else ""
-    body = body.replace("</turn", _ESCAPED_CLOSE)
+    body = _CLOSE.sub(lambda m: f"<\\{m.group(1)}/turn", body)
     return f'<turn n="{index}"{said}>\n{body}\n</turn>'
 
 
-_ESCAPED_CLOSE = "<\\/turn"
+#: A closing tag with any number of backslashes before its slash. Escaping adds
+#: one and :func:`unfence` takes one away, so a transcript that already held
+#: ``<\/turn`` comes back as itself rather than as a closing tag.
+_CLOSE = re.compile(r"<(\\*)/turn")
+_ESCAPED = re.compile(r"<\\(\\*)/turn")
 
 
 def unfence(text: str) -> str:
     """*text* with :func:`fence_turn`'s escaping undone.
 
-    A model copies quotes from the fenced form, so one that spans an escaped
-    closing tag matches the transcript, and is stored, only once undone.
+    For what a model copied from the fenced form: a quote that spans an escaped
+    closing tag matches the transcript, and is stored, only once undone. Never
+    for the transcript itself, which was never escaped.
     """
-    return text.replace(_ESCAPED_CLOSE, "</turn")
+    return _ESCAPED.sub(lambda m: f"<{m.group(1)}/turn", text)
 
 
 def fence_turns(indexes: Iterable[int], texts: Mapping[int, str]) -> str:

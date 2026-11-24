@@ -505,6 +505,24 @@ class TestBuildDenials:
         assert len(built) == 1
         assert built[0].evidence == "no longer use </turn> as"
 
+    def test_a_literal_escape_is_stored_as_the_turn_wrote_it(
+        self, answer: Answer
+    ) -> None:
+        answer([])
+        turn = "I no longer write <\\/turn> by hand."
+        self._returns(
+            _Denial(
+                "Stopped writing the escape", evidence="no longer write <\\\\/turn>"
+            )
+        )
+
+        built = build_denials(
+            _denies(statement("Writes the escape by hand", {16, 35})), {35: turn}
+        )
+
+        assert len(built) == 1
+        assert built[0].evidence == "no longer write <\\/turn>"
+
     def test_a_quote_not_in_the_turn_is_discarded(self, answer: Answer) -> None:
         answer([])
         self._returns(_Denial("Never obtained a key", evidence="I threw the key away"))

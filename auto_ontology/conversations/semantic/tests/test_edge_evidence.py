@@ -11,11 +11,18 @@ the write guards -- compares nodes.
 
 from __future__ import annotations
 
+import pytest
+
 from auto_ontology.conversations.semantic.extract import (
     EdgeDraft,
     report_unquoted_edges,
 )
-from auto_ontology.conversations.semantic.windows import Window, build_windows
+from auto_ontology.conversations.semantic.windows import (
+    Window,
+    build_windows,
+    fence_turn,
+    unfence,
+)
 
 
 def _window(*bodies: str) -> Window:
@@ -66,6 +73,30 @@ class TestFindingTheQuote:
         """The model sees the closing tag escaped and copies it that way."""
         window = _window("I no longer use </turn> as the delimiter.")
         assert window.find_quote("I no longer use <\\/turn> as the delimiter") == 0
+
+    def test_a_literal_escape_in_the_turn_is_not_read_as_a_tag(self) -> None:
+        window = _window("I write <\\/turn> to escape the delimiter.")
+        # Copied from the fenced form, where it shows one backslash more.
+        assert window.find_quote("I write <\\\\/turn> to escape the delimiter") == 0
+        # A quote claiming the turn said a bare closing tag is not in it.
+        assert window.find_quote("I write </turn> to escape the delimiter") is None
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "uses </turn> as a delimiter",
+        "writes <\\/turn> to escape it",
+        "or even <\\\\/turn>",
+        "no tag at all",
+    ],
+)
+def test_fencing_round_trips(said: str) -> None:
+    fenced = fence_turn(0, said)
+    body = fenced.split("\n", 1)[1].rsplit("\n", 1)[0]
+
+    assert fenced.count("</turn") == 1
+    assert unfence(body) == said
 
 
 class TestBuckets:

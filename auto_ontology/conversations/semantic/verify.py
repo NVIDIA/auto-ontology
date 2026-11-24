@@ -809,7 +809,7 @@ def build_denials(
 
         result.evidence = unfence(result.evidence)
         quote = _normalise(result.evidence)
-        if not quote or quote not in _normalise(unfence(body)):
+        if not quote or quote not in _normalise(body):
             logger.warning(
                 "Discarding denial of %r: quote %r is not in turn %d.",
                 claim.name,
