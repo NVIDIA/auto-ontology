@@ -198,6 +198,7 @@ def test_duplicate_edges_fold_and_keep_both_sets_of_turns() -> None:
                 target="jest",
                 role="tested_with",
                 turn_indexes={57},
+                verified_turn_indexes={57},
             ),
         ],
     )
@@ -207,6 +208,7 @@ def test_duplicate_edges_fold_and_keep_both_sets_of_turns() -> None:
 
     assert len(graph.edges) == 1
     assert graph.edges[0].turn_indexes == {3, 57}
+    assert graph.edges[0].verified_turn_indexes == {57}
 
 
 def test_the_canonical_absorbs_the_duplicates_turns() -> None:

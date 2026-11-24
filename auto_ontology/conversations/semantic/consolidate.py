@@ -292,6 +292,7 @@ def consolidate_graph(
             folded[key] = edge
             continue
         existing.turn_indexes |= edge.turn_indexes
+        existing.verified_turn_indexes |= edge.verified_turn_indexes
         if not existing.evidence:
             existing.evidence = edge.evidence
     graph.edges = list(folded.values())
