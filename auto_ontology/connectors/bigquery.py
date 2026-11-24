@@ -319,7 +319,12 @@ def _byte_size(text: str) -> int | None:
             f"BigQuery maximum_bytes_billed must be a byte size such as "
             f"10737418240 or 20GiB, got {text!r}"
         )
-    return int(float(match.group(1)) * _BYTE_UNITS[match.group(2)]) or None
+    size = int(float(match.group(1)) * _BYTE_UNITS[match.group(2)])
+    if size < 1:
+        raise ValueError(
+            f"BigQuery maximum_bytes_billed must be at least one byte, got {text!r}"
+        )
+    return size
 
 
 def _parse_connection_string(connection_string: str) -> dict[str, Any]:
@@ -598,10 +603,10 @@ class BigQueryDatabase(SQLDatabase):
     ) -> "QueryJobConfig":
         from google.cloud.bigquery import QueryJobConfig
 
-        config = QueryJobConfig(
-            maximum_bytes_billed=self._maximum_bytes_billed,
-            labels=dict(_JOB_LABELS),
-        )
+        config = QueryJobConfig(labels=dict(_JOB_LABELS))
+        # The SDK sends None as the string "None", which BigQuery rejects.
+        if self._maximum_bytes_billed is not None:
+            config.maximum_bytes_billed = self._maximum_bytes_billed
         # An unqualified table name in generated SQL resolves the way the user
         # expects only when exactly one dataset is in scope.
         if self._scope is not None and len(self._scope) == 1:

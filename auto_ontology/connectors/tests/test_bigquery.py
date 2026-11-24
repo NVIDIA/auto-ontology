@@ -268,7 +268,9 @@ def test_one_dataset_name_cannot_belong_to_two_projects() -> None:
         ("1000", 1000),
         ("20GiB", 20 * 1024**3),
         ("500MB", 500 * 10**6),
+        ("1.5KiB", 1536),
         ("unlimited", None),
+        ("none", None),
         ("0", None),
     ],
 )
@@ -284,6 +286,37 @@ def test_the_byte_cap_defaults_and_rejects_nonsense() -> None:
     )
     with pytest.raises(ValueError, match="byte size"):
         _parse_connection_string("bigquery://p?maximum_bytes_billed=lots")
+
+
+@pytest.mark.parametrize("raw", ["0.1B", "0.0001KB", "0.0000001MB", "0.5"])
+def test_a_cap_below_one_byte_is_rejected_rather_than_lifted(raw: str) -> None:
+    with pytest.raises(ValueError, match="at least one byte"):
+        _parse_connection_string(f"bigquery://p?maximum_bytes_billed={raw}")
+
+
+@pytest.mark.parametrize(
+    ("raw", "sent"),
+    [
+        (None, str(DEFAULT_MAXIMUM_BYTES_BILLED)),
+        ("20GiB", str(20 * 1024**3)),
+        ("0", None),
+        ("none", None),
+        ("unlimited", None),
+    ],
+)
+def test_the_cap_reaches_the_api_only_when_finite(
+    raw: str | None, sent: str | None
+) -> None:
+    url = build_connection_string(_connection())
+    if raw is not None:
+        url += f"&maximum_bytes_billed={raw}"
+    database = BigQueryDatabase(url)
+    client = _wire(database, _FakeClient())
+
+    database.execute("SELECT 1")
+
+    query = client.configs[0].to_api_repr()["query"]
+    assert query.get("maximumBytesBilled") == sent
 
 
 def test_a_url_without_a_project_is_rejected() -> None:
