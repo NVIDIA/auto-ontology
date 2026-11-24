@@ -32,6 +32,8 @@ from auto_ontology.connectors.bigquery import (
     DEFAULT_MAXIMUM_BYTES_BILLED,
     TABLE_SUFFIX_COLUMN,
     BigQueryDatabase,
+    _COLUMN_SCHEMA,
+    _TABLE_SCHEMA,
     _decode_credentials,
     _parse_connection_string,
     shard_families,
@@ -1400,6 +1402,148 @@ def test_a_struct_that_gained_fields_still_reads_through_the_wildcard() -> None:
     )
 
     assert [f.shards for f in families] == [("ga_20160801", "ga_20170801")]
+
+
+def test_a_recreated_older_shard_gives_the_wildcard_its_schema() -> None:
+    """BigQuery takes a wildcard's schema from the matching table created last."""
+    families = shard_families(
+        ["s_2018", "s_2019", "s_2020"],
+        {
+            "s_2018": {"c": "INT64"},
+            "s_2019": {"a": "INT64", "b": "INT64"},
+            "s_2020": {"a": "INT64"},
+        },
+        created={
+            "s_2018": dt.datetime(2018, 1, 1),
+            "s_2019": dt.datetime(2026, 3, 1),
+            "s_2020": dt.datetime(2020, 1, 1),
+        },
+    )
+
+    assert [(f.shards, f.also_matches, f.schema_table) for f in families] == [
+        (("s_2019", "s_2020"), ("s_2018",), "s_2019")
+    ]
+
+
+def test_a_newer_non_shard_the_wildcard_matches_gives_it_its_schema() -> None:
+    (family,) = shard_families(
+        ["events_20260101", "events_20260102", "events_intraday_20260103"],
+        created={
+            "events_20260101": dt.datetime(2026, 1, 2),
+            "events_20260102": dt.datetime(2026, 1, 3),
+            "events_intraday_20260103": dt.datetime(2026, 1, 3, 6),
+        },
+    )
+
+    assert family.schema_table == "events_intraday_20260103"
+
+
+def test_without_creation_times_the_newest_shard_gives_the_schema() -> None:
+    (family,) = shard_families(["s_2019", "s_2020"])
+
+    assert family.schema_table == "s_2020"
+
+
+def _recreated_client() -> _FakeClient:
+    """``ga_sessions_20160801`` was recreated after the newest shard, with a column."""
+    columns = {
+        "ga_sessions_20160801": ["visitId", "date", "channel"],
+        "ga_sessions_20170801": ["visitId", "date"],
+    }
+
+    def answer(sql: str) -> _FakeRows:
+        if "INFORMATION_SCHEMA.COLUMNS" in sql:
+            return _FakeRows(
+                _COLUMN_SCHEMA,
+                [
+                    ["ga", name, column, "STRING", "YES", position, None]
+                    for name, names in columns.items()
+                    for position, column in enumerate(names, start=1)
+                ],
+            )
+        if "INFORMATION_SCHEMA.TABLES" in sql:
+            return _FakeRows(
+                [*_TABLE_SCHEMA, "creation_time"],
+                [
+                    ["ga", name, "BASE TABLE", None, created]
+                    for name, created in (
+                        ("ga_sessions_20160801", dt.datetime(2026, 5, 1)),
+                        ("ga_sessions_20170801", dt.datetime(2017, 8, 2)),
+                    )
+                ],
+            )
+        return _FakeRows([], [])
+
+    return _FakeClient(answer)
+
+
+def test_a_wildcard_has_the_columns_of_the_shard_created_last() -> None:
+    database = _database(schema="ga")
+    _wire(database, _recreated_client())
+
+    frame = database.get_columns()
+    wildcard = frame[frame["table_name"] == "ga_sessions_*"]
+
+    assert wildcard["column_name"].tolist() == [
+        "visitId",
+        "date",
+        "channel",
+        TABLE_SUFFIX_COLUMN,
+    ]
+    assert database.qualify("ga", "ga_sessions_*").endswith(
+        "`ga`.`ga_sessions_20160801`"
+    )
+
+
+def test_get_tables_reads_creation_times_but_does_not_return_them() -> None:
+    database = _database(schema="ga")
+    client = _wire(database, _recreated_client())
+
+    frame = database.get_tables()
+
+    assert "t.creation_time" in client.statements[0]
+    assert "creation_time" not in frame.columns
+    assert database.qualify("ga", "ga_sessions_*").endswith(
+        "`ga`.`ga_sessions_20160801`"
+    )
+
+
+def test_a_non_shard_created_last_lends_the_wildcard_its_columns() -> None:
+    rows = [
+        ["ga", "events_20260101", "BASE TABLE", dt.datetime(2026, 1, 2)],
+        ["ga", "events_20260102", "BASE TABLE", dt.datetime(2026, 1, 3)],
+        ["ga", "events_intraday_20260103", "BASE TABLE", dt.datetime(2026, 1, 3, 6)],
+    ]
+    columns = {
+        "events_20260101": ["id"],
+        "events_20260102": ["id"],
+        "events_intraday_20260103": ["id", "live"],
+    }
+
+    def answer(sql: str) -> _FakeRows:
+        if "INFORMATION_SCHEMA.COLUMNS" in sql:
+            return _FakeRows(
+                _COLUMN_SCHEMA,
+                [
+                    ["ga", name, column, "STRING", "YES", position, None]
+                    for name, names in columns.items()
+                    for position, column in enumerate(names, start=1)
+                ],
+            )
+        return _FakeRows(
+            ["table_schema", "table_name", "table_type", "creation_time"], rows
+        )
+
+    database = _database(schema="ga")
+    _wire(database, _FakeClient(answer))
+
+    frame = database.get_columns()
+
+    by_table = frame.groupby("table_name")["column_name"].apply(list).to_dict()
+    assert by_table == {
+        "events_*": ["id", "live", TABLE_SUFFIX_COLUMN],
+        "events_intraday_20260103": ["id", "live"],
+    }
 
 
 # ----------------------------------------------------------------------

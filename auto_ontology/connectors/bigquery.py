@@ -33,11 +33,12 @@ These properties of the engine shape this connector:
   the cap fails before it runs instead of being billed.
 * **Date-sharded tables are one wildcard table.** ``events_20210101``,
   ``events_20210102``, ... are queried together as ``events_*``, so the catalog
-  carries that one table, with the newest shard's columns and the
-  ``_TABLE_SUFFIX`` pseudo-column. Hundreds of near-identical shards would
-  otherwise crowd search, and a query naming the wildcard would match none of
-  them. :meth:`~BigQueryDatabase.qualify` points the wildcard at its newest
-  shard, so profiling reads one day rather than scanning every shard.
+  carries that one table, with the columns of the matching table created last
+  -- whose schema BigQuery gives the wildcard -- and the ``_TABLE_SUFFIX``
+  pseudo-column. Hundreds of near-identical shards would otherwise crowd
+  search, and a query naming the wildcard would match none of them.
+  :meth:`~BigQueryDatabase.qualify` points the wildcard at that same table, so
+  profiling reads one day rather than scanning every shard.
 * **Unenforced keys.** BigQuery stores primary and foreign keys as metadata
   only. They are reported anyway, because they are the modeller's own statement
   of how tables join. Foreign keys are read from the table resource rather than
@@ -72,7 +73,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, TypeVar
 from urllib.parse import parse_qs, unquote, urlparse
@@ -222,15 +223,23 @@ class ShardFamily:
     shards: tuple[str, ...]
     #: Other tables ``<prefix>*`` also matches, which BigQuery unions in too.
     also_matches: tuple[str, ...] = ()
+    #: The matching table created last, when creation times are known.
+    created_last: str | None = None
 
     @property
     def wildcard(self) -> str:
         return f"{self.prefix}*"
 
     @property
-    def latest(self) -> str:
-        """The newest shard, whose schema a wildcard query uses."""
-        return self.shards[-1]
+    def schema_table(self) -> str:
+        """The table whose schema a wildcard query uses.
+
+        BigQuery takes it from the matching table created last, which need not
+        be the shard with the highest date: an older shard may be recreated,
+        and a non-shard the wildcard also matches may be newer. Without
+        creation times the highest date stands in.
+        """
+        return self.created_last or self.shards[-1]
 
     def note(self) -> str:
         first, last = self.shards[0], self.shards[-1]
@@ -250,13 +259,15 @@ def shard_families(
     names: list[str],
     columns: dict[str, dict[str, str]] | None = None,
     views: Iterable[str] = (),
+    created: Mapping[str, Any] | None = None,
 ) -> list[ShardFamily]:
     """Group date-sharded table names into wildcard families of two shards or more.
 
-    A wildcard query reads every shard with the newest one's schema: a column
-    a shard lacks reads as NULL, but one only an older shard has cannot be
+    A wildcard query reads every shard with the schema of the matching table
+    *created* last (name to creation time), else of the newest shard: a column
+    a shard lacks reads as NULL, but one only another shard has cannot be
     selected, and a changed type fails the query. Given each table's
-    *columns* (name to type), a shard with a column the newest does not have
+    *columns* (name to type), a shard with a column that schema does not have
     the same way stays a table of its own, listed in ``also_matches``.
 
     BigQuery rejects a wildcard that matches a view, even when a
@@ -275,20 +286,28 @@ def shard_families(
         if any(view.startswith(prefix) for view in views):
             continue
         shards = sorted(members, key=lambda n: (len(n), n))
+        times = created or {}
+        matches = shards + [
+            n for n in unique if n.startswith(prefix) and n not in shards
+        ]
+        dated = [n for n in matches if times.get(n) is not None]
+        source = max(dated, key=lambda n: times[n]) if dated else shards[-1]
         if columns is not None:
-            newest = {c.casefold(): t for c, t in columns.get(shards[-1], {}).items()}
+            schema = {c.casefold(): t for c, t in columns.get(source, {}).items()}
             shards = [
                 n
                 for n in shards
                 if all(
-                    type_fits(t, newest.get(c.casefold()))
+                    type_fits(t, schema.get(c.casefold()))
                     for c, t in columns.get(n, {}).items()
                 )
             ]
         if len(shards) < 2:
             continue
         also = tuple(n for n in unique if n.startswith(prefix) and n not in shards)
-        families.append(ShardFamily(prefix, tuple(shards), also))
+        families.append(
+            ShardFamily(prefix, tuple(shards), also, source if dated else None)
+        )
     return families
 
 
@@ -745,8 +764,9 @@ class BigQueryDatabase(SQLDatabase):
         family = self._family(schema, table)
         if family is not None:
             # Callers qualify a table to profile or probe it, and on a wildcard
-            # that would scan every shard; the newest one stands for them all.
-            table = family.latest
+            # that would scan every shard; the table whose schema the wildcard
+            # has stands for them all.
+            table = family.schema_table
         return qualified_name(self._owner(schema), schema, table, dialect=self.dialect)
 
     def _qualify_datasets(self, sql: str) -> str:
@@ -1013,30 +1033,39 @@ class BigQueryDatabase(SQLDatabase):
 
             def sql(dataset: str) -> str:
                 return f"""
-                    SELECT table_schema, table_name, table_type
+                    SELECT table_schema, table_name, table_type, creation_time
                     FROM {self._information_schema(dataset, "TABLES")}
                 """
 
             self._remember_families(
-                self._per_dataset(sql, ["table_schema", "table_name", "table_type"])
+                self._per_dataset(
+                    sql, ["table_schema", "table_name", "table_type", "creation_time"]
+                )
             )
         return self._families or {}
 
     def _remember_families(self, relations: pd.DataFrame) -> None:
         tables: dict[str, list[str]] = {}
         views: dict[str, list[str]] = {}
-        for schema, name, kind in relations[
-            ["table_schema", "table_name", "table_type"]
+        created: dict[str, dict[str, Any]] = {}
+        if "creation_time" not in relations.columns:
+            relations = relations.assign(creation_time=None)
+        for schema, name, kind, at in relations[
+            ["table_schema", "table_name", "table_type", "creation_time"]
         ].itertuples(index=False, name=None):
             into = tables if str(kind).upper() == "BASE TABLE" else views
             into.setdefault(str(schema), []).append(str(name))
+            if pd.notna(at):
+                created.setdefault(str(schema), {})[str(name)] = at
         # Assigned whole, so a concurrent reader never takes a half-built map
         # for the loaded cache.
         self._families_read_at = time.monotonic()
         self._families = {
             schema: {
                 f.wildcard: f
-                for f in shard_families(names, views=views.get(schema, ()))
+                for f in shard_families(
+                    names, views=views.get(schema, ()), created=created.get(schema)
+                )
             }
             for schema, names in tables.items()
         }
@@ -1058,20 +1087,32 @@ class BigQueryDatabase(SQLDatabase):
     def _collapse_shards(
         self, frame: pd.DataFrame, schema_col: str, table_col: str
     ) -> pd.DataFrame:
-        """Rows of the newest shard renamed to its wildcard; other shards dropped."""
+        """Shards dropped, and each wildcard given the rows of its schema table.
+
+        The schema table may be a non-shard the wildcard also matches; that one
+        keeps its own rows too.
+        """
         owners = self._shard_owners()
         if frame.empty or not owners:
             return frame
-        keep: list[bool] = []
+        sources: dict[tuple[str, str], list[ShardFamily]] = {}
+        for schema, families in self._shard_families().items():
+            for family in families.values():
+                sources.setdefault((schema, family.schema_table), []).append(family)
+        picks: list[int] = []
         names: list[Any] = []
-        for schema, table in frame[[schema_col, table_col]].itertuples(
-            index=False, name=None
+        for position, (schema, table) in enumerate(
+            frame[[schema_col, table_col]].itertuples(index=False, name=None)
         ):
-            family = owners.get((str(schema), str(table)))
-            keep.append(family is None or table == family.latest)
-            names.append(table if family is None else family.wildcard)
-        frame = frame.assign(**{table_col: names})
-        return frame[keep].reset_index(drop=True)
+            key = (str(schema), str(table))
+            if key not in owners:
+                picks.append(position)
+                names.append(table)
+            for family in sources.get(key, ()):
+                picks.append(position)
+                names.append(family.wildcard)
+        frame = frame.iloc[picks].reset_index(drop=True)
+        return frame.assign(**{table_col: names})
 
     def _per_dataset(self, build_sql: Any, columns: list[str]) -> pd.DataFrame:
         """Run *build_sql(dataset)* on every dataset in scope and stack the results."""
@@ -1093,7 +1134,8 @@ class BigQueryDatabase(SQLDatabase):
                     t.table_schema,
                     t.table_name,
                     t.table_type,
-                    o.option_value AS description
+                    o.option_value AS description,
+                    t.creation_time
                 FROM {tables} AS t
                 LEFT JOIN {options} AS o
                     ON o.table_name = t.table_name
@@ -1103,6 +1145,7 @@ class BigQueryDatabase(SQLDatabase):
 
         frame = self._per_dataset(sql, _TABLE_SCHEMA)
         self._remember_families(frame)
+        frame = frame.drop(columns="creation_time", errors="ignore")
         if frame.empty:
             return frame
         frame["table_type"] = (
