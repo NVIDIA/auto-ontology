@@ -60,11 +60,13 @@ The registry lives in
 
 ### BigQuery
 
-A BigQuery connection binds one project, and its datasets are the schemas you
-pick from. In the UI it authenticates with a pasted service-account JSON key;
-the account needs **BigQuery Data Viewer** and **BigQuery Job User** on the
-project. A `CONNECTION_STRINGS` URL can instead point at a key file, or omit
-credentials and run as the pod's Application Default Credentials:
+A BigQuery connection binds one project, and its datasets are the schemas.
+There is no UI form for it yet. A connection saved through
+`POST /api/connections` (`type: bigquery`) must carry a service-account JSON
+key in `credentials_json`; the account needs **BigQuery Data Viewer** and
+**BigQuery Job User** on the project. A `CONNECTION_STRINGS` URL can instead
+point at a key file, or omit credentials and run as the pod's Application
+Default Credentials:
 
 ```text
 bigquery://my-project?location=US&credentials=<URL-safe base64 JSON key>
@@ -84,6 +86,19 @@ Every query job is capped at 40 GiB billed (`maximum_bytes_billed=` overrides
 it); a profiling query over the cap fails without being billed, and that column
 is left unprofiled. Query history is read from `JOBS_BY_PROJECT` only when
 `location` is set, and needs `bigquery.jobs.listAll`.
+
+#### Rolling back to a release without BigQuery
+
+A release without the BigQuery connector cannot load a `bigquery` connection,
+and one connection it cannot load leaves it with none at all. Before
+downgrading:
+
+1. Delete every BigQuery connection saved through the API with
+   `DELETE /api/connections/{database_name}`. This also removes the catalog
+   ingested from it.
+2. Remove any `bigquery://` entries from `CONNECTION_STRINGS`.
+
+After upgrading again, recreate the connections and re-ingest them.
 
 ## Vault
 

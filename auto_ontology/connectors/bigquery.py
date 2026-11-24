@@ -47,9 +47,10 @@ These properties of the engine shape this connector:
 Authentication is a service-account key carried in the URL as URL-safe base64
 (``credentials=``), or a key file on disk (``credentials_file=``). With
 neither, the client uses Application Default Credentials -- the workload
-identity of the pod. The UI always supplies a key (see
-:mod:`auto_ontology.connectors.connection_string_factory`), so falling back to
-the pod's identity is reserved for operator-written ``CONNECTION_STRINGS``.
+identity of the pod. A connection saved through the API always supplies a key
+(see :mod:`auto_ontology.connectors.connection_string_factory`), so falling
+back to the pod's identity is reserved for operator-written
+``CONNECTION_STRINGS``.
 
 Example
 -------
