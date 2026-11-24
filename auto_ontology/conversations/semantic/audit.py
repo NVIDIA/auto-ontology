@@ -644,6 +644,11 @@ class MutualAnswers(BaseModel):
     answers: list[MutualAnswer] = Field(default_factory=list)
 
 
+#: Pairs or groups per review call. One call for everything puts every verdict
+#: behind a single answer, so one truncation or failure decides all of them.
+_REVIEW_BATCH = 20
+
+
 def resolve_mutual(graph: GraphDraft) -> int:
     """Drop the wrong half of every containment recorded in both directions.
 
@@ -686,38 +691,42 @@ def resolve_mutual(graph: GraphDraft) -> int:
         invoke_with_structured_output,
     )
 
-    described = "\n".join(
-        f"{number}. a: {first.source} {first.role} {first.target}\n"
-        f'   sentence: "{(first.evidence or "").strip()}"\n'
-        f"   b: {second.source} {second.role} {second.target}\n"
-        f'   sentence: "{(second.evidence or "").strip()}"'
-        for number, (first, second) in enumerate(pairs, start=1)
-    )
-    try:
-        answer = invoke_with_structured_output(
-            get_llm_client(temperature=0.0, max_tokens=1024),
-            [
-                SystemMessage(content=_MUTUAL_SYSTEM),
-                HumanMessage(content=_MUTUAL_TEMPLATE.format(pairs=described)),
-            ],
-            MutualAnswers,
+    # Per batch, so a failed or truncated answer leaves only its own pairs
+    # undecided, and an undecided pair keeps both halves.
+    verdicts: list[tuple[Any, Any, str]] = []
+    for start in range(0, len(pairs), _REVIEW_BATCH):
+        batch = pairs[start : start + _REVIEW_BATCH]
+        described = "\n".join(
+            f"{number}. a: {first.source} {first.role} {first.target}\n"
+            f'   sentence: "{(first.evidence or "").strip()}"\n'
+            f"   b: {second.source} {second.role} {second.target}\n"
+            f'   sentence: "{(second.evidence or "").strip()}"'
+            for number, (first, second) in enumerate(batch, start=1)
         )
-    except Exception:
-        logger.exception(
-            "Could not resolve %d mutual pair(s) -- both halves are kept.", len(pairs)
-        )
-        return 0
-    if answer is None:
-        return 0
-
-    keep: dict[int, str] = {}
-    for item in answer.answers:
-        if 1 <= item.number <= len(pairs) and item.number not in keep:
-            keep[item.number] = item.keep
+        try:
+            answer = invoke_with_structured_output(
+                get_llm_client(temperature=0.0, max_tokens=1024),
+                [
+                    SystemMessage(content=_MUTUAL_SYSTEM),
+                    HumanMessage(content=_MUTUAL_TEMPLATE.format(pairs=described)),
+                ],
+                MutualAnswers,
+            )
+        except Exception:
+            logger.exception(
+                "Could not resolve %d mutual pair(s) -- both halves are kept.",
+                len(batch),
+            )
+            answer = None
+        keep: dict[int, str] = {}
+        for item in answer.answers if answer is not None else ():
+            if 1 <= item.number <= len(batch) and item.number not in keep:
+                keep[item.number] = item.keep
+        for number, (first, second) in enumerate(batch, start=1):
+            verdicts.append((first, second, keep.get(number, "neither")))
 
     doomed: list[Any] = []
-    for number, (first, second) in enumerate(pairs, start=1):
-        chosen = keep.get(number, "neither")
+    for first, second, chosen in verdicts:
         if chosen == "a":
             doomed.append(second)
         elif chosen == "b":
@@ -808,6 +817,9 @@ def review_merges(merges: list[Any], nodes: Sequence[Any]) -> list[Any]:
     The names are checked against the ones shown, as everywhere else here: a
     model answering with a name this call did not raise is ignored rather than
     acted on.
+
+    Asked in batches, and a group with no verdict -- its batch failed, or the
+    answer left it out -- is not merged.
     """
     if not merges:
         return []
@@ -839,45 +851,56 @@ def review_merges(merges: list[Any], nodes: Sequence[Any]) -> list[Any]:
             lines.append(f'      said as: "{quote}"')
         return "\n".join(lines)
 
-    groups = "\n".join(
-        f"{number}. keep: {describe(merge.canonical)}\n"
-        + "\n".join(f"   fold in: {describe(name)}" for name in merge.duplicates)
-        for number, merge in enumerate(merges, start=1)
-    )
-
     from auto_ontology.utils.llm_invoke import (
         get_llm_client,
         invoke_with_structured_output,
     )
 
     logger.info("Reviewing %d planned merge(s).", len(merges))
-    try:
-        answer = invoke_with_structured_output(
-            get_llm_client(temperature=0.0, max_tokens=2048),
-            [
-                SystemMessage(content=_MERGE_SYSTEM),
-                HumanMessage(content=_MERGE_TEMPLATE.format(groups=groups)),
-            ],
-            MergeAnswers,
+    # A merge that is not confirmed is not applied: skipping one costs a
+    # duplicate node, applying a wrong one deletes a distinct thing for good.
+    judged: list[tuple[Any, MergeAnswer]] = []
+    unreviewed = 0
+    for start in range(0, len(merges), _REVIEW_BATCH):
+        batch = merges[start : start + _REVIEW_BATCH]
+        groups = "\n".join(
+            f"{number}. keep: {describe(merge.canonical)}\n"
+            + "\n".join(f"   fold in: {describe(name)}" for name in merge.duplicates)
+            for number, merge in enumerate(batch, start=1)
         )
-    except Exception:
-        logger.exception("Could not review the merges -- applying the plan as is.")
-        return merges
-    if answer is None:
-        return merges
-
-    judged: dict[int, MergeAnswer] = {}
-    for item in answer.answers:
-        if 1 <= item.number <= len(merges) and item.number not in judged:
-            judged[item.number] = item
+        try:
+            answer = invoke_with_structured_output(
+                get_llm_client(temperature=0.0, max_tokens=2048),
+                [
+                    SystemMessage(content=_MERGE_SYSTEM),
+                    HumanMessage(content=_MERGE_TEMPLATE.format(groups=groups)),
+                ],
+                MergeAnswers,
+            )
+        except Exception:
+            logger.exception(
+                "Could not review %d merge(s) -- not applying them.", len(batch)
+            )
+            answer = None
+        by_number: dict[int, MergeAnswer] = {}
+        for item in answer.answers if answer is not None else ():
+            if 1 <= item.number <= len(batch) and item.number not in by_number:
+                by_number[item.number] = item
+        for number, merge in enumerate(batch, start=1):
+            if (item := by_number.get(number)) is None:
+                unreviewed += 1
+                continue
+            judged.append((merge, item))
+    if unreviewed:
+        logger.warning(
+            "%d planned merge(s) got no verdict and were not applied -- their "
+            "names stay as separate nodes.",
+            unreviewed,
+        )
 
     kept: list[Any] = []
     rejected = 0
-    for number, merge in enumerate(merges, start=1):
-        item = judged.get(number)
-        if item is None:
-            kept.append(merge)
-            continue
+    for merge, item in judged:
         from auto_ontology.conversations.semantic.extract import normalise_name
 
         offered = set(merge.duplicates)

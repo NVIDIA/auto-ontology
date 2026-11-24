@@ -22,6 +22,7 @@ from auto_ontology.conversations.semantic.audit import (
     RevisionReport,
     SubjectAnswer,
     SubjectAnswers,
+    _REVIEW_BATCH as _BATCH,
     audit_revisions,
     audit_structure,
     check_derived,
@@ -607,6 +608,25 @@ class TestResolvingMutual:
 
         assert len(graph.edges) == 2
 
+    def test_pairs_are_resolved_in_batches(self) -> None:
+        """A failed batch keeps both halves of its own pairs and nothing else."""
+        edges = []
+        for i in range(_BATCH + 1):
+            edges += [
+                _Edge(f"Whole {i}", f"Part {i}", "has_component"),
+                _Edge(f"Part {i}", f"Whole {i}", "has_component"),
+            ]
+        graph = _Graph(list(edges))
+        first = mutual_answers(*((n, "a") for n in range(1, _BATCH + 1)))
+        with patch(
+            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
+            side_effect=[first, RuntimeError("no")],
+        ) as called:
+            assert resolve_mutual(graph) == _BATCH
+
+        assert called.call_count == 2
+        assert len(graph.edges) == _BATCH + 2
+
 
 @dataclass
 class _Merge:
@@ -677,21 +697,37 @@ class TestReviewingMerges:
 
         assert kept[0].duplicates == ("api module",)
 
-    def test_a_group_the_model_skipped_still_merges(self) -> None:
+    def test_a_group_the_model_skipped_is_not_merged(self) -> None:
+        """A merge cannot be undone, so one nobody confirmed is not applied."""
         merges = [_Merge("api integration module", ("api module",))]
         with patch(
             "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
             return_value=merge_answers((2, "different", [])),
         ):
-            assert review_merges(merges, _MERGE_NODES) == merges
+            assert review_merges(merges, _MERGE_NODES) == []
 
-    def test_a_model_failure_applies_the_plan_as_planned(self) -> None:
+    def test_a_model_failure_applies_none_of_the_batch(self) -> None:
         merges = [_Merge("api integration module", ("api module",))]
         with patch(
             "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
             side_effect=RuntimeError("no"),
         ):
-            assert review_merges(merges, _MERGE_NODES) == merges
+            assert review_merges(merges, _MERGE_NODES) == []
+
+    def test_merges_are_reviewed_in_batches(self) -> None:
+        """A failed batch skips its own merges and nothing else."""
+        merges = [
+            _Merge(f"canonical {i}", (f"duplicate {i}",)) for i in range(_BATCH + 1)
+        ]
+        first = merge_answers(*((n, "same", []) for n in range(1, _BATCH + 1)))
+        with patch(
+            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
+            side_effect=[first, RuntimeError("no")],
+        ) as called:
+            kept = review_merges(merges, _MERGE_NODES)
+
+        assert called.call_count == 2
+        assert kept == merges[:_BATCH]
 
     def test_nothing_planned_asks_nothing(self) -> None:
         with patch(
