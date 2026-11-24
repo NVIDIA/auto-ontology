@@ -19,6 +19,7 @@ class FakeTurn:
     answer: str
     session_index: int | None = 1
     time_anchor: str | None = "2024-03-15"
+    conversation_id: str = "c1"
 
 
 @dataclass
@@ -84,7 +85,10 @@ def test_a_turn_says_where_it_was_said(
     # cannot be answered from the text of a turn alone.
     _found(monkeypatch, FakeHits(turns=[FakeTurn(7, "when?", "March")]))
 
-    assert '<turn n="7" session="1" said_on="2024-03-15">' in conversation(ctx, "when")
+    assert (
+        '<turn n="7" conversation="c1" session="1" said_on="2024-03-15">'
+        in conversation(ctx, "when")
+    )
 
 
 def test_retrieved_text_is_fenced_and_cannot_close_its_fence(
@@ -104,6 +108,22 @@ def test_retrieved_text_is_fenced_and_cannot_close_its_fence(
     assert text.count("</conversation_note>") == 1
     assert text.count("</turn>") == 1
     assert text.rstrip().endswith("</turn>")
+
+
+def test_the_same_turn_number_in_two_transcripts_stays_apart(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    turns = [
+        FakeTurn(1, "q", "a", session_index=None, time_anchor=None, conversation_id=c)
+        for c in ("c1", "c2")
+    ] * 3
+    _found(monkeypatch, FakeHits(turns=turns))
+
+    text = conversation(ctx, "cap")
+
+    # Shown in full and as one line, the transcript is named both ways.
+    assert text.count('<turn n="1" conversation="c1">') == 3
+    assert text.count('<turn n="1" conversation="c2">') == 3
 
 
 def test_a_date_cannot_break_out_of_its_turn_tag(

@@ -89,13 +89,19 @@ def _turn_line(hit: TurnHit) -> str:
 
 
 def _turn_attributes(hit: TurnHit) -> str:
-    """The turn number, with the session and date when the transcript had them.
+    """The turn number and its transcript, with the session and date when the
+    transcript had them.
 
     Session and turn numbers are kept because some questions are about the
     conversation rather than its subject -- when something was first raised,
     what came before what -- and those cannot be answered from the text alone.
+    Turn numbers restart in every transcript, so without the transcript two
+    turns from different ones can read as the same turn.
     """
-    parts = [f' n="{hit.turn_index}"']
+    parts = [
+        f' n="{hit.turn_index}"',
+        f' conversation="{html.escape(str(hit.conversation_id), quote=True)}"',
+    ]
     if hit.session_index is not None:
         parts.append(f' session="{hit.session_index}"')
     if hit.time_anchor:
