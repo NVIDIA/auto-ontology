@@ -15,7 +15,7 @@ here walks the physical catalog database by database: consumers should reach
 the data through the semantic layer, which is the point of Auto Ontology, and a tool that
 lists schemas or columns invites an agent to bypass it and reason about raw
 tables instead. ``describe_table`` is the exception, because what it returns is
-the terms and SQL attributes a table participates in.
+the terms, stored queries and semantic foreign keys a table participates in.
 
 Two things are deliberately overridden rather than taken from the spec:
 
@@ -116,7 +116,11 @@ CURATED: tuple[ToolSpec, ...] = (
         name="describe_table",
         description=(
             "Describe what one table means: the glossary terms that map to it, "
-            "and the stored queries from query history that reference it."
+            "the stored queries from query history that reference it, and the "
+            "semantic foreign keys that join it to other tables. Each foreign "
+            "key says how it was established (a declared constraint, or inferred "
+            "and whether values and a real join confirmed it), so prefer "
+            "well-supported joins and treat an unconfirmed model pick with care."
         ),
     ),
     ToolSpec(

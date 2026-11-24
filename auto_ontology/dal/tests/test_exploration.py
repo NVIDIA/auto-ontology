@@ -430,7 +430,86 @@ def test_an_out_of_zone_table_has_no_details(world) -> None:
     zone_id = world.zone("Sales", "orders")
     assert e.fetch_table_exploration_details(
         world.tables["secrets"], zone_ids=[zone_id]
-    ) == {"queries": [], "terms": [], "terms_total": 0}
+    ) == {"queries": [], "terms": [], "terms_total": 0, "semantic_fks": []}
+
+
+def _customer_reference(world) -> str:
+    """``orders.customer_id`` -> ``customers.id``, inferred with evidence."""
+    world.table("customers", columns=("id",))
+    world.table("orders", columns=("id", "customer_id"))
+    attribute = _add(
+        s.column_attribute,
+        name=f"{world.prefix}-customer-id",
+        source_column="id",
+        term_name=f"{world.prefix}-Customer",
+        table_id=world.tables["customers"],
+    )
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["customers.id"],
+        attribute_id=attribute,
+    )
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["orders.customer_id"],
+        attribute_id=attribute,
+        method="value_confirmed",
+        containment=0.98,
+        vector_distance=0.2,
+        join_verified=True,
+        rationale="named after the customer key",
+    )
+    return attribute
+
+
+def _drop_attribute(attribute: str) -> None:
+    store().query_write(
+        s.column_attribute.delete().where(s.column_attribute.c.id == attribute)
+    )
+
+
+def test_table_details_lists_semantic_fks_both_ways_with_evidence(world) -> None:
+    attribute = _customer_reference(world)
+    try:
+        outgoing = e.fetch_table_exploration_details(world.tables["orders"])
+        incoming = e.fetch_table_exploration_details(world.tables["customers"])
+    finally:
+        _drop_attribute(attribute)
+
+    expected = {
+        "source_table_id": world.tables["orders"],
+        "source_table_name": f"{world.prefix}_orders",
+        "source_schema_name": "public",
+        "source_column_id": world.columns["orders.customer_id"],
+        "source_column_name": "customer_id",
+        "target_table_id": world.tables["customers"],
+        "target_table_name": f"{world.prefix}_customers",
+        "target_schema_name": "public",
+        "target_column_id": world.columns["customers.id"],
+        "target_column_name": "id",
+        "column_attribute_id": attribute,
+        "use_in_join_paths": True,
+        "method": "value_confirmed",
+        "containment": 0.98,
+        "vector_distance": 0.2,
+        "join_verified": True,
+        "rationale": "named after the customer key",
+    }
+    assert outgoing["semantic_fks"] == [expected]
+    assert incoming["semantic_fks"] == [expected]
+
+
+def test_table_details_hide_a_semantic_fk_into_an_out_of_zone_table(world) -> None:
+    attribute = _customer_reference(world)
+    zone_id = world.zone("Sales", "orders")
+    try:
+        details = e.fetch_table_exploration_details(
+            world.tables["orders"], zone_ids=[zone_id]
+        )
+    finally:
+        _drop_attribute(attribute)
+
+    assert details["semantic_fks"] == []
 
 
 # --------------------------------------------------------------------------

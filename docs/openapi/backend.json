@@ -4696,13 +4696,20 @@
       },
       "TableExplorationDetails": {
         "additionalProperties": true,
-        "description": "The table-detail modal: its SQL queries and one page of its Terms.",
+        "description": "The table-detail modal: its SQL queries, one page of its Terms, and\nthe semantic FKs leaving or reaching it (outgoing first, capped).",
         "properties": {
           "queries": {
             "items": {
               "$ref": "#/components/schemas/TableSqlQuery"
             },
             "title": "Queries",
+            "type": "array"
+          },
+          "semantic_fks": {
+            "items": {
+              "$ref": "#/components/schemas/TableSemanticFk"
+            },
+            "title": "Semantic Fks",
             "type": "array"
           },
           "terms": {
@@ -4769,6 +4776,167 @@
           "id"
         ],
         "title": "TableExplorationTerm",
+        "type": "object"
+      },
+      "TableSemanticFk": {
+        "additionalProperties": true,
+        "description": "One semantic FK leaving or reaching a table, and how it was made.\n\nThe edge runs from ``source_column`` to ``target_column``, the column that\nowns the referenced attribute. ``method`` is ``declared`` (a database\nconstraint), ``llm_pick`` (the model's pick among vector-search hits, not\nchecked against values), ``value_confirmed`` (a vector-search hit whose key\nholds the FK's values) or ``value_match`` (the model's pick among keys\nfound by values alone). ``containment`` is the share of the FK's compared\nvalues found in the key, ``vector_distance`` the chosen hit's retriever\ndistance, ``join_verified`` whether joining the two columns returned a\nrow, and ``rationale`` the model's stated reason. Each is ``None`` when it\nwas not measured or the edge predates them.",
+        "properties": {
+          "column_attribute_id": {
+            "title": "Column Attribute Id",
+            "type": "string"
+          },
+          "containment": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Containment"
+          },
+          "join_verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Join Verified"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "source_column_id": {
+            "title": "Source Column Id",
+            "type": "string"
+          },
+          "source_column_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column Name"
+          },
+          "source_schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Schema Name"
+          },
+          "source_table_id": {
+            "title": "Source Table Id",
+            "type": "string"
+          },
+          "source_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Table Name"
+          },
+          "target_column_id": {
+            "title": "Target Column Id",
+            "type": "string"
+          },
+          "target_column_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Column Name"
+          },
+          "target_schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Schema Name"
+          },
+          "target_table_id": {
+            "title": "Target Table Id",
+            "type": "string"
+          },
+          "target_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Table Name"
+          },
+          "use_in_join_paths": {
+            "default": true,
+            "title": "Use In Join Paths",
+            "type": "boolean"
+          },
+          "vector_distance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Distance"
+          }
+        },
+        "required": [
+          "source_table_id",
+          "source_column_id",
+          "target_table_id",
+          "target_column_id",
+          "column_attribute_id"
+        ],
+        "title": "TableSemanticFk",
         "type": "object"
       },
       "TableSqlQuery": {

@@ -26,7 +26,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from sqlalchemy import and_, func, literal, select
+from sqlalchemy import and_, case, func, literal, or_, select
 
 from auto_ontology.catalog.constants import Edges, Labels
 from auto_ontology.dal import schema as s
@@ -229,6 +229,11 @@ _TABLE_REF_COLUMNS = (
 #: lookup-style column can be referenced by very many source columns, and this
 #: field is capped rather than paged like every other field on that payload.
 _MAX_REFERENCING_COLUMNS = 50
+
+#: Cap on the semantic FKs one table's details return. A shared dimension can be
+#: referenced from very many columns; outgoing edges are listed first so a
+#: table's own references survive the cap.
+_MAX_TABLE_SEMANTIC_FKS = 100
 
 
 def _visible_table(table_filter: list[str] | None):
@@ -450,7 +455,7 @@ def fetch_table_exploration_details(
     """
     resolved = resolve_accessible_catalog_ids(zone_ids)
     if resolved is not None and table_id not in resolved["table_ids"]:
-        return {"queries": [], "terms": [], "terms_total": 0}
+        return {"queries": [], "terms": [], "terms_total": 0, "semantic_fks": []}
 
     queries = store().query_read(
         select(s.sql_query.c.id, s.sql_query.c.sql_full_query.label("sql"))
@@ -505,7 +510,87 @@ def fetch_table_exploration_details(
             if row["id"]
         ],
         "terms_total": int(total[0]["total"]) if total else 0,
+        "semantic_fks": _fetch_table_semantic_fks(
+            table_id, None if resolved is None else list(resolved["table_ids"])
+        ),
     }
+
+
+def _fetch_table_semantic_fks(
+    table_id: str, table_filter: list[str] | None
+) -> list[dict[str, Any]]:
+    """The semantic FKs leaving or reaching *table_id*, with how each was made.
+
+    An edge runs from a source column to the column owning the referenced
+    attribute. Both ends must be visible; outgoing edges come first, then by
+    name, capped at :data:`_MAX_TABLE_SEMANTIC_FKS`. The evidence fields are
+    ``None`` for an edge written before they were recorded.
+    """
+    fk = s.column__semantic_fk
+    source_column = s.catalog_column.alias("sfk_source_column")
+    source_table = s.catalog_table.alias("sfk_source_table")
+    source_schema = s.catalog_schema.alias("sfk_source_schema")
+    target_column = s.catalog_column.alias("sfk_target_column")
+    target_table = s.catalog_table.alias("sfk_target_table")
+    target_schema = s.catalog_schema.alias("sfk_target_schema")
+    outgoing = case((source_table.c.id == table_id, 0), else_=1).label("direction_rank")
+    statement = (
+        select(
+            source_table.c.id.label("source_table_id"),
+            source_table.c.name.label("source_table_name"),
+            source_schema.c.name.label("source_schema_name"),
+            source_column.c.id.label("source_column_id"),
+            source_column.c.name.label("source_column_name"),
+            target_table.c.id.label("target_table_id"),
+            target_table.c.name.label("target_table_name"),
+            target_schema.c.name.label("target_schema_name"),
+            target_column.c.id.label("target_column_id"),
+            target_column.c.name.label("target_column_name"),
+            fk.c.attribute_id.label("column_attribute_id"),
+            fk.c.use_in_join_paths,
+            fk.c.method,
+            fk.c.containment,
+            fk.c.vector_distance,
+            fk.c.join_verified,
+            fk.c.rationale,
+            outgoing,
+        )
+        .select_from(
+            fk.join(source_column, source_column.c.id == fk.c.column_id)
+            .join(source_table, source_table.c.id == source_column.c.table_id)
+            .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+            .join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == fk.c.attribute_id,
+            )
+            .join(
+                target_column,
+                target_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(target_table, target_table.c.id == target_column.c.table_id)
+            .join(target_schema, target_schema.c.id == target_table.c.schema_id)
+        )
+        .where(or_(source_table.c.id == table_id, target_table.c.id == table_id))
+        .distinct()
+        .order_by(
+            outgoing,
+            source_table.c.name,
+            source_column.c.name,
+            target_table.c.name,
+            target_column.c.name,
+            source_column.c.id,
+            target_column.c.id,
+        )
+        .limit(_MAX_TABLE_SEMANTIC_FKS)
+    )
+    if table_filter is not None:
+        statement = statement.where(
+            source_table.c.id.in_(table_filter), target_table.c.id.in_(table_filter)
+        )
+    return [
+        {key: value for key, value in dict(row).items() if key != "direction_rank"}
+        for row in store().query_read(statement)
+    ]
 
 
 def fetch_term_exploration_details(
