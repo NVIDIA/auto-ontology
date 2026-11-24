@@ -650,6 +650,24 @@ column__semantic_fk = Table(
         nullable=False,
         server_default=text("true"),
     ),
+    # How `resolve_semantic_fks` arrived at the edge, kept so a reviewer can
+    # tell a declared constraint from an inference and weigh the inference.
+    # All four are NULL for edges written before they existed, by an import
+    # that carried none, or by a caller that passed no evidence.
+    #
+    #   method           declared | llm_pick | value_confirmed | value_match
+    #   containment      share of the FK's comparable values found in the key
+    #   vector_distance  retriever distance of the chosen vector-search hit
+    #   rationale        the model's stated reason for its pick
+    Column("method", Text, nullable=True),
+    Column("containment", Float, nullable=True),
+    Column("vector_distance", Float, nullable=True),
+    Column("rationale", Text, nullable=True),
+    CheckConstraint(
+        "method IS NULL OR method IN "
+        "('declared', 'llm_pick', 'value_confirmed', 'value_match')",
+        name="method_value",
+    ),
 )
 
 sql_attribute = Table(

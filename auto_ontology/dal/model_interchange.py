@@ -21,7 +21,7 @@ import logging
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from sqlalchemy import func, literal, select, update
+from sqlalchemy import case, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.catalog.constants import Props
@@ -344,6 +344,10 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
                 s.column__semantic_fk.c.column_id,
                 s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
                 s.column__semantic_fk.c.use_in_join_paths,
+                s.column__semantic_fk.c.method,
+                s.column__semantic_fk.c.containment,
+                s.column__semantic_fk.c.vector_distance,
+                s.column__semantic_fk.c.rationale,
             )
             .select_from(
                 _catalog_join().join(
@@ -528,6 +532,10 @@ def assemble_export_document(
             column_attribute_id=str(row["column_attribute_id"]),
             column_id=str(row["column_id"]),
             use_in_join_paths=bool(row.get("use_in_join_paths", True)),
+            method=row.get("method"),
+            containment=row.get("containment"),
+            vector_distance=row.get("vector_distance"),
+            rationale=row.get("rationale"),
         )
         for row in rows["semantic_fks"]
         if str(row.get("column_attribute_id") or "") in _attribute_ids
@@ -1489,6 +1497,9 @@ def _import_column_attributes(
     _link(s.column_attribute__term, property_of_rows)
 
 
+_SEMANTIC_FK_EVIDENCE = ("method", "containment", "vector_distance", "rationale")
+
+
 def _import_semantic_fks(
     document: AutoOntologyModelDocument, id_map: dict[str, str]
 ) -> None:
@@ -1509,6 +1520,10 @@ def _import_semantic_fks(
                 "column_id": column_id,
                 "attribute_id": attribute_id,
                 "use_in_join_paths": fk.use_in_join_paths,
+                "method": fk.method,
+                "containment": fk.containment,
+                "vector_distance": fk.vector_distance,
+                "rationale": fk.rationale,
             }
         )
     if rows:
@@ -1521,6 +1536,19 @@ def _import_semantic_fks(
                 ],
                 set_={
                     "use_in_join_paths": statement.excluded.use_in_join_paths,
+                    # Evidence moves as one record: a document that carries
+                    # none (an export from before it existed) keeps what the
+                    # edge already has rather than erasing it.
+                    **{
+                        name: case(
+                            (
+                                statement.excluded.method.is_(None),
+                                s.column__semantic_fk.c[name],
+                            ),
+                            else_=statement.excluded[name],
+                        )
+                        for name in _SEMANTIC_FK_EVIDENCE
+                    },
                 },
             )
         )

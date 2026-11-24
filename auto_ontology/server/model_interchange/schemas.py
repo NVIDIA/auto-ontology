@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -116,6 +116,13 @@ class ModelSemanticFk(BaseModel):
     column_attribute_id: str
     column_id: str
     use_in_join_paths: bool = True
+    # How compilation arrived at the edge; all None when nothing was recorded.
+    method: Literal["declared", "llm_pick", "value_confirmed", "value_match"] | None = (
+        None
+    )
+    containment: float | None = None
+    vector_distance: float | None = None
+    rationale: str | None = None
 
 
 class ModelSqlAttribute(BaseModel):
