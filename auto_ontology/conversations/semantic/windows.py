@@ -24,6 +24,7 @@ citation needs no translation to become a read.
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -115,8 +116,9 @@ def fence_turn(index: int, body: str, anchor: str | None = None) -> str:
 
     A closing tag inside the text is escaped: a turn that pasted one would
     otherwise end its own fence and the rest of it would read as instructions.
+    The anchor is stored text too, and is escaped as an attribute value.
     """
-    said = f' said_on="{anchor}"' if anchor else ""
+    said = f' said_on="{html.escape(anchor, quote=True)}"' if anchor else ""
     body = body.replace("</turn", "<\\/turn")
     return f'<turn n="{index}"{said}>\n{body}\n</turn>'
 

@@ -22,6 +22,8 @@ follow as the evidence behind it.
 
 from __future__ import annotations
 
+import html
+
 from auto_ontology.retrieval.conversation import TurnHit, search_semantic
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
@@ -90,7 +92,8 @@ def _turn_attributes(hit: TurnHit) -> str:
     if hit.session_index is not None:
         parts.append(f' session="{hit.session_index}"')
     if hit.time_anchor:
-        parts.append(f' said_on="{hit.time_anchor}"')
+        # Stored text, so escaped: a quote in it would close the attribute.
+        parts.append(f' said_on="{html.escape(hit.time_anchor, quote=True)}"')
     return "".join(parts)
 
 
