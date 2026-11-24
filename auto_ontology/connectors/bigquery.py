@@ -106,11 +106,17 @@ _TIMEOUT_GRACE_S = 10.0
 _CANCEL_TIMEOUT_S = 5.0
 
 _QUERY_HISTORY_LIMIT = 10_000
+_MAX_QUERY_JOB_HOURS = 6
 
 # How long a long-lived connector trusts its shard families before re-reading
 # them, so a newly landed shard becomes the one a wildcard is qualified to.
 _FAMILIES_TTL_S = 3600.0
-_MAX_QUERY_JOB_HOURS = 6
+
+# The only token endpoints a service-account key may name.
+_GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+_GOOGLE_TOKEN_URIS = frozenset(
+    {_GOOGLE_TOKEN_URI, "https://accounts.google.com/o/oauth2/token"}
+)
 
 _TABLE_TYPES = {
     "VIEW": TableTypes.VIEW,
@@ -339,12 +345,6 @@ def _service_account_key(text: str) -> dict[str, Any]:
             f"({_GOOGLE_TOKEN_URI})"
         )
     return {**info, "token_uri": token_uri}
-
-
-_GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
-_GOOGLE_TOKEN_URIS = frozenset(
-    {_GOOGLE_TOKEN_URI, "https://accounts.google.com/o/oauth2/token"}
-)
 
 
 _BYTE_UNITS = {
