@@ -216,9 +216,9 @@ _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 # OpenAI-compatible chat API. ``ChatNVIDIA`` requests structured output there with
 # NVIDIA's ``guided_json`` extension and ignores any other ``method``, but the
 # hosted backends reject that field for some models — nemotron-3.5-lightning
-# answers ``400 unknown field `guided_json``` on part of its traffic — while
-# accepting the standard ``response_format: json_schema`` that ``ChatOpenAI``
-# sends. Self-hosted NIMs keep ``ChatNVIDIA``.
+# answers ``400 unknown field `guided_json``` on part of its traffic. Going
+# through ``ChatOpenAI`` lets ``_structured_output_kwargs`` pick tool calling
+# instead. Self-hosted NIMs keep ``ChatNVIDIA``.
 _NVIDIA_HOSTED_HOSTS = ("integrate.api.nvidia.com",)
 
 
@@ -502,9 +502,17 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     "required", and langchain's default of naming the tool) hits that conflict, and only
     omitting it succeeds. The model still calls the tool without being forced to, and
     the caller retries if it ever answers without one.
+
+    Models on the hosted NVIDIA API catalog also use ``function_calling``. Its
+    ``response_format: json_schema`` decoding runs away on nullable fields: for
+    ``VisualizationRecommendation`` nemotron-3.5-lightning writes up to
+    ``"hue": `` and then emits whitespace until ``max_tokens``, failing 3/3
+    with or without ``strict``, while tool calling succeeded 3/3.
     """
     if _is_claude(llm):
         return {"method": "function_calling", "tool_choice": None}
+    if _is_nvidia_hosted(str(getattr(llm, "openai_api_base", "") or "")):
+        return {"method": "function_calling"}
     return {}
 
 

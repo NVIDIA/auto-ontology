@@ -95,6 +95,25 @@ def test_nvidia_hosted_models_use_the_openai_client() -> None:
     assert isinstance(client, ChatOpenAI)
     assert client.model_name == "nvidia/nemotron-3.5-lightning-30b-a3b"
     assert client.temperature == 0.0
+
+
+def test_nvidia_hosted_models_use_function_calling() -> None:
+    """The catalog's json_schema decoding runs away on nullable fields.
+
+    Measured with ``VisualizationRecommendation`` on nemotron-3.5-lightning: the
+    model writes up to ``"hue": `` and then whitespace until ``max_tokens``, 3/3
+    with or without ``strict``; tool calling succeeded 3/3.
+    """
+    client = _client_for(
+        "nvidia/nemotron-3.5-lightning-30b-a3b", "https://integrate.api.nvidia.com/v1"
+    )
+
+    assert _structured_output_kwargs(client) == {"method": "function_calling"}
+
+
+def test_other_openai_endpoints_keep_the_langchain_default() -> None:
+    client = _client_for("openai/gpt-4o", "https://api.openai.com/v1")
+
     assert _structured_output_kwargs(client) == {}
 
 
