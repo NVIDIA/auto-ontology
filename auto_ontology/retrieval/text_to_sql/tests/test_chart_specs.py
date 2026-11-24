@@ -6,10 +6,15 @@
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from auto_ontology.retrieval.text_to_sql.visualization.chart_specs import (
     build_chart_spec,
+)
+from auto_ontology.retrieval.text_to_sql.visualization.helpers import (
+    parse_sql_response_to_dataframe,
 )
 from auto_ontology.retrieval.text_to_sql.visualization.prompts import PlotRecommendation
 
@@ -260,3 +265,44 @@ def test_kpi_on_multiple_rows_falls_through_to_a_real_chart() -> None:
 def test_missing_columns_skip_the_chart() -> None:
     df = pd.DataFrame({"a": [1], "b": [2]})
     assert build_chart_spec(df, _plot(x="nope", y="b")) is None
+
+
+# --- text that only looks numeric ---------------------------------------------
+
+
+def _parsed(rows: list[dict[str, object]]) -> pd.DataFrame:
+    df = parse_sql_response_to_dataframe([json.dumps(rows)])
+    assert df is not None
+    return df
+
+
+def test_zero_padded_codes_stay_distinct_categories() -> None:
+    """ZIP codes are text: '02134' and '2134' are different places."""
+    df = _parsed(
+        [
+            {"zip_code": "02134", "orders": 5},
+            {"zip_code": "2134", "orders": 8},
+            {"zip_code": "00501", "orders": 1},
+        ]
+    )
+    assert df["zip_code"].tolist() == ["02134", "2134", "00501"]
+
+    spec = build_chart_spec(df, _plot(x="zip_code", y="orders"))
+
+    assert spec is not None
+    assert sorted(row["zip_code"] for row in spec["data"]) == [
+        "00501",
+        "02134",
+        "2134",
+    ]
+
+
+def test_only_thousands_separators_are_dropped_from_numeric_text() -> None:
+    df = _parsed(
+        [
+            {"total": "1,234", "ratio": "1,2"},
+            {"total": "-12.5", "ratio": "3"},
+        ]
+    )
+    assert df["total"].tolist() == [1234, -12.5]
+    assert df["ratio"].tolist() == ["1,2", "3"]
