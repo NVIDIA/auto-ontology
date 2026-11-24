@@ -1,5 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
-# All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 workdd
 # SPDX-License-Identifier: Apache-2.0
 
 """add semantic fk evidence
