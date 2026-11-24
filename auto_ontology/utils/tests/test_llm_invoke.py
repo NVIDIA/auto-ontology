@@ -68,6 +68,54 @@ def test_other_models_keep_the_langchain_default() -> None:
         assert _structured_output_kwargs(_Model(name)) == {}
 
 
+def _client_for(model: str, base_url: str) -> object:
+    return llm_invoke._build_client(
+        model=model,
+        api_key="nvapi-test",
+        base_url=base_url,
+        temperature=0.0,
+        max_tokens=256,
+    )
+
+
+def test_nvidia_hosted_models_use_the_openai_client() -> None:
+    """The hosted catalog rejects ChatNVIDIA's ``guided_json`` for some models.
+
+    Measured against integrate.api.nvidia.com with nemotron-3.5-lightning:
+    ``nvext.guided_json`` answers ``400 unknown field `guided_json``` while
+    ``response_format: json_schema`` answers 200, so structured output there must
+    go through ChatOpenAI, which sends the latter.
+    """
+    from langchain_openai import ChatOpenAI
+
+    client = _client_for(
+        "nvidia/nemotron-3.5-lightning-30b-a3b", "https://integrate.api.nvidia.com/v1"
+    )
+
+    assert isinstance(client, ChatOpenAI)
+    assert client.model_name == "nvidia/nemotron-3.5-lightning-30b-a3b"
+    assert client.temperature == 0.0
+    assert _structured_output_kwargs(client) == {}
+
+
+def test_self_hosted_nims_keep_the_nvidia_client() -> None:
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+    client = _client_for("nvidia/nemotron-3.5-lightning-30b-a3b", "http://nim:8000/v1")
+
+    assert isinstance(client, ChatNVIDIA)
+
+
+def test_a_lookalike_host_is_not_treated_as_nvidia_hosted() -> None:
+    """Matched on the parsed host, not a substring of the URL."""
+    for url in (
+        "https://integrate.api.nvidia.com.example.com/v1",
+        "http://proxy.local/integrate.api.nvidia.com/v1",
+        "",
+    ):
+        assert not llm_invoke._is_nvidia_hosted(url)
+
+
 def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:
     """Some langchain clients expose `model` rather than `model_name`."""
 

@@ -12,6 +12,7 @@ import threading
 import time
 import weakref
 from typing import Iterator, Type, TypeVar
+from urllib.parse import urlparse
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
@@ -211,6 +212,22 @@ _NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
 _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
+# Hosts of the NVIDIA API catalog (build.nvidia.com), which serves an
+# OpenAI-compatible chat API. ``ChatNVIDIA`` requests structured output there with
+# NVIDIA's ``guided_json`` extension and ignores any other ``method``, but the
+# hosted backends reject that field for some models — nemotron-3.5-lightning
+# answers ``400 unknown field `guided_json``` on part of its traffic — while
+# accepting the standard ``response_format: json_schema`` that ``ChatOpenAI``
+# sends. Self-hosted NIMs keep ``ChatNVIDIA``.
+_NVIDIA_HOSTED_HOSTS = ("integrate.api.nvidia.com",)
+
+
+def _is_nvidia_hosted(base_url: str) -> bool:
+    """True when *base_url* points at the hosted NVIDIA API catalog."""
+    host = urlparse(base_url).hostname or ""
+    return host in _NVIDIA_HOSTED_HOSTS
+
+
 def _build_client(
     *,
     model: str,
@@ -222,9 +239,23 @@ def _build_client(
     """Build a chat client for the given model/endpoint.
 
     OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
-    ``ChatOpenAI``, which supports structured output. Everything else uses
-    ``ChatNVIDIA``.
+    ``ChatOpenAI``, which supports structured output. So do models served by the
+    hosted NVIDIA API catalog (see ``_NVIDIA_HOSTED_HOSTS``). Everything else
+    uses ``ChatNVIDIA``.
     """
+    if _is_nvidia_hosted(base_url):
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=LLM_INVOKE_TIMEOUT_S,
+            max_retries=0,
+        )
+
     if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
 
