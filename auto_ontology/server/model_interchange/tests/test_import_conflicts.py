@@ -447,9 +447,7 @@ def test_import_worker_does_not_block_unrelated_requests() -> None:
 
 
 @pytest.mark.parametrize("entity", ["sql_attribute", "custom_analysis"])
-def test_sql_owner_renames_check_the_key_that_is_actually_updated(
-    catalog: Catalog, entity: str
-) -> None:
+def test_matched_sql_owner_names_are_retained(catalog: Catalog, entity: str) -> None:
     from auto_ontology.server.model_interchange.schemas import (
         ModelSqlAttribute,
         ModelCustomAnalysis,
@@ -470,7 +468,58 @@ def test_sql_owner_renames_check_the_key_that_is_actually_updated(
         doc.semantic_layer.custom_analyses.append(
             ModelCustomAnalysis(id="one", name="Taken")
         )
+    dal._preflight_import(doc, replace=False)
+    with engine.connect() as connection:
+        assert dict(
+            connection.execute(select(tables[entity].c.id, tables[entity].c.name)).all()
+        ) == {"one": "Original", "two": "Taken"}
+
+
+@pytest.mark.parametrize("identity", ["tbl", "alias"])
+def test_resolver_accepts_one_declaration_through_either_alias(
+    catalog: Catalog, identity: str
+) -> None:
+    engine, tables = catalog
+    with engine.begin() as connection:
+        connection.execute(tables["catalog_table"].update().values(imported_id="alias"))
+    assert dal._resolve_entities_batch(
+        dal.s.catalog_table, [(identity, {"name": "orders", "schema_id": "sch"})]
+    ) == {identity: ("tbl", False)}
+
+
+def test_resolver_rejects_two_aliases_claiming_one_live_row(catalog: Catalog) -> None:
+    engine, tables = catalog
+    with engine.begin() as connection:
+        connection.execute(tables["catalog_table"].update().values(imported_id="alias"))
+    with patch.object(StoreConn, "query_write", autospec=True) as writes:
+        with pytest.raises(dal.ModelImportConflictError) as error:
+            dal._resolve_entities_batch(
+                dal.s.catalog_table,
+                [
+                    (identity, {"name": identity, "schema_id": "sch"})
+                    for identity in ("tbl", "alias")
+                ],
+            )
+    writes.assert_not_called()
+    assert {c["proposed_id"] for c in error.value.conflicts} == {"tbl", "alias"}
+    assert all(c["kind"] == "duplicate_payload_path" for c in error.value.conflicts)
+
+
+def test_ambiguous_live_id_guidance_requires_fixing_the_other_alias(
+    catalog: Catalog,
+) -> None:
+    engine, tables = catalog
+    with engine.begin() as connection:
+        connection.execute(
+            tables["catalog_table"]
+            .insert()
+            .values(id="other", imported_id="tbl", name="other", schema_id="sch")
+        )
     with pytest.raises(dal.ModelImportConflictError) as error:
-        dal._preflight_import(doc, replace=False)
-    assert error.value.conflicts[0]["kind"] == "natural_name_conflict"
-    assert set(error.value.conflicts[0]["existing_ids"]) == {"one", "two"}
+        dal._preflight_import(document(), replace=False)
+    assert any(c["kind"] == "ambiguous_id" for c in error.value.conflicts)
+    resolution = error.value.detail()["resolution"]
+    assert "export-and-bind cannot resolve" in resolution
+    assert (
+        "remove or change the conflicting imported_id on the other object" in resolution
+    )

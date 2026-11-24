@@ -17,6 +17,7 @@ behind rather than a catalog with half its semantics on top.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -28,6 +29,7 @@ from auto_ontology.catalog.constants import Props
 from auto_ontology.catalog.model import CatalogNode
 from auto_ontology.catalog.store.queries import add_query
 from auto_ontology.dal import schema as s
+from auto_ontology.dal import session
 from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
@@ -116,7 +118,11 @@ class ModelImportConflictError(ModelInterchangeError):
                 "document and all its references to the exported IDs before retrying. "
                 "For duplicate declarations of new objects, assign distinct IDs "
                 "and object paths to distinct objects and update their references, "
-                "or remove the duplicate declaration."
+                "or remove the duplicate declaration. For ambiguous_id where a live ID "
+                "also belongs to another object as imported_id, export-and-bind "
+                "cannot resolve the ambiguity. Have the catalog administrator "
+                "remove or change the conflicting imported_id on the other object, "
+                "or remove that duplicate object, before retrying."
             ),
         }
 
@@ -841,14 +847,10 @@ def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> 
         for identity, props, path in nodes:
             key = tuple(props[k] for k in keys)
             identities = list(by_id.get(identity, {}).values())
-            # Catalog, Term, and ColumnAttribute imports retain matched rows'
-            # properties. SQL owners are updated later by _persist_sql_object.
-            # Check the keys this writer persists, not unapplied name edits.
+            # All current import writers skip properties on matched rows.
+            # Check the retained key, not a name edit this writer never applies.
             effective_key = (
-                tuple(identities[0][k] for k in keys)
-                if (catalog or table is s.term or table is s.column_attribute)
-                and len(identities) == 1
-                else key
+                tuple(identities[0][k] for k in keys) if len(identities) == 1 else key
             )
             same_key = by_key.get(effective_key, [])
             if table is s.catalog_database and not path and identities:
@@ -1040,8 +1042,8 @@ def _resolve_entities_batch(
     A row found this way has its ``imported_id`` stamped if it had none, so the
     *next* import matches it the fast way.
 
-    Three statements regardless of batch size — one ``INSERT ... RETURNING``
-    rather than a create per row.
+    One batched lock read followed by resolution, stamping and
+    ``INSERT ... RETURNING``; no per-row insert or lock round trips.
     """
     if not items:
         return {}
@@ -1052,6 +1054,30 @@ def _resolve_entities_batch(
     for imported_id, create_props in items:
         deduped.setdefault(imported_id, create_props)
     imported_ids = list(deduped)
+
+    if session.get_engine().dialect.name == "postgresql":
+        # Existing-row locks cannot protect an absent source ID. Serialize
+        # cooperating importers before reading, including when parents differ.
+        # Keep imported_id non-unique: collisions in stored catalogs remain
+        # reportable rather than imposing a new global schema constraint.
+        lock_ids = sorted(
+            {
+                int.from_bytes(
+                    hashlib.sha256(
+                        f"model-import:{table.name}:{identity}".encode()
+                    ).digest()[:8],
+                    "big",
+                    signed=True,
+                )
+                for identity in imported_ids
+            }
+        )
+        store().query_read(
+            "SELECT pg_advisory_xact_lock(lock_id) FROM "
+            "(SELECT unnest(CAST(:lock_ids AS bigint[])) AS lock_id "
+            "ORDER BY lock_id) AS import_locks",
+            {"lock_ids": lock_ids},
+        )
 
     parent_key = {
         s.catalog_schema: "database_id",
@@ -1084,6 +1110,22 @@ def _resolve_entities_batch(
         for identity, live_ids in matches.items()
         if len(live_ids) > 1
     ]
+    claims: dict[str, list[str]] = {}
+    for identity, rows in matches.items():
+        for live_id in rows:
+            claims.setdefault(live_id, []).append(identity)
+    for live_id, identities in claims.items():
+        if len(identities) > 1:
+            conflicts.extend(
+                {
+                    "kind": "duplicate_payload_path",
+                    "entity_type": table.name,
+                    "proposed_id": identity,
+                    "existing_ids": [live_id],
+                    "path": [deduped[identity].get("name", "")],
+                }
+                for identity in identities
+            )
     if parent_key:
         for identity, rows in matches.items():
             if len(rows) != 1:

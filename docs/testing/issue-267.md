@@ -16,7 +16,10 @@ Preflight and replacement use the same deletion plan, so replacing an in-scope
 semantic object remains supported while shared terms are protected. Both live
 and imported IDs keep existing objects during replacement. Resolution also
 rejects ambiguities and catalog-parent mismatches that appear after preflight,
-and locks matched catalog parents through transaction completion. The async
+and locks matched catalog parents through transaction completion. Batched
+transaction-scoped advisory locks serialize source-ID resolution before the
+read, including absent IDs; they add no uniqueness constraint. A resolver
+check also rejects distinct payload IDs claiming the same live row. The async
 route runs the complete synchronous import in a worker so unrelated requests
 remain responsive. Database integrity failures
 are translated at the service boundary after transactional rollback; SQL,
@@ -26,15 +29,15 @@ parameters, and driver messages are excluded from the response.
 
 Validated locally against PostgreSQL 17 with the repository's Alembic migrations.
 The fix was refreshed against `main` at `a12fec75` on November 24, 2026.
-The full refreshed backend suite passed: **2,980 passed, 2 skipped** (live
+The full refreshed backend suite passed: **2,994 passed, 2 skipped** (live
 Databricks/MySQL tests). The **5 gateway tests** also passed. Ruff, frontend
 Prettier/ESLint, production frontend build, API schema generation, and Alembic
 schema-drift validation passed; no migration is needed.
 
 The focused identity tests also cover consistent repeated declarations of shared
 attributes and exact-ID catalog bindings with edited display labels. Matched
-terms and column attributes are checked against their retained names; SQL
-owners are checked against the names their writer updates. Document-only
+terms, column attributes, SQL attributes, and analyses are checked against
+their retained names because the current writers skip matched properties. Document-only
 conflicts explain how to assign distinct IDs/paths or remove duplicate entries.
 
 ## Relationship to PR 581
@@ -53,7 +56,6 @@ that error with a typed conflict. This checks guard compatibility; it does not
 claim the two complete branches merge without conflict. Both change the import
 module and replacement planning, so their merge order should be coordinated.
 
-
 | Requirement                              | Validation                                                                                                                                     |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Different IDs on matching physical paths | All seven fixture objects reported together, for both replacement modes                                                                        |
@@ -61,9 +63,9 @@ module and replacement planning, so their merge order should be coordinated.
 | No partial mutation                      | Real PostgreSQL readback and a write-boundary assertion before any writes                                                                      |
 | Exact live IDs and imported IDs          | Successful imports and idempotent reimports, including SQL attributes and analyses                                                             |
 | Genuinely new names                      | Full copy into a new database, preserving relationships                                                                                        |
-| Ambiguous matches                        | Every imported entity kind, plus late ambiguity and independently committed parent mismatches after preflight                                                                                |
+| Ambiguous matches                        | Every imported entity kind, late ambiguity/alias collapse/parent mismatches, and concurrent absent-ID resolution through commit and rollback   |
 | Cross-database collisions                | Database/schema/table/column identity boundaries and protected shared terms                                                                    |
-| Recovery                                 | Rebind the rejected document and references using HTTP export; preserve a new column without duplicating existing rows                                                                             |
+| Recovery                                 | Rebind the rejected document and references using HTTP export; preserve a new column without duplicating existing rows                         |
 | Rollback                                 | Real PostgreSQL uniqueness violation after earlier import writes; exact pre/post readback                                                      |
 | Gateway behavior                         | Actual import route, permission guard, proxy, FastAPI, and PostgreSQL; raw YAML and multipart 409, bound import 200, viewer 403, anonymous 401 |
 

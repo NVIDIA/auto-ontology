@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/auth/resolve-user', () => ({ resolveUser: vi.fn() }));
 
 import { resolveUser } from '@/auth/resolve-user';
+import { requests } from '@/api/requests';
 import { POST } from '@/app/api/model/import/route';
 
 const conflictYaml = process.env.MODEL_IMPORT_CONFLICT_YAML;
@@ -17,9 +18,8 @@ const boundYaml = process.env.MODEL_IMPORT_BOUND_YAML;
 const fixtureState = process.env.MODEL_IMPORT_FIXTURE_STATE;
 
 const expectFixtureUnchanged = async () => {
-	const state = await fetch(`${process.env.PYTHON_API_URL}/__fixture_state`);
-	expect(state.status).toBe(200);
-	expect(await state.json()).toEqual(JSON.parse(fixtureState!));
+	const state = await requests.get('/__fixture_state');
+	expect(state).toEqual(JSON.parse(fixtureState!));
 };
 
 beforeEach(() => {

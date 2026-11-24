@@ -1153,6 +1153,20 @@ def test_wrong_parent_committed_after_preflight_is_not_reused(
     other_id = proposed_id if match == "id" else f"{world.prefix}-other-live-id"
     before = mi.fetch_export_rows([world.database])
 
+    def aliases() -> list[list[dict[str, Any]]]:
+        return [
+            store().query_read(
+                select(table.c.id, table.c.imported_id).where(table.c.id == identity)
+            )
+            for table, identity in (
+                (s.catalog_database, world.database),
+                (s.catalog_schema, world.schema),
+            )
+        ]
+
+    before_aliases = aliases()
+    assert all(row[0]["imported_id"] is None for row in before_aliases)
+
     def concurrent_insert(*args: Any, **kwargs: Any) -> list[str]:
         # A different transaction commits after preflight but before resolution.
         with get_engine().begin() as connection:
@@ -1188,3 +1202,192 @@ def test_wrong_parent_committed_after_preflight_is_not_reused(
         )
     )
     assert mi.fetch_export_rows([world.database]) == before
+    assert aliases() == before_aliases
+
+
+@pytest.mark.parametrize("entity", ["sql_attribute", "custom_analysis"])
+@pytest.mark.parametrize("replace", [False, True])
+def test_matched_sql_owner_name_edits_are_skipped(
+    world: World, entity: str, replace: bool
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    table = getattr(s, entity)
+    first = _add(table, name=f"{world.prefix}-original")
+    second = _add(table, name=f"{world.prefix}-taken")
+    document = _document(world)
+    if entity == "sql_attribute":
+        document.semantic_layer.sql_attributes.manual.append(
+            ModelSqlAttribute(
+                id=first, name=f"{world.prefix}-taken", term_id=world.term
+            )
+        )
+    else:
+        document.semantic_layer.custom_analyses.append(
+            ModelCustomAnalysis(id=first, name=f"{world.prefix}-taken")
+        )
+    response = _post_document(document, replace=replace)
+    assert response.status_code == 200, response.text
+    assert {
+        r["id"]: r["name"]
+        for r in store().query_read(
+            select(table.c.id, table.c.name).where(table.c.id.in_([first, second]))
+        )
+    } == {first: f"{world.prefix}-original", second: f"{world.prefix}-taken"}
+
+
+def test_two_aliases_committed_after_preflight_are_not_merged(world: World) -> None:
+    from unittest.mock import patch
+    from auto_ontology.dal.session import get_engine
+    from auto_ontology.server.model_interchange.schemas import ModelTable, ModelColumn
+
+    document = _document(world)
+    a, b = f"{world.prefix}-alias-a", f"{world.prefix}-alias-b"
+    document.data_layer.databases[0].schemas[0].tables.extend(
+        [
+            ModelTable(
+                id=identity,
+                name=f"table_{index}",
+                columns=[ModelColumn(id=f"{identity}-col", name=f"col_{index}")],
+            )
+            for index, identity in enumerate((a, b))
+        ]
+    )
+    original = mi._import_catalog
+
+    def concurrent_insert(*args: Any, **kwargs: Any) -> list[str]:
+        with get_engine().begin() as connection:
+            connection.execute(
+                s.catalog_table.insert().values(
+                    id=a, imported_id=b, name="table_0", schema_id=world.schema
+                )
+            )
+        return original(*args, **kwargs)
+
+    with patch.object(mi, "_import_catalog", side_effect=concurrent_insert):
+        response = _post_document(document)
+    assert response.status_code == 409, response.text
+    conflicts = response.json()["detail"]["conflicts"]
+    assert {
+        c["proposed_id"] for c in conflicts if c["kind"] == "duplicate_payload_path"
+    } == {a, b}
+    assert not store().query_read(
+        select(s.catalog_column.c.id).where(s.catalog_column.c.table_id == a)
+    )
+
+
+@pytest.mark.parametrize("same_parent", [False, True])
+@pytest.mark.parametrize("rollback", [False, True])
+def test_concurrent_absent_source_id_is_resolved_after_first_transaction(
+    world: World, same_parent: bool, rollback: bool
+) -> None:
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from auto_ontology.dal.session import write_transaction
+
+    other_schema = (
+        world.schema
+        if same_parent
+        else _add(s.catalog_schema, database_id=world.database, name="other")
+    )
+    source_id = f"{world.prefix}-concurrent-source"
+    ready = threading.Barrier(2)
+    inserted, release = threading.Event(), threading.Event()
+    pids: list[int] = []
+
+    class AbortFirst(Exception):
+        pass
+
+    def resolve(parent: str) -> tuple[str, Any]:
+        try:
+            with write_transaction():
+                # Both transactions observe an absent identity before resolution.
+                assert not store().query_read(
+                    select(s.catalog_table.c.id).where(
+                        s.catalog_table.c.imported_id == source_id
+                    )
+                )
+                pids.append(
+                    store().query_read("SELECT pg_backend_pid() AS pid")[0]["pid"]
+                )
+                ready.wait(timeout=10)
+                result = mi._resolve_entities_batch(
+                    s.catalog_table,
+                    [(source_id, {"name": "concurrent", "schema_id": parent})],
+                )
+                if result[source_id][1] and not inserted.is_set():
+                    inserted.set()
+                    assert release.wait(10)
+                    if rollback:
+                        raise AbortFirst
+            return "ok", result[source_id]
+        except AbortFirst:
+            return "rollback", None
+        except mi.ModelImportConflictError as error:
+            return "conflict", error.conflicts
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(resolve, parent) for parent in (world.schema, other_schema)
+        ]
+        try:
+            assert inserted.wait(10)
+            deadline = time.monotonic() + 10
+            while not store().query_read(
+                "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND pid = ANY(:pids)",
+                {"pids": pids},
+            ):
+                assert time.monotonic() < deadline, (
+                    "second importer did not wait on the source-ID lock"
+                )
+                time.sleep(0.01)
+            assert not any(f.done() for f in futures)
+        finally:
+            release.set()
+        outcomes = [f.result(timeout=10) for f in futures]
+    rows = store().query_read(
+        select(s.catalog_table).where(s.catalog_table.c.imported_id == source_id)
+    )
+    assert len(rows) == 1
+    if rollback:
+        assert sorted(status for status, _ in outcomes) == ["ok", "rollback"]
+        assert next(value for status, value in outcomes if status == "ok")[1] is True
+    elif same_parent:
+        assert [status for status, _ in outcomes] == ["ok", "ok"]
+        assert sorted(value[1] for _, value in outcomes) == [False, True]
+    else:
+        assert sorted(status for status, _ in outcomes) == ["conflict", "ok"]
+        assert (
+            next(value for status, value in outcomes if status == "conflict")[0]["kind"]
+            == "identity_path_mismatch"
+        )
+    with write_transaction():
+        assert mi._resolve_entities_batch(
+            s.catalog_table,
+            [(source_id, {"name": "concurrent", "schema_id": rows[0]["schema_id"]})],
+        ) == {source_id: (rows[0]["id"], False)}
+
+
+def test_gateway_snapshot_failure_still_cleans_committed_fixture() -> None:
+    from unittest.mock import Mock, patch
+    from dev_tools import verify_model_import_gateway as harness
+
+    def fixtures() -> list[dict[str, Any]]:
+        return store().query_read(
+            select(s.catalog_database)
+            .where(s.catalog_database.c.name.like("issue267-gateway-%"))
+            .order_by(s.catalog_database.c.id)
+        )
+
+    before = fixtures()
+    connection = Mock(wraps=store())
+    connection.query_read.side_effect = RuntimeError("snapshot read failed")
+    with patch.object(harness, "store", return_value=connection):
+        with pytest.raises(RuntimeError, match="snapshot read failed"):
+            harness.main()
+    connection.query_write.assert_called_once()
+    assert fixtures() == before

@@ -74,53 +74,56 @@ def main() -> None:
     }
     summary = import_model(yaml.safe_dump(payload), replace=False, embed=False)
     db_ids = summary["database_ids"]
-    app = FastAPI()
-    app.include_router(router, prefix="/api")
-
-    def fixture_state() -> dict:
-        schemas = select(s.catalog_schema.c.id).where(
-            s.catalog_schema.c.database_id.in_(db_ids)
-        )
-        tables = select(s.catalog_table.c.id).where(
-            s.catalog_table.c.schema_id.in_(schemas)
-        )
-        return jsonable_encoder(
-            {
-                "databases": store().query_read(
-                    select(s.catalog_database)
-                    .where(s.catalog_database.c.id.in_(db_ids))
-                    .order_by(s.catalog_database.c.id)
-                ),
-                "schemas": store().query_read(
-                    select(s.catalog_schema)
-                    .where(s.catalog_schema.c.id.in_(schemas))
-                    .order_by(s.catalog_schema.c.id)
-                ),
-                "tables": store().query_read(
-                    select(s.catalog_table)
-                    .where(s.catalog_table.c.id.in_(tables))
-                    .order_by(s.catalog_table.c.id)
-                ),
-                "columns": store().query_read(
-                    select(s.catalog_column)
-                    .where(s.catalog_column.c.table_id.in_(tables))
-                    .order_by(s.catalog_column.c.id)
-                ),
-            }
-        )
-
-    # Loopback-only acceptance server, not a production endpoint. Every 409
-    # case checks full row state before the later successful import can mask it.
-    app.get("/__fixture_state")(fixture_state)
-    before = fixture_state()
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
-    thread = threading.Thread(
-        target=server.run, kwargs={"sockets": [listener]}, daemon=True
-    )
+    listener = None
+    server = None
+    thread = None
     try:
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+
+        def fixture_state() -> dict:
+            schemas = select(s.catalog_schema.c.id).where(
+                s.catalog_schema.c.database_id.in_(db_ids)
+            )
+            tables = select(s.catalog_table.c.id).where(
+                s.catalog_table.c.schema_id.in_(schemas)
+            )
+            return jsonable_encoder(
+                {
+                    "databases": store().query_read(
+                        select(s.catalog_database)
+                        .where(s.catalog_database.c.id.in_(db_ids))
+                        .order_by(s.catalog_database.c.id)
+                    ),
+                    "schemas": store().query_read(
+                        select(s.catalog_schema)
+                        .where(s.catalog_schema.c.id.in_(schemas))
+                        .order_by(s.catalog_schema.c.id)
+                    ),
+                    "tables": store().query_read(
+                        select(s.catalog_table)
+                        .where(s.catalog_table.c.id.in_(tables))
+                        .order_by(s.catalog_table.c.id)
+                    ),
+                    "columns": store().query_read(
+                        select(s.catalog_column)
+                        .where(s.catalog_column.c.table_id.in_(tables))
+                        .order_by(s.catalog_column.c.id)
+                    ),
+                }
+            )
+
+        # Loopback-only acceptance server, not a production endpoint. Every 409
+        # case checks full row state before the later successful import can mask it.
+        app.get("/api/__fixture_state")(fixture_state)
+        before = fixture_state()
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+        thread = threading.Thread(
+            target=server.run, kwargs={"sockets": [listener]}, daemon=True
+        )
         document = dal.assemble_export_document(
             dal.fetch_export_rows(db_ids),
             dialect_by_db_name={name: "postgres"},
@@ -171,10 +174,12 @@ def main() -> None:
             == 1
         )
     finally:
-        server.should_exit = True
-        if thread.is_alive():
+        if server is not None:
+            server.should_exit = True
+        if thread is not None and thread.is_alive():
             thread.join(timeout=10)
-        listener.close()
+        if listener is not None:
+            listener.close()
         store().query_write(
             s.catalog_database.delete().where(s.catalog_database.c.id.in_(db_ids))
         )
