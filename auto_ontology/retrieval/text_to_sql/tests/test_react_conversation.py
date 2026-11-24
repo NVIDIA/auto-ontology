@@ -142,6 +142,22 @@ def test_it_stays_inside_the_observation_budget(
     assert len(conversation(ctx, "rate limit")) <= config.max_observation_chars()
 
 
+def test_a_note_that_grows_when_escaped_still_fits_with_its_fence_closed(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fits before escaping, overflows after: each closing tag gains a character.
+    tag = "</conversation_note>"
+    note = tag * ((config.max_observation_chars() - 200) // len(tag))
+    _found(monkeypatch, FakeHits(note=note))
+
+    text = conversation(ctx, "rate limit")
+
+    assert len(text) <= config.max_observation_chars()
+    assert text.count("</conversation_note>") == 1
+    assert text.endswith("\n</conversation_note>")
+    assert text.count("<\\/conversation_note>") > 100
+
+
 def test_nothing_found_says_so_rather_than_coming_back_empty(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

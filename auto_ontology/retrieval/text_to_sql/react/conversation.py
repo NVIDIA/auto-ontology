@@ -47,15 +47,22 @@ _TURN_CHARS = 700
 _LINE_CHARS = 160
 
 
-def _fence(tag: str, attributes: str, body: str) -> str:
+def _fence(tag: str, attributes: str, body: str, room: int | None = None) -> str:
     """*body* inside ``<tag>``, with any closing tag in it escaped.
 
     Retrieved text is stored user input and model-written prose; the system
     prompt says what is inside these tags is data, and an unescaped closing
     tag would let the rest of it read as something else.
+
+    With *room*, the escaped body is cut so the whole block fits in it.
+    Escaping lengthens the body, so cutting before it could still overflow,
+    and a block cut later would lose its closing tag.
     """
     body = body.replace(f"</{tag}", f"<\\/{tag}")
-    return f"<{tag}{attributes}>\n{body}\n</{tag}>"
+    head, tail = f"<{tag}{attributes}>\n", f"\n</{tag}>"
+    if room is not None and len(head) + len(body) + len(tail) > room:
+        body = _cut(body, max(room - len(head) - len(tail), 1))
+    return head + body + tail
 
 
 def _turn_block(hit: TurnHit) -> str:
@@ -120,10 +127,9 @@ def conversation(ctx: ToolContext, query: str) -> str:
 
     blocks = []
     if hits.note:
-        # Cut before fencing, so a long note is never cut through its tag.
+        # Under the room _fit keeps, so it never has to cut the note itself.
         room = max(config.max_observation_chars() - 200, 1)
-        note = hits.note if len(hits.note) <= room else _cut(hits.note, room)
-        blocks.append(_fence("conversation_note", "", note))
+        blocks.append(_fence("conversation_note", "", hits.note, room))
     for position, hit in enumerate(hits.turns):
         blocks.append(_turn_block(hit) if position < _FULL_TURNS else _turn_line(hit))
     return _fit(blocks, "turns", "narrow the query to see them", "\n\n")
