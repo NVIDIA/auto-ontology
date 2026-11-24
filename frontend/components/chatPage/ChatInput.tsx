@@ -15,6 +15,7 @@ import {
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
+import { isImeComposing } from '@/lib/imeComposition';
 
 type ChatInputProps = {
 	/** Resolves false when the question was refused, so the text can be restored. */
@@ -72,6 +73,7 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 
 	const handleKeyDown = useCallback(
 		(e: KeyboardEvent<HTMLTextAreaElement>) => {
+			if (isImeComposing(e)) return;
 			if (e.key === 'Enter' && !e.shiftKey) {
 				e.preventDefault();
 				handleSubmit();
