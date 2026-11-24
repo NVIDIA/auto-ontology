@@ -13,9 +13,13 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from auto_ontology.dal.attributes import SemanticFkEvidence
 from auto_ontology.semantic import semantic_fk
 from auto_ontology.semantic.embed import _build_rows
-from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
+from auto_ontology.semantic.models import (
+    FkHitSelection,
+    SemanticFkJoinDefaultSelection,
+)
 
 
 def _hit(
@@ -736,7 +740,7 @@ def test_inferred_fk_is_stored_when_the_join_returns_rows() -> None:
 
     assert created == 1
     join.assert_called_once()
-    merge.assert_called_once_with("col-1", "attr")
+    merge.assert_called_once_with("col-1", "attr", None)
 
 
 def test_inferred_fk_is_dropped_when_the_join_returns_nothing() -> None:
@@ -754,7 +758,7 @@ def test_prevented_db_queries_store_the_pick_without_validation() -> None:
     assert created == 1
     resolve_connector.assert_not_called()
     join.assert_not_called()
-    merge.assert_called_once_with("col-1", "attr")
+    merge.assert_called_once_with("col-1", "attr", None)
 
 
 @pytest.mark.parametrize(
@@ -792,7 +796,9 @@ def test_declared_fk_is_trusted_without_a_join(name: str, target: str) -> None:
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 1
 
-    merge.assert_called_once_with("col-1", "attr")
+    merge.assert_called_once_with(
+        "col-1", "attr", SemanticFkEvidence(method="declared")
+    )
     join.assert_not_called()
 
 
@@ -822,3 +828,191 @@ def test_declared_fk_onto_the_column_itself_is_rejected() -> None:
         assert semantic_fk.resolve_semantic_fks("database") == 0
 
     merge.assert_not_called()
+
+
+# --------------------------------------------------------------------------
+# Evidence recorded on each resolution path
+# --------------------------------------------------------------------------
+
+
+def _llm_answers(*selections: FkHitSelection):
+    """Patch the model so successive picks return *selections* in order."""
+    return (
+        patch("auto_ontology.semantic.semantic_fk.get_llm_client"),
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output",
+            side_effect=list(selections),
+        ),
+    )
+
+
+def test_unchecked_pick_records_llm_pick_with_distance_and_reason() -> None:
+    trace = semantic_fk._Trace()
+    client, invoke = _llm_answers(
+        FkHitSelection(selected_id="picked", rationale="  name and type match ")
+    )
+    with client, invoke:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column([100, 101]),
+            _retriever(_hit("picked", "table-2", score=0.25)),
+            "database",
+            trace=trace,
+        )
+
+    assert selected == "picked"
+    assert trace.evidence() == SemanticFkEvidence(
+        method="llm_pick", vector_distance=0.25, rationale="name and type match"
+    )
+
+
+def test_confirmed_pick_records_containment_and_keeps_the_reason() -> None:
+    keys = _keys([_key_row("picked", "table-2", [100, 101, 102])])
+    trace = semantic_fk._Trace()
+    client, invoke = _llm_answers(
+        FkHitSelection(selected_id="picked", rationale="references the key")
+    )
+    with client, invoke:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column([100, 102]),
+            _retriever(_hit("picked", "table-2", score=0.4)),
+            "database",
+            keys,
+            trace=trace,
+        )
+
+    assert selected == "picked"
+    assert trace.evidence() == SemanticFkEvidence(
+        method="value_confirmed",
+        containment=1.0,
+        vector_distance=0.4,
+        rationale="references the key",
+    )
+
+
+def test_a_hit_confirmed_instead_of_the_pick_drops_the_pick_s_reason() -> None:
+    keys = _keys(
+        [
+            _key_row("picked", "table-2", [900, 901]),
+            _key_row("near", "table-4", [100, 101, 102]),
+        ]
+    )
+    trace = semantic_fk._Trace()
+    client, invoke = _llm_answers(
+        FkHitSelection(selected_id="picked", rationale="argues for picked")
+    )
+    with client, invoke:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column([100, 101]),
+            _retriever(
+                _hit("picked", "table-2", score=0.1),
+                _hit("near", "table-4", score=0.3),
+            ),
+            "database",
+            keys,
+            trace=trace,
+        )
+
+    assert selected == "near"
+    assert trace.evidence() == SemanticFkEvidence(
+        method="value_confirmed", containment=1.0, vector_distance=0.3
+    )
+
+
+def test_value_only_match_records_its_share_and_its_own_reason() -> None:
+    keys = _keys(
+        [
+            _key_row("vector-hit", "table-2", [900, 901]),
+            _key_row("holder", "table-3", [1000, 1001, 1002, 1003]),
+        ]
+    )
+    trace = semantic_fk._Trace()
+    client, invoke = _llm_answers(
+        FkHitSelection(selected_id="vector-hit", rationale="looks like it"),
+        FkHitSelection(selected_id="holder", rationale="holds every value"),
+    )
+    with client, invoke:
+        selected = semantic_fk._resolve_via_vdb(
+            _fk_column([1000, 1003]),
+            _retriever(_hit("vector-hit", "table-2", score=0.2)),
+            "database",
+            keys,
+            trace=trace,
+        )
+
+    assert selected == "holder"
+    assert trace.evidence() == SemanticFkEvidence(
+        method="value_match", containment=1.0, rationale="holds every value"
+    )
+
+
+def test_an_ambiguous_column_confirming_the_pick_keeps_its_distance() -> None:
+    keys = _keys([_key_row("comments-id", "table-2", list(range(1, 21)))])
+    column = _fk_column([1, 2, 3, 5, 8], name="VoteTypeId")
+    trace = semantic_fk._Trace()
+
+    selected = semantic_fk._confirm_by_values(
+        column,
+        [1, 2, 3, 5, 8],
+        [_hit("comments-id", "table-2", score=0.1)],
+        "comments-id",
+        keys,
+        trace=trace,
+    )
+
+    assert selected == "comments-id"
+    assert trace.vector_distance == 0.1
+
+
+def test_an_empty_trace_has_no_evidence() -> None:
+    assert semantic_fk._Trace().evidence() is None
+
+
+def test_inferred_fk_is_stored_with_the_evidence_its_resolution_traced() -> None:
+    def resolve(col, retriever, database_name, keys, families, *, trace):
+        trace.method = "value_confirmed"
+        trace.containment = 0.9
+        trace.vector_distance = 0.2
+        trace.rationale = "named after the key"
+        return "attr"
+
+    candidates = [{"id": "col-1", "name": "customer_ref", "table_name": "orders"}]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._build_retriever",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_table_families",
+            return_value={},
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.is_semantic_fk_db_query_prevented",
+            return_value=True,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_via_vdb", side_effect=resolve
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
+        ) as merge,
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 1
+
+    merge.assert_called_once_with(
+        "col-1",
+        "attr",
+        SemanticFkEvidence(
+            method="value_confirmed",
+            containment=0.9,
+            vector_distance=0.2,
+            rationale="named after the key",
+        ),
+    )

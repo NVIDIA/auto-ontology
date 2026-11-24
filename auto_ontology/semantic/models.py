@@ -223,7 +223,13 @@ class FkHitSelection(BaseModel):
             "Return null if none of the candidates are a confident match."
         ),
     )
-    rationale: str = Field(default="")
+    rationale: str = Field(
+        default="",
+        description=(
+            "One sentence on why the selected candidate is the referenced key, "
+            "citing the names, descriptions or values that decided it."
+        ),
+    )
 
 
 class SemanticFkJoinDefaultSelection(BaseModel):

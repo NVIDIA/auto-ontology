@@ -1118,6 +1118,61 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
     assert len(rows) == 1
 
 
+def test_merge_semantic_fk_stores_evidence_with_a_new_edge_only(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.table("orders")
+    world.column("orders", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+    column = world.columns["orders.customer_id"]
+
+    a.merge_semantic_fk(
+        column,
+        attr,
+        a.SemanticFkEvidence(
+            method="value_confirmed",
+            containment=0.95,
+            vector_distance=0.3,
+            rationale="named after the key",
+        ),
+    )
+    a.merge_semantic_fk(column, attr, a.SemanticFkEvidence(method="llm_pick"))
+
+    rows = store().query_read(
+        select(
+            s.column__semantic_fk.c.method,
+            s.column__semantic_fk.c.containment,
+            s.column__semantic_fk.c.vector_distance,
+            s.column__semantic_fk.c.rationale,
+        ).where(s.column__semantic_fk.c.attribute_id == attr)
+    )
+    assert rows == [
+        {
+            "method": "value_confirmed",
+            "containment": 0.95,
+            "vector_distance": 0.3,
+            "rationale": "named after the key",
+        }
+    ]
+
+
+def test_merge_semantic_fk_without_evidence_leaves_it_null(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.table("orders")
+    world.column("orders", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+
+    a.merge_semantic_fk(world.columns["orders.customer_id"], attr)
+
+    rows = store().query_read(
+        select(s.column__semantic_fk.c.method, s.column__semantic_fk.c.rationale).where(
+            s.column__semantic_fk.c.attribute_id == attr
+        )
+    )
+    assert rows == [{"method": None, "rationale": None}]
+
+
 def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
     """A column and attribute in different ingested databases must never link.
 

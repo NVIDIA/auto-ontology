@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -48,6 +49,7 @@ from sqlglot import exp
 from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
+    SemanticFkEvidence,
     fetch_semantic_fk_join_groups,
     fetch_value_key_candidates,
     find_column_attribute_by_column_id,
@@ -61,7 +63,6 @@ from auto_ontology.infra.feature_flags import is_semantic_fk_db_query_prevented
 from auto_ontology.semantic.fk_values import (
     MIN_CONTAINMENT,
     containment,
-    contains,
     is_value_search_ambiguous,
 )
 from auto_ontology.semantic.visit_enter import (
@@ -193,7 +194,9 @@ def _resolve_semantic_fks(database_name: str) -> int:
                 # FK, whose target is always a column in the same connected
                 # database, but treat "not written" the same as "no attribute
                 # found" rather than assume.
-                if merge_semantic_fk(col["id"], attr_id):
+                if merge_semantic_fk(
+                    col["id"], attr_id, SemanticFkEvidence(method="declared")
+                ):
                     declared_written += 1
                     logger.debug(
                         "resolve_semantic_fks [declared]: %s.%s → attr %s",
@@ -245,8 +248,11 @@ def _resolve_semantic_fks(database_name: str) -> int:
 
     def _resolve_one(index: int, col: dict[str, Any]) -> bool:
         _log_start(index, col)
+        trace = _Trace()
         try:
-            attr_id = _resolve_via_vdb(col, retriever, database_name, keys, families)
+            attr_id = _resolve_via_vdb(
+                col, retriever, database_name, keys, families, trace=trace
+            )
             if (
                 attr_id
                 and keys is not None
@@ -259,7 +265,7 @@ def _resolve_semantic_fks(database_name: str) -> int:
             # mechanism that let Term nodes leak across databases elsewhere.
             # merge_semantic_fk verifies against the catalog before writing
             # rather than trust the filter alone, and logs its own rejection.
-            if attr_id and merge_semantic_fk(col["id"], attr_id):
+            if attr_id and merge_semantic_fk(col["id"], attr_id, trace.evidence()):
                 logger.debug(
                     "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),
@@ -563,12 +569,47 @@ class _Families:
 _NO_FAMILIES = _Families([])
 
 
+@dataclass
+class _Trace:
+    """What one column's resolution measured, filled in as it goes.
+
+    The resolvers return only the chosen attribute id; a caller that wants to
+    store how it was chosen passes a trace and reads it back afterwards.
+    """
+
+    method: str | None = None
+    containment: float | None = None
+    vector_distance: float | None = None
+    rationale: str | None = None
+
+    def evidence(self) -> SemanticFkEvidence | None:
+        if self.method is None:
+            return None
+        return SemanticFkEvidence(
+            method=self.method,
+            containment=self.containment,
+            vector_distance=self.vector_distance,
+            rationale=self.rationale,
+        )
+
+
+def _hit_distance(hits: list[dict[str, Any]], attribute_id: str) -> float | None:
+    """The retriever distance of the hit for *attribute_id*, if it has one."""
+    for hit in hits:
+        if (hit.get("metadata") or {}).get("id") == attribute_id:
+            score = _hit_score(hit)
+            return None if score == float("inf") else score
+    return None
+
+
 def _resolve_via_vdb(
     col: dict[str, Any],
     retriever: Retriever,
     database_name: str,
     keys: _KeyIndex | None = None,
     families: _Families = _NO_FAMILIES,
+    *,
+    trace: _Trace | None = None,
 ) -> str | None:
     """Return the id of the ColumnAttribute *col* references, or ``None``.
 
@@ -580,6 +621,9 @@ def _resolve_via_vdb(
 
     A candidate that is another family's copy of a table the column's own
     family has is never offered (:meth:`_Families.crosses`).
+
+    *trace*, when given, records which of these paths chose the result and
+    what it measured.
     """
     hits = [
         hit
@@ -588,16 +632,19 @@ def _resolve_via_vdb(
             col.get("table_id"), (hit.get("metadata") or {}).get("table_id")
         )
     ]
-    selected = _llm_pick_hit(col, hits) if hits else None
-    if keys is None:
+    selected = _llm_pick_hit(col, hits, trace=trace) if hits else None
+    fk_values = (
+        parse_sample_values(col.get("distinct_values")) if keys is not None else None
+    )
+    if keys is None or not fk_values:
+        if selected and trace is not None:
+            trace.method = "llm_pick"
+            trace.vector_distance = _hit_distance(hits, selected)
         return selected
-    fk_values = parse_sample_values(col.get("distinct_values"))
-    if not fk_values:
-        return selected
-    confirmed = _confirm_by_values(col, fk_values, hits, selected, keys)
+    confirmed = _confirm_by_values(col, fk_values, hits, selected, keys, trace=trace)
     if confirmed:
         return confirmed
-    return _match_by_values_only(col, fk_values, keys, families)
+    return _match_by_values_only(col, fk_values, keys, families, trace=trace)
 
 
 def _vector_hits(
@@ -658,6 +705,8 @@ def _confirm_by_values(
     hits: list[dict[str, Any]],
     selected: str | None,
     keys: _KeyIndex,
+    *,
+    trace: _Trace | None = None,
 ) -> str | None:
     """The first hit — the LLM's pick, then by distance — whose values hold *col*'s.
 
@@ -667,16 +716,27 @@ def _confirm_by_values(
     is contained in ``comments.Id`` without referring to it.
     """
     ordered = [selected] if selected else []
-    if is_value_search_ambiguous(str(col.get("name") or ""), fk_values):
-        hits = []
-    for hit in sorted(hits, key=_hit_score):
+    # An ambiguous column may only confirm the pick; *hits* stays whole so the
+    # pick's distance can still be recorded.
+    fallbacks = (
+        [] if is_value_search_ambiguous(str(col.get("name") or ""), fk_values) else hits
+    )
+    for hit in sorted(fallbacks, key=_hit_score):
         hit_id = (hit.get("metadata") or {}).get("id")
         if hit_id and hit_id not in ordered and not _on_own_table(col, hit):
             ordered.append(hit_id)
     for attribute_id in ordered:
-        if contains(
+        share = containment(
             fk_values, keys.values(attribute_id), limit=KEY_DISTINCT_VALUES_LIMIT
-        ):
+        )
+        if share is not None and share >= MIN_CONTAINMENT:
+            if trace is not None:
+                trace.method = "value_confirmed"
+                trace.containment = share
+                trace.vector_distance = _hit_distance(hits, attribute_id)
+                if attribute_id != selected:
+                    # The model's reason argued for a different column.
+                    trace.rationale = None
             if attribute_id != selected:
                 logger.info(
                     "resolve_semantic_fks [values]: %s.%s confirmed by values on "
@@ -703,6 +763,8 @@ def _match_by_values_only(
     fk_values: list[Any],
     keys: _KeyIndex,
     families: _Families,
+    *,
+    trace: _Trace | None = None,
 ) -> str | None:
     """Pick among the key columns whose stored values hold *col*'s."""
     if is_value_search_ambiguous(str(col.get("name") or ""), fk_values):
@@ -738,7 +800,14 @@ def _match_by_values_only(
         candidates,
         system_prompt=_VALUE_SYSTEM_PROMPT,
         source="matched by values",
+        trace=trace,
     )
+    if selected and trace is not None:
+        trace.method = "value_match"
+        trace.containment = next(
+            share for share, row, _ in scored if row["attribute_id"] == selected
+        )
+        trace.vector_distance = None
     if selected:
         logger.info(
             "resolve_semantic_fks [values-only]: %s.%s → attr %s, from %d candidate(s)",
@@ -842,11 +911,13 @@ def _llm_pick_hit(
     *,
     system_prompt: str = _SYSTEM_PROMPT,
     source: str = "from vector search",
+    trace: _Trace | None = None,
 ) -> str | None:
     """Ask the LLM which candidate column the foreign key references.
 
     Returns the ``column_id`` from the chosen hit's metadata, or ``None`` when
-    the LLM is not confident enough to pick any candidate.
+    the LLM is not confident enough to pick any candidate. A valid pick's
+    stated reason goes to *trace*.
 
     The ``column_id`` label only has to be internally consistent between the
     candidate list and the instruction that references it — but it *is* part of
@@ -898,4 +969,6 @@ def _llm_pick_hit(
         )
         return None
 
+    if trace is not None:
+        trace.rationale = (result.rationale or "").strip() or None
     return selected
