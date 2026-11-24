@@ -18,7 +18,7 @@ because they cascade.
 
 from __future__ import annotations
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, literal, select, update
 
 from auto_ontology.catalog.constants import Labels
 
@@ -33,6 +33,7 @@ from auto_ontology.catalog.store.rows import upsert_row
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.pii import untag_attributes_of_columns_being_deleted
 from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.semantic.constants import SEMANTIC_SOURCE
 
 
 def db_exists(db_node):
@@ -110,46 +111,141 @@ def _column_ids_of_table(table_id: str) -> list[str]:
     ]
 
 
+def _table_ids_of_schema(schema_node_id: str) -> list[str]:
+    return [
+        row["id"]
+        for row in store().query_read(
+            select(s.catalog_table.c.id).where(
+                s.catalog_table.c.schema_id == schema_node_id
+            )
+        )
+    ]
+
+
+def _term_ids_of_tables(table_ids: list[str]) -> list[str]:
+    if not table_ids:
+        return []
+    return [
+        row["term_id"]
+        for row in store().query_read(
+            select(s.table__term.c.term_id)
+            .where(s.table__term.c.table_id.in_(table_ids))
+            .distinct()
+        )
+    ]
+
+
+def _attribute_ids_of_columns(column_ids: list[str]) -> list[str]:
+    if not column_ids:
+        return []
+    return [
+        row["attribute_id"]
+        for row in store().query_read(
+            select(s.column__has_attribute.c.attribute_id)
+            .where(s.column__has_attribute.c.column_id.in_(column_ids))
+            .distinct()
+        )
+    ]
+
+
+def _delete_unrepresented_terms(term_ids: list[str]) -> None:
+    if not term_ids:
+        return
+    represented = (
+        select(literal(1))
+        .where(s.table__term.c.term_id == s.term.c.id)
+        .correlate(s.term)
+        .exists()
+    )
+    store().query_write(
+        s.term.delete().where(
+            s.term.c.id.in_(term_ids),
+            s.term.c.source == SEMANTIC_SOURCE,
+            ~represented,
+        )
+    )
+
+
+def _delete_unowned_attributes(attribute_ids: list[str]) -> None:
+    if not attribute_ids:
+        return
+    owned = (
+        select(literal(1))
+        .where(s.column__has_attribute.c.attribute_id == s.column_attribute.c.id)
+        .correlate(s.column_attribute)
+        .exists()
+    )
+    store().query_write(
+        s.column_attribute.delete().where(
+            s.column_attribute.c.id.in_(attribute_ids),
+            ~owned,
+        )
+    )
+
+
 def delete_schema(schema_node_id):
     """Delete a schema. Its tables and columns go with it, by cascade.
 
     PII on attributes of those columns is realigned in the same transaction
-    as the delete. A cleanup that committed while the delete rolled back
-    would leave live columns without labels the next ingest will not put
-    back; failing the whole unit keeps both or neither.
+    as the delete, and semantic Terms and ColumnAttributes that lose their
+    only representing table or owning column are removed too.
     """
     with write_transaction():
-        untag_attributes_of_columns_being_deleted(_column_ids_of_schema(schema_node_id))
+        table_ids = _table_ids_of_schema(schema_node_id)
+        column_ids = _column_ids_of_schema(schema_node_id)
+        term_ids = _term_ids_of_tables(table_ids)
+        attribute_ids = _attribute_ids_of_columns(column_ids)
+        untag_attributes_of_columns_being_deleted(column_ids)
+        if table_ids:
+            store().query_write(
+                s.column_attribute.delete().where(
+                    s.column_attribute.c.table_id.in_(table_ids)
+                )
+            )
         store().query_write(
             s.catalog_schema.delete().where(s.catalog_schema.c.id == schema_node_id)
         )
+        _delete_unowned_attributes(attribute_ids)
+        _delete_unrepresented_terms(term_ids)
 
 
 def delete_table(table_id):
     """Delete a table. Its columns cascade.
 
-    Same atomic unit as :func:`delete_schema`: untag, then delete, or neither.
+    Same atomic unit as :func:`delete_schema`: untag, delete, and clean up
+    orphaned semantic Terms and ColumnAttributes, or none of them.
     """
     with write_transaction():
-        untag_attributes_of_columns_being_deleted(_column_ids_of_table(table_id))
+        column_ids = _column_ids_of_table(table_id)
+        term_ids = _term_ids_of_tables([table_id])
+        attribute_ids = _attribute_ids_of_columns(column_ids)
+        untag_attributes_of_columns_being_deleted(column_ids)
+        store().query_write(
+            s.column_attribute.delete().where(s.column_attribute.c.table_id == table_id)
+        )
         store().query_write(
             s.catalog_table.delete().where(s.catalog_table.c.id == table_id)
         )
+        _delete_unowned_attributes(attribute_ids)
+        _delete_unrepresented_terms(term_ids)
 
 
 def delete_columns_batch(column_ids):
-    """Delete catalog columns, realigning PII on their attributes first.
+    """Delete catalog columns, realigning PII and removing orphaned attributes.
 
-    Same atomic unit as :func:`delete_schema`: untag, then delete, or neither.
+    Same atomic unit as :func:`delete_schema`: untag, delete, and clean up
+    ColumnAttributes that lose their only owning column, or none of them.
     """
     ids = list(column_ids)
     if not ids:
         return
     with write_transaction():
+        attribute_ids = _attribute_ids_of_columns(ids)
         untag_attributes_of_columns_being_deleted(ids)
         store().query_write(
             s.catalog_column.delete().where(s.catalog_column.c.id.in_(ids))
         )
+        _delete_unowned_attributes(attribute_ids)
 
 
 def add_schemas_edge_batch(edges, created):

@@ -288,7 +288,9 @@ def semantic_layer_calculated() -> bool:
     """Has the semantic layer been built at all?"""
     return bool(
         store().query_read(
-            select(s.term.c.id).where(s.term.c.source == SEMANTIC_SOURCE).limit(1)
+            select(s.term.c.id)
+            .where(s.term.c.source == SEMANTIC_SOURCE, _represented())
+            .limit(1)
         )
     )
 
@@ -485,13 +487,19 @@ def upsert_table_term(
             represented_tables = {
                 row["table_id"] for row in existing if row.get("table_id")
             }
-            if existing and represented_tables == {table_id}:
+            if existing and represented_tables in ({table_id}, set()):
                 term_id = existing[0]["id"]
                 store().query_write(
                     update(s.term)
                     .where(s.term.c.id == term_id)
                     .values(description=description, synonyms=synonyms or [])
                 )
+                if not represented_tables:
+                    store().query_write(
+                        insert(s.table__term)
+                        .values(table_id=table_id, term_id=term_id)
+                        .on_conflict_do_nothing()
+                    )
                 return term_id, candidate_name
             if existing:
                 continue
