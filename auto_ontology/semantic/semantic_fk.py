@@ -665,7 +665,7 @@ def _confirm_by_values(
     The stored values are each column's lowest few, so against a large key
     they can miss an FK that sits elsewhere in the key's range, or catch only
     its orphans. The LLM's pick alone is then measured in the warehouse
-    (:func:`_pick_held_in_warehouse`); the other hits stay on stored values.
+    (:func:`_warehouse_containment`); the other hits stay on stored values.
 
     A hit on *col*'s own table is tried only as the LLM's pick, and so is every
     hit when *col*'s values are ones any surrogate key holds
@@ -682,9 +682,7 @@ def _confirm_by_values(
     for attribute_id in ordered:
         if contains(
             fk_values, keys.values(attribute_id), limit=KEY_DISTINCT_VALUES_LIMIT
-        ) or (
-            attribute_id == selected and _pick_held_in_warehouse(keys, col, selected)
-        ):
+        ) or (attribute_id == selected and _held_in_warehouse(keys, col, selected)):
             if attribute_id != selected:
                 logger.info(
                     "resolve_semantic_fks [values]: %s.%s confirmed by values on "
@@ -762,19 +760,25 @@ def _match_by_values_only(
 _PROBE_FK_VALUES = 1000
 
 
-def _pick_held_in_warehouse(
+def _held_in_warehouse(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) -> bool:
+    """Whether the key holds at least :data:`MIN_CONTAINMENT` of *col*'s values."""
+    share = _warehouse_containment(keys, col, attribute_id)
+    return share is not None and share >= MIN_CONTAINMENT
+
+
+def _warehouse_containment(
     keys: _KeyIndex, col: dict[str, Any], attribute_id: str
-) -> bool:
-    """Whether the key holds *col*'s values, measured in the warehouse.
+) -> float | None:
+    """Share of *col*'s distinct values the key holds, measured in the warehouse.
 
     Up to :data:`_PROBE_FK_VALUES` distinct FK values are looked up in the
-    key column; at least :data:`MIN_CONTAINMENT` of them must be found.
-    Retried with both sides cast to text when the plain comparison fails, as
-    :func:`_join_returns_rows` does. A probe that cannot run confirms nothing.
+    key column. Retried with both sides cast to text when the plain
+    comparison fails, as :func:`_join_returns_rows` does. ``None`` when the
+    probe cannot run or finds no FK values.
     """
     target = keys.target(attribute_id)
     if target is None:
-        return False
+        return None
     label = (
         f"{col.get('table_name')}.{col.get('name')} -> "
         f"{target['table_name']}.{target['column_name']}"
@@ -797,8 +801,8 @@ def _pick_held_in_warehouse(
             label,
             "none" if share is None else f"{share:.0%}",
         )
-        return share is not None and share >= MIN_CONTAINMENT
-    return False
+        return share
+    return None
 
 
 def _probe_share(df: Any) -> float | None:
