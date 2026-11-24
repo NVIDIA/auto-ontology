@@ -191,6 +191,23 @@ class TestBatching:
         batches = _batch([statement("only one", turn=25)], turn_text)
         assert len(batches) == 1
 
+    def test_a_statement_whose_turn_was_not_fetched_joins_the_nearest_batch(
+        self,
+    ) -> None:
+        turn_text = {i: f"turn {i}" for i in range(20)}
+        batches = _batch([statement("late", turn=40)], turn_text)
+
+        assert [(indexes[0], [n.name for n in m]) for indexes, m in batches] == [
+            (10, ["late"])
+        ]
+
+    def test_a_statement_with_no_turn_is_logged(self, caplog) -> None:
+        node = statement("unplaced", turn=0)
+        node.turn_indexes = set()
+
+        assert _batch([node], {0: "turn 0"}) == []
+        assert "unplaced" in caplog.text
+
 
 class TestAcceptance:
     def setup_method(self) -> None:

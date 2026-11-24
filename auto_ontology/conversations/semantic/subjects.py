@@ -237,16 +237,35 @@ def _batch(
     about exactly once even when it was accumulated across several windows. The
     text of its later turns is then sometimes absent from the call -- which
     costs less than asking twice and having to reconcile two answers.
+
+    A statement whose earliest turn was not fetched goes to the nearest batch
+    rather than to none: left out, it would end up with no subject and nothing
+    would say so.
     """
     ordered = sorted(turn_text)
-    batches = []
-    for start in range(0, len(ordered), TURNS_PER_CALL):
-        indexes = ordered[start : start + TURNS_PER_CALL]
-        window = set(indexes)
-        members = [node for node in statements if _first_turn(node) in window]
-        if members:
-            batches.append((indexes, members))
-    return batches
+    chunks = [
+        ordered[start : start + TURNS_PER_CALL]
+        for start in range(0, len(ordered), TURNS_PER_CALL)
+    ]
+    members: list[list[NodeDraft]] = [[] for _ in chunks]
+    stranded: list[str] = []
+    for node in statements:
+        if not node.turn_indexes or not chunks:
+            stranded.append(node.name)
+            continue
+        first = _first_turn(node)
+        nearest = min(
+            range(len(chunks)),
+            key=lambda i: max(chunks[i][0] - first, first - chunks[i][-1], 0),
+        )
+        members[nearest].append(node)
+    if stranded:
+        logger.warning(
+            "%d statement(s) cite no fetched turn and get no subject: %s",
+            len(stranded),
+            ", ".join(stranded[:10]),
+        )
+    return [(indexes, batch) for indexes, batch in zip(chunks, members) if batch]
 
 
 def _look_up(offered: dict[str, NodeDraft], answer: str) -> NodeDraft | None:
