@@ -945,6 +945,24 @@ def test_value_only_match_records_its_share_and_its_own_reason() -> None:
     )
 
 
+def test_an_ambiguous_column_confirming_the_pick_keeps_its_distance() -> None:
+    keys = _keys([_key_row("comments-id", "table-2", list(range(1, 21)))])
+    column = _fk_column([1, 2, 3, 5, 8], name="VoteTypeId")
+    trace = semantic_fk._Trace()
+
+    selected = semantic_fk._confirm_by_values(
+        column,
+        [1, 2, 3, 5, 8],
+        [_hit("comments-id", "table-2", score=0.1)],
+        "comments-id",
+        keys,
+        trace=trace,
+    )
+
+    assert selected == "comments-id"
+    assert trace.vector_distance == 0.1
+
+
 def test_an_empty_trace_has_no_evidence() -> None:
     assert semantic_fk._Trace().evidence() is None
 

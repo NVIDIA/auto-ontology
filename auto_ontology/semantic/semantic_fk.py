@@ -716,9 +716,12 @@ def _confirm_by_values(
     is contained in ``comments.Id`` without referring to it.
     """
     ordered = [selected] if selected else []
-    if is_value_search_ambiguous(str(col.get("name") or ""), fk_values):
-        hits = []
-    for hit in sorted(hits, key=_hit_score):
+    # An ambiguous column may only confirm the pick; *hits* stays whole so the
+    # pick's distance can still be recorded.
+    fallbacks = (
+        [] if is_value_search_ambiguous(str(col.get("name") or ""), fk_values) else hits
+    )
+    for hit in sorted(fallbacks, key=_hit_score):
         hit_id = (hit.get("metadata") or {}).get("id")
         if hit_id and hit_id not in ordered and not _on_own_table(col, hit):
             ordered.append(hit_id)

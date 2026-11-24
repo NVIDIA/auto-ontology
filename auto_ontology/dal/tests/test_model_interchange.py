@@ -497,6 +497,7 @@ def test_semantic_fk_evidence_is_exported(world) -> None:
 
 
 def test_reimport_replaces_semantic_fk_evidence_it_carries(world) -> None:
+    _record_evidence(world)
     document = _document(world)
     fk = document.semantic_layer.semantic_fks[0]
     fk.method, fk.containment, fk.rationale = "declared", None, None
