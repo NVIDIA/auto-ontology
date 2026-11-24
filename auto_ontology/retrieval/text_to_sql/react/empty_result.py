@@ -164,7 +164,15 @@ def literal_filters(statement: exp.Expression, catalog: CatalogNames) -> list[_F
 
 
 def _negated(node: exp.Expression) -> bool:
-    return bool(node.args.get("negate")) or isinstance(node.parent, exp.Not)
+    """Whether *node* is negated, itself or by a NOT around it in its clause."""
+    if node.args.get("negate"):
+        return True
+    parent = node.parent
+    while parent is not None and not isinstance(parent, (exp.Where, exp.Having)):
+        if isinstance(parent, exp.Not):
+            return True
+        parent = parent.parent
+    return False
 
 
 def _is_value(node: exp.Expression | None) -> bool:
@@ -306,8 +314,8 @@ def _probe(
         )
         if not entry["ok"]:
             return f"{head} Its stored range could not be read."
-        row = (entry["rows"] or [{}])[0]
-        low, high = row.get("low"), row.get("high")
+        # By position: an engine may return the aliases in upper case.
+        low, high = [*(entry["rows"] or [{}])[0].values(), None, None][:2]
         if low is None:
             return f"{head} It has no stored values."
         note = _type_note(f.literals, [low, high])

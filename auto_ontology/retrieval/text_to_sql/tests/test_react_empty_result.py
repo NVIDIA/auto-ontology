@@ -104,6 +104,37 @@ def test_a_range_filter_shows_the_stored_range(ctx: ToolContext) -> None:
     assert "Stored range: 20.0 to 100.0." in observation
 
 
+def test_range_keys_are_read_whatever_their_case(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = ctx.connectors[0]
+    execute = connector.execute
+
+    def upper_case_columns(sql: str):
+        frame = execute(sql)
+        return frame.rename(columns=str.upper)
+
+    monkeypatch.setattr(connector, "execute", upper_case_columns)
+
+    observation, _ = loop.submit(
+        ctx, "SELECT order_id FROM sales_orders WHERE amount > 1000"
+    )
+
+    assert "Stored range: 20.0 to 100.0." in observation
+
+
+def test_a_comparison_under_a_not_is_not_probed(ctx: ToolContext) -> None:
+    observation, _ = loop.submit(
+        ctx,
+        "SELECT order_id FROM sales_orders "
+        "WHERE NOT (status = 'OPEN' OR status = 'SHIPPED')",
+    )
+
+    assert "could not be checked" in observation
+    assert "no filter compares a column with a value" in observation
+    assert len(_executed(ctx)) == 1
+
+
 def test_filters_that_each_match_point_at_how_they_combine(ctx: ToolContext) -> None:
     observation, _ = loop.submit(
         ctx,
