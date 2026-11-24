@@ -941,7 +941,8 @@ def test_containment_probe_counts_distinct_fk_values_held_by_the_key() -> None:
     )
 
     assert sql == (
-        "SELECT COUNT(*) AS total, COUNT(k.v) AS held FROM "
+        "SELECT COUNT(DISTINCT f.v) AS total, "
+        "COUNT(DISTINCT CASE WHEN k.v IS NOT NULL THEN f.v END) AS held FROM "
         '(SELECT DISTINCT "product_code" AS v FROM "sales"."order_lines" '
         'WHERE "product_code" IS NOT NULL LIMIT 1000) f '
         'LEFT JOIN (SELECT DISTINCT "code" AS v FROM "sales"."products") k '

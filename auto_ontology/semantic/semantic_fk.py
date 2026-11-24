@@ -850,7 +850,10 @@ def _containment_probe_sql(
     source = connector.qualify(col.get("schema_name"), col["table_name"])
     target_table = connector.qualify(target.get("schema_name"), target["table_name"])
     return (
-        f"SELECT COUNT(*) AS total, COUNT(k.v) AS held FROM "
+        # Each FK value counts once: a key with several values equal to one FK
+        # value (an implicit numeric cast of '100' and '0100') joins it twice.
+        f"SELECT COUNT(DISTINCT f.v) AS total, "
+        f"COUNT(DISTINCT CASE WHEN k.v IS NOT NULL THEN f.v END) AS held FROM "
         f"(SELECT DISTINCT {fk_sql} AS v FROM {source} WHERE {fk_sql} IS NOT NULL "
         f"LIMIT {_PROBE_FK_VALUES}) f "
         f"LEFT JOIN (SELECT DISTINCT {key_sql} AS v FROM {target_table}) k "
