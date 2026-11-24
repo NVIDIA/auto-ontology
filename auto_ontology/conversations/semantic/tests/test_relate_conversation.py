@@ -51,6 +51,9 @@ def _fact(name: str, key: str) -> dict:
     }
 
 
+_EMBED_FOR_RELATE = pipeline._embed_for_relate
+
+
 @pytest.fixture
 def graph(database_name: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     ids = semantic_store.replace_graph(
@@ -78,7 +81,7 @@ def graph(database_name: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]
 
     monkeypatch.setattr(pipeline, "reconcile_keys", rekey)
     monkeypatch.setattr(pipeline, "derive_edges", lambda _: ([], set()))
-    monkeypatch.setattr(pipeline, "_embed_for_relate", lambda _: None)
+    monkeypatch.setattr(pipeline, "_embed_for_relate", lambda _: True)
     monkeypatch.setattr(pipeline, "_embed_paths", lambda **_: 0)
     monkeypatch.setattr(vdb, "get_one_hop_path_vdb", lambda **_: _NoVDB())
     return ids
@@ -121,6 +124,24 @@ def test_a_failed_adjudication_keeps_the_old_edges(
 
     assert _semantic(graph) == [("contradicts", "old verdict")]
     assert _keys(graph) == ["cache", "storage"]
+
+
+def test_a_failed_embedding_keeps_the_old_edges(
+    database_name: str, graph: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_ontology.utils import embedding
+
+    def down(*_: object, **__: object) -> list:
+        raise RuntimeError("embedding endpoint down")
+
+    monkeypatch.setattr(pipeline, "_embed_for_relate", _EMBED_FOR_RELATE)
+    monkeypatch.setattr(embedding, "embed_texts", down)
+    monkeypatch.setattr(pipeline, "relate_nodes", lambda *_, **__: [])
+
+    with pytest.raises(RuntimeError, match="could not be embedded"):
+        pipeline.relate_conversation(database_name=database_name, conversation_id="1")
+
+    assert _semantic(graph) == [("contradicts", "old verdict")]
 
 
 def test_a_pair_with_no_verdict_keeps_the_old_edges(

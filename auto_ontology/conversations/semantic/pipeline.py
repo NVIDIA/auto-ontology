@@ -836,18 +836,19 @@ def _embed_names(nodes: list[NodeDraft]) -> dict[str, list[float]]:
     return {name: vector for name, vector in zip(names, vectors) if vector}
 
 
-def _embed_for_relate(stored: list[dict]) -> None:
-    """Fill in the vectors the candidate proposal needs.
+def _embed_for_relate(stored: list[dict]) -> bool:
+    """Fill in the vectors the candidate proposal needs; ``False`` if some are missing.
 
     Extraction no longer embeds as it goes -- identity is the property key and
     value now, not vector proximity -- so the vectors arrive null and the one
     caller that needs them asks for them here. Failure leaves them null, which
     costs :func:`candidate_pairs` its similarity gate and still proposes every
-    ``event``/``event`` pair.
+    ``event``/``event`` pair. A first build can live with that; a retune
+    replacing edges that already exist cannot, and checks the result.
     """
     missing = [row for row in stored if not row.get("vector")]
     if not missing:
-        return
+        return True
 
     from auto_ontology.utils import get_embed_params
     from auto_ontology.utils.embedding import embed_texts
@@ -864,9 +865,10 @@ def _embed_for_relate(stored: list[dict]) -> None:
             "falls back to event pairs only.",
             len(missing),
         )
-        return
+        return False
     for row, vector in zip(missing, vectors):
         row["vector"] = vector
+    return all(row.get("vector") for row in missing)
 
 
 def relate_conversation(*, database_name: str, conversation_id: str) -> int:
@@ -914,7 +916,14 @@ def relate_conversation(*, database_name: str, conversation_id: str) -> int:
         if row.get("attribute_key") != keys_before[str(row["id"])]
     ]
     derived, decided = derive_edges(statements)
-    _embed_for_relate(statements)
+    # Without vectors the proposal is short of every pair but events, and the
+    # replace below would drop the existing verdicts on the rest.
+    if not _embed_for_relate(statements):
+        raise RuntimeError(
+            f"Statements of conversation {conversation_id!r} could not be "
+            "embedded for candidate proposal -- the previous semantic edges "
+            "are kept."
+        )
     failed: list[frozenset[str]] = []
     ruled = relate_nodes(statements, skip=decided, failed=failed)
     if failed:
