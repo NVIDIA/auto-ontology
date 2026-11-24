@@ -66,6 +66,20 @@ def test_extract_tables_and_columns_subquery_inside_having() -> None:
     assert result.tables["u"].columns == {"c"}
 
 
+def test_extract_tables_and_columns_window_order_by_matching_an_output_alias() -> None:
+    """An ORDER BY inside a window or WITHIN GROUP isn't a SELECT output clause."""
+    window = extract_tables_and_columns(
+        "SELECT ROW_NUMBER() OVER (ORDER BY a) AS a FROM t", ["postgres"], {}
+    )
+    assert window.tables["t"].columns == {"a"}
+    within_group = extract_tables_and_columns(
+        "SELECT STRING_AGG(b, ',') WITHIN GROUP (ORDER BY a) AS a FROM t",
+        ["postgres"],
+        {},
+    )
+    assert within_group.tables["t"].columns == {"a", "b"}
+
+
 def test_extract_tables_and_columns_cte_virtual_tables_excluded() -> None:
     """CTE aliases must not be treated as real source tables."""
     result = extract_tables_and_columns(

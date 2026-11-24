@@ -159,8 +159,14 @@ def _infer_single_table_columns(expression: exp.Expression) -> None:
             # In these clauses a bare name may be one of the SELECT's own outputs.
             # The search stops at the nearest SELECT, so a subquery's columns aren't
             # taken for the clause it sits in.
+            # Only a clause that belongs directly to the SELECT counts: an ORDER BY
+            # inside a window or WITHIN GROUP is not one of its output clauses.
             clause = column.find_ancestor(exp.Select, *_OUTPUT_CLAUSES)
-            if isinstance(clause, _OUTPUT_CLAUSES) and column.name in outputs:
+            if (
+                isinstance(clause, _OUTPUT_CLAUSES)
+                and isinstance(clause.parent, exp.Select)
+                and column.name in outputs
+            ):
                 continue
             column.set("table", exp.to_identifier(source.alias_or_name))
 
