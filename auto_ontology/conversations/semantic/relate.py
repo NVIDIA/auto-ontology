@@ -264,6 +264,10 @@ def _date(attribute: dict) -> str:
     return f"\n  said on: {anchor}" if anchor else ""
 
 
+def _kinds(attribute: dict) -> str:
+    return "/".join(attribute.get("kinds") or ())
+
+
 def _about(attribute: dict) -> str:
     return ", ".join(attribute.get("about") or ()) or "not recorded"
 
@@ -278,14 +282,14 @@ def adjudicate(left: dict, right: dict) -> PairVerdict | None:
     prompt = _TEMPLATE.format(
         a_about=_about(left),
         a_name=left.get("name", ""),
-        a_kind=left.get("kind", ""),
+        a_kind=_kinds(left),
         a_key=left.get("attribute_key") or "none",
         a_description=left.get("description", ""),
         a_turns=_turns(left),
         a_date=_date(left),
         b_about=_about(right),
         b_name=right.get("name", ""),
-        b_kind=right.get("kind", ""),
+        b_kind=_kinds(right),
         b_key=right.get("attribute_key") or "none",
         b_description=right.get("description", ""),
         b_turns=_turns(right),

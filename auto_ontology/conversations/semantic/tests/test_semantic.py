@@ -600,6 +600,30 @@ def test_candidates_come_back_closest_first() -> None:
     assert scores == sorted(scores, reverse=True)
 
 
+def test_the_adjudicator_sees_each_nodes_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Node rows carry ``kinds``; ``precedes`` depends on both being events."""
+    import auto_ontology.utils.llm_invoke as llm
+    from auto_ontology.conversations.semantic.relate import adjudicate
+
+    sent: list[str] = []
+    monkeypatch.setattr(llm, "get_llm_client", lambda **_: object())
+    monkeypatch.setattr(
+        llm,
+        "invoke_with_structured_output",
+        lambda _client, messages, _schema: sent.append(messages[-1].content),
+    )
+
+    adjudicate(
+        {"id": "a", "name": "got the key", "kinds": ["event"]},
+        {"id": "b", "name": "key works", "kinds": ["fact", "state"]},
+    )
+
+    assert "event" in sent[0]
+    assert "fact/state" in sent[0]
+
+
 def test_decided_pairs_are_dropped_before_the_cap() -> None:
     """A pair derive already settled must not use up the adjudication budget."""
     rows = [
