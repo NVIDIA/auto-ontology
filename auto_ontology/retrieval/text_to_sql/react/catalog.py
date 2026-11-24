@@ -320,7 +320,19 @@ def _resolve_tables(
 
 
 def _in_database(ctx: ToolContext, table: dict) -> bool:
-    return not ctx.database_name or table.get("database_name") == ctx.database_name
+    """Whether *table* is one the episode can query.
+
+    The catalog can still hold a database whose connection is gone; its tables
+    would send the model after SQL that has nowhere to run.
+    """
+    database_name = table.get("database_name")
+    if ctx.database_name:
+        return database_name == ctx.database_name
+    if not database_name or not ctx.connectors:
+        return True
+    return any(
+        getattr(c, "database_name", None) == database_name for c in ctx.connectors
+    )
 
 
 def _qualified(table: dict) -> str:
