@@ -55,14 +55,25 @@ class _FakeVdb:
         return [self._hits[:top_k]]
 
 
+def _stores(nodes: _FakeVdb, paths: _FakeVdb) -> Any:
+    from auto_ontology.vdb import (
+        CONVERSATION_SEMANTIC_VDB_COLLECTION,
+        ONE_HOP_PATH_VDB_COLLECTION,
+    )
+
+    return {
+        CONVERSATION_SEMANTIC_VDB_COLLECTION: nodes,
+        ONE_HOP_PATH_VDB_COLLECTION: paths,
+    }.__getitem__
+
+
 @contextlib.contextmanager
 def _stub(hits: list[dict], paths: list[dict] | None = None) -> Iterator[_FakeVdb]:
     vdb = _FakeVdb(hits)
     module = "auto_ontology.retrieval.conversation.semantic_search"
     with (
         patch(f"{module}.embed_query", return_value=[0.1, 0.2]),
-        patch(f"{module}.get_conversation_semantic_vdb", return_value=vdb),
-        patch(f"{module}.get_one_hop_path_vdb", return_value=_FakeVdb(paths or [])),
+        patch(f"{module}.shared_vdb", side_effect=_stores(vdb, _FakeVdb(paths or []))),
     ):
         yield vdb
 
@@ -71,7 +82,7 @@ def test_a_missing_semantic_layer_falls_through_to_the_turn_route() -> None:
     from auto_ontology.retrieval.conversation.search import TurnHit
     from auto_ontology.retrieval.conversation.semantic_search import search_semantic
 
-    def missing(**_: Any) -> Any:
+    def missing(*_: Any) -> Any:
         raise RuntimeError("collection does not exist")
 
     turn = TurnHit(
@@ -87,8 +98,7 @@ def test_a_missing_semantic_layer_falls_through_to_the_turn_route() -> None:
     store = f"{module}.semantic_store"
     with (
         patch(f"{module}.embed_query", return_value=[0.1, 0.2]),
-        patch(f"{module}.get_conversation_semantic_vdb", side_effect=missing),
-        patch(f"{module}.get_one_hop_path_vdb", side_effect=missing),
+        patch(f"{module}.shared_vdb", side_effect=missing),
         patch(f"{store}.fetch_nodes", return_value=[]),
         patch(f"{store}.fetch_edges", return_value=[]),
         patch(f"{store}.fetch_half_edges", return_value=[]),
@@ -107,8 +117,7 @@ def test_one_search_embeds_the_query_once() -> None:
     store = f"{module}.semantic_store"
     with (
         patch(f"{module}.embed_query", return_value=_VECTOR) as embedded,
-        patch(f"{module}.get_conversation_semantic_vdb", return_value=_FakeVdb([])),
-        patch(f"{module}.get_one_hop_path_vdb", return_value=_FakeVdb([])),
+        patch(f"{module}.shared_vdb", return_value=_FakeVdb([])),
         patch(f"{store}.fetch_nodes", return_value=[]),
         patch(f"{store}.fetch_edges", return_value=[]),
         patch(f"{store}.fetch_half_edges", return_value=[]),

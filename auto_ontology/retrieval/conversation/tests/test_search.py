@@ -76,7 +76,7 @@ def _stub(
             return_value=[0.1, 0.2] if vector is _DEFAULT_VECTOR else vector,
         ),
         patch(
-            "auto_ontology.retrieval.conversation.search.get_conversation_vdb",
+            "auto_ontology.retrieval.conversation.search.shared_vdb",
             return_value=vdb,
         ),
         patch(
@@ -121,7 +121,7 @@ def test_a_timeout_embedding_the_query_is_retried() -> None:
         patch.object(retriever, "get_embed_params"),
         patch.object(retriever.time, "sleep"),
         patch(
-            "auto_ontology.retrieval.conversation.search.get_conversation_vdb",
+            "auto_ontology.retrieval.conversation.search.shared_vdb",
             return_value=_FakeVdb([_hit(3, 0.2)]),
         ),
         patch(

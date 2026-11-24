@@ -46,7 +46,11 @@ from auto_ontology.conversations.store import fetch_turns
 from auto_ontology.dal.schema import CONVERSATION_NODE_SUBJECT
 from auto_ontology.retrieval.conversation.search import TurnHit, search_turns
 from auto_ontology.utils.retriever import embed_query
-from auto_ontology.vdb import get_conversation_semantic_vdb, get_one_hop_path_vdb
+from auto_ontology.vdb import (
+    CONVERSATION_SEMANTIC_VDB_COLLECTION,
+    ONE_HOP_PATH_VDB_COLLECTION,
+    shared_vdb,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +126,7 @@ def _matched_ids(
     if top_k <= 0 or vector is None:
         return []
 
-    hits = get_conversation_semantic_vdb(database_name=database_name).retrieval(
+    hits = shared_vdb(CONVERSATION_SEMANTIC_VDB_COLLECTION).retrieval(
         [vector],
         top_k=top_k + _SUBJECT_HEADROOM,
         where={"database_name": database_name, "label": "Conversation"},
@@ -173,7 +177,7 @@ def _matched_path_endpoints(
     if path_k <= 0 or vector is None:
         return []
 
-    hits = get_one_hop_path_vdb(database_name=database_name).retrieval(
+    hits = shared_vdb(ONE_HOP_PATH_VDB_COLLECTION).retrieval(
         [vector],
         top_k=path_k * _PATH_SCAN,
         where={"database_name": database_name, "label": "Conversation"},

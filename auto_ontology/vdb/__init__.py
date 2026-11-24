@@ -4,6 +4,8 @@
 
 """VDB initialization — data layer, semantic layer and conversation collections."""
 
+import functools
+
 from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.vdb.postgres import PostgresVDB
 
@@ -70,6 +72,18 @@ def get_vdb(
     if database_name:
         kwargs["database_name"] = database_name
     return PostgresVDB(reset=reset, **kwargs)
+
+
+@functools.cache
+def shared_vdb(collection_name: str) -> PostgresVDB:
+    """One store per collection for searching, shared by the whole process.
+
+    Each store holds its own connection pool, so a store built per query is a
+    pool per query that nothing closes. A search scopes itself with a
+    ``where`` filter, so the store needs no database of its own; writes still
+    build theirs, because ``reset`` is what binds one to a database.
+    """
+    return get_vdb(collection_name=collection_name)
 
 
 def get_data_vdb(

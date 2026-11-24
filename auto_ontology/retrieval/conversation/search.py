@@ -30,7 +30,7 @@ from typing import Any
 
 from auto_ontology.conversations.store import fetch_turns
 from auto_ontology.utils.retriever import embed_query
-from auto_ontology.vdb import get_conversation_vdb
+from auto_ontology.vdb import CONVERSATION_VDB_COLLECTION, shared_vdb
 
 __all__ = ["TurnHit", "search_turns"]
 
@@ -90,7 +90,7 @@ def search_turns(
     if vector is None:
         return []
 
-    hits = get_conversation_vdb(database_name=database_name).retrieval(
+    hits = shared_vdb(CONVERSATION_VDB_COLLECTION).retrieval(
         [vector],
         top_k=top_k,
         # Both predicates matter. `database_name` is the memory boundary and
