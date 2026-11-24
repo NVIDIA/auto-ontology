@@ -13,13 +13,13 @@ detection.
 
 from __future__ import annotations
 
-import re
 from typing import Iterable
 
 import sqlglot
 from sqlglot import exp
 
 from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.bigquery import wildcard_for
 
 
 def resolve_target_database_name(
@@ -149,17 +149,6 @@ def _connector_named(
         if getattr(connector, "database_name", None) == resolved:
             return connector
     return None
-
-
-# A single shard (``events_20210131``) or a partial wildcard (``events_2021*``)
-# of a date-sharded BigQuery table, which the catalog holds as ``events_*``.
-_SHARD_REFERENCE = re.compile(r"^(?P<prefix>.*\D)(?:\d{4,8}|\d{1,7}\*)$")
-
-
-def wildcard_for(table: str) -> str | None:
-    """The wildcard table that *table* reads part of, if it names shards."""
-    match = _SHARD_REFERENCE.match(table)
-    return f"{match.group('prefix')}*" if match else None
 
 
 def databases_for_sql(

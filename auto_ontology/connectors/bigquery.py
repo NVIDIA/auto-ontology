@@ -148,7 +148,21 @@ _FK_SCHEMA = [
 # A shard ends in a 4- to 8-digit date (2017, 201708, 20170801) after a
 # non-digit, so ``gsod1929`` and ``events_20201101`` qualify and
 # ``icoads_core_1662_2000`` groups with nothing.
-_SHARD_NAME = re.compile(r"^(?P<prefix>.*\D)(?P<suffix>\d{4,8})$")
+_SHARD_PREFIX = r"(?P<prefix>.*\D)"
+_SHARD_NAME = re.compile(rf"^{_SHARD_PREFIX}(?P<suffix>\d{{4,8}})$")
+# One shard, or a partial wildcard (``events_2021*``) over some of them.
+_SHARD_REFERENCE = re.compile(rf"^{_SHARD_PREFIX}(?:\d{{4,8}}|\d{{1,7}}\*)$")
+
+
+def wildcard_for(table: str) -> str | None:
+    """The wildcard table (``events_*``) that *table* reads part of, if any.
+
+    The catalog holds a date-sharded table only as its wildcard, so SQL naming
+    a single shard or a partial wildcard is matched against that.
+    """
+    match = _SHARD_REFERENCE.match(table)
+    return f"{match.group('prefix')}*" if match else None
+
 
 # BigQuery's pseudo-column on a wildcard table. Listing it as a column is what
 # lets the agent's catalog check accept ``WHERE _TABLE_SUFFIX BETWEEN ...``.
