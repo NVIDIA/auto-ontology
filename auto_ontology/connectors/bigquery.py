@@ -1177,29 +1177,41 @@ class BigQueryDatabase(SQLDatabase):
             return None
         return (_by_dataset(self._shard_families(), schema) or {}).get(table)
 
-    def _shard_owners(self) -> dict[tuple[str, str], ShardFamily]:
+    @staticmethod
+    def _shard_owners(
+        families: dict[str, dict[str, ShardFamily]],
+    ) -> dict[tuple[str, str], ShardFamily]:
         """``(dataset, shard)`` -> its family."""
         return {
             (schema, shard): family
-            for schema, families in self._shard_families().items()
-            for family in families.values()
+            for schema, by_wildcard in families.items()
+            for family in by_wildcard.values()
             for shard in family.shards
         }
 
+    @classmethod
     def _collapse_shards(
-        self, frame: pd.DataFrame, schema_col: str, table_col: str
+        cls,
+        frame: pd.DataFrame,
+        schema_col: str,
+        table_col: str,
+        families: dict[str, dict[str, ShardFamily]],
     ) -> pd.DataFrame:
         """Shards dropped, and each wildcard given the rows of its schema table.
 
         The schema table may be a non-shard the wildcard also matches; that one
-        keeps its own rows too.
+        keeps its own rows too. *families* is one snapshot of the family map,
+        taken by the caller before it read *frame*: the map is reloaded once
+        an hour, and two reads on either side of a reload could disagree on
+        which tables a wildcard stands for, dropping its shards without
+        emitting it.
         """
-        owners = self._shard_owners()
+        owners = cls._shard_owners(families)
         if frame.empty or not owners:
             return frame
         sources: dict[tuple[str, str], list[ShardFamily]] = {}
-        for schema, families in self._shard_families().items():
-            for family in families.values():
+        for schema, by_wildcard in families.items():
+            for family in by_wildcard.values():
                 sources.setdefault((schema, family.schema_table), []).append(family)
         picks: list[int] = []
         names: list[Any] = []
@@ -1247,6 +1259,7 @@ class BigQueryDatabase(SQLDatabase):
 
         frame = self._per_dataset(sql, _TABLE_SCHEMA)
         self._remember_families(frame)
+        families = self._families or {}
         frame = frame.drop(columns="creation_time", errors="ignore")
         if frame.empty:
             return frame
@@ -1256,8 +1269,7 @@ class BigQueryDatabase(SQLDatabase):
             .map(lambda kind: _TABLE_TYPES.get(kind.upper(), TableTypes.BASE_TABLE))
         )
         frame["description"] = frame["description"].map(_description)
-        frame = self._collapse_shards(frame, "table_schema", "table_name")
-        families = self._shard_families()
+        frame = self._collapse_shards(frame, "table_schema", "table_name", families)
         frame["description"] = [
             f"{family.note()} {description or ''}".strip()
             if (family := families.get(str(schema), {}).get(str(table)))
@@ -1296,8 +1308,12 @@ class BigQueryDatabase(SQLDatabase):
                 ORDER BY c.table_name, c.ordinal_position
             """
 
+        families = self._shard_families()
         frame = self._collapse_shards(
-            self._per_dataset(sql, _COLUMN_SCHEMA), "table_schema", "table_name"
+            self._per_dataset(sql, _COLUMN_SCHEMA),
+            "table_schema",
+            "table_name",
+            families,
         )
         suffixes = [
             {
@@ -1320,7 +1336,7 @@ class BigQueryDatabase(SQLDatabase):
                 ),
             }
             for schema in frame["table_schema"].drop_duplicates()
-            for family in self._shard_families().get(str(schema), {}).values()
+            for family in families.get(str(schema), {}).values()
             if (
                 (frame["table_schema"] == schema)
                 & (frame["table_name"] == family.wildcard)
@@ -1410,8 +1426,9 @@ class BigQueryDatabase(SQLDatabase):
                 ORDER BY k.table_name, k.ordinal_position
             """
 
+        families = self._shard_families()
         return self._collapse_shards(
-            self._per_dataset(sql, _PK_SCHEMA), "table_schema", "table_name"
+            self._per_dataset(sql, _PK_SCHEMA), "table_schema", "table_name", families
         )
 
     def get_fks(self) -> pd.DataFrame:
@@ -1431,6 +1448,7 @@ class BigQueryDatabase(SQLDatabase):
                 WHERE constraint_type = 'FOREIGN KEY'
             """
 
+        families = self._shard_families()
         constrained = self._per_dataset(sql, ["table_schema", "table_name"])
         rows: list[dict[str, str]] = []
         for schema, table in constrained.itertuples(index=False, name=None):
@@ -1454,9 +1472,12 @@ class BigQueryDatabase(SQLDatabase):
                         }
                     )
         frame = self._collapse_shards(
-            pd.DataFrame(rows, columns=_FK_SCHEMA), "table_schema", "table_name"
+            pd.DataFrame(rows, columns=_FK_SCHEMA),
+            "table_schema",
+            "table_name",
+            families,
         )
-        owners = self._shard_owners()
+        owners = self._shard_owners(families)
         frame["referenced_table"] = [
             family.wildcard
             if (family := owners.get((str(schema), str(table))))

@@ -733,8 +733,9 @@ def test_get_columns_keeps_top_level_fields_and_reports_booleans() -> None:
     client = _wire(database, _FakeClient())
 
     database.get_columns()
-    sql = client.statements[0]
+    sql = client.statements[-1]
 
+    assert "INFORMATION_SCHEMA.TABLES" in client.statements[0]
     assert "p.field_path = c.column_name" in sql
     assert "c.is_nullable = 'YES' AS is_nullable" in sql
 
@@ -791,7 +792,7 @@ def test_get_pks_reads_primary_key_constraints() -> None:
     client = _wire(database, _FakeClient())
 
     database.get_pks()
-    sql = client.statements[0]
+    sql = client.statements[-1]
 
     assert "constraint_type = 'PRIMARY KEY'" in sql
     assert "c.table_name = k.table_name" in sql
@@ -1676,6 +1677,45 @@ def test_get_tables_reads_creation_times_but_does_not_return_them() -> None:
     assert database.qualify("ga", "ga_sessions_*").endswith(
         "`ga`.`ga_sessions_20160801`"
     )
+
+
+def test_a_shard_landing_after_the_columns_are_read_keeps_the_wildcards_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The families a read collapses with are the ones from before that read."""
+    clock = [10_000.0]
+    monkeypatch.setattr(
+        "auto_ontology.connectors.bigquery.time.monotonic", lambda: clock[0]
+    )
+    tables = {
+        "events_20260101": dt.datetime(2026, 1, 2),
+        "events_20260102": dt.datetime(2026, 1, 3),
+    }
+
+    def answer(sql: str) -> _FakeRows:
+        if _is_shapes_query(sql):
+            return _shape_rows({name: {"id": "STRING"} for name in tables})
+        if "INFORMATION_SCHEMA.COLUMNS" in sql:
+            frame = _FakeRows(
+                _COLUMN_SCHEMA,
+                [["ga", name, "id", "STRING", "YES", 1, None] for name in tables],
+            )
+            tables["events_20260103"] = dt.datetime(2026, 1, 4)
+            return frame
+        return _FakeRows(
+            ["table_schema", "table_name", "table_type", "creation_time"],
+            [["ga", name, "BASE TABLE", at] for name, at in tables.items()],
+        )
+
+    database = _database(schema="ga")
+    _wire(database, _FakeClient(answer))
+    database._shard_families()  # noqa: SLF001
+    clock[0] += 3601
+
+    frame = database.get_columns()
+
+    wildcard = frame[frame["table_name"] == "events_*"]
+    assert wildcard["column_name"].tolist() == ["id", TABLE_SUFFIX_COLUMN]
 
 
 def test_a_non_shard_created_last_lends_the_wildcard_its_columns() -> None:
