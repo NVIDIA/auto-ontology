@@ -221,7 +221,7 @@ def test_key_columns_count_only_fully_distinct_unique_columns(world) -> None:
     assert sorted(keys["unique"]) == ["id", "legacy_code"]
 
 
-def test_table_key_profile_keeps_the_columns_that_repeat(world) -> None:
+def test_table_key_profile_keeps_the_columns_that_repeat(world: World) -> None:
     """The fanout check needs the measured repeats, not only the unique columns."""
     world.table("asn")
     for position, name in enumerate(("ID", "supplier_id", "note"), 1):

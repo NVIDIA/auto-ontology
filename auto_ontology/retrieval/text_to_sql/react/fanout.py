@@ -104,7 +104,8 @@ class Fanout:
             f"({key} has repeated values). Aggregate {self.detail} in a subquery "
             f"or CTE grouped by {self.key} before joining it, or compute each "
             "measure in its own subquery at the grain it belongs to and join "
-            "those results; COUNT(DISTINCT ...) counts each row once."
+            "those results. To count rows of one table, count the distinct "
+            "values of its key."
         )
 
 
@@ -173,8 +174,14 @@ class _ScopeCheck:
             measured = self._measured(aggregate)
             if not measured:
                 continue
+            # ``SUM(x) FILTER (WHERE a.id = 2)`` may keep one row of ``a``.
+            filtered = (
+                self._referenced(aggregate.parent.expression)
+                if isinstance(aggregate.parent, exp.Filter)
+                else set()
+            )
             for alias, source in self.sources.items():
-                if alias in measured:
+                if alias in measured or alias in filtered:
                     continue
                 key = self._repeating_key(alias, source)
                 if key:
@@ -200,17 +207,16 @@ class _ScopeCheck:
         if qualifier:
             return qualifier if qualifier in self.sources else None
         name = column.name.lower()
-        owners = [
-            alias
-            for alias, source in self.sources.items()
-            if source.physical
-            and name
-            in {
-                c.lower()
-                for c in self.catalog.columns(source.name, source.schema) or []
-            }
-        ]
+        owners = [alias for alias in self.sources if self._has_column(alias, name)]
         return owners[0] if len(owners) == 1 else None
+
+    def _has_column(self, alias: str, name: str) -> bool:
+        """Whether *alias* is a catalog table with a column *name* (lowercased)."""
+        source = self.sources.get(alias)
+        if source is None or not source.physical:
+            return False
+        columns = self.catalog.columns(source.name, source.schema) or []
+        return name in {c.lower() for c in columns}
 
     def _measured(self, aggregate: exp.Expression) -> set[str] | None:
         """The sources *aggregate*'s argument reads; None when any is unknown."""
@@ -238,6 +244,9 @@ class _ScopeCheck:
     def _read_joins(self) -> None:
         """Equi-join columns per source, and sources whose joins are unclear."""
         conditions: list[exp.Expression] = []
+        first = self.select.args.get("from_") or self.select.args.get("from")
+        # The sources a join's USING can name: those left of it.
+        left = [first.this.alias_or_name.lower()] if first else []
         for join in self.select.args.get("joins") or []:
             right = join.this.alias_or_name.lower()
             if join.args.get("method"):  # NATURAL: the columns are implicit
@@ -245,33 +254,24 @@ class _ScopeCheck:
             if on := join.args.get("on"):
                 conditions.append(on)
             for using in join.args.get("using") or []:
-                self._read_using(right, using.name)
+                self._read_using(left, right, using.name)
+            left.append(right)
         if where := self.select.args.get("where"):
             conditions.append(where.this)
         for condition in conditions:
             for conjunct in _conjuncts(condition):
                 self._read_conjunct(conjunct)
 
-    def _read_using(self, right: str, using: str) -> None:
+    def _read_using(self, left: list[str], right: str, using: str) -> None:
         name = using.lower()
         if right not in self.sources:
             return
-        left = [
-            alias
-            for alias, source in self.sources.items()
-            if alias != right
-            and source.physical
-            and name
-            in {
-                c.lower()
-                for c in self.catalog.columns(source.name, source.schema) or []
-            }
-        ]
-        if len(left) != 1:
+        owners = [alias for alias in left if self._has_column(alias, name)]
+        if len(owners) != 1:
             self.uncertain.add(right)
             return
         self.keys[right].setdefault(name, using)
-        self.keys[left[0]].setdefault(name, using)
+        self.keys[owners[0]].setdefault(name, using)
 
     def _read_conjunct(self, conjunct: exp.Expression) -> None:
         if isinstance(conjunct, exp.EQ) and not conjunct.find(exp.Select):
@@ -301,18 +301,18 @@ class _ScopeCheck:
             e.alias.lower(): e.unalias() for e in self.select.expressions if e.alias
         }
         for item in group.expressions:
-            item = _bare(item)
+            item = _unparen(item)
             if isinstance(item, exp.Literal) and item.is_int:
                 position = int(item.this) - 1
                 if 0 <= position < len(self.select.expressions):
-                    item = _bare(self.select.expressions[position].unalias())
+                    item = _unparen(self.select.expressions[position].unalias())
             elif (
                 isinstance(item, exp.Column)
                 and not item.table
                 and self._alias_of(item) is None
                 and item.name.lower() in outputs
             ):
-                item = _bare(outputs[item.name.lower()])
+                item = _unparen(outputs[item.name.lower()])
             if isinstance(item, exp.Column) and (alias := self._alias_of(item)):
                 self.grouped[alias].add(item.name.lower())
 
@@ -342,6 +342,13 @@ def _counts_rows(aggregate: exp.Expression) -> bool:
         return False
     argument = aggregate.this
     return argument is not None and not isinstance(argument, (exp.Distinct, exp.Star))
+
+
+def _unparen(node: exp.Expression) -> exp.Expression:
+    """*node* without parentheses; a cast stays, since it can merge keys."""
+    while isinstance(node, exp.Paren):
+        node = node.this
+    return node
 
 
 def _bare(node: exp.Expression) -> exp.Expression:
@@ -438,6 +445,5 @@ def run_sql_hint(fanouts: list[Fanout]) -> str:
     if not fanouts:
         return ""
     return (
-        "\n\nNote: a join repeats the rows an aggregate adds up; submit will "
-        f"not accept this query as it is:\n- {_listed(fanouts)}"
+        f"\n\nNote: a join repeats the rows an aggregate adds up:\n- {_listed(fanouts)}"
     )

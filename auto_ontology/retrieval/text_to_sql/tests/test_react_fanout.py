@@ -243,6 +243,42 @@ def test_two_detail_tables_repeat_each_other(
     assert rows[3] == (100.0 * 19, _qty_total(3) * 2)
 
 
+def test_using_reads_only_the_sources_left_of_the_join(
+    profiles: dict[str, KeyProfile],
+) -> None:
+    """A later join whose table has the same column does not make USING unclear."""
+    sql = (
+        "SELECT SUM(sr.share) FROM sourcing sr JOIN asn a USING (supplier_id) "
+        "JOIN contracts c ON c.supplier_id = sr.supplier_id"
+    )
+
+    assert [(f.detail, f.key) for f in _fanouts(sql, profiles)] == [
+        ("asn", "supplier_id")
+    ]
+
+
+def test_aggregate_filter_spares_only_that_aggregate(
+    profiles: dict[str, KeyProfile],
+) -> None:
+    sql = (
+        "SELECT SUM(s.rate) FILTER (WHERE a.id = 2), SUM(s.rate) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id"
+    )
+
+    assert [f.aggregate for f in _fanouts(sql, profiles)] == ["SUM(s.rate)"]
+
+
+def test_grouping_by_a_cast_key_does_not_spare_it(
+    profiles: dict[str, KeyProfile],
+) -> None:
+    sql = (
+        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
+        "GROUP BY CAST(a.id AS VARCHAR(1))"
+    )
+
+    assert [f.detail for f in _fanouts(sql, profiles)] == ["asn"]
+
+
 def test_join_using_is_read(profiles: dict[str, KeyProfile]) -> None:
     sql = "SELECT SUM(sr.share) FROM sourcing sr JOIN asn a USING (supplier_id)"
 
@@ -258,7 +294,7 @@ def test_message_says_how_to_fix_it(profiles: dict[str, KeyProfile]) -> None:
     assert "SUM(s.rate) reads suppliers rows" in text
     assert "a.supplier_id" in text
     assert "grouped by supplier_id before joining it" in text
-    assert "COUNT(DISTINCT" in text
+    assert "count the distinct values of its key" in text
 
 
 # -- accepted: owner-grain and pre-aggregated queries ------------------------
@@ -354,6 +390,8 @@ def test_owner_grain_and_pre_aggregation_pass_with_the_oracle_values(
         "AND a.qty = 3",
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
         "WHERE a.id IN (1, 2)",
+        "SELECT SUM(s.rate) FILTER (WHERE a.id = 2) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id",
         # A correlated subquery that picks the latest row per owner.
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
         "WHERE a.id = (SELECT MAX(a2.id) FROM asn a2 "
@@ -490,6 +528,23 @@ def test_run_sql_runs_and_adds_a_note(ctx: ToolContext) -> None:
     assert "Note:" not in run_sql_module.run_sql(ctx, PRE_AGGREGATED)
     # A note is not a refusal: submit still refuses the query once.
     assert loop.submit(ctx, GROUPED_OWNER_SUM, "x")[1] is None
+
+
+def test_run_sql_note_fits_the_observation_limit(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rows are clipped to leave room for the note, not the note dropped."""
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "600")
+    sql = (
+        "SELECT a.qty % 11 AS bucket, SUM(s.rate), MAX(s.name) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id GROUP BY a.qty % 11"
+    )
+
+    text = run_sql_module.run_sql(ctx, sql)
+
+    assert len(text) == 600
+    assert text.startswith("11 rows")
+    assert "…\n\nNote: a join repeats" in text
 
 
 def test_episode_fixes_the_query_after_the_refusal(ctx: ToolContext) -> None:

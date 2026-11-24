@@ -461,9 +461,10 @@ def render_rows(frame: Any) -> str:
     return summary + "\n" + "\n".join(lines)
 
 
-def _clip(text: str) -> str:
-    limit = config.max_observation_chars()
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+def _clip(text: str, reserve: int = 0) -> str:
+    """*text* within the observation limit, less *reserve* chars kept for a note."""
+    limit = config.max_observation_chars() - reserve
+    return text if len(text) <= limit else text[: max(limit - 1, 0)] + "…"
 
 
 def run_sql(ctx: ToolContext, sql: str) -> str:
@@ -503,7 +504,7 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
     if config.grep_enabled():
         text = _save_page(ctx, frame, text)
     hint = fanout.run_sql_hint(join_fanouts(ctx, connector, check.statement))
-    return _clip(text) + hint
+    return _clip(text, reserve=len(hint)) + hint
 
 
 def _save_page(ctx: ToolContext, frame: Any, text: str) -> str:
