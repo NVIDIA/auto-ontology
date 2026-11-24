@@ -1,8 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Mario Nascimento
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
+import datetime
+import ssl
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 import oracledb
 import pytest
@@ -111,6 +115,109 @@ def test_parse_connection_string() -> None:
     }
 
 
+def test_parse_connection_string_is_plain_tcp_by_default() -> None:
+    kwargs = _parse_connection_string("oracle://u:p@db:1521/FREEPDB1?protocol=tcp")
+
+    assert "protocol" not in kwargs
+    assert "ssl_context" not in kwargs
+
+
+def test_tcps_verifies_the_server_with_the_system_trust_store() -> None:
+    kwargs = _parse_connection_string("oracle://u:p@db:2484/FREEPDB1?protocol=TCPS")
+
+    assert kwargs["protocol"] == "tcps"
+    assert kwargs["ssl_server_dn_match"] is True
+    context = kwargs["ssl_context"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert "ssl_server_cert_dn" not in kwargs
+
+
+def _self_signed_pem() -> bytes:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(1)
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(serialization.Encoding.PEM)
+
+
+@pytest.mark.parametrize("encoding", ["pem", "der"])
+def test_tcps_trusts_an_uploaded_ca(encoding: str) -> None:
+    pem = _self_signed_pem()
+    data = pem if encoding == "pem" else ssl.PEM_cert_to_DER_cert(pem.decode())
+    encoded = quote(base64.b64encode(data).decode(), safe="")
+
+    kwargs = _parse_connection_string(
+        f"oracle://u:p@db:2484/FREEPDB1?protocol=tcps&ssl_ca_data={encoded}"
+    )
+
+    assert kwargs["ssl_context"].get_ca_certs()[0]["subject"] == (
+        (("commonName", "Test CA"),),
+    )
+
+
+def test_tcps_trusts_a_ca_file(tmp_path: Any) -> None:
+    ca = tmp_path / "ca.pem"
+    ca.write_bytes(_self_signed_pem())
+
+    kwargs = _parse_connection_string(
+        f"oracle://u:p@db:2484/FREEPDB1?protocol=tcps&ssl_ca={quote(str(ca))}"
+    )
+
+    assert len(kwargs["ssl_context"].get_ca_certs()) == 1
+
+
+def test_tcps_matches_a_server_dn_instead_of_the_host_name() -> None:
+    dn = quote("CN=adb.example.com,O=Oracle Corporation", safe="")
+
+    kwargs = _parse_connection_string(
+        f"oracle://u:p@10.0.0.5:1522/svc?protocol=tcps&ssl_server_cert_dn={dn}"
+    )
+
+    assert kwargs["ssl_server_cert_dn"] == "CN=adb.example.com,O=Oracle Corporation"
+    assert kwargs["ssl_server_dn_match"] is True
+    # The driver checks the DN; the chain is still verified.
+    assert kwargs["ssl_context"].check_hostname is False
+    assert kwargs["ssl_context"].verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("query", "message"),
+    [
+        # A typo must not leave the connection unencrypted.
+        ("protocl=tcps", "Unsupported Oracle connection option"),
+        ("ssl_verify=false", "Unsupported Oracle connection option"),
+        ("protocol=ssl", "Unsupported Oracle protocol"),
+        ("protocol=tcps&protocol=tcp", "given twice"),
+        ("ssl_ca_data=AAAA", "add protocol=tcps"),
+        ("ssl_server_cert_dn=CN%3Dx", "add protocol=tcps"),
+        ("protocol=tcps&ssl_ca=a.pem&ssl_ca_data=AAAA", "not both"),
+        ("protocol=tcps&ssl_ca_data=not*base64", "not valid base64"),
+        ("protocol=tcps&ssl_ca_data=AAAA", "could not be loaded"),
+        ("protocol=tcps&ssl_ca=/no/such/ca.pem", "could not be loaded"),
+    ],
+)
+def test_bad_tls_options_are_rejected(query: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _parse_connection_string(f"oracle://u:p@db:2484/FREEPDB1?{query}")
+
+
 def test_parse_connection_string_defaults_the_port() -> None:
     assert _parse_connection_string("oracle://u:p@db/XEPDB1")["port"] == 1521
 
@@ -153,6 +260,48 @@ def test_build_connection_string() -> None:
         connection_string
         == "oracle://user%40domain:secret%2Fvalue@localhost:1522/FREEPDB1"
     )
+
+
+def test_build_connection_string_carries_tls_options() -> None:
+    pem = _self_signed_pem()
+    uploaded = base64.b64encode(pem).decode()
+
+    connection_string = build_connection_string(
+        {
+            "type": "oracle",
+            "host": "adb.example.com",
+            "port": "1522",
+            "user": "admin",
+            "password": "pw",
+            "database": "svc_high",
+            "protocol": "TCPS",
+            "ssl_ca_file": uploaded,
+            "ssl_server_cert_dn": "CN=adb.example.com,O=Oracle Corporation",
+        }
+    )
+
+    kwargs = _parse_connection_string(connection_string)
+    assert kwargs["protocol"] == "tcps"
+    assert len(kwargs["ssl_context"].get_ca_certs()) == 1
+    assert kwargs["ssl_server_cert_dn"] == "CN=adb.example.com,O=Oracle Corporation"
+
+
+def test_build_connection_string_passes_a_ca_without_tcps_to_fail() -> None:
+    # Dropping the CA here would silently connect without TLS; the connector
+    # rejects it instead, so the connection test shows the mistake.
+    connection_string = build_connection_string(
+        {
+            "type": "oracle",
+            "host": "db",
+            "user": "u",
+            "password": "p",
+            "database": "svc",
+            "ssl_ca_file": "AAAA",
+        }
+    )
+
+    with pytest.raises(ValueError, match="add protocol=tcps"):
+        _parse_connection_string(connection_string)
 
 
 def test_build_connection_string_defaults_the_port() -> None:

@@ -16,10 +16,13 @@ mistake comes back as Oracle's own error rather than as a silent rewrite.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
+import ssl
 import time
 from typing import Any, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import oracledb
 import pandas as pd
@@ -30,6 +33,11 @@ from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 1521
+
+# Query-string options the connection URL accepts; see _parse_connection_string.
+_CONNECTION_OPTIONS = frozenset(
+    {"protocol", "ssl_ca", "ssl_ca_data", "ssl_server_cert_dn"}
+)
 
 # The driver giving up on a round trip at ``call_timeout``: DPY-4024 in thin
 # mode, ORA-03156 (and the older ORA-03136) in thick mode.
@@ -61,6 +69,17 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
 
     The path is the **service name**, not a SID: it is what a pluggable
     database is addressed by, and the only form Oracle Cloud accepts.
+
+    ``?protocol=tcps`` connects over TLS and verifies the server: its
+    certificate must chain to a trusted CA, and must name the host, or match
+    ``ssl_server_cert_dn`` when that is given. The CA is the system's trust
+    store unless ``ssl_ca`` (a PEM file path) or ``ssl_ca_data`` (the
+    base64-encoded PEM or DER bytes, as the connection form uploads them)
+    names one. There is no option to skip verification, and a TCPS connection
+    that fails verification fails; it never falls back to TCP.
+
+    An option this function does not know is an error rather than ignored, so
+    a misspelt ``protocol`` cannot leave the connection unencrypted.
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "oracle":
@@ -71,13 +90,84 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
     if not service_name:
         raise ValueError("Oracle connection string is missing a service name")
 
-    return {
+    kwargs: dict[str, Any] = {
         "host": parsed.hostname,
         "port": parsed.port or DEFAULT_PORT,
         "user": unquote(parsed.username or ""),
         "password": unquote(parsed.password or ""),
         "service_name": service_name,
     }
+    kwargs.update(_tls_kwargs(parse_qs(parsed.query, keep_blank_values=True)))
+    return kwargs
+
+
+def _tls_kwargs(query: dict[str, list[str]]) -> dict[str, Any]:
+    """The ``oracledb.connect`` arguments for the URL's TLS options."""
+    unknown = sorted(set(query) - _CONNECTION_OPTIONS)
+    if unknown:
+        raise ValueError(
+            f"Unsupported Oracle connection option(s): {', '.join(unknown)}. "
+            f"Supported: {', '.join(sorted(_CONNECTION_OPTIONS))}"
+        )
+    repeated = sorted(key for key, values in query.items() if len(values) > 1)
+    if repeated:
+        raise ValueError(f"Oracle connection option given twice: {', '.join(repeated)}")
+    options = {key: values[0].strip() for key, values in query.items()}
+
+    protocol = (options.pop("protocol", "") or "tcp").lower()
+    if protocol not in ("tcp", "tcps"):
+        raise ValueError(
+            f"Unsupported Oracle protocol {protocol!r}: use tcp, or tcps for TLS"
+        )
+    tls_options = sorted(key for key, value in options.items() if value)
+    if protocol == "tcp":
+        if tls_options:
+            raise ValueError(
+                f"{', '.join(tls_options)} only apply to TLS connections: "
+                "add protocol=tcps"
+            )
+        return {}
+    if options.get("ssl_ca") and options.get("ssl_ca_data"):
+        raise ValueError("Give the Oracle CA as ssl_ca or ssl_ca_data, not both")
+
+    context = ssl.create_default_context()
+    try:
+        if options.get("ssl_ca"):
+            context = ssl.create_default_context(cafile=options["ssl_ca"])
+        elif options.get("ssl_ca_data"):
+            context = ssl.create_default_context(
+                cadata=_decode_ca_data(options["ssl_ca_data"])
+            )
+    except (OSError, ssl.SSLError) as exc:
+        raise ValueError(f"Oracle CA certificate could not be loaded: {exc}") from exc
+
+    kwargs: dict[str, Any] = {
+        "protocol": "tcps",
+        "ssl_context": context,
+        "ssl_server_dn_match": True,
+    }
+    if options.get("ssl_server_cert_dn"):
+        # The driver matches the certificate's subject against this DN instead
+        # of the host name, so the context's own host name check would reject
+        # exactly the servers this option exists for. The chain is still
+        # verified (CERT_REQUIRED stays on).
+        context.check_hostname = False
+        kwargs["ssl_server_cert_dn"] = options["ssl_server_cert_dn"]
+    return kwargs
+
+
+def _decode_ca_data(encoded: str) -> str | bytes:
+    """Decode ``ssl_ca_data``: base64 of a PEM bundle or a DER certificate."""
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Oracle ssl_ca_data is not valid base64") from exc
+    if not raw:
+        raise ValueError("Oracle ssl_ca_data is empty")
+    # ``cadata`` takes PEM as text and DER as bytes.
+    if raw.lstrip().startswith(b"-----BEGIN"):
+        return raw.decode("ascii", errors="strict")
+    return raw
 
 
 def _quoted_literal(value: str) -> str:
@@ -112,7 +202,8 @@ class OracleDatabase(SQLDatabase):
     Parameters
     ----------
     connection_string:
-        ``oracle://user:password@host:1521/service_name``
+        ``oracle://user:password@host:1521/service_name``, or with
+        ``?protocol=tcps`` for TLS (see :func:`_parse_connection_string`).
     schemas:
         Optional ingestion allowlist. Empty or ``None`` means only the schema
         of the connecting user -- an Oracle account can usually *see* far more

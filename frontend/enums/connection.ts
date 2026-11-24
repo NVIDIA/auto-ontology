@@ -46,6 +46,8 @@ export type ConnectionFieldKey =
 	| 'truststore'
 	| 'truststore_file'
 	| 'truststore_password'
+	| 'ssl_ca_file'
+	| 'ssl_server_cert_dn'
 	| 'schema'
 	| 'http_scheme'
 	| 'sso_federation'
@@ -146,6 +148,28 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			label: 'Service Name',
 			placeholder: 'FREEPDB1',
 			hint: 'The service name of the database or pluggable database, not a SID. Requires Oracle Database 12.1 or later.',
+		},
+		{
+			key: 'protocol',
+			label: 'Protocol',
+			placeholder: 'tcp',
+			optional: true,
+			hint: 'Set tcps to connect over TLS. The server certificate is always verified, and a TLS connection that fails verification fails rather than falling back to tcp.',
+		},
+		{
+			key: 'ssl_ca_file',
+			label: 'CA Certificate (PEM or DER)',
+			file: true,
+			fileAccept: '.pem,.crt,.cer,.der',
+			optional: true,
+			hint: 'Only with tcps. Upload the CA that signed the server certificate when it is not publicly trusted. Leave empty to use the system trust store.',
+		},
+		{
+			key: 'ssl_server_cert_dn',
+			label: 'Server Certificate DN',
+			placeholder: 'CN=db.example.com,O=Example',
+			optional: true,
+			hint: 'Only with tcps, when the certificate does not name the host you connect to. The certificate subject must then match this DN exactly.',
 		},
 	],
 	[ConnectionType.SNOWFLAKE]: [

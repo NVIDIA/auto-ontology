@@ -65,6 +65,24 @@ name** (not a SID), and it is the connection's database name. The connector
 uses `python-oracledb` in thin mode, so no Oracle Instant Client is needed;
 Oracle Database 12.1 or later is required.
 
+Add `?protocol=tcps` to connect over TLS, for example
+`oracle://user:password@host:2484/service_name?protocol=tcps`. The server
+certificate is always verified: it must chain to a trusted CA and name the
+host. There is no option to skip verification, and a TLS connection that fails
+it fails rather than falling back to plain TCP.
+
+| Option | Meaning |
+|---|---|
+| `protocol` | `tcp` (the default) or `tcps`. |
+| `ssl_ca` | Path to a PEM file of CAs to trust instead of the system store. |
+| `ssl_ca_data` | The same CA as base64 PEM or DER bytes; what the connection form's upload sends. |
+| `ssl_server_cert_dn` | Match the certificate subject against this DN instead of the host name. |
+
+The `ssl_*` options need `protocol=tcps`, and an option the connector does not
+recognise is an error, so a typo cannot leave a connection unencrypted.
+Autonomous Database works over one-way TLS with no CA option once its network
+access list allows the host. Mutual TLS (a client wallet) is not supported yet.
+
 Without a schema allowlist only the connecting user's own schema is ingested.
 Pick other schemas in the UI to ingest them instead; the account needs `SELECT`
 on their tables, and reads metadata from the `ALL_*` dictionary views, so no

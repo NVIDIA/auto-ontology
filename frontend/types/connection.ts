@@ -51,6 +51,12 @@ export type OracleConnectionParams = {
 	password: string;
 	/** The service name; it is also the connection's identity. */
 	database: string;
+	/** `tcps` for TLS; empty or `tcp` for a plain connection. */
+	protocol?: string;
+	/** Base64 bytes of an uploaded CA certificate (PEM or DER); tcps only. */
+	ssl_ca_file?: string;
+	/** Expected server certificate subject DN, when it does not name the host; tcps only. */
+	ssl_server_cert_dn?: string;
 	/** Optional ingestion allowlist. Empty/absent = only the connecting user's schema. */
 	schemas?: string[];
 };
