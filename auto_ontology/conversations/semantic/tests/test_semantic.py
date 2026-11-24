@@ -532,6 +532,24 @@ def _reading(key: str, value: str, turn: int, *about: str) -> dict:
     }
 
 
+def test_a_goal_is_not_renamed_by_a_merge_approved_for_readings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It shares a reading's key without being a reading of it, which is why it
+    was kept out of the question the merge answers."""
+    first = _reading("x", "180ms", 1, "A")
+    later = _reading("y", "140ms", 2, "A")
+    goal = {**_reading("y", "<100ms", 3, "A"), "kinds": ["goal"]}
+
+    changed = _reconcile_with(
+        monkeypatch, KeyGroup(subject="A", keys=["x", "y"]), [first, later, goal]
+    )
+
+    assert changed == 1
+    assert later["attribute_key"] == "x"
+    assert goal["attribute_key"] == "y"
+
+
 def test_a_shared_row_is_not_renamed_into_another_subjects_property(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

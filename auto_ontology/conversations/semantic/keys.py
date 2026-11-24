@@ -367,16 +367,27 @@ def reconcile_keys(statements: Sequence[dict[str, Any]]) -> int:
     if not rewrite:
         return 0
 
+    # Every row, including the ones never offered: a goal reading under the
+    # new name is still a collision, and the subject carrying it never agreed
+    # its goal and these readings were one property.
     keys_on: dict[str, set[str]] = defaultdict(set)
     for row in statements:
         for subject in row.get("about") or ():
             keys_on[subject].add((row.get("attribute_key") or "").strip())
+
+    #: Only what was asked about may be renamed. A goal shares a reading's key
+    #: without being a reading of it, and _valued kept it out of the question
+    #: for that reason -- renaming it here would answer a question about
+    #: readings by rewriting something the model was never shown.
+    eligible = {id(row) for row in rows}
 
     #: (subject, new name) -> the one original key renamed into it on a
     #: subject whose group did not cover the rename.
     merged: dict[tuple[str, str], str] = {}
     changed = 0
     for row in statements:
+        if id(row) not in eligible:
+            continue
         key = (row.get("attribute_key") or "").strip()
         subjects = list(row.get("about") or ())
         targets = {rewrite[(s, key)] for s in subjects if (s, key) in rewrite}
