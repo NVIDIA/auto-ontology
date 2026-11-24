@@ -17,7 +17,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
-    "fastmcp>=3.2.4,<4",
+    "fastmcp>=3.4.10,<4",
     "httpx>=0.28.1",
     "pydantic>=2",
     "python-dotenv>=1.0",
@@ -52,7 +52,6 @@ dev = ["pytest>=8"]
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via mcp)
     "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2 (via httpx)
-    "fastmcp>=3.4.10",  # GHSA-7xgj-8392-5q4r
     "fastmcp-slim>=3.4.10",  # GHSA-7xgj-8392-5q4r (via fastmcp)
     "mcp>=1.30.0",  # GHSA-qx49-fqc8-xw99 and four more (via fastmcp)
     "authlib>=1.9.1",  # GHSA-6v38-4h7w-rj9h, GHSA-8m4g-j4wp-wgcg and seven more (via fastmcp)
