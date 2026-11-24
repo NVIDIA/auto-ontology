@@ -7,6 +7,7 @@ export enum ConnectionType {
 	DATABRICKS = 'databricks',
 	POSTGRESQL = 'postgresql',
 	MYSQL = 'mysql',
+	ORACLE = 'oracle',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
 	KYUUBI = 'kyuubi',
@@ -18,6 +19,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.DATABRICKS]: 'Databricks',
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.MYSQL]: 'MySQL',
+	[ConnectionType.ORACLE]: 'Oracle',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
 	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
@@ -44,6 +46,8 @@ export type ConnectionFieldKey =
 	| 'truststore'
 	| 'truststore_file'
 	| 'truststore_password'
+	| 'ssl_ca_file'
+	| 'ssl_server_cert_dn'
 	| 'schema'
 	| 'http_scheme'
 	| 'sso_federation'
@@ -128,6 +132,45 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'user', label: 'User', placeholder: 'root' },
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'my_database' },
+	],
+	[ConnectionType.ORACLE]: [
+		{ key: 'host', label: 'Host', placeholder: 'localhost' },
+		{ key: 'port', label: 'Port', placeholder: '1521', optional: true },
+		{
+			key: 'user',
+			label: 'User',
+			placeholder: 'hr',
+			hint: 'Only this user’s own schema is ingested unless you pick other schemas in the next step.',
+		},
+		{ key: 'password', label: 'Password', secret: true },
+		{
+			key: 'database',
+			label: 'Service Name',
+			placeholder: 'FREEPDB1',
+			hint: 'The service name of the database or pluggable database, not a SID. Requires Oracle Database 12.1 or later.',
+		},
+		{
+			key: 'protocol',
+			label: 'Protocol',
+			placeholder: 'tcp',
+			optional: true,
+			hint: 'Set tcps to connect over TLS. The server certificate is always verified, and a TLS connection that fails verification fails rather than falling back to tcp.',
+		},
+		{
+			key: 'ssl_ca_file',
+			label: 'CA Certificate (PEM or DER)',
+			file: true,
+			fileAccept: '.pem,.crt,.cer,.der',
+			optional: true,
+			hint: 'Only with tcps. Upload the CA that signed the server certificate when it is not publicly trusted. Leave empty to use the system trust store.',
+		},
+		{
+			key: 'ssl_server_cert_dn',
+			label: 'Server Certificate DN',
+			placeholder: 'CN=db.example.com,O=Example',
+			optional: true,
+			hint: 'Only with tcps, when the certificate does not name the host you connect to. The certificate subject must then match this DN exactly.',
+		},
 	],
 	[ConnectionType.SNOWFLAKE]: [
 		{ key: 'account', label: 'Account', placeholder: 'xy12345.us-east-1' },
@@ -268,7 +311,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 /**
  * Fields offered for every connector, appended after the type-specific ones.
  *
- * Kept separate rather than copied into all eight lists: they are enforced
+ * Kept separate rather than copied into all nine lists: they are enforced
  * centrally at catalog extraction (`auto_ontology/catalog/table_filter.py`), so
  * every connector honours them identically and none may drift.
  */

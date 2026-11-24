@@ -418,8 +418,8 @@ def test_key_index_remembers_a_failed_probe() -> None:
     store.assert_not_called()
 
 
-def _join_keys(*results: object) -> semantic_fk._KeyIndex:
-    connector = MagicMock(dialect="postgres")
+def _join_keys(*results: object, dialect: str = "postgres") -> semantic_fk._KeyIndex:
+    connector = MagicMock(dialect=dialect)
     connector.qualify.side_effect = lambda schema, table: f'"{schema}"."{table}"'
     connector.supports_statement_timeout = False
     connector.execute.side_effect = list(results)
@@ -434,6 +434,19 @@ def test_join_validation_accepts_a_returned_row() -> None:
     assert sql == (
         'SELECT 1 AS hit FROM "public"."orders" s JOIN "public"."target_table" t '
         'ON s."customer_ref" = t."id" LIMIT 1'
+    )
+
+
+def test_join_validation_uses_the_dialect_row_limit() -> None:
+    # A LIMIT the engine rejects reads as "the join could not run", so every
+    # inferred link on that engine would be dropped.
+    keys = _join_keys(pd.DataFrame({"hit": [1]}), dialect="oracle")
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    sql = keys.connector.execute.call_args.args[0]
+    assert sql == (
+        'SELECT 1 AS hit FROM "public"."orders" s JOIN "public"."target_table" t '
+        'ON s."customer_ref" = t."id" FETCH FIRST 1 ROWS ONLY'
     )
 
 
@@ -452,6 +465,36 @@ def test_join_validation_retries_as_text_after_a_type_error() -> None:
     assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
     retry = keys.connector.execute.call_args.args[0]
     assert 'CAST(s."customer_ref" AS TEXT) = CAST(t."id" AS TEXT)' in retry
+
+
+def test_join_validation_casts_to_the_connectors_text_type() -> None:
+    # Oracle spells TEXT as CLOB, and ``=`` rejects a CLOB (ORA-22849 on 23ai),
+    # so the retry has to ask for a type the engine can compare.
+    keys = _join_keys(
+        RuntimeError("ORA-01722: invalid number"),
+        pd.DataFrame({"hit": [1]}),
+        dialect="oracle",
+    )
+    keys.connector.text_cast_type = "VARCHAR2(4000)"
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    retry = keys.connector.execute.call_args.args[0]
+    assert (
+        'CAST(s."customer_ref" AS VARCHAR2(4000)) = CAST(t."id" AS VARCHAR2(4000))'
+    ) in retry
+    assert "CLOB" not in retry
+
+
+def test_join_validation_keeps_clickhouse_nullable_text_cast() -> None:
+    # Parsing the type in the connector's dialect would read TEXT as a bare
+    # ClickHouse String and drop the Nullable() this SQL has always carried.
+    keys = _join_keys(
+        RuntimeError("type mismatch"), pd.DataFrame({"hit": [1]}), dialect="clickhouse"
+    )
+    keys.connector.text_cast_type = "TEXT"
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    assert "AS Nullable(String))" in keys.connector.execute.call_args.args[0]
 
 
 def test_join_validation_rejects_when_both_attempts_fail() -> None:

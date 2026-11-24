@@ -32,6 +32,7 @@ const SCHEMA_SELECTION_TYPES: ReadonlySet<ConnectionType> = new Set([
 	ConnectionType.SNOWFLAKE,
 	ConnectionType.KYUUBI,
 	ConnectionType.TRINO,
+	ConnectionType.ORACLE,
 ]);
 
 type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
@@ -288,7 +289,9 @@ export const ConnectionModal = ({
 				return (
 					<div className="flex flex-col gap-2">
 						<p className="px-2 text-xs text-secondary dark:text-zinc-400">
-							Leave empty to ingest all schemas.
+							{connectionType === ConnectionType.ORACLE
+								? 'Leave empty to ingest only the connecting user’s own schema.'
+								: 'Leave empty to ingest all schemas.'}
 						</p>
 						<ConnectionSelectDataStep
 							availableDatabases={availableSchemas}

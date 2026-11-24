@@ -127,6 +127,13 @@ class SQLDatabase(ABC):
     #: set; a parse-level check alone cannot see what a called function does.
     supports_read_only: bool = False
 
+    #: The type the semantic FK join check casts both columns to when their
+    #: own types will not compare. It goes to sqlglot, which spells it for
+    #: :attr:`dialect`, so ``TEXT`` is right wherever that spelling can be
+    #: compared with ``=``. Override it where it cannot: Oracle's spelling is
+    #: ``CLOB``, which ``=`` rejects.
+    text_cast_type: str = "TEXT"
+
     #: Optional regex allow/deny filter over relation names, set from the
     #: connection by :func:`auto_ontology.connectors.registry.create_connector`.
     #: Connectors do not read it themselves — it is enforced centrally in

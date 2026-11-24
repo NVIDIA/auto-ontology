@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_MYSQL_PORT = "3306"
+DEFAULT_ORACLE_PORT = "1521"
 DEFAULT_HEAVYDB_PORT = "6274"
 DEFAULT_KYUUBI_PORT = "10000"
 DEFAULT_TRINO_PORT = "8080"
@@ -71,6 +72,36 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         database = _require(connection, "database")
         port = str(connection.get("port") or "").strip() or DEFAULT_MYSQL_PORT
         return f"mysql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
+
+    if conn_type == "oracle":
+        host = _require(connection, "host").rstrip("/")
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        # ``database`` holds the service name: it is what identifies the
+        # connection, and what a pluggable database is addressed by.
+        service_name = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_ORACLE_PORT
+        url = (
+            f"oracle://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(service_name)}"
+        )
+
+        # TLS options, validated by the connector rather than here, so a CA or
+        # DN given without ``tcps`` fails the connection test instead of being
+        # dropped. The CA arrives as the uploaded file's base64 bytes, which
+        # keeps it with the connection rather than as a file on every pod.
+        params = []
+        protocol = str(connection.get("protocol") or "").strip().lower()
+        if protocol:
+            params.append(f"protocol={_enc(protocol)}")
+        ssl_ca_file = str(connection.get("ssl_ca_file") or "").strip()
+        if ssl_ca_file:
+            params.append(f"ssl_ca_data={_enc(ssl_ca_file)}")
+        server_dn = str(connection.get("ssl_server_cert_dn") or "").strip()
+        if server_dn:
+            params.append(f"ssl_server_cert_dn={_enc(server_dn)}")
+        if params:
+            url += f"?{'&'.join(params)}"
+        return url
 
     if conn_type == "snowflake":
         account = _require(connection, "account")

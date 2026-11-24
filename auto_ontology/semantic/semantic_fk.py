@@ -47,6 +47,7 @@ from sqlglot import exp
 
 from auto_ontology.connectors import get_connectors
 from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.utils.sql_limits import with_row_limit
 from auto_ontology.dal.attributes import (
     fetch_semantic_fk_join_groups,
     fetch_value_key_candidates,
@@ -772,8 +773,8 @@ def _join_returns_rows(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) 
         f"{target['table_name']}.{target['column_name']}"
     )
     for as_text in (False, True):
-        sql = _join_probe_sql(keys.connector, col, target, as_text=as_text)
         try:
+            sql = _join_probe_sql(keys.connector, col, target, as_text=as_text)
             df = execute_capped(keys.connector, sql)
         except Exception as exc:
             logger.info(
@@ -800,7 +801,7 @@ def _join_probe_sql(
     *,
     as_text: bool,
 ) -> str:
-    """``SELECT 1 ... JOIN ... LIMIT 1`` over the two columns."""
+    """``SELECT 1 ... JOIN ...`` over the two columns, capped at one row."""
     dialect = getattr(connector, "dialect", None) or None
     left: exp.Expression = exp.Column(
         this=exp.to_identifier(str(col["name"]), quoted=True),
@@ -811,7 +812,14 @@ def _join_probe_sql(
         table=exp.to_identifier("t"),
     )
     if as_text:
-        left, right = exp.cast(left, "TEXT"), exp.cast(right, "TEXT")
+        # The connector names the type, because only it knows whether its
+        # engine's spelling of TEXT can be compared (Oracle's, CLOB, cannot).
+        cast_type = getattr(connector, "text_cast_type", None)
+        if not isinstance(cast_type, str) or not cast_type:
+            cast_type = "TEXT"
+        # Parsed without a dialect on purpose: reading TEXT as ClickHouse
+        # would drop the Nullable() the rendered cast has always carried.
+        left, right = exp.cast(left, cast_type), exp.cast(right, cast_type)
     condition = exp.EQ(this=left, expression=right)
     try:
         rendered = condition.sql(dialect=dialect)
@@ -819,8 +827,10 @@ def _join_probe_sql(
         rendered = condition.sql()
     source = connector.qualify(col.get("schema_name"), col["table_name"])
     target_table = connector.qualify(target.get("schema_name"), target["table_name"])
-    return (
-        f"SELECT 1 AS hit FROM {source} s JOIN {target_table} t ON {rendered} LIMIT 1"
+    return with_row_limit(
+        f"SELECT 1 AS hit FROM {source} s JOIN {target_table} t ON {rendered}",
+        1,
+        dialect,
     )
 
 

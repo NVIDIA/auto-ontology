@@ -39,6 +39,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
 | NumPy | >=2.5.2 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | https://github.com/numpy/numpy |
 | openai | ==2.44.0 | Apache-2.0 | https://github.com/openai/openai-python |
+| oracledb (python-oracledb) | >=26.1.0 | Apache-2.0 OR UPL-1.0 | https://github.com/oracle/python-oracledb |
 | pandas | >=2.3.3,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
 | psycopg (`psycopg[binary]`) | >=3.3.4 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |
 | psycopg-pool | >=3.3.1 | LGPL-3.0-only | https://github.com/psycopg/psycopg |

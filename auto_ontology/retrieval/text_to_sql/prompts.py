@@ -107,6 +107,36 @@ _MYSQL_DIALECT_RULES = (
 )
 
 
+# Oracle rejects several things the generic rules (and the model's habits from
+# other engines) produce. The connector runs SQL as written, so these rules are
+# the only guard; a miss comes back to the model as Oracle's own error.
+_ORACLE_DIALECT_RULES = (
+    "**Oracle-specific (STRICT — these OVERRIDE the generic rules above and will error at execution)**\n"
+    "- Oracle has no LIMIT. Wherever a rule above says to add LIMIT n, write "
+    "`FETCH FIRST n ROWS ONLY` after ORDER BY instead (`OFFSET m ROWS` before it to skip rows).\n"
+    "- Never put AS before a table or subquery alias: write `FROM orders o` and "
+    "`FROM (SELECT ...) t`, not `FROM orders AS o`. AS is only valid for column aliases.\n"
+    "- A SELECT with no table needs `FROM DUAL`.\n"
+    "- Do not end the statement with a semicolon.\n"
+    "- Oracle folds unquoted identifiers to UPPER case. Table and column names shown in "
+    "AVAILABLE TABLES / KNOWN COLUMN MAPPINGS in upper case need no quoting; a name containing "
+    "any lowercase letter must be wrapped in double quotes using the EXACT case shown.\n"
+    "- An empty string is NULL in Oracle: test with IS NULL / IS NOT NULL, never `= ''`.\n"
+    "- A column whose data type is BOOLEAN (Oracle 23ai and later) takes TRUE / FALSE or can be "
+    "used as a condition on its own. Any other column holding a flag stores it as text or a "
+    "number: compare against the stored value (for example 'Y'/'N' or 1/0) shown in the "
+    "sample values, never TRUE / FALSE.\n"
+    "- Use Oracle functions: NVL or COALESCE, SUBSTR, `||` for concatenation, TO_CHAR / TO_DATE "
+    "with an explicit format, TRUNC(date, 'MM') instead of DATE_TRUNC, EXTRACT(YEAR FROM d), "
+    "SYSDATE or CURRENT_DATE, ADD_MONTHS, and LISTAGG(...) WITHIN GROUP (ORDER BY ...). "
+    "Date literals are written `DATE 'YYYY-MM-DD'`.\n"
+    "- `/` never truncates in Oracle: NUMBER / NUMBER is fractional, so do not cast to make a "
+    "division fractional.\n"
+    "- GROUP BY, WHERE and HAVING cannot reference SELECT aliases. Repeat the full expression "
+    "or wrap the query in a subquery/CTE.\n\n"
+)
+
+
 def format_dialect_rules(dialect: str | None) -> str:
     """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
 
@@ -114,8 +144,9 @@ def format_dialect_rules(dialect: str | None) -> str:
     LEAST/GREATEST, stats aggregates, EXTRACT/DATE_TRUNC). Snowflake needs
     identifier-quoting and VARIANT/FLATTEN guidance for case-sensitive
     lowercase columns (Spider2 PATENTS etc.). MySQL needs the generic
-    division-cast rule lifted, since its casts round results. Returns '' for
-    other dialects.
+    division-cast rule lifted, since its casts round results. Oracle needs
+    its row-limiting and aliasing syntax, which the generic rules get wrong.
+    Returns '' for other dialects.
     """
     normalized = (dialect or "").strip().lower()
     if normalized == "sqlite":
@@ -126,6 +157,8 @@ def format_dialect_rules(dialect: str | None) -> str:
         return _POSTGRES_DIALECT_RULES
     if normalized == "mysql":
         return _MYSQL_DIALECT_RULES
+    if normalized == "oracle":
+        return _ORACLE_DIALECT_RULES
     return ""
 
 

@@ -21,6 +21,7 @@ from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.kyuubi import KyuubiDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
+from auto_ontology.connectors.oracle import OracleDatabase
 from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.snowflake import SnowflakeDatabase
 from auto_ontology.connectors.sqlite import SQLiteDatabase
@@ -45,6 +46,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
     "mysql": MySQLDatabase,
+    "oracle": OracleDatabase,
     "databricks": DatabricksDatabase,
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
@@ -138,7 +140,7 @@ def create_connector(
 
     *schemas* is an optional ingestion allowlist. It is only honoured by
     connectors that support schema filtering (currently Databricks, Snowflake,
-    Kyuubi, and Trino); for others it is ignored so their behaviour is unchanged.
+    Kyuubi, Trino, and Oracle); for others it is ignored so their behaviour is unchanged.
 
     *table_filter* is the connection's regex allow/deny pair. Unlike *schemas*
     it applies to every connector, because it is enforced centrally in
@@ -166,6 +168,7 @@ def create_connector(
             SnowflakeDatabase,
             KyuubiDatabase,
             TrinoDatabase,
+            OracleDatabase,
         ):
             connector = connector_class(connection_string, schemas=schemas)
         else:
@@ -269,7 +272,7 @@ def get_connectors() -> list[SQLDatabase]:
 
         # Each spec is (connection_string, schema_allowlist, table_filter). The
         # schema filter is honoured only during ingestion introspection
-        # (Databricks, Snowflake, Kyuubi, and Trino); it is inert for retrieval,
+        # (Databricks, Snowflake, Kyuubi, Trino, and Oracle); it is inert for retrieval,
         # which executes SQL rather than introspecting. The table filter is
         # likewise ingestion-only, but applies to every connector.
         try:
