@@ -396,14 +396,22 @@ class OracleDatabase(SQLDatabase):
         endpoint, the credentials and the service name all work.
 
         Schemas Oracle itself maintains (``SYS``, ``SYSTEM``, ``XDB``, ...) are
-        left out; they hold the data dictionary, not anything to model.
+        left out; they hold the data dictionary, not anything to model. So are
+        schemas with no table or view this account can read: in Oracle every
+        database user is a schema, and a database that gives each person a
+        login has far more users than schemas worth offering.
         """
         frame = self.execute(
             """
-            SELECT USERNAME
-            FROM ALL_USERS
-            WHERE ORACLE_MAINTAINED = 'N'
-            ORDER BY USERNAME
+            SELECT u.USERNAME
+            FROM ALL_USERS u
+            WHERE u.ORACLE_MAINTAINED = 'N'
+              AND (
+                  EXISTS (SELECT 1 FROM ALL_TABLES t WHERE t.OWNER = u.USERNAME)
+                  OR EXISTS (SELECT 1 FROM ALL_VIEWS v WHERE v.OWNER = u.USERNAME)
+                  OR EXISTS (SELECT 1 FROM ALL_MVIEWS m WHERE m.OWNER = u.USERNAME)
+              )
+            ORDER BY u.USERNAME
             """
         )
         if frame.empty:

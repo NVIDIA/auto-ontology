@@ -651,7 +651,12 @@ def test_get_schemas_lists_only_user_schemas(driver: SimpleNamespace) -> None:
     driver.results.append((["USERNAME"], [("HR",), ("SALES",)]))
 
     assert database.get_schemas() == ["HR", "SALES"]
-    assert "ORACLE_MAINTAINED = 'N'" in driver.connections[-1].executed[0][0]
+    statement = driver.connections[-1].executed[0][0]
+    assert "ORACLE_MAINTAINED = 'N'" in statement
+    # Every database user is a schema; only those with something to read are
+    # offered.
+    for view in ("ALL_TABLES", "ALL_VIEWS", "ALL_MVIEWS"):
+        assert f"EXISTS (SELECT 1 FROM {view}" in statement
 
 
 def test_qualify_quotes_schema_and_table(driver: SimpleNamespace) -> None:
