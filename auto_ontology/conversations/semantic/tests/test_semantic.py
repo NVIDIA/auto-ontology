@@ -208,8 +208,21 @@ def test_the_known_list_is_capped_and_keeps_the_vocabulary(
 ) -> None:
     from auto_ontology.conversations.semantic import extract
 
-    monkeypatch.setattr(extract, "_KNOWN_CAP", 3)
-    drafts = [
+    monkeypatch.setenv(extract._KNOWN_CAP_ENV, "3")
+    listed = _format_known(_five_drafts())
+
+    assert [line.split(" [")[0] for line in listed.splitlines()] == [
+        "- weather app",
+        "- quota 1200",
+        "- flask",
+    ]
+    # Four, not five: the earlier reading of the same key is not a line the
+    # ceiling dropped, it is one there was never a reason to send.
+    assert "Listing 3 of 4 known nodes" in caplog.text
+
+
+def _five_drafts() -> list[NodeDraft]:
+    return [
         NodeDraft(name="weather app", type="Project", kinds=["object"]),
         NodeDraft(name="quota 1000", type="Fact", kinds=["state"], key="quota"),
         NodeDraft(name="said hello", type="Fact", kinds=["fact"]),
@@ -217,14 +230,35 @@ def test_the_known_list_is_capped_and_keeps_the_vocabulary(
         NodeDraft(name="flask", type="Library", kinds=["object"]),
     ]
 
-    listed = _format_known(drafts)
+
+def test_every_known_node_is_listed_unless_a_ceiling_is_asked_for(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A node the window cannot see is one it may introduce again under another
+    name, which is the failure this list exists to prevent."""
+    from auto_ontology.conversations.semantic import extract
+
+    monkeypatch.delenv(extract._KNOWN_CAP_ENV, raising=False)
+    listed = _format_known(_five_drafts())
 
     assert [line.split(" [")[0] for line in listed.splitlines()] == [
         "- weather app",
+        "- said hello",
         "- quota 1200",
         "- flask",
     ]
-    assert "Listing 3 of 5 known nodes" in caplog.text
+    assert "Listing" not in caplog.text
+
+
+def test_an_unreadable_ceiling_lists_them_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Listing every node costs tokens; listing none would lose the vocabulary."""
+    from auto_ontology.conversations.semantic import extract
+
+    monkeypatch.setenv(extract._KNOWN_CAP_ENV, "three")
+
+    assert len(_format_known(_five_drafts()).splitlines()) == 4
 
 
 def test_a_short_known_list_is_listed_whole(caplog: pytest.LogCaptureFixture) -> None:
@@ -341,6 +375,22 @@ class TestKeyAcceptance:
         groups = [KeyGroup(keys=["api_response_time", "fetch_latency"])]
 
         assert _accept(groups, self.CANDIDATES) == {
+            ("Weather app", "api_response_time"): "fetch_latency"
+        }
+
+    def test_another_subjects_earlier_turn_does_not_choose_the_name(self) -> None:
+        """It states a property of its own that happens to share a key's name,
+        and the group is about neither it nor that turn."""
+        candidates = {
+            **self.CANDIDATES,
+            "Autocomplete feature": [
+                {"attribute_key": "api_response_time", "turn_indexes": [4]},
+                {"attribute_key": "cache_ttl", "turn_indexes": [9]},
+            ],
+        }
+        groups = [KeyGroup(keys=["api_response_time", "fetch_latency"])]
+
+        assert _accept(groups, candidates) == {
             ("Weather app", "api_response_time"): "fetch_latency"
         }
 

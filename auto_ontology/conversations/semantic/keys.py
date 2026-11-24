@@ -246,20 +246,28 @@ def _accept(
     review, which discards a whole answer, there is nothing here to retry on a
     smaller question.
 
-    The canonical key is the one stated earliest, so the chain reads from the
-    name the transcript used first.
+    The canonical key is the one the subject stated earliest, so the chain
+    reads from the name the transcript used first for it. Earliest on that
+    subject, not on any: another subject carrying the key says nothing about
+    which name this one reached for first.
     """
     keys_by_subject = {
         subject: {(row.get("attribute_key") or "").strip() for row in members}
         for subject, members in candidates.items()
     }
-    first_turn: dict[str, int] = {}
-    for members in candidates.values():
+    # Per subject, like the rewrite: the same key on another subject is a
+    # different property, and letting its turn decide would file this group
+    # under the name the transcript used second for the subject it is about.
+    first_turn: dict[tuple[str, str], int] = {}
+    for subject, members in candidates.items():
         for row in members:
             key = (row.get("attribute_key") or "").strip()
             turns = row.get("turn_indexes") or []
             if turns:
-                first_turn[key] = min(first_turn.get(key, min(turns)), min(turns))
+                stated = min(turns)
+                first_turn[subject, key] = min(
+                    first_turn.get((subject, key), stated), stated
+                )
 
     rewrite: dict[tuple[str, str], str] = {}
     #: Per subject: one key can be grouped under two subjects, never twice
@@ -292,21 +300,26 @@ def _accept(
                 len(subjects),
             )
             continue
-        if any((subject, key) in claimed for subject in subjects for key in keys):
+        # One by now: a group naming a subject was narrowed to it, and one
+        # naming none that several carry was dropped just above.
+        subject = subjects[0]
+        if any((subject, key) in claimed for key in keys):
             logger.warning("Key group %s reuses an already-grouped key.", keys)
             continue
-        canonical = min(set(keys), key=lambda k: (first_turn.get(k, 10**9), k))
+        canonical = min(
+            set(keys), key=lambda k: (first_turn.get((subject, k), 10**9), k)
+        )
         logger.info(
-            "Keys %s name one property (%s) -- filing them under %r.",
+            "Keys %s name one property (%s) of %r -- filing them under %r.",
             sorted(set(keys)),
             group.property_name or "unnamed",
+            subject,
             canonical,
         )
-        claimed.update((subject, key) for subject in subjects for key in keys)
-        for subject in subjects:
-            for key in set(keys):
-                if key != canonical:
-                    rewrite[(subject, key)] = canonical
+        claimed.update((subject, key) for key in keys)
+        for key in set(keys):
+            if key != canonical:
+                rewrite[(subject, key)] = canonical
     return rewrite
 
 
