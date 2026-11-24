@@ -318,7 +318,7 @@ def _in_database(ctx: ToolContext, table: dict) -> bool:
     database_name = table.get("database_name")
     if ctx.database_name:
         return database_name == ctx.database_name
-    if not database_name or len(ctx.connectors) <= 1:
+    if not database_name or not ctx.connectors:
         return True
     return any(
         getattr(c, "database_name", None) == database_name for c in ctx.connectors

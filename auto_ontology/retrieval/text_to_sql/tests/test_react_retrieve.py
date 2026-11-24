@@ -847,3 +847,11 @@ def test_tables_of_unconnected_databases_are_not_offered() -> None:
     assert tool._in_database(connected, {"database_name": "a"})
     assert not tool._in_database(connected, {"database_name": "gone"})
     assert tool._in_database(connected, {"name": "no_database_recorded"})
+
+
+def test_a_single_connection_does_not_offer_another_databases_tables() -> None:
+    connected = ToolContext(None, [SimpleNamespace(database_name="a")])
+
+    assert tool._in_database(connected, {"database_name": "a"})
+    assert not tool._in_database(connected, {"database_name": "gone"})
+    assert tool._in_database(connected, {"name": "no_database_recorded"})
