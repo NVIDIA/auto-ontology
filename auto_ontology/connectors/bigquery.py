@@ -71,6 +71,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
@@ -100,6 +101,7 @@ _JOB_LABELS = {"source": "auto-ontology"}
 _TIMEOUT_GRACE_S = 10.0
 
 _QUERY_HISTORY_LIMIT = 10_000
+_MAX_QUERY_JOB_HOURS = 6
 
 _TABLE_TYPES = {
     "VIEW": TableTypes.VIEW,
@@ -214,7 +216,9 @@ class ShardFamily:
 
 
 def shard_families(
-    names: list[str], columns: dict[str, dict[str, str]] | None = None
+    names: list[str],
+    columns: dict[str, dict[str, str]] | None = None,
+    views: Iterable[str] = (),
 ) -> list[ShardFamily]:
     """Group date-sharded table names into wildcard families of two shards or more.
 
@@ -223,8 +227,13 @@ def shard_families(
     selected, and a changed type fails the query. Given each table's
     *columns* (name to type), a shard with a column the newest does not have
     the same way stays a table of its own, listed in ``also_matches``.
+
+    BigQuery rejects a wildcard that matches a view, even when a
+    ``_TABLE_SUFFIX`` filter excludes it, so no family is formed over a prefix
+    any of *views* (relations other than base tables) starts with.
     """
     unique = sorted(set(names))
+    views = tuple(views)
     groups: dict[str, list[str]] = {}
     for name in unique:
         match = _SHARD_NAME.match(name)
@@ -232,6 +241,8 @@ def shard_families(
             groups.setdefault(match.group("prefix"), []).append(name)
     families = []
     for prefix, members in sorted(groups.items()):
+        if any(view.startswith(prefix) for view in views):
+            continue
         shards = sorted(members, key=lambda n: (len(n), n))
         if columns is not None:
             newest = {c.casefold(): t for c, t in columns.get(shards[-1], {}).items()}
@@ -863,26 +874,28 @@ class BigQueryDatabase(SQLDatabase):
 
             def sql(dataset: str) -> str:
                 return f"""
-                    SELECT table_schema, table_name
+                    SELECT table_schema, table_name, table_type
                     FROM {self._information_schema(dataset, "TABLES")}
-                    WHERE table_type = 'BASE TABLE'
                 """
 
             self._remember_families(
-                self._per_dataset(sql, ["table_schema", "table_name"])
+                self._per_dataset(sql, ["table_schema", "table_name", "table_type"])
             )
         return self._families or {}
 
-    def _remember_families(self, base_tables: pd.DataFrame) -> None:
-        names: dict[str, list[str]] = {}
-        for schema, table in base_tables[["table_schema", "table_name"]].itertuples(
-            index=False, name=None
-        ):
-            names.setdefault(str(schema), []).append(str(table))
+    def _remember_families(self, relations: pd.DataFrame) -> None:
+        tables: dict[str, list[str]] = {}
+        views: dict[str, list[str]] = {}
+        for schema, name, kind in relations[
+            ["table_schema", "table_name", "table_type"]
+        ].itertuples(index=False, name=None):
+            into = tables if str(kind).upper() == "BASE TABLE" else views
+            into.setdefault(str(schema), []).append(str(name))
         self._families = {}
-        for schema, tables in names.items():
+        for schema, names in tables.items():
             self._families[schema.casefold()] = {
-                f.wildcard: f for f in shard_families(tables)
+                f.wildcard: f
+                for f in shard_families(names, views=views.get(schema, ()))
             }
 
     def _family(self, schema: str, table: str) -> ShardFamily | None:
@@ -946,9 +959,7 @@ class BigQueryDatabase(SQLDatabase):
             """
 
         frame = self._per_dataset(sql, _TABLE_SCHEMA)
-        self._remember_families(
-            frame[frame["table_type"].astype(str).str.upper() == "BASE TABLE"]
-        )
+        self._remember_families(frame)
         if frame.empty:
             return frame
         frame["table_type"] = (
@@ -1062,12 +1073,18 @@ class BigQueryDatabase(SQLDatabase):
             ".INFORMATION_SCHEMA.JOBS_BY_PROJECT"
         )
         window = f"TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {int(hours)} HOUR)"
+        # creation_time is the partition key; a job that ended in the window can
+        # have started up to the longest a query job may run before it.
+        created = (
+            f"TIMESTAMP_SUB(CURRENT_TIMESTAMP(), "
+            f"INTERVAL {int(hours) + _MAX_QUERY_JOB_HOURS} HOUR)"
+        )
         label_key, label_value = next(iter(_JOB_LABELS.items()))
         try:
             frame = self.execute(f"""
                 SELECT end_time, query AS query_text
                 FROM {jobs}
-                WHERE creation_time >= {window}
+                WHERE creation_time >= {created}
                   AND end_time >= {window}
                   AND job_type = 'QUERY'
                   AND statement_type = 'SELECT'

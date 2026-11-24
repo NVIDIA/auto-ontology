@@ -701,8 +701,13 @@ def test_get_fks_pairs_composite_key_columns_exactly() -> None:
     _wire(
         database,
         _FakeClient(
-            lambda sql: _FakeRows(
-                ["table_schema", "table_name"], [["sales", "order_lines"]]
+            lambda sql: (
+                _FakeRows(["table_schema", "table_name"], [["sales", "order_lines"]])
+                if "TABLE_CONSTRAINTS" in sql
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type"],
+                    [["sales", "order_lines", "BASE TABLE"]],
+                )
             ),
             tables={
                 "my-project.sales.order_lines": _table_with_foreign_keys(
@@ -760,8 +765,13 @@ def test_a_key_into_another_project_is_left_out() -> None:
     _wire(
         database,
         _FakeClient(
-            lambda sql: _FakeRows(
-                ["table_schema", "table_name"], [["sales", "order_lines"]]
+            lambda sql: (
+                _FakeRows(["table_schema", "table_name"], [["sales", "order_lines"]])
+                if "TABLE_CONSTRAINTS" in sql
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type"],
+                    [["sales", "order_lines", "BASE TABLE"]],
+                )
             ),
             tables={
                 "my-project.sales.order_lines": _table_with_foreign_keys(foreign, local)
@@ -923,7 +933,10 @@ def test_query_history_reads_the_regional_jobs_view() -> None:
     sql = client.statements[0]
 
     assert "`my-project`.`region-US`.INFORMATION_SCHEMA.JOBS_BY_PROJECT" in sql
-    assert "INTERVAL 6 HOUR" in sql
+    assert "AND end_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 6 HOUR)" in sql
+    assert (
+        "creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 12 HOUR)" in sql
+    )
     assert "label.value = 'auto-ontology'" in sql
     assert frame["query_text"].tolist() == ["SELECT 1"]
 
@@ -1075,6 +1088,46 @@ def test_a_wildcard_names_the_other_tables_it_matches() -> None:
 
     assert family.also_matches == ("ghcnd_countries",)
     assert "also matches ghcnd_countries" in family.note()
+
+
+def test_no_wildcard_is_formed_over_a_prefix_a_view_matches() -> None:
+    """BigQuery rejects such a wildcard even with a _TABLE_SUFFIX filter."""
+    names = ["events_20260101", "events_20260102"]
+
+    assert shard_families(names, views=["events_summary"]) == []
+    assert [f.wildcard for f in shard_families(names, views=["summary"])] == [
+        "events_*"
+    ]
+
+
+@pytest.mark.parametrize("list_tables_first", [True, False])
+def test_shards_beside_a_matching_view_stay_separate(list_tables_first: bool) -> None:
+    rows = [
+        ["ga", "events_20260101", "BASE TABLE", None],
+        ["ga", "events_20260102", "BASE TABLE", None],
+        ["ga", "events_summary", "VIEW", None],
+    ]
+    database = _database(schema="ga")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: (
+                _FakeRows(
+                    ["table_schema", "table_name", "table_type", "description"], rows
+                )
+                if "INFORMATION_SCHEMA.TABLES" in sql
+                else _FakeRows([], [])
+            )
+        ),
+    )
+    if list_tables_first:
+        assert database.get_tables()["table_name"].tolist() == [
+            "events_20260101",
+            "events_20260102",
+            "events_summary",
+        ]
+
+    assert database._shard_families() == {"ga": {}}  # noqa: SLF001
 
 
 def test_date_shards_collapse_into_one_wildcard_table() -> None:
