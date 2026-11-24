@@ -80,6 +80,22 @@ def test_extract_tables_and_columns_window_order_by_matching_an_output_alias() -
     assert within_group.tables["t"].columns == {"a", "b"}
 
 
+def test_extract_tables_and_columns_aggregate_argument_named_like_an_output() -> None:
+    """``SUM(a)`` in HAVING reads the input column a, even beside ``AS a``."""
+    result = extract_tables_and_columns(
+        "SELECT SUM(b) AS a FROM t HAVING SUM(a) > 1", ["postgres"], {}
+    )
+    assert result.tables["t"].columns == {"a", "b"}
+
+
+def test_extract_tables_and_columns_duplicate_alias_keeps_the_tables() -> None:
+    """A query sqlglot can't resolve still returns the tables it names."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t AS x JOIN u AS x ON TRUE", ["postgres"], {}
+    )
+    assert set(result.tables) == {"t", "u"}
+
+
 def test_extract_tables_and_columns_cte_virtual_tables_excluded() -> None:
     """CTE aliases must not be treated as real source tables."""
     result = extract_tables_and_columns(

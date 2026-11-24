@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError, TokenError
+from sqlglot.errors import OptimizeError, ParseError, TokenError
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope, walk_in_scope
 
@@ -161,7 +161,9 @@ def _infer_single_table_columns(expression: exp.Expression) -> None:
             # taken for the clause it sits in.
             # Only a clause that belongs directly to the SELECT counts: an ORDER BY
             # inside a window or WITHIN GROUP is not one of its output clauses.
-            clause = column.find_ancestor(exp.Select, *_OUTPUT_CLAUSES)
+            # A name inside a function call (``HAVING SUM(a)``) is an input column,
+            # not a reference to an output alias, so a function ends the search too.
+            clause = column.find_ancestor(exp.Func, exp.Select, *_OUTPUT_CLAUSES)
             if (
                 isinstance(clause, _OUTPUT_CLAUSES)
                 and isinstance(clause.parent, exp.Select)
@@ -743,7 +745,10 @@ def extract_tables_and_columns(
     except Exception:
         qualified = statement  # fall back to unqualified AST if optimizer fails
     if not schema_dict:
-        _infer_single_table_columns(qualified)
+        try:
+            _infer_single_table_columns(qualified)
+        except OptimizeError:
+            pass  # e.g. a duplicate alias: keep the tables found, as qualify() did
 
     # Walk every Column node; after qualify, col.table names the resolved table/alias.
     for col in qualified.find_all(exp.Column):
