@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
 from auto_ontology.conversations.semantic.extract import EdgeDraft, NodeDraft
@@ -436,8 +438,13 @@ class TestDetach:
 
 class _Denial:
     def __init__(
-        self, name, description="said so", evidence="", value="", kind="retraction"
-    ):
+        self,
+        name: str,
+        description: str = "said so",
+        evidence: str = "",
+        value: str = "",
+        kind: Literal["retraction", "inaccuracy"] = "retraction",
+    ) -> None:
         self.name, self.description = name, description
         self.evidence, self.value = evidence, value
         self.kind = kind
