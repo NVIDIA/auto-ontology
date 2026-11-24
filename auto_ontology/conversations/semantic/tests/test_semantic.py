@@ -339,6 +339,38 @@ class TestKeyAcceptance:
     def test_a_group_of_one_is_not_a_group(self) -> None:
         assert _accept([KeyGroup(keys=["fetch_latency"])], self.CANDIDATES) == {}
 
+    SHARED = {
+        "Weather app": [
+            {"attribute_key": "fetch_latency", "turn_indexes": [19]},
+            {"attribute_key": "api_response_time", "turn_indexes": [75]},
+        ],
+        "Autocomplete feature": [
+            {"attribute_key": "fetch_latency", "turn_indexes": [20]},
+            {"attribute_key": "api_response_time", "turn_indexes": [80]},
+        ],
+    }
+
+    def test_a_merge_applies_only_to_the_subject_it_names(self) -> None:
+        groups = [
+            KeyGroup(subject="Weather app", keys=["fetch_latency", "api_response_time"])
+        ]
+
+        assert _accept(groups, self.SHARED) == {
+            ("Weather app", "api_response_time"): "fetch_latency"
+        }
+
+    def test_a_group_with_no_subject_carried_by_two_is_refused(self) -> None:
+        groups = [KeyGroup(keys=["fetch_latency", "api_response_time"])]
+
+        assert _accept(groups, self.SHARED) == {}
+
+    def test_a_named_subject_that_lacks_the_keys_is_refused(self) -> None:
+        groups = [
+            KeyGroup(subject="OpenWeather API", keys=["fetch_latency", "daily_quota"])
+        ]
+
+        assert _accept(groups, self.CANDIDATES) == {}
+
 
 def test_a_merge_renames_the_key_only_on_the_subject_it_was_found_on(
     monkeypatch: pytest.MonkeyPatch,

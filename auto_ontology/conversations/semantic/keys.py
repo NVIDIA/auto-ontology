@@ -94,15 +94,19 @@ Conversation properties, grouped by the thing they are about. Each line is
 
 {subjects}
 
-Return the groups of two or more keys that name one property. Use only keys
-listed above, each in at most one group, and never group keys from two
-different subjects.
+Return the groups of two or more keys that name one property, each with the
+subject it is under. Use only keys listed above, each in at most one group, and
+never group keys from two different subjects.
 """
 
 
 class KeyGroup(BaseModel):
     """Keys the model says are one property."""
 
+    subject: str = Field(
+        default="",
+        description="The subject the keys are listed under, exactly as its ## heading.",
+    )
     keys: list[str] = Field(
         default_factory=list,
         description="Two or more keys, exactly as listed, naming one property.",
@@ -232,10 +236,11 @@ def _accept(
     to share a name, and renaming it there would let derivation chain the two
     into a revision.
 
-    Four ways to be rejected, each of which would otherwise merge two keys the
+    The ways to be rejected, each of which would otherwise merge two keys the
     question never put together: a key no subject offered, a key in two groups,
-    a group of fewer than two keys, and a group whose keys no single subject
-    carries. A rejected group is dropped on its own -- unlike cognee's batch
+    a group of fewer than two keys, a group whose keys no single subject
+    carries, a named subject that does not carry them, and no subject named
+    when several carry them. A rejected group is dropped on its own -- unlike cognee's batch
     review, which discards a whole answer, there is nothing here to retry on a
     smaller question.
 
@@ -270,6 +275,21 @@ def _accept(
         ]
         if not subjects:
             logger.warning("Key group %s is not carried by one subject.", keys)
+            continue
+        # Only on the subject whose readings the answer was about: another
+        # subject carrying the same keys may measure two different things.
+        named = group.subject.strip()
+        if named:
+            if named not in subjects:
+                logger.warning("Key group %s is not carried by %r.", keys, named)
+                continue
+            subjects = [named]
+        elif len(subjects) > 1:
+            logger.warning(
+                "Key group %s names no subject and %d carry it -- skipped.",
+                keys,
+                len(subjects),
+            )
             continue
         canonical = min(set(keys), key=lambda k: (first_turn.get(k, 10**9), k))
         logger.info(
