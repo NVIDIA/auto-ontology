@@ -60,8 +60,7 @@ def _stub(hits: list[dict], paths: list[dict] | None = None) -> Iterator[_FakeVd
     vdb = _FakeVdb(hits)
     module = "auto_ontology.retrieval.conversation.semantic_search"
     with (
-        patch(f"{module}.get_embed_params"),
-        patch(f"{module}.embed_texts", return_value=[[0.1, 0.2]]),
+        patch(f"{module}.embed_query", return_value=[0.1, 0.2]),
         patch(f"{module}.get_conversation_semantic_vdb", return_value=vdb),
         patch(f"{module}.get_one_hop_path_vdb", return_value=_FakeVdb(paths or [])),
     ):
@@ -87,8 +86,7 @@ def test_a_missing_semantic_layer_falls_through_to_the_turn_route() -> None:
     module = "auto_ontology.retrieval.conversation.semantic_search"
     store = f"{module}.semantic_store"
     with (
-        patch(f"{module}.get_embed_params"),
-        patch(f"{module}.embed_texts", return_value=[[0.1, 0.2]]),
+        patch(f"{module}.embed_query", return_value=[0.1, 0.2]),
         patch(f"{module}.get_conversation_semantic_vdb", side_effect=missing),
         patch(f"{module}.get_one_hop_path_vdb", side_effect=missing),
         patch(f"{store}.fetch_nodes", return_value=[]),
@@ -108,8 +106,7 @@ def test_one_search_embeds_the_query_once() -> None:
     module = "auto_ontology.retrieval.conversation.semantic_search"
     store = f"{module}.semantic_store"
     with (
-        patch(f"{module}.get_embed_params"),
-        patch(f"{module}.embed_texts", return_value=[_VECTOR]) as embedded,
+        patch(f"{module}.embed_query", return_value=_VECTOR) as embedded,
         patch(f"{module}.get_conversation_semantic_vdb", return_value=_FakeVdb([])),
         patch(f"{module}.get_one_hop_path_vdb", return_value=_FakeVdb([])),
         patch(f"{store}.fetch_nodes", return_value=[]),

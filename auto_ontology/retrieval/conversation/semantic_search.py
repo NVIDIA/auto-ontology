@@ -45,8 +45,7 @@ from auto_ontology.conversations.semantic.paths import graph_text
 from auto_ontology.conversations.store import fetch_turns
 from auto_ontology.dal.schema import CONVERSATION_NODE_SUBJECT
 from auto_ontology.retrieval.conversation.search import TurnHit, search_turns
-from auto_ontology.utils import get_embed_params
-from auto_ontology.utils.embedding import embed_texts
+from auto_ontology.utils.retriever import embed_query
 from auto_ontology.vdb import get_conversation_semantic_vdb, get_one_hop_path_vdb
 
 logger = logging.getLogger(__name__)
@@ -96,8 +95,7 @@ class SemanticHits:
 
 
 def _query_vector(query: str) -> list[float] | None:
-    vectors = embed_texts([query], get_embed_params(), "query")
-    return vectors[0] if vectors else None
+    return embed_query(query)
 
 
 def _matched_ids(

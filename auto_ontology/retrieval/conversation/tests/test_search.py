@@ -71,10 +71,9 @@ def _stub(
         return rows
 
     with (
-        patch("auto_ontology.retrieval.conversation.search.get_embed_params"),
         patch(
-            "auto_ontology.retrieval.conversation.search.embed_texts",
-            return_value=[[0.1, 0.2] if vector is _DEFAULT_VECTOR else vector],
+            "auto_ontology.retrieval.conversation.search.embed_query",
+            return_value=[0.1, 0.2] if vector is _DEFAULT_VECTOR else vector,
         ),
         patch(
             "auto_ontology.retrieval.conversation.search.get_conversation_vdb",
@@ -97,6 +96,42 @@ def test_hits_come_back_in_transcript_order_not_distance_order() -> None:
         found = search_turns("q", database_name="mem")
 
     assert [t.turn_index for t in found] == [3, 7, 12]
+
+
+def test_a_timeout_embedding_the_query_is_retried() -> None:
+    """A blip must not read as a transcript that holds nothing on the query."""
+    import httpx
+    import openai
+
+    from auto_ontology.utils import retriever
+
+    outcomes: list[Any] = [
+        openai.APITimeoutError(request=httpx.Request("POST", "http://embed")),
+        [[0.1, 0.2]],
+    ]
+
+    def _embed(*_: Any, **__: Any) -> list:
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    with (
+        patch.object(retriever, "embed_texts", side_effect=_embed),
+        patch.object(retriever, "get_embed_params"),
+        patch.object(retriever.time, "sleep"),
+        patch(
+            "auto_ontology.retrieval.conversation.search.get_conversation_vdb",
+            return_value=_FakeVdb([_hit(3, 0.2)]),
+        ),
+        patch(
+            "auto_ontology.retrieval.conversation.search.fetch_turns",
+            return_value=[_row(3)],
+        ),
+    ):
+        found = search_turns("q", database_name="mem")
+
+    assert [t.turn_index for t in found] == [3]
 
 
 def test_text_comes_from_the_rows_not_the_vectors() -> None:

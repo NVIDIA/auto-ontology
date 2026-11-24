@@ -29,8 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from auto_ontology.conversations.store import fetch_turns
-from auto_ontology.utils import get_embed_params
-from auto_ontology.utils.embedding import embed_texts
+from auto_ontology.utils.retriever import embed_query
 from auto_ontology.vdb import get_conversation_vdb
 
 __all__ = ["TurnHit", "search_turns"]
@@ -87,8 +86,7 @@ def search_turns(
         return []
 
     if vector is None:
-        vectors = embed_texts([stripped], get_embed_params(), "query")
-        vector = vectors[0] if vectors else None
+        vector = embed_query(stripped)
     if vector is None:
         return []
 
