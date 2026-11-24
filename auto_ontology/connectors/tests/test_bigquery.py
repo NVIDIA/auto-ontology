@@ -944,7 +944,7 @@ def test_sql_on_a_billing_dataset_is_not_sent_to_its_case_twin() -> None:
     database.execute("SELECT COUNT(*) FROM sales.orders")
 
     assert "other" not in client.statements[0]
-    assert "other.sales.orders" in client.statements[1]
+    assert "`other`.sales.orders" in client.statements[1]
 
 
 def test_a_dataset_named_in_another_case_resolves_when_unambiguous() -> None:
@@ -1004,6 +1004,45 @@ def test_two_part_names_get_their_datasets_project() -> None:
     database.execute("SELECT COUNT(*) FROM austin_311.requests")
 
     assert "`bigquery-public-data`.austin_311.requests" in client.statements[0]
+
+
+def test_qualifying_datasets_leaves_the_rest_of_the_sql_as_written() -> None:
+    """Regenerating through sqlglot would move comments and rewrite literals."""
+    database = BigQueryDatabase(PUBLIC_URL)
+    client = _wire(database, _FakeClient())
+    sql = (
+        "-- requests per day\n"
+        "SELECT /* day */ DATE(r.created) AS d, COUNT(*) FROM `austin_311`.requests r"
+        " JOIN `austin_crime.crimes` c ON TRUE WHERE r.created > DATE '2020-01-01';\n"
+        "SELECT 1 FROM austin_311.requests"
+    )
+
+    database.execute(sql)
+
+    assert client.statements == [
+        "-- requests per day\n"
+        "SELECT /* day */ DATE(r.created) AS d, COUNT(*) "
+        "FROM `bigquery-public-data`.`austin_311`.requests r"
+        " JOIN `bigquery-public-data`.`austin_crime.crimes` c ON TRUE"
+        " WHERE r.created > DATE '2020-01-01';\n"
+        "SELECT 1 FROM `bigquery-public-data`.austin_311.requests"
+    ]
+
+
+def test_a_dataset_not_found_in_the_text_falls_back_to_regenerating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "auto_ontology.connectors.bigquery._dataset_offset", lambda sql, ds: None
+    )
+    database = BigQueryDatabase(PUBLIC_URL)
+    client = _wire(database, _FakeClient())
+
+    database.execute("SELECT COUNT(*) FROM austin_311.requests")
+
+    assert client.statements == [
+        "SELECT COUNT(*) FROM `bigquery-public-data`.austin_311.requests"
+    ]
 
 
 def test_sql_naming_its_projects_is_sent_unchanged() -> None:

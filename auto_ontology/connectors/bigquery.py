@@ -547,6 +547,21 @@ def _is_job_timeout(exc: BaseException) -> bool:
     return False
 
 
+def _dataset_offset(sql: str, dataset: exp.Expression) -> int | None:
+    """Where *dataset*'s identifier starts in *sql*, if sqlglot recorded it.
+
+    A quoted path (`` `ds.table` ``) is one token, so the identifier may be
+    only the first part of the text found there.
+    """
+    start = dataset.meta.get("start")
+    if not isinstance(start, int):
+        return None
+    name = dataset.name
+    if sql.startswith(name, start) or sql.startswith(f"`{name}", start):
+        return start
+    return None
+
+
 def _description(option_value: Any) -> str | None:
     """Decode a ``TABLE_OPTIONS`` description, which arrives as a SQL literal."""
     if option_value is None or option_value is pd.NA:
@@ -724,9 +739,12 @@ class BigQueryDatabase(SQLDatabase):
     def _qualify_datasets(self, sql: str) -> str:
         """Prefix ``dataset.table`` with the project of a dataset the URL names.
 
-        SQL is regenerated only when a name actually changes, so a statement
-        that already names its projects reaches BigQuery byte for byte. SQL
-        sqlglot cannot parse is passed through for BigQuery to judge.
+        The project is spliced in front of each dataset where it stands in the
+        text, so the rest of the statement reaches BigQuery byte for byte:
+        regenerating it through sqlglot can move comments and rewrite literals
+        and functions. Only when a dataset cannot be located in the text is the
+        statement regenerated. SQL sqlglot cannot parse is passed through for
+        BigQuery to judge.
         """
         if all(owner == self._project for owner in self._owners.values()):
             return sql
@@ -736,7 +754,8 @@ class BigQueryDatabase(SQLDatabase):
             logger.debug("Could not parse SQL to qualify its datasets; sent as is")
             return sql
 
-        changed = False
+        splices: dict[int, str] = {}
+        located = True
         for statement in statements:
             if statement is None:
                 continue
@@ -746,14 +765,23 @@ class BigQueryDatabase(SQLDatabase):
                 # Resolved against every named dataset, so an exact local
                 # match is never traded for a case-twin in another project.
                 owner = _by_dataset(self._owners, table.db)
-                if owner is not None and owner != self._project:
-                    table.set("catalog", exp.to_identifier(owner))
-                    changed = True
-        if not changed:
+                if owner is None or owner == self._project:
+                    continue
+                table.set("catalog", exp.to_identifier(owner))
+                start = _dataset_offset(sql, table.args["db"])
+                if start is None:
+                    located = False
+                else:
+                    splices[start] = f"`{owner}`."
+        if not splices and located:
             return sql
-        return ";\n".join(
-            s.sql(dialect="bigquery") for s in statements if s is not None
-        )
+        if not located:
+            return ";\n".join(
+                s.sql(dialect="bigquery") for s in statements if s is not None
+            )
+        for start in sorted(splices, reverse=True):
+            sql = sql[:start] + splices[start] + sql[start:]
+        return sql
 
     # ------------------------------------------------------------------
     # Execution
