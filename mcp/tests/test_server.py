@@ -65,6 +65,7 @@ def test_publishes_exactly_the_curated_tools_plus_the_handwritten_ones() -> None
     assert names == {spec.name for spec in CURATED} | {
         "ask_question",
         "check_readiness",
+        "describe_table",
     }
 
 

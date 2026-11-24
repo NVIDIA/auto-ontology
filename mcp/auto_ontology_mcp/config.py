@@ -39,8 +39,11 @@ DEFAULT_API_URL = "http://localhost:3000"
 DEFAULT_PORT = 3003
 DEFAULT_HOST = "0.0.0.0"
 
-# Catalog and glossary reads are ordinary API calls.
-DEFAULT_TIMEOUT_S = 30.0
+# Catalog and glossary reads are ordinary API calls. Coverage grading
+# (check_answerable) is not: it runs the extraction and grading LLM chain, which
+# takes tens of seconds against a remote model, so the same client needs enough
+# headroom to see the answer rather than cancelling it mid-flight.
+DEFAULT_TIMEOUT_S = 180.0
 
 # One chat turn is many sequential LLM calls. The backend caps individual SQL
 # statements at 30s but puts no ceiling on a whole run, so this is a client-side

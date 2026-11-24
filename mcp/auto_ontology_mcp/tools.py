@@ -111,15 +111,6 @@ CURATED: tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        method="GET",
-        path="/api/exploration/tables/{table_id}/details",
-        name="describe_table",
-        description=(
-            "Describe what one table means: the glossary terms that map to it, "
-            "and the stored queries from query history that reference it."
-        ),
-    ),
-    ToolSpec(
         method="POST",
         path="/api/question-entity-coverage",
         name="check_answerable",
