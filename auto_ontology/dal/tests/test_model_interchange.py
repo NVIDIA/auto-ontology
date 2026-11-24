@@ -22,6 +22,11 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+    from httpx import Response
 
 import pytest
 
@@ -644,9 +649,8 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
     `term` is `UNIQUE(name, source)`, so importing a document whose term shares
     a name with an existing one raises rather than creating a duplicate.
 
-    Left to surface: the constraint describes a genuine ambiguity between two
-    terms, and swallowing it would leave a duplicate no read can choose
-    between.
+    Preflight reports the conflict before database mutation, rather than
+    exposing the constraint violation to the HTTP caller.
     """
     document = _reid(_document(world), f"{world.prefix}-copy")
     document.data_layer.databases[0].schemas[0].database_name = f"{world.prefix}-copy"
@@ -654,7 +658,371 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
     document.semantic_layer.terms[0].name = f"{world.prefix}-Order"
 
     try:
-        with pytest.raises(Exception, match="uq_term_name_source|already exists"):
+        with pytest.raises(mi.ModelImportConflictError) as error:
             mi.apply_import_model(document, replace=False)
+        assert error.value.conflicts[0]["entity_type"] == "term"
     finally:
         _cleanup(f"{world.prefix}-copy")
+
+
+@pytest.mark.parametrize("replace", [True, False])
+def test_foreign_ids_on_existing_paths_report_all_conflicts(
+    world: World, replace: bool
+) -> None:
+    """A different deployment's IDs must not cause a partial import or a raw DB error."""
+    before = mi.fetch_export_rows([world.database])
+    document = _reid(_document(world), f"{world.prefix}-foreign")
+    with pytest.raises(mi.ModelImportConflictError) as error:
+        mi.apply_import_model(document, replace=replace)
+    assert (
+        len(error.value.conflicts) == 7
+    )  # Database, schema, two tables, three columns.
+    assert {c["kind"] for c in error.value.conflicts} == {"natural_name_conflict"}
+    assert mi.fetch_export_rows([world.database]) == before
+
+
+def _http_client() -> TestClient:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from auto_ontology.server.model_interchange.router import router
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    return TestClient(app)
+
+
+def _post_document(
+    document: mi.AutoOntologyModelDocument, *, replace: bool = False
+) -> Response:
+    import yaml
+
+    return _http_client().post(
+        f"/api/model/import?embed=false&replace={str(replace).lower()}",
+        content=yaml.safe_dump(document.model_dump()),
+        headers={"Content-Type": "application/yaml"},
+    )
+
+
+def test_http_reports_catalog_and_all_semantic_conflicts_before_writes(
+    world: World,
+) -> None:
+    from unittest.mock import patch
+    from auto_ontology.dal.session import StoreConn
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    document = _document(world)
+    document.semantic_layer.terms[0].id = "foreign-term"
+    document.semantic_layer.terms[0].columns_attributes[0].id = "foreign-attribute"
+    sql_id = _add(s.sql_attribute, name=f"{world.prefix}-sql")
+    ca_id = _add(s.custom_analysis, name=f"{world.prefix}-analysis")
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id="foreign-sql", name=f"{world.prefix}-sql", term_id="foreign-term"
+        )
+    )
+    document.semantic_layer.custom_analyses.append(
+        ModelCustomAnalysis(id="foreign-analysis", name=f"{world.prefix}-analysis")
+    )
+    # Catalog and semantic errors must be reported together.
+    document.data_layer.databases[0].schemas[0].tables[0].id = "foreign-table"
+    before = mi.fetch_export_rows([world.database])
+    with patch.object(StoreConn, "query_write", autospec=True) as writes:
+        response = _post_document(document)
+    assert response.status_code == 409
+    writes.assert_not_called()
+    conflicts = response.json()["detail"]["conflicts"]
+    assert {c["entity_type"] for c in conflicts} == {
+        "catalog_table",
+        "term",
+        "column_attribute",
+        "sql_attribute",
+        "custom_analysis",
+    }
+    assert {sql_id, ca_id, world.term, world.attribute} <= {
+        identity for conflict in conflicts for identity in conflict["existing_ids"]
+    }
+    assert mi.fetch_export_rows([world.database]) == before
+
+
+def test_http_export_and_bind_recovers_from_foreign_physical_ids(world: World) -> None:
+    import yaml
+
+    response = _post_document(_reid(_document(world), f"{world.prefix}-foreign"))
+    assert response.status_code == 409
+    exported = _http_client().post(
+        "/api/model/export", json={"databases": [world.database]}
+    )
+    assert exported.status_code == 200
+    rebound = mi.AutoOntologyModelDocument.model_validate(yaml.safe_load(exported.text))
+    result = _post_document(rebound, replace=True)
+    assert result.status_code == 200
+    assert all(value == 0 for value in result.json()["summary"]["created"].values())
+    assert _post_document(rebound, replace=True).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "entity", ["database", "schema", "table", "column", "term", "attribute"]
+)
+def test_http_rejects_ambiguous_live_and_imported_ids(
+    world: World, entity: str
+) -> None:
+    table, identity, props = {
+        "database": (
+            s.catalog_database,
+            world.database,
+            {"name": f"{world.prefix}-other"},
+        ),
+        "schema": (
+            s.catalog_schema,
+            world.schema,
+            {"name": "other", "database_id": world.database},
+        ),
+        "table": (
+            s.catalog_table,
+            world.orders,
+            {"name": "other", "schema_id": world.schema},
+        ),
+        "column": (
+            s.catalog_column,
+            world.order_id,
+            {"name": "other", "table_id": world.orders},
+        ),
+        "term": (
+            s.term,
+            world.term,
+            {"name": f"{world.prefix}-other", "source": SEMANTIC_SOURCE},
+        ),
+        "attribute": (
+            s.column_attribute,
+            world.attribute,
+            {
+                "name": f"{world.prefix}-other",
+                "source_column": "id",
+                "term_name": "other",
+                "table_id": world.orders,
+            },
+        ),
+    }[entity]
+    other = _add(table, imported_id=identity, **props)
+    response = _post_document(_document(world))
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "ambiguous_id"
+        and c["proposed_id"] == identity
+        and set(c["existing_ids"]) == {identity, other}
+        for c in response.json()["detail"]["conflicts"]
+    )
+
+
+def test_http_imported_ids_and_exact_live_ids_both_survive_replace(
+    world: World,
+) -> None:
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    attr = term.columns_attributes[0]
+    # Stamped aliases differ from live IDs. Exact live IDs must remain legal
+    # under replacement, without deleting the objects they identify.
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(imported_id="external-term")
+    )
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attribute)
+        .values(imported_id="external-attr")
+    )
+    assert _post_document(document, replace=True).status_code == 200
+    term.id = "external-term"
+    attr.id = "external-attr"
+    document.semantic_layer.semantic_fks[0].column_attribute_id = attr.id
+    result = _post_document(document, replace=True)
+    assert result.status_code == 200
+    assert result.json()["summary"]["created"]["terms"] == 0
+    assert result.json()["summary"]["created"]["column_attributes"] == 0
+    assert store().query_read(select(s.term.c.id).where(s.term.c.id == world.term))
+    assert store().query_read(
+        select(s.column_attribute.c.id).where(
+            s.column_attribute.c.id == world.attribute
+        )
+    )
+
+
+def test_http_replacement_allows_in_scope_semantic_id_change(world: World) -> None:
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    term.id = "replacement-term"
+    term.columns_attributes[0].id = "replacement-attribute"
+    document.semantic_layer.semantic_fks[
+        0
+    ].column_attribute_id = "replacement-attribute"
+    result = _post_document(document, replace=True)
+    assert result.status_code == 200
+    assert result.json()["summary"]["created"]["terms"] == 1
+    assert not store().query_read(select(s.term.c.id).where(s.term.c.id == world.term))
+
+
+def test_http_replacement_cannot_delete_a_cross_database_term(world: World) -> None:
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, name="public", database_id=other_db)
+    other_table = _add(s.catalog_table, name="orders", schema_id=other_schema)
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    document = _document(world)
+    document.semantic_layer.terms[0].id = "replacement-term"
+    response = _post_document(document, replace=True)
+    assert response.status_code == 409
+    assert any(
+        c["entity_type"] == "term" and world.term in c["existing_ids"]
+        for c in response.json()["detail"]["conflicts"]
+    )
+    assert store().query_read(
+        select(s.table__term).where(s.table__term.c.table_id == other_table)
+    )
+
+
+def test_http_real_integrity_failure_rolls_back_and_redacts(world: World) -> None:
+    from unittest.mock import patch
+
+    document = _document(world)
+    before = mi.fetch_export_rows([world.database])
+    original = mi._import_terms
+
+    def violate_constraint(*args: Any, **kwargs: Any) -> None:
+        # Simulate a writer racing preflight: earlier catalog stamps/writes
+        # must roll back when a real Postgres uniqueness constraint fails.
+        store().query_write(s.term.insert().values(name=f"{world.prefix}-Order"))
+        original(*args, **kwargs)
+
+    with patch.object(mi, "_import_terms", side_effect=violate_constraint):
+        response = _post_document(document, replace=True)
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflicts"] == [
+        {"kind": "integrity_conflict", "existing_ids": []}
+    ]
+    assert "INSERT INTO" not in response.text
+    assert "uq_term" not in response.text
+    assert mi.fetch_export_rows([world.database]) == before
+
+
+def test_sql_attributes_and_analyses_create_and_reimport_by_both_id_forms(
+    world: World,
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    document = _document(world)
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-external-sql",
+            name=f"{world.prefix}-sql",
+            term_id=world.term,
+            sql="SELECT id FROM public.orders",
+            sql_column_is=[world.order_id],
+        )
+    )
+    document.semantic_layer.custom_analyses.append(
+        ModelCustomAnalysis(
+            id=f"{world.prefix}-external-analysis",
+            name=f"{world.prefix}-analysis",
+            sql="SELECT id FROM public.orders",
+            sql_column_is=[world.order_id],
+        )
+    )
+    result = _post_document(document, replace=True)
+    assert result.status_code == 200, result.text
+    assert result.json()["summary"]["created"]["sql_attributes"] == 1
+    assert result.json()["summary"]["created"]["custom_analyses"] == 1
+    second = _post_document(document, replace=True)
+    assert second.status_code == 200, second.text
+    assert all(value == 0 for value in second.json()["summary"]["created"].values())
+    sql_live = store().query_read(
+        select(s.sql_attribute.c.id).where(
+            s.sql_attribute.c.name == f"{world.prefix}-sql"
+        )
+    )[0]["id"]
+    analysis_live = store().query_read(
+        select(s.custom_analysis.c.id).where(
+            s.custom_analysis.c.name == f"{world.prefix}-analysis"
+        )
+    )[0]["id"]
+    document.semantic_layer.sql_attributes.manual[0].id = sql_live
+    document.semantic_layer.custom_analyses[0].id = analysis_live
+    third = _post_document(document, replace=True)
+    assert third.status_code == 200, third.text
+    assert all(value == 0 for value in third.json()["summary"]["created"].values())
+
+
+@pytest.mark.parametrize("entity", ["sql_attribute", "custom_analysis"])
+def test_sql_owner_identity_ambiguity_is_reported(world: World, entity: str) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    document = _document(world)
+    table = getattr(s, entity)
+    live_id = _add(table, name=f"{world.prefix}-one")
+    other_id = _add(table, name=f"{world.prefix}-two", imported_id=live_id)
+    if entity == "sql_attribute":
+        document.semantic_layer.sql_attributes.manual.append(
+            ModelSqlAttribute(
+                id=live_id, name=f"{world.prefix}-one", term_id=world.term
+            )
+        )
+    else:
+        document.semantic_layer.custom_analyses.append(
+            ModelCustomAnalysis(id=live_id, name=f"{world.prefix}-one")
+        )
+    response = _post_document(document)
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "ambiguous_id" and set(c["existing_ids"]) == {live_id, other_id}
+        for c in response.json()["detail"]["conflicts"]
+    )
+
+
+def test_identity_ambiguity_appearing_after_preflight_rolls_back(world: World) -> None:
+    from unittest.mock import patch
+
+    document = _document(world)
+    before = mi.fetch_export_rows([world.database])
+    original = mi._import_catalog
+
+    def race_after_preflight(*args: Any, **kwargs: Any) -> list[str]:
+        result = original(*args, **kwargs)
+        _add(s.term, name=f"{world.prefix}-racing", imported_id=world.term)
+        return result
+
+    with patch.object(mi, "_import_catalog", side_effect=race_after_preflight):
+        response = _post_document(document)
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflicts"][0]["kind"] == "ambiguous_id"
+    assert mi.fetch_export_rows([world.database]) == before
+    assert not store().query_read(
+        select(s.term.c.id).where(s.term.c.name == f"{world.prefix}-racing")
+    )
+
+
+def test_two_payload_aliases_cannot_bind_to_one_semantic_entity(world: World) -> None:
+    document = _document(world)
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(imported_id="other-alias")
+    )
+    duplicate = document.semantic_layer.terms[0].model_copy(deep=True)
+    duplicate.id = "other-alias"
+    duplicate.name = f"{world.prefix}-new-name"
+    duplicate.columns_attributes = []
+    document.semantic_layer.terms.append(duplicate)
+    response = _post_document(document)
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "duplicate_payload_path" and c["proposed_id"] == "other-alias"
+        for c in response.json()["detail"]["conflicts"]
+    )

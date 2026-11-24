@@ -114,6 +114,7 @@
     "update_group": "(*, group_id: 'str', updates: 'dict[str, Any]', user_ids: 'list[str] | None') -> 'dict[str, Any] | None'"
   },
   "model_interchange": {
+    "ModelImportConflictError": "class(ModelInterchangeError)",
     "ModelImportValidationError": "class(ModelInterchangeError)",
     "ModelInterchangeError": "class(Exception)",
     "UnknownDatabaseIdsError": "class(ModelInterchangeError)",

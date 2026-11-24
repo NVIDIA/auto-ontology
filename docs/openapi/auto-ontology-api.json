@@ -5121,6 +5121,16 @@
           "403": {
             "description": "The caller lacks the required permission"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelImportConflictResponse"
+                }
+              }
+            },
+            "description": "Model identity or database integrity conflict; import rolled back"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -10836,6 +10846,95 @@
         "enum": ["auto_ontology", "ossie"],
         "title": "ModelFormat",
         "type": "string"
+      },
+      "ModelImportConflict": {
+        "properties": {
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
+          },
+          "existing_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Existing Ids",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "duplicate_payload_id",
+              "duplicate_payload_path",
+              "ambiguous_id",
+              "identity_path_mismatch",
+              "natural_name_conflict",
+              "integrity_conflict"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "proposed_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Id"
+          }
+        },
+        "required": ["kind", "existing_ids"],
+        "title": "ModelImportConflict",
+        "type": "object"
+      },
+      "ModelImportConflictDetail": {
+        "properties": {
+          "code": {
+            "const": "model_import_conflict",
+            "default": "model_import_conflict",
+            "title": "Code",
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ModelImportConflict"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": ["conflicts", "resolution"],
+        "title": "ModelImportConflictDetail",
+        "type": "object"
+      },
+      "ModelImportConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ModelImportConflictDetail"
+          }
+        },
+        "required": ["detail"],
+        "title": "ModelImportConflictResponse",
+        "type": "object"
       },
       "ModelImportResponse": {
         "additionalProperties": true,

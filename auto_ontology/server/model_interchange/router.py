@@ -12,11 +12,15 @@ from ossie_nvidia_auto_ontology import AutoOntologyConversionError
 from pydantic import ValidationError
 
 from auto_ontology.dal.model_interchange import (
+    ModelImportConflictError,
     ModelImportValidationError,
     UnknownDatabaseIdsError,
 )
 from auto_ontology.server.model_interchange import service
-from auto_ontology.server.model_interchange.schemas import ExportRequest
+from auto_ontology.server.model_interchange.schemas import (
+    ExportRequest,
+    ModelImportConflictResponse,
+)
 from auto_ontology.server.responses import ModelImportResponse
 
 router = APIRouter()
@@ -73,7 +77,16 @@ def export_model(body: ExportRequest) -> Response:
     )
 
 
-@router.post("/model/import", response_model=ModelImportResponse)
+@router.post(
+    "/model/import",
+    response_model=ModelImportResponse,
+    responses={
+        409: {
+            "model": ModelImportConflictResponse,
+            "description": "Model identity or database integrity conflict; import rolled back",
+        }
+    },
+)
 async def import_model(
     request: Request,
     file: UploadFile | None = File(default=None),
@@ -99,6 +112,8 @@ async def import_model(
 
     try:
         summary = service.import_model(yaml_text, replace=replace, embed=embed)
+    except ModelImportConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail()) from exc
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except AutoOntologyConversionError as exc:

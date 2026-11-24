@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -43,6 +43,31 @@ class ImportRequest(BaseModel):
     """Optional import flags when YAML is supplied as raw body text."""
 
     replace: bool = True
+
+
+class ModelImportConflict(BaseModel):
+    kind: Literal[
+        "duplicate_payload_id",
+        "duplicate_payload_path",
+        "ambiguous_id",
+        "identity_path_mismatch",
+        "natural_name_conflict",
+        "integrity_conflict",
+    ]
+    existing_ids: list[str]
+    entity_type: str | None = None
+    proposed_id: str | None = None
+    path: list[str] = Field(default_factory=list)
+
+
+class ModelImportConflictDetail(BaseModel):
+    code: Literal["model_import_conflict"] = "model_import_conflict"
+    conflicts: list[ModelImportConflict]
+    resolution: str
+
+
+class ModelImportConflictResponse(BaseModel):
+    detail: ModelImportConflictDetail
 
 
 class ModelColumn(BaseModel):
