@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import math
 import ssl
 import time
 from typing import Any, Optional
@@ -261,19 +262,48 @@ class OracleDatabase(SQLDatabase):
         connection.outputtypehandler = _output_type_handler
         return connection
 
+    @staticmethod
+    def _spend(connection: Any, timeout_s: float | None, started: float) -> None:
+        """Give the next round trip whatever is left of the statement's budget.
+
+        ``call_timeout`` bounds one round trip, and a statement takes one to
+        execute plus one per batch of rows, so each gets only the time the
+        earlier ones left over.
+
+        Raises:
+            StatementTimeout: the budget is already spent.
+        """
+        if timeout_s is None:
+            return
+        remaining = timeout_s - (time.monotonic() - started)
+        if remaining <= 0:
+            raise StatementTimeout.since(timeout_s, started)
+        # Never 0: that would switch the driver's timeout off.
+        connection.call_timeout = max(1, math.ceil(remaining * 1000))
+
     def _run(
         self,
         connection: Any,
         sql: str,
         parameters: Optional[list],
+        timeout_s: float | None,
+        started: float,
     ) -> pd.DataFrame:
         cursor = connection.cursor()
         try:
+            self._spend(connection, timeout_s, started)
             cursor.execute(sql, parameters or [])
             if cursor.description is None:
                 return pd.DataFrame()
             columns = [description[0] for description in cursor.description]
-            return pd.DataFrame(cursor.fetchall(), columns=columns)
+            rows: list[Any] = []
+            while True:
+                self._spend(connection, timeout_s, started)
+                batch = cursor.fetchmany()
+                if not batch:
+                    break
+                rows.extend(batch)
+            return pd.DataFrame(rows, columns=columns)
         finally:
             cursor.close()
 
@@ -284,12 +314,13 @@ class OracleDatabase(SQLDatabase):
         *,
         timeout_s: float | None = None,
     ) -> pd.DataFrame:
-        """Run *sql*; with *timeout_s*, the driver abandons it after that long.
+        """Run *sql*; with *timeout_s*, it is abandoned after that long.
 
         Positional *parameters* bind to ``:1``, ``:2``, ...
 
         Raises:
-            StatementTimeout: the statement outlived *timeout_s*.
+            StatementTimeout: executing the statement and fetching its rows
+                together outlived *timeout_s*.
         """
         # Oracle rejects a trailing semicolon on a single statement. Dropping it
         # changes nothing about what the statement means.
@@ -298,9 +329,7 @@ class OracleDatabase(SQLDatabase):
         connection = self._connect()
         started = time.monotonic()
         try:
-            if timeout_s is not None:
-                connection.call_timeout = max(1, int(timeout_s * 1000))
-            return self._run(connection, statement, parameters)
+            return self._run(connection, statement, parameters, timeout_s, started)
         except oracledb.Error as exc:
             if timeout_s is not None and _error_code(exc) in _TIMEOUT_CODES:
                 raise StatementTimeout.since(timeout_s, started) from exc

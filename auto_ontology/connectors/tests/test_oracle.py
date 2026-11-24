@@ -51,8 +51,11 @@ class Cursor:
         self.description = [(name,) for name in columns]
         self._rows = rows
 
-    def fetchall(self) -> list[tuple[Any, ...]]:
-        return self._rows
+    def fetchmany(self) -> list[tuple[Any, ...]]:
+        self._connection.fetches += 1
+        self._connection.clock.now += self._connection.fetch_seconds
+        batch, self._rows = self._rows[: self.arraysize], self._rows[self.arraysize :]
+        return batch
 
     def close(self) -> None:
         self.closed = True
@@ -64,9 +67,19 @@ class Connection:
         self.connect_kwargs = connect_kwargs
         self.executed: list[tuple[str, list[Any] | None]] = []
         self.call_timeout: int | None = None
+        self.call_timeouts: list[int] = []
+        self.fetches = 0
+        # Each fetch round trip moves *clock* on by this long.
+        self.clock = SimpleNamespace(now=0.0)
+        self.fetch_seconds = 0.0
         self.outputtypehandler: Any = None
         self.pinged = False
         self.closed = False
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "call_timeout" and value is not None:
+            self.call_timeouts.append(value)
+        super().__setattr__(name, value)
 
     def next_result(self) -> Any:
         if self._results:
@@ -90,13 +103,14 @@ def driver(monkeypatch: MonkeyPatch) -> SimpleNamespace:
     Results queued on ``driver.results`` are consumed by statements in order,
     across connections, since the connector opens one per call.
     """
-    state = SimpleNamespace(connections=[], results=[])
+    state = SimpleNamespace(connections=[], results=[], connect=None)
 
     def connect(**kwargs: Any) -> Connection:
         connection = Connection(state.results, kwargs)
         state.connections.append(connection)
         return connection
 
+    state.connect = connect
     monkeypatch.setattr("auto_ontology.connectors.oracle.oracledb.connect", connect)
     return state
 
@@ -508,6 +522,53 @@ def test_timeout_is_set_per_call_and_becomes_statement_timeout(
     assert raised.value.timeout_s == 2.5
     assert driver.connections[-1].call_timeout == 2500
     assert driver.connections[-1].closed
+
+
+def test_timeout_covers_the_fetches_as_well_as_the_execute(
+    driver: SimpleNamespace, monkeypatch: MonkeyPatch
+) -> None:
+    # call_timeout bounds one round trip. A result fetched in several must
+    # still stop at timeout_s overall, each trip getting only what is left.
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(
+        "auto_ontology.connectors.oracle.time.monotonic", lambda: clock.now
+    )
+    database = OracleDatabase(_CONNECTION_STRING)
+    driver.results.append((["ID"], [(n,) for n in range(350)]))
+    connect = driver.connect
+
+    def slow_connect(**kwargs: Any) -> Connection:
+        connection = connect(**kwargs)
+        connection.clock = clock
+        connection.fetch_seconds = 1.0
+        return connection
+
+    monkeypatch.setattr(
+        "auto_ontology.connectors.oracle.oracledb.connect", slow_connect
+    )
+
+    with pytest.raises(StatementTimeout) as raised:
+        database.execute("SELECT ID FROM T", timeout_s=2.5)
+
+    connection = driver.connections[-1]
+    assert raised.value.timeout_s == 2.5
+    # Execute and two fetches got 2.5s, 2.5s and 1.5s; the third fetch had
+    # 0.5s left, and the fourth was never sent.
+    assert connection.call_timeouts == [2500, 2500, 1500, 500]
+    assert connection.fetches == 3
+    assert connection.closed
+
+
+def test_a_result_fetched_within_the_cap_is_returned_whole(
+    driver: SimpleNamespace,
+) -> None:
+    database = OracleDatabase(_CONNECTION_STRING)
+    driver.results.append((["ID"], [(n,) for n in range(250)]))
+
+    result = database.execute("SELECT ID FROM T", timeout_s=30)
+
+    assert result.ID.tolist() == list(range(250))
+    assert driver.connections[-1].fetches == 4
 
 
 def test_timeout_code_without_a_cap_is_not_a_statement_timeout(
