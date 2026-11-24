@@ -563,6 +563,48 @@ def test_a_server_side_timeout_is_a_statement_timeout() -> None:
         database.execute("SELECT 1", timeout_s=1)
 
 
+def test_a_job_stopped_at_its_timeout_is_a_statement_timeout() -> None:
+    """What BigQuery actually raises when ``job_timeout_ms`` fires."""
+    from google.api_core.exceptions import Cancelled
+
+    error = Cancelled(
+        "Job execution was cancelled: Job timed out after 1 sec",
+        errors=[
+            {
+                "message": "Job execution was cancelled: Job timed out after 1 sec",
+                "domain": "global",
+                "reason": "stopped",
+            }
+        ],
+    )
+    database = _database()
+    _wire(database, _FakeClient(lambda sql: error))
+
+    with pytest.raises(StatementTimeout):
+        database.execute("SELECT 1", timeout_s=1)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        {"reason": "stopped", "message": "User requested cancellation"},
+        {"reason": "invalidQuery", "message": "Connection timed out reading x"},
+    ],
+)
+def test_a_timeout_is_told_by_its_reason_not_any_timed_out_text(
+    error: dict[str, str],
+) -> None:
+    from google.api_core.exceptions import BadRequest
+
+    database = _database()
+    _wire(
+        database, _FakeClient(lambda sql: BadRequest(error["message"], errors=[error]))
+    )
+
+    with pytest.raises(BadRequest):
+        database.execute("SELECT 1", timeout_s=1)
+
+
 def test_other_errors_propagate_unchanged() -> None:
     from google.api_core.exceptions import BadRequest
 

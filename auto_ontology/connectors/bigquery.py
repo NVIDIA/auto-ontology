@@ -531,13 +531,20 @@ def _bytes_billed_limit(
 
 
 def _is_job_timeout(exc: BaseException) -> bool:
-    """True when BigQuery stopped the job at its ``job_timeout_ms``."""
-    errors = getattr(exc, "errors", None) or []
-    if any(
-        isinstance(error, dict) and error.get("reason") == "timeout" for error in errors
-    ):
-        return True
-    return "timed out" in str(exc).lower()
+    """True when BigQuery stopped the job at its ``job_timeout_ms``.
+
+    BigQuery reports that as reason ``stopped`` ("Job execution was cancelled:
+    Job timed out after 1 sec"), the reason a user's cancellation has too, so
+    the message tells the two apart.
+    """
+    for error in getattr(exc, "errors", None) or []:
+        if not isinstance(error, dict):
+            continue
+        reason = error.get("reason")
+        message = str(error.get("message") or "").lower()
+        if reason == "timeout" or (reason == "stopped" and "job timed out" in message):
+            return True
+    return False
 
 
 def _description(option_value: Any) -> str | None:
