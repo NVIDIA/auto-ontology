@@ -15,7 +15,9 @@ import pytest
 from auto_ontology.conversations.semantic import extract, pipeline
 from auto_ontology.conversations.semantic import store as semantic_store
 from auto_ontology.conversations.semantic.extract import (
+    EdgeItem,
     GraphExtractionResult,
+    NodeItem,
     extract_graph,
 )
 from auto_ontology.conversations.semantic.windows import build_windows
@@ -59,3 +61,39 @@ def test_a_failed_window_is_not_written(
         )
 
     assert written == []
+
+
+def test_an_edge_survives_when_a_later_same_name_node_is_grounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turns = [
+        {
+            "turn_index": 0,
+            "question": "the hub cap is now 4800 parcels",
+            "answer": "",
+            "time_anchor": None,
+        }
+    ]
+    result = GraphExtractionResult(
+        nodes=[
+            NodeItem(
+                name="Hub cap", type="Metric", kinds=["fact"], key="cap", value="3000"
+            ),
+            NodeItem(
+                name="Hub cap",
+                type="Metric",
+                kinds=["fact"],
+                key="cap",
+                value="4800",
+                source_turns=[0],
+            ),
+            NodeItem(name="Hub", type="Place", kinds=["object"], source_turns=[0]),
+        ],
+        edges=[EdgeItem(source="Hub cap", target="Hub", role="about")],
+    )
+    monkeypatch.setattr(extract, "_extract_window", lambda *_: result)
+
+    graph = extract_graph(build_windows(turns, max_chars=500))
+
+    assert [d.value for d in graph.nodes if d.name == "Hub cap"] == ["4800"]
+    assert [(e.source, e.target) for e in graph.edges] == [("hub cap", "hub")]

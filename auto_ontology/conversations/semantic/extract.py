@@ -931,10 +931,13 @@ def extract_graph(windows: list[Window]) -> GraphDraft:
             len(nodes) - len(grounded),
         )
 
+    # By name, not through ``by_name``: one name can be several statements, and
+    # the first one seen may be the ungrounded one.
+    grounded_names = {name for name, _key, _value in grounded}
     kept_edges = [
         edge
         for edge in edges.values()
-        if by_name.get(edge.source) in grounded and by_name.get(edge.target) in grounded
+        if edge.source in grounded_names and edge.target in grounded_names
     ]
     things = sum(1 for d in grounded.values() if not d.is_statement)
     logger.info(
