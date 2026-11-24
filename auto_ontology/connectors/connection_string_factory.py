@@ -260,8 +260,8 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
     if conn_type == "bigquery":
         project = _require(connection, "database")
         # Required here even though the connector can fall back to Application
-        # Default Credentials: that fallback is the pod's own identity, and a UI
-        # connection must not be able to borrow it.
+        # Default Credentials: that fallback is the pod's own identity, and a
+        # connection saved through the API must not be able to borrow it.
         key = _require(connection, "credentials_json")
         if not key.startswith("{"):
             raise ValueError("BigQuery credentials_json must be a JSON key")

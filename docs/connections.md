@@ -73,10 +73,12 @@ bigquery://my-project?location=US&credentials=<URL-safe base64 JSON key>
 bigquery://my-project?schema=analytics&credentials_file=/secrets/sa.json
 ```
 
-To query datasets that live in another project (public datasets, say), give
-the connection a name in the path and list its datasets. Jobs are billed to the
-host project, and `dataset.table` in generated SQL resolves to the dataset's own
-project:
+To query datasets that live in another project (public datasets such as
+`bigquery-public-data`, say), give the connection a name in the path and list
+its datasets. Jobs are billed to the host project, and `dataset.table` in
+generated SQL resolves to the dataset's own project. Only a `CONNECTION_STRINGS`
+URL can do this: a connection saved through the API has no `dataset=`
+parameters and reads only its own project's datasets.
 
 ```text
 bigquery://my-billing-project/austin?dataset=bigquery-public-data.austin_311&dataset=bigquery-public-data.austin_crime
