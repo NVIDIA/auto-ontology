@@ -600,6 +600,19 @@ def test_candidates_come_back_closest_first() -> None:
     assert scores == sorted(scores, reverse=True)
 
 
+def test_decided_pairs_are_dropped_before_the_cap() -> None:
+    """A pair derive already settled must not use up the adjudication budget."""
+    rows = [
+        {"id": "a", "kinds": ["fact"], "vector": [1.0, 0.0]},
+        {"id": "b", "kinds": ["fact"], "vector": [1.0, 0.0]},
+        {"id": "c", "kinds": ["fact"], "vector": [0.9, 0.1]},
+    ]
+
+    pairs = candidate_pairs(rows, max_pairs=1, skip={frozenset(("a", "b"))})
+
+    assert [(rows[i]["id"], rows[j]["id"]) for i, j, _ in pairs] == [("a", "c")]
+
+
 def test_supersedes_falls_back_to_the_later_turn_when_no_side_was_given() -> None:
     """Presentation order would make the direction depend on extraction order."""
     left = {"id": "a", "turn_indexes": [12]}

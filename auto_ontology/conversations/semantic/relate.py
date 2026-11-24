@@ -202,8 +202,12 @@ def candidate_pairs(
     *,
     similarity: float = CANDIDATE_SIMILARITY,
     max_pairs: int = MAX_PAIRS,
+    skip: set[frozenset[str]] | None = None,
 ) -> list[tuple[int, int, float]]:
     """Index pairs worth adjudicating, closest first.
+
+    Pairs in *skip*, keyed by their two ids, are dropped before the cap, so a
+    pair already decided elsewhere never takes the place of an undecided one.
 
     *attributes* carry a ``vector`` each. Pairs below *similarity* are not
     proposed; above it they are returned in descending order so that a
@@ -219,8 +223,12 @@ def candidate_pairs(
     reaches the undated ones, where reading is the only way to order them.
     """
     scored: list[tuple[int, int, float]] = []
+    skipped = 0
     for i, j in itertools.combinations(range(len(attributes)), 2):
         left, right = attributes[i], attributes[j]
+        if skip and frozenset((str(left["id"]), str(right["id"]))) in skip:
+            skipped += 1
+            continue
         both_events = "event" in (left.get("kinds") or ()) and "event" in (
             right.get("kinds") or ()
         )
@@ -229,6 +237,8 @@ def candidate_pairs(
         if both_events or score >= similarity:
             scored.append((i, j, score))
 
+    if skipped:
+        logger.info("Skipping %d pair(s) already decided from the rows.", skipped)
     scored.sort(key=lambda pair: pair[2], reverse=True)
     if len(scored) > max_pairs:
         logger.info("Capping %d candidate pair(s) at %d.", len(scored), max_pairs)
@@ -415,20 +425,7 @@ def relate_nodes(
     Everything decided from their answers stays in pair order, so the graph does
     not depend on which call came back first.
     """
-    pairs = candidate_pairs(attributes)
-    if skip:
-        kept = [
-            (i, j, score)
-            for i, j, score in pairs
-            if frozenset((str(attributes[i]["id"]), str(attributes[j]["id"])))
-            not in skip
-        ]
-        if len(kept) < len(pairs):
-            logger.info(
-                "Skipping %d pair(s) already decided from the rows.",
-                len(pairs) - len(kept),
-            )
-        pairs = kept
+    pairs = candidate_pairs(attributes, skip=skip)
     if not pairs:
         logger.info("No candidate pairs among %d attribute(s).", len(attributes))
         return []
