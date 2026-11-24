@@ -231,6 +231,37 @@ def test_deleting_a_database_returns_the_deleted_rows_ids(
     assert _ids(_search(store, params, "address", top_k=10)) == ["c_billing"]
 
 
+def test_content_lookup_finds_the_named_rows_holding_the_fragment(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
+    # PII withholding finds attribute rows still carrying sample values this way.
+    store, params = backend
+    rows = [
+        ("a_email", "ColumnAttribute", "pagila", "Email. Sample values: x@y.z."),
+        ("a_status", "ColumnAttribute", "pagila", "Status. Sample values: open."),
+        ("a_clean", "ColumnAttribute", "pagila", "Phone."),
+        ("a_rate", "ColumnAttribute", "pagila", "Rate. 100% Sample values"),
+    ]
+    _write(store, params, _rows(rows))
+
+    found = store.ids_with_content_containing(
+        ["a_email", "a_clean", "a_rate", "a_missing"], "Sample values:"
+    )
+
+    # A substring, not words: a_rate has the words but not the colon.
+    assert found == ["a_email"]
+    assert store.ids_with_content_containing(["a_email", "a_rate"], "0%") == ["a_rate"]
+    assert store.ids_with_content_containing([], "Sample values:") == []
+
+
+def test_content_lookup_before_anything_was_written_finds_nothing(
+    backend: tuple[VectorStore, EmbedParams],
+) -> None:
+    store, _ = backend
+
+    assert store.ids_with_content_containing(["a_email"], "Sample values:") == []
+
+
 def _replace(store: VectorStore, params: EmbedParams, node_id: str, text: str) -> int:
     """Re-embed one row as a catalog edit does (``_refresh_vdb_embeddings``)."""
     rows = _rows([(node_id, "Column", "pagila", text)])

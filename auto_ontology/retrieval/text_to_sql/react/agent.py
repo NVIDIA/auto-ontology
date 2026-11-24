@@ -55,6 +55,16 @@ def _tool_thought(call: dict[str, Any]) -> str:
     return "Submitting the final query."
 
 
+def tables_in_database(tables: list[dict], database_name: str) -> list[dict]:
+    """*tables* of *database_name*, ignoring case as routing does, plus untagged ones."""
+    wanted = database_name.casefold()
+    return [
+        t
+        for t in tables
+        if not t.get("database_name") or str(t["database_name"]).casefold() == wanted
+    ]
+
+
 class ReactSQLAgent(BaseAgent):
     """Answer the question by letting the model search, query and submit."""
 
@@ -78,6 +88,13 @@ class ReactSQLAgent(BaseAgent):
             custom_prompts=state.get("custom_prompts") or "",
         )
         connector = connector_for(ctx)
+        # A connector that charges for queries says so through cost_status.
+        cost_status = getattr(connector, "cost_status", None)
+        if callable(cost_status):
+            ctx.cost_status = cost_status
+        can_run_queries = getattr(connector, "can_run_queries", None)
+        if callable(can_run_queries):
+            ctx.can_run_queries = can_run_queries
         result = run_episode(
             state.get("reasoning_llm") or state["llm"],
             ctx,
@@ -86,6 +103,9 @@ class ReactSQLAgent(BaseAgent):
             dialect=getattr(connector, "dialect", None),
             mode=episode_mode(state.get("prediction_override")),
             custom_prompts=state.get("custom_prompts"),
+            sql_examples=state.get("sql_examples"),
+            value_anchors=state.get("value_anchors"),
+            shorten_answer=bool(state.get("shorten_answer")),
         )
 
         for step in result.trajectory:
@@ -131,6 +151,10 @@ class ReactSQLAgent(BaseAgent):
                 "path_state": path_state,
             }
 
+        if ctx.submitted_database:
+            path_state["relevant_tables"] = tables_in_database(
+                path_state["relevant_tables"], ctx.submitted_database
+            )
         path_state["sql_code"] = submission.sql
         path_state["sql_generation_result"] = SQLGenerationModel(
             thought=submission.assumptions or _NO_ASSUMPTIONS,

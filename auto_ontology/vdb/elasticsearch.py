@@ -587,6 +587,33 @@ class ElasticsearchVDB:
         """Delete every row whose ``metadata["id"]`` is *node_id*."""
         return self._delete({"term": {"metadata.id": str(node_id)}})
 
+    def ids_with_content_containing(
+        self, node_ids: list[str], fragment: str
+    ) -> list[str]:
+        """The ``metadata["id"]`` of each row among *node_ids* whose text holds *fragment*.
+
+        Checked against each row's stored ``text`` here rather than by a query:
+        ``text`` is analysed into words, so no query on it matches a literal
+        substring. The rows are those of a few nodes, so fetching them is cheap.
+        """
+        if not node_ids:
+            return []
+        try:
+            hits = helpers.scan(
+                self._client,
+                index=self.index_name,
+                query={"query": {"terms": {"metadata.id": [str(i) for i in node_ids]}}},
+                _source=["text", "metadata.id"],
+            )
+            found = {
+                str(hit["_source"]["metadata"]["id"])
+                for hit in hits
+                if fragment in (hit["_source"].get("text") or "")
+            }
+        except NotFoundError:
+            return []
+        return sorted(found)
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------

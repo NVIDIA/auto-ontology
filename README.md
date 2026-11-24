@@ -7,15 +7,17 @@ SPDX-License-Identifier: Apache-2.0
 # Auto Ontology
 
 [![#1 on the BEAVER leaderboard](https://img.shields.io/badge/BEAVER_leaderboard-%231-76b900)](https://beaverbench.github.io/#leaderboard)
-[![#2 on the BIRD-Interact leaderboard](https://img.shields.io/badge/BIRD--Interact_leaderboard-%232-76b900)](https://bird-interact.github.io/)
+[![#1 on the BIRD-Interact leaderboard](https://img.shields.io/badge/BIRD--Interact_leaderboard-%231-76b900)](https://bird-interact.github.io/)
 
 Agents can retrieve documents and query databases, but reliability gates agentic analytics: a revenue metric answered faster is worth nothing if the number is wrong. Agents need context to answer accurately: what each business concept means, where it lives, how it connects, how to calculate it, where it comes from, and whether to trust it. An ontology holds that context: a shared, governed map from the concepts people ask about to the data behind them. NVIDIA Auto Ontology is an open library that builds that ontology automatically from enterprise metadata, reconciles definitions across systems, and exposes it to any agent harness through MCP, CLI, and API. It complements the semantic models customers already own, and [Apache Ossie](https://ossie.apache.org/) keeps it portable.
+
+Auto Ontology leads on the [BIRD-Interact](https://bird-interact.github.io/) and [BEAVER](https://beaverbench.github.io/#leaderboard) benchmarks, which test the accuracy of text-to-SQL analytics question answering in interactive flows with ambiguous user inputs and on large-scale, messy databases.
 
 It enables developers to:
 
 - **Discover:** generate enterprise ontologies from metadata; connect existing ontologies and semantic models; build AI-ready knowledge graphs.
 - **Ground:** give agents trusted business meaning for metrics, entities, and relationships; reconcile inconsistent definitions across systems.
-- **Validate:** test a draft with real questions before experts certify it; check generated queries against certified definitions and lineage; return provenance with every answer.
+- **Validate:** test a draft with real questions before experts certify it; check generated queries against the catalog and the definitions retrieval surfaced; return the SQL and steps with every answer.
 - **Expose:** serve context to any agent harness through MCP, CLI, and API.
 - **Learn:** fold certified corrections and usage back into the ontology, so shared context improves with use.
 
@@ -392,7 +394,7 @@ in the [OpenAPI spec](./docs/openapi/auto-ontology-api.json).
 
 ### Sources
 
-Auto Ontology connects to ten engines:
+Auto Ontology connects to eleven engines:
 
 - PostgreSQL
 - MySQL
@@ -400,6 +402,7 @@ Auto Ontology connects to ten engines:
 - Snowflake
 - ClickHouse
 - Trino
+- Google BigQuery
 - Apache Kyuubi
 - HeavyDB
 - DuckDB

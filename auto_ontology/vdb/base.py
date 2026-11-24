@@ -54,6 +54,16 @@ class VectorStore(Protocol):
         """Delete every row for *database_name*; returns the deleted rows' ids."""
         ...
 
+    def ids_with_content_containing(
+        self, node_ids: list[str], fragment: str
+    ) -> list[str]:
+        """The ``metadata["id"]`` of each row among *node_ids* whose text holds *fragment*.
+
+        *fragment* matches literally, as a substring. Empty when nothing has
+        been written yet.
+        """
+        ...
+
     def replace_rows(self, node_ids: Iterable[str], records: list) -> int:
         """Swap the rows for *node_ids* for *records*; returns rows written.
 

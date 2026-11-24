@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -836,3 +837,21 @@ def test_a_lookup_copied_into_a_wide_table_is_not_a_sibling() -> None:
     }
 
     assert siblings.find_siblings(lookup, [wide]) == []
+
+
+def test_tables_of_unconnected_databases_are_not_offered() -> None:
+    connected = ToolContext(
+        None, [SimpleNamespace(database_name="a"), SimpleNamespace(database_name="b")]
+    )
+
+    assert tool._in_database(connected, {"database_name": "a"})
+    assert not tool._in_database(connected, {"database_name": "gone"})
+    assert tool._in_database(connected, {"name": "no_database_recorded"})
+
+
+def test_a_single_connection_does_not_offer_another_databases_tables() -> None:
+    connected = ToolContext(None, [SimpleNamespace(database_name="a")])
+
+    assert tool._in_database(connected, {"database_name": "a"})
+    assert not tool._in_database(connected, {"database_name": "gone"})
+    assert tool._in_database(connected, {"name": "no_database_recorded"})

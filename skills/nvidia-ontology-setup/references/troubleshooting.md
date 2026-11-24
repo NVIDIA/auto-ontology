@@ -70,7 +70,7 @@ Users, sessions, API keys, and the MCP OAuth tables live in the Prisma
 without an error before while leaving MCP login broken:
 
 - Compose: `docker compose logs frontend-migrate`
-- Helm: `kubectl logs job/frontend-migrate-<release revision>`
+- Helm: `kubectl logs -l app.kubernetes.io/component=frontend-migrate --tail=-1 --prefix`
 
 ## "Protected resource ... does not match expected ..."
 
@@ -85,6 +85,9 @@ The grant expired or was revoked in Auto Ontology. Sign in again from the MCP cl
 There is no server-side token to paste; do not try to configure one.
 
 ## `ask_question` returned an empty answer, with no SQL and no error
+
+An answer with text and empty SQL is a different case, covered under *Answers
+without SQL* in `nvidia-ontology-query`.
 
 Call `check_readiness` first. Most often no database connection is
 configured. A non-empty `databases` list is not proof SQL can run: the
