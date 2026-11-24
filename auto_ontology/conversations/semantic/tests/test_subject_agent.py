@@ -15,6 +15,7 @@ from auto_ontology.conversations.semantic.extract import (
     normalise_name,
 )
 from auto_ontology.conversations.semantic.subject_agent import (
+    MAX_ITERATIONS,
     MAX_OBSERVATION_CHARS,
     MAX_SEARCH_HITS,
     MAX_TOOL_CALLS,
@@ -119,9 +120,11 @@ class TestTheLoop:
         )
         remaining = list(steps)
         calls = {"n": 0}
+        self.seen: list[list[Any]] = []
 
-        def _next(*_: Any, **__: Any) -> AgentStep | None:
+        def _next(_client: Any, messages: list[Any], *_: Any) -> AgentStep | None:
             calls["n"] += 1
+            self.seen.append(list(messages))
             return remaining.pop(0) if remaining else None
 
         monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_: object())
@@ -160,14 +163,43 @@ class TestTheLoop:
         assert graph.edges[0].role == "about"
 
     def test_reading_forever_still_ends(self, monkeypatch) -> None:
-        """A model that only ever asks for more must not loop. The last step
-        inside the budget is taken as the answer, empty or not."""
+        """A model that only ever asks for more must not loop, and a tool
+        request is never taken as the answer."""
+        read = AgentStep(
+            action=Action.TOOL,
+            tool=ToolName.READ_TURNS,
+            turns=[7],
+            choices=[SubjectChoice(statement="s1", thing="Weather app")],
+        )
+        graph, calls = self._run(monkeypatch, [read] * 20)
+        assert calls == MAX_ITERATIONS
+        assert graph.edges == []
+
+    def test_a_spent_budget_asks_for_the_answer(self, monkeypatch) -> None:
+        read = AgentStep(action=Action.TOOL, tool=ToolName.READ_TURNS, turns=[7])
         graph, calls = self._run(
             monkeypatch,
-            [AgentStep(action=Action.TOOL, tool=ToolName.READ_TURNS, turns=[7])] * 20,
+            [read] * MAX_TOOL_CALLS
+            + [_answer(choices=[SubjectChoice(statement="s1", thing="Weather app")])],
         )
         assert calls == MAX_TOOL_CALLS + 1
-        assert graph.edges == []
+        assert "Answer now" in self.seen[-1][-1].content
+        assert len(graph.edges) == 1
+
+    def test_the_model_sees_its_own_tool_request(self, monkeypatch) -> None:
+        from langchain_core.messages import AIMessage
+
+        self._run(
+            monkeypatch,
+            [
+                AgentStep(action=Action.TOOL, tool=ToolName.READ_TURNS, turns=[7]),
+                _answer(choices=[]),
+            ],
+        )
+        request, result = self.seen[1][-2:]
+        assert isinstance(request, AIMessage)
+        assert "read_turns" in request.content and "[7]" in request.content
+        assert result.content.startswith("Result of read_turns")
 
     def test_a_failed_call_leaves_the_statement_without_a_subject(
         self, monkeypatch

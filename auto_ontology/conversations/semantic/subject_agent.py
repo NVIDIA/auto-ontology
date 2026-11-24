@@ -47,7 +47,7 @@ from collections.abc import Sequence
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from auto_ontology.conversations.semantic.subjects import (
@@ -403,7 +403,10 @@ def _converse(
     """Run the act/observe loop and return the step that answered, if one did.
 
     Shared by both phases because the loop is the same loop: the question
-    differs, the budget and the tools do not.
+    differs, the budget and the tools do not. Each tool request goes into the
+    history before its result, so later steps see what was asked as well as
+    what came back. Once the tool budget is spent the model is told to answer;
+    a further tool request is never returned as if it were the answer.
     """
     from auto_ontology.utils.llm_invoke import (
         get_llm_client,
@@ -423,22 +426,33 @@ def _converse(
             return None
         if step is None:
             return None
-        if step.action == Action.ANSWER or calls >= MAX_TOOL_CALLS:
+        if step.action == Action.ANSWER:
             return step
+        request = f"{step.tool}({step.turns or step.query!r}) -- {step.reason}"
+        messages.append(AIMessage(content=f"Tool request: {request}"))
+        if calls >= MAX_TOOL_CALLS:
+            messages.append(HumanMessage(content=_ANSWER_NOW))
+            continue
         observation = _run_tool(step, turn_text)
         calls += 1
-        logger.debug(
-            "%s: %s(%s) -- %s", label, step.tool, step.turns or step.query, step.reason
-        )
+        logger.debug("%s: %s", label, request)
+        last = f"\n\n{_ANSWER_NOW}" if calls >= MAX_TOOL_CALLS else ""
         messages.append(
             HumanMessage(
                 content=(
                     f"Result of {step.tool} ({calls} of {MAX_TOOL_CALLS} "
-                    f"tool calls used):\n\n{observation}"
+                    f"tool calls used):\n\n{observation}{last}"
                 )
             )
         )
+    logger.info("%s: no answer within %d steps.", label, MAX_ITERATIONS)
     return None
+
+
+_ANSWER_NOW = (
+    "The tool budget is spent. Answer now with action 'answer', from what you "
+    "have read."
+)
 
 
 def _regroup(
