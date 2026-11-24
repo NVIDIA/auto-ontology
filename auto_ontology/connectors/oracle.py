@@ -176,6 +176,25 @@ def _quoted_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+# Oracle allows at most 1,000 expressions in one IN list (ORA-01795).
+_MAX_IN_LIST = 1000
+
+
+def _in_list(column: str, values: list[str]) -> str:
+    """``column IN (...)`` for *values*, split into lists Oracle accepts.
+
+    Each list holds at most :data:`_MAX_IN_LIST` literals, and the lists are
+    joined with ``OR``, so an allowlist of any size stays one condition.
+    """
+    groups = [
+        ", ".join(_quoted_literal(value) for value in values[i : i + _MAX_IN_LIST])
+        for i in range(0, len(values), _MAX_IN_LIST)
+    ]
+    if len(groups) == 1:
+        return f"{column} IN ({groups[0]})"
+    return "(" + " OR ".join(f"{column} IN ({group})" for group in groups) + ")"
+
+
 def _error_code(exc: BaseException) -> str:
     """Return the ``ORA-``/``DPY-`` code of a driver error, or ``''``."""
     detail = exc.args[0] if exc.args else None
@@ -349,10 +368,7 @@ class OracleDatabase(SQLDatabase):
         """The ``WHERE`` condition selecting which schemas to introspect."""
         if not self._schema_names:
             return f"{column} = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')"
-        names = ", ".join(
-            _quoted_literal(name) for name in self._resolved_schema_names()
-        )
-        return f"{column} IN ({names})"
+        return _in_list(column, self._resolved_schema_names())
 
     def _resolved_schema_names(self) -> list[str]:
         """The allowlist as the exact schema names Oracle stores.
@@ -373,9 +389,8 @@ class OracleDatabase(SQLDatabase):
             else:
                 bare.append(name)
         candidates = sorted(quoted | set(bare) | {name.upper() for name in bare})
-        literals = ", ".join(_quoted_literal(name) for name in candidates)
         frame = self.execute(
-            f"SELECT USERNAME FROM ALL_USERS WHERE USERNAME IN ({literals})"
+            f"SELECT USERNAME FROM ALL_USERS WHERE {_in_list('USERNAME', candidates)}"
         )
         existing = set() if frame.empty else {str(n) for n in frame.iloc[:, 0]}
         resolved = set(quoted)

@@ -3,6 +3,7 @@
 
 import base64
 import datetime
+import re
 import ssl
 from types import SimpleNamespace
 from typing import Any
@@ -386,6 +387,31 @@ def test_schema_allowlist_matches_exact_schema_names(
     statement = driver.connections[-1].executed[0][0]
     names = ", ".join(f"'{name}'" for name in expected)
     assert f"OWNER IN ({names})" in statement
+
+
+def test_a_large_allowlist_stays_within_oracles_in_list_limit(
+    driver: SimpleNamespace,
+) -> None:
+    # 600 lowercase names look up 1,200 candidates; one IN list over 1,000
+    # fails with ORA-01795.
+    requested = [f"s{i:03d}" for i in range(600)]
+    database = OracleDatabase(_CONNECTION_STRING, schemas=requested)
+    # Half exist as typed, half only in upper case.
+    existing = requested[:300] + [name.upper() for name in requested[300:]]
+    driver.results.append((["USERNAME"], [(name,) for name in existing]))
+    driver.results.append((["X"], []))
+
+    database.get_columns()
+
+    lookup = driver.connections[-2].executed[0][0]
+    statement = driver.connections[-1].executed[0][0]
+    for sql in (lookup, statement):
+        lists = re.findall(r"IN \(([^)]*)\)", sql)
+        assert all(group.count("'") // 2 <= 1000 for group in lists)
+    assert len(re.findall(r"IN \(", lookup)) == 2
+    # Exact names keep precedence; the rest resolve to upper case.
+    assert "'s000'" in statement and "'S000'" not in statement
+    assert "'S599'" in statement and "'s599'" not in statement
 
 
 def test_schema_names_are_resolved_once(driver: SimpleNamespace) -> None:
