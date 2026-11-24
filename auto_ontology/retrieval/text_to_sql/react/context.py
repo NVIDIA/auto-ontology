@@ -62,6 +62,9 @@ class ToolContext:
     because every query changes it. ``None`` when queries are free.
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
+
+    ``fanout_refused`` holds the SQL texts ``submit`` refused once for a join
+    that repeats an aggregate's rows; the same text is accepted the second time.
     """
 
     retriever: Any
@@ -91,6 +94,7 @@ class ToolContext:
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    fanout_refused: set[str] = field(default_factory=set)
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
