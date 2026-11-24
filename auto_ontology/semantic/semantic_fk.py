@@ -253,12 +253,10 @@ def _resolve_semantic_fks(database_name: str) -> int:
             attr_id = _resolve_via_vdb(
                 col, retriever, database_name, keys, families, trace=trace
             )
-            if (
-                attr_id
-                and keys is not None
-                and not _join_returns_rows(keys, col, attr_id)
-            ):
-                return False
+            if attr_id and keys is not None:
+                if not _join_returns_rows(keys, col, attr_id):
+                    return False
+                trace.join_verified = True
             # The VDB where-filter already scopes hits to database_name, but
             # it's a query-time filter over a collection shared by every
             # ingested database, not physical isolation -- the same shape of
@@ -580,6 +578,7 @@ class _Trace:
     method: str | None = None
     containment: float | None = None
     vector_distance: float | None = None
+    join_verified: bool | None = None
     rationale: str | None = None
 
     def evidence(self) -> SemanticFkEvidence | None:
@@ -589,6 +588,7 @@ class _Trace:
             method=self.method,
             containment=self.containment,
             vector_distance=self.vector_distance,
+            join_verified=self.join_verified,
             rationale=self.rationale,
         )
 

@@ -1133,6 +1133,7 @@ def test_merge_semantic_fk_stores_evidence_with_a_new_edge_only(world) -> None:
             method="value_confirmed",
             containment=0.95,
             vector_distance=0.3,
+            join_verified=True,
             rationale="named after the key",
         ),
     )
@@ -1143,6 +1144,7 @@ def test_merge_semantic_fk_stores_evidence_with_a_new_edge_only(world) -> None:
             s.column__semantic_fk.c.method,
             s.column__semantic_fk.c.containment,
             s.column__semantic_fk.c.vector_distance,
+            s.column__semantic_fk.c.join_verified,
             s.column__semantic_fk.c.rationale,
         ).where(s.column__semantic_fk.c.attribute_id == attr)
     )
@@ -1151,6 +1153,7 @@ def test_merge_semantic_fk_stores_evidence_with_a_new_edge_only(world) -> None:
             "method": "value_confirmed",
             "containment": 0.95,
             "vector_distance": 0.3,
+            "join_verified": True,
             "rationale": "named after the key",
         }
     ]

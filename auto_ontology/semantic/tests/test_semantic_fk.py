@@ -1016,3 +1016,58 @@ def test_inferred_fk_is_stored_with_the_evidence_its_resolution_traced() -> None
             rationale="named after the key",
         ),
     )
+
+
+def test_an_inferred_fk_whose_join_returned_rows_records_it() -> None:
+    def resolve(col, retriever, database_name, keys, families, *, trace):
+        trace.method = "llm_pick"
+        trace.vector_distance = 0.3
+        return "attr"
+
+    candidates = [{"id": "col-1", "name": "customer_ref", "table_name": "orders"}]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._build_retriever",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_table_families",
+            return_value={},
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.is_semantic_fk_db_query_prevented",
+            return_value=False,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_connector",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_value_key_candidates",
+            return_value=[],
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_via_vdb", side_effect=resolve
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk._join_returns_rows", return_value=True
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.merge_semantic_fk", return_value=True
+        ) as merge,
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 1
+
+    merge.assert_called_once_with(
+        "col-1",
+        "attr",
+        SemanticFkEvidence(method="llm_pick", vector_distance=0.3, join_verified=True),
+    )

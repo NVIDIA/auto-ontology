@@ -347,6 +347,7 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
                 s.column__semantic_fk.c.method,
                 s.column__semantic_fk.c.containment,
                 s.column__semantic_fk.c.vector_distance,
+                s.column__semantic_fk.c.join_verified,
                 s.column__semantic_fk.c.rationale,
             )
             .select_from(
@@ -535,6 +536,7 @@ def assemble_export_document(
             method=row.get("method"),
             containment=row.get("containment"),
             vector_distance=row.get("vector_distance"),
+            join_verified=row.get("join_verified"),
             rationale=row.get("rationale"),
         )
         for row in rows["semantic_fks"]
@@ -1497,7 +1499,13 @@ def _import_column_attributes(
     _link(s.column_attribute__term, property_of_rows)
 
 
-_SEMANTIC_FK_EVIDENCE = ("method", "containment", "vector_distance", "rationale")
+_SEMANTIC_FK_EVIDENCE = (
+    "method",
+    "containment",
+    "vector_distance",
+    "join_verified",
+    "rationale",
+)
 
 
 def _import_semantic_fks(
@@ -1523,6 +1531,7 @@ def _import_semantic_fks(
                 "method": fk.method,
                 "containment": fk.containment,
                 "vector_distance": fk.vector_distance,
+                "join_verified": fk.join_verified,
                 "rationale": fk.rationale,
             }
         )

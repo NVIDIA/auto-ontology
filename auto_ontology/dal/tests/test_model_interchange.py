@@ -464,6 +464,7 @@ def _record_evidence(world) -> None:
             method="value_match",
             containment=0.97,
             vector_distance=None,
+            join_verified=True,
             rationale="holds the key's values",
         )
     )
@@ -475,6 +476,7 @@ def _stored_evidence(world) -> list[dict]:
             s.column__semantic_fk.c.method,
             s.column__semantic_fk.c.containment,
             s.column__semantic_fk.c.vector_distance,
+            s.column__semantic_fk.c.join_verified,
             s.column__semantic_fk.c.rationale,
         ).where(
             s.column__semantic_fk.c.column_id == world.customer_ref,
@@ -488,19 +490,25 @@ def test_semantic_fk_evidence_is_exported(world) -> None:
 
     fk = _document(world).semantic_layer.semantic_fks[0]
 
-    assert (fk.method, fk.containment, fk.vector_distance, fk.rationale) == (
-        "value_match",
-        0.97,
-        None,
-        "holds the key's values",
-    )
+    assert (
+        fk.method,
+        fk.containment,
+        fk.vector_distance,
+        fk.join_verified,
+        fk.rationale,
+    ) == ("value_match", 0.97, None, True, "holds the key's values")
 
 
 def test_reimport_replaces_semantic_fk_evidence_it_carries(world) -> None:
     _record_evidence(world)
     document = _document(world)
     fk = document.semantic_layer.semantic_fks[0]
-    fk.method, fk.containment, fk.rationale = "declared", None, None
+    fk.method, fk.containment, fk.join_verified, fk.rationale = (
+        "declared",
+        None,
+        None,
+        None,
+    )
 
     mi.apply_import_model(document, replace=False)
 
@@ -509,6 +517,7 @@ def test_reimport_replaces_semantic_fk_evidence_it_carries(world) -> None:
             "method": "declared",
             "containment": None,
             "vector_distance": None,
+            "join_verified": None,
             "rationale": None,
         }
     ]
@@ -519,6 +528,7 @@ def test_reimport_without_evidence_keeps_the_stored_evidence(world) -> None:
     document = _document(world)
     fk = document.semantic_layer.semantic_fks[0]
     fk.method = fk.containment = fk.vector_distance = fk.rationale = None
+    fk.join_verified = None
 
     mi.apply_import_model(document, replace=False)
 
@@ -527,6 +537,7 @@ def test_reimport_without_evidence_keeps_the_stored_evidence(world) -> None:
             "method": "value_match",
             "containment": 0.97,
             "vector_distance": None,
+            "join_verified": True,
             "rationale": "holds the key's values",
         }
     ]

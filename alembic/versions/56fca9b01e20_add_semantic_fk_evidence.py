@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 workdd
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # SPDX-License-Identifier: Apache-2.0
 
 """add semantic fk evidence
@@ -32,6 +33,10 @@ def upgrade() -> None:
         "column__semantic_fk", sa.Column("vector_distance", sa.Float(), nullable=True)
     )
     op.add_column(
+        "column__semantic_fk",
+        sa.Column("join_verified", sa.Boolean(), nullable=True),
+    )
+    op.add_column(
         "column__semantic_fk", sa.Column("rationale", sa.Text(), nullable=True)
     )
     op.create_check_constraint(
@@ -50,6 +55,7 @@ def downgrade() -> None:
         type_="check",
     )
     op.drop_column("column__semantic_fk", "rationale")
+    op.drop_column("column__semantic_fk", "join_verified")
     op.drop_column("column__semantic_fk", "vector_distance")
     op.drop_column("column__semantic_fk", "containment")
     op.drop_column("column__semantic_fk", "method")

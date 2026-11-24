@@ -730,12 +730,15 @@ class SemanticFkEvidence:
     ``value_confirmed`` (a vector-search hit whose key holds the FK's values)
     or ``value_match`` (the model's pick among keys found by values alone).
     The other fields are whatever that method measured; ``None`` means it
-    measured nothing of that kind.
+    measured nothing of that kind. ``join_verified`` is ``True`` when joining
+    the two columns in the warehouse returned a row, and ``None`` when that
+    check did not run; an edge whose join returns nothing is never stored.
     """
 
     method: str
     containment: float | None = None
     vector_distance: float | None = None
+    join_verified: bool | None = None
     rationale: str | None = None
 
 

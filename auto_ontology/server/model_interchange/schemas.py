@@ -122,6 +122,7 @@ class ModelSemanticFk(BaseModel):
     )
     containment: float | None = None
     vector_distance: float | None = None
+    join_verified: bool | None = None
     rationale: str | None = None
 
 
