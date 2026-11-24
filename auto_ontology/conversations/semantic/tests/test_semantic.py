@@ -22,8 +22,10 @@ from auto_ontology.conversations.semantic.derive import derive_edges
 from auto_ontology.conversations.semantic.extract import (
     NODE_KINDS,
     STATEMENT_KINDS,
+    NodeDraft,
     NodeItem,
     _clean_kinds,
+    _format_known,
     _node_key,
     _pair_key_and_value,
     node_text,
@@ -153,6 +155,37 @@ def test_one_property_stated_twice_collapses() -> None:
     second = _item(name="quota", kinds=["state"], key="daily_quota", value="1200/day")
 
     assert _node_key(first, ["state"]) == _node_key(second, ["state"])
+
+
+def test_the_known_list_is_capped_and_keeps_the_vocabulary(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from auto_ontology.conversations.semantic import extract
+
+    monkeypatch.setattr(extract, "_KNOWN_CAP", 3)
+    drafts = [
+        NodeDraft(name="weather app", type="Project", kinds=["object"]),
+        NodeDraft(name="quota 1000", type="Fact", kinds=["state"], key="quota"),
+        NodeDraft(name="said hello", type="Fact", kinds=["fact"]),
+        NodeDraft(name="quota 1200", type="Fact", kinds=["state"], key="quota"),
+        NodeDraft(name="flask", type="Library", kinds=["object"]),
+    ]
+
+    listed = _format_known(drafts)
+
+    assert [line.split(" [")[0] for line in listed.splitlines()] == [
+        "- weather app",
+        "- quota 1200",
+        "- flask",
+    ]
+    assert "Listing 3 of 5 known nodes" in caplog.text
+
+
+def test_a_short_known_list_is_listed_whole(caplog: pytest.LogCaptureFixture) -> None:
+    drafts = [NodeDraft(name="flask", type="Library", kinds=["object"])]
+
+    assert _format_known(drafts) == "- flask [Library: object]"
+    assert "Listing" not in caplog.text
 
 
 def test_one_key_and_value_on_two_features_stay_two_nodes() -> None:

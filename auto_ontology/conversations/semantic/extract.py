@@ -615,6 +615,10 @@ def _clean_kinds(kinds: list[str]) -> list[str]:
     return statements or (["object"] if seen else [])
 
 
+#: Most nodes listed in one window's prompt; about 15 tokens each.
+_KNOWN_CAP = 300
+
+
 def _format_known(drafts: Iterable[NodeDraft]) -> str:
     """Nodes earlier windows found, as the vocabulary this window should reuse.
 
@@ -624,9 +628,37 @@ def _format_known(drafts: Iterable[NodeDraft]) -> str:
     :mod:`derive` groups revisions by exact key, so the chain saying which
     reading is current was never built and a reader answered from a date
     instead.
+
+    Capped at :data:`_KNOWN_CAP` lines, or the prompt grows with every window
+    and a long transcript pays for its history quadratically. What is kept is
+    what there is to reuse: every thing, and one statement per key, then the
+    unkeyed statements while room is left -- the most recent of each first,
+    since a later window most often returns to what was just discussed.
     """
+    drafts = list(drafts)
+    by_key: dict[str, NodeDraft] = {}
+    unkeyed: list[NodeDraft] = []
+    for draft in drafts:
+        if not draft.is_statement:
+            by_key[f"thing:{normalise_name(draft.name)}"] = draft
+        elif draft.key:
+            by_key.pop(draft.key, None)
+            by_key[draft.key] = draft
+        else:
+            unkeyed.append(draft)
+    ranked = [*reversed(by_key.values()), *reversed(unkeyed)]
+    kept = {id(draft) for draft in ranked[:_KNOWN_CAP]}
+    if len(kept) < len(drafts):
+        logger.warning(
+            "Listing %d of %d known nodes in the window prompt (cap %d).",
+            len(kept),
+            len(drafts),
+            _KNOWN_CAP,
+        )
     listed = []
     for draft in drafts:
+        if id(draft) not in kept:
+            continue
         key = f" key={draft.key}" if draft.key else ""
         listed.append(f"- {draft.name} [{draft.type}: {'/'.join(draft.kinds)}]{key}")
     return "\n".join(listed) or "(none yet -- this is the first window)"
