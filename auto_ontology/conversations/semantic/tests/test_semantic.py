@@ -721,9 +721,27 @@ def test_an_explicit_side_wins_over_the_turn_numbers() -> None:
     left = {"id": "a", "turn_indexes": [12]}
     right = {"id": "b", "turn_indexes": [48]}
 
-    source, _ = _orient(PairVerdict(role="supersedes", source="A"), left, right)
+    source, _ = _orient(PairVerdict(role="precedes", source="B"), left, right)
 
-    assert source["id"] == "a"
+    assert source["id"] == "b"
+
+
+def test_supersedes_runs_from_the_later_turn_whatever_the_model_said() -> None:
+    left = {"id": "a", "turn_indexes": [12]}
+    right = {"id": "b", "turn_indexes": [48]}
+
+    source, target = _orient(PairVerdict(role="supersedes", source="A"), left, right)
+
+    assert (source["id"], target["id"]) == ("b", "a")
+
+
+def test_supersedes_within_one_turn_takes_the_models_side() -> None:
+    left = {"id": "a", "turn_indexes": [12]}
+    right = {"id": "b", "turn_indexes": [12]}
+
+    source, _ = _orient(PairVerdict(role="supersedes", source="B"), left, right)
+
+    assert source["id"] == "b"
 
 
 def test_a_revision_needs_both_sides_to_be_about_the_same_thing() -> None:

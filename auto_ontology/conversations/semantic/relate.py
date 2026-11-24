@@ -335,21 +335,26 @@ def adjudicate(left: dict, right: dict) -> PairVerdict | None:
 def _orient(verdict: PairVerdict, left: dict, right: dict) -> tuple[dict, dict]:
     """Put the pair in the order the relation runs.
 
-    The model's ``source`` is taken when it gave one. When it did not, and the
-    relation is one whose direction matters, the turn numbers decide: the later
-    statement supersedes, the earlier one precedes. Falling back to the
-    presentation order would make the direction depend on which attribute the
-    extractor happened to find first.
+    ``supersedes`` follows the turns whenever they differ, whatever the model
+    said: the later statement is the one that replaces, and that is read off
+    the transcript rather than judged. Otherwise the model's ``source`` is
+    taken when it gave one. When it did not, and the relation is one whose
+    direction matters, the turn numbers decide: the later statement
+    supersedes, the earlier one precedes. Falling back to the presentation
+    order would make the direction depend on which attribute the extractor
+    happened to find first.
     """
+    left_last = max(left.get("turn_indexes") or [-1])
+    right_last = max(right.get("turn_indexes") or [-1])
+    if verdict.role == "supersedes" and left_last != right_last:
+        return (left, right) if left_last > right_last else (right, left)
+
     if verdict.source == "B":
         return right, left
     if verdict.source == "A" or verdict.role not in DIRECTED:
         return left, right
-
-    left_last = max(left.get("turn_indexes") or [-1])
-    right_last = max(right.get("turn_indexes") or [-1])
     if verdict.role == "supersedes":
-        return (left, right) if left_last >= right_last else (right, left)
+        return left, right
     return (left, right) if left_last <= right_last else (right, left)
 
 
