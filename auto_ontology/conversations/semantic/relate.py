@@ -448,9 +448,13 @@ def relate_nodes(
     attributes: Sequence[dict],
     *,
     skip: set[frozenset[str]] | None = None,
+    failed: list[frozenset[str]] | None = None,
 ) -> list[SemanticEdge]:
     """Adjudicate every candidate pair and return the edges, ``unrelated``
     included.
+
+    *failed*, when given, collects the pairs whose call returned no verdict,
+    for a caller that must not replace edges it could not recompute.
 
     *skip* holds pairs :mod:`derive` has already settled from the rows
     themselves. They are not re-asked: a revised value and an ordering of dated
@@ -477,6 +481,8 @@ def relate_nodes(
             logger.debug(
                 "Adjudication failed for %r / %r.", left.get("name"), right.get("name")
             )
+            if failed is not None:
+                failed.append(frozenset((str(left["id"]), str(right["id"]))))
             continue
         if verdict.role == "supersedes" and (rejected := _not_a_revision(left, right)):
             logger.info(

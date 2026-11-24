@@ -815,6 +815,20 @@ def test_decided_pairs_are_dropped_before_the_cap() -> None:
     assert [(rows[i]["id"], rows[j]["id"]) for i, j, _ in pairs] == [("a", "c")]
 
 
+def test_a_pair_with_no_verdict_is_reported_as_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from auto_ontology.conversations.semantic import relate
+
+    rows = [{"id": "a", "name": "a"}, {"id": "b", "name": "b"}]
+    monkeypatch.setattr(relate, "candidate_pairs", lambda *_, **__: [(0, 1, 0.9)])
+    monkeypatch.setattr(relate, "_adjudicate_all", lambda *_: [None])
+    failed: list[frozenset[str]] = []
+
+    assert relate.relate_nodes(rows, failed=failed) == []
+    assert failed == [frozenset(("a", "b"))]
+
+
 def test_supersedes_falls_back_to_the_later_turn_when_no_side_was_given() -> None:
     """Presentation order would make the direction depend on extraction order."""
     left = {"id": "a", "turn_indexes": [12]}

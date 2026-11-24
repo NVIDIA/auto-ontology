@@ -913,7 +913,13 @@ def relate_conversation(*, database_name: str, conversation_id: str) -> int:
     ]
     derived, decided = derive_edges(statements)
     _embed_for_relate(statements)
-    ruled = relate_nodes(statements, skip=decided)
+    failed: list[frozenset[str]] = []
+    ruled = relate_nodes(statements, skip=decided, failed=failed)
+    if failed:
+        raise RuntimeError(
+            f"{len(failed)} pair(s) could not be adjudicated in conversation "
+            f"{conversation_id!r} -- the previous semantic edges are kept."
+        )
 
     ids = [str(row["id"]) for row in statements]
     stale_paths = _semantic_path_ids(nodes)

@@ -123,6 +123,22 @@ def test_a_failed_adjudication_keeps_the_old_edges(
     assert _keys(graph) == ["cache", "storage"]
 
 
+def test_a_pair_with_no_verdict_keeps_the_old_edges(
+    database_name: str, graph: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_verdict(*_: object, failed: list, **__: object) -> list:
+        failed.append(frozenset((graph["cache on disk"], graph["cache in memory"])))
+        return []
+
+    monkeypatch.setattr(pipeline, "relate_nodes", no_verdict)
+
+    with pytest.raises(RuntimeError, match="could not be adjudicated"):
+        pipeline.relate_conversation(database_name=database_name, conversation_id="1")
+
+    assert _semantic(graph) == [("contradicts", "old verdict")]
+    assert _keys(graph) == ["cache", "storage"]
+
+
 def test_replaces_the_edges_and_saves_the_reconciled_keys(
     database_name: str, graph: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
