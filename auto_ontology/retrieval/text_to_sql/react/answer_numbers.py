@@ -194,7 +194,7 @@ def _cell_values(rows: list[dict[str, Any]]) -> list[float]:
             if number is not None:
                 values.append(number)
             elif isinstance(cell, str):
-                values.extend(c.readings[0][0] for c in _numbers(cell))
+                values.extend(n for c in _numbers(cell) for n, _ in c.readings)
     return values
 
 
@@ -233,7 +233,7 @@ def _supported(cited: _Cited, values: list[float]) -> bool:
 
 
 def _stated(text: str) -> set[float]:
-    return {c.readings[0][0] for c in _numbers(text or "")}
+    return {n for c in _numbers(text or "") for n, _ in c.readings}
 
 
 def _checked(response: str, question: str, sql: str) -> list[_Cited]:

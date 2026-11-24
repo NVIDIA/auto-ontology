@@ -242,3 +242,11 @@ def test_a_scaled_number_is_compared_at_its_scale() -> None:
 def test_a_spaced_letter_that_may_not_be_a_scale_is_read_both_ways() -> None:
     assert contradicted_numbers("It is 300 m long.", [{"length": 300}]) == []
     assert contradicted_numbers("Group 3 B has 1,872.", [{"n": 583}]) == ["1,872"]
+
+
+def test_both_readings_count_in_text_cells_and_the_question() -> None:
+    rows = [{"description": "300 m long", "n": 7}]
+    assert contradicted_numbers("The length is 300 metres.", rows) == []
+    race = [{"winner": "Ada", "lane": 42}]
+    question = "Who won the 300 m event?"
+    assert contradicted_numbers("Ada won the 300 metre event.", race, question) == []
