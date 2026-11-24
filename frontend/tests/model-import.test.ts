@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Invoked by the PostgreSQL acceptance test with a live FastAPI server and
+// Invoked by the PostgreSQL acceptance harness with a live FastAPI server and
 // generated fixtures. Only session resolution is stubbed; permission checks,
 // route handlers, proxying, backend validation, and database writes are real.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,13 @@ import { POST } from '@/app/api/model/import/route';
 
 const conflictYaml = process.env.MODEL_IMPORT_CONFLICT_YAML;
 const boundYaml = process.env.MODEL_IMPORT_BOUND_YAML;
+const fixtureState = process.env.MODEL_IMPORT_FIXTURE_STATE;
+
+const expectFixtureUnchanged = async () => {
+	const state = await fetch(`${process.env.PYTHON_API_URL}/__fixture_state`);
+	expect(state.status).toBe(200);
+	expect(await state.json()).toEqual(JSON.parse(fixtureState!));
+};
 
 beforeEach(() => {
 	vi.mocked(resolveUser).mockResolvedValue({ id: 'acceptance-admin', role: 'admin' });
@@ -25,7 +32,7 @@ const request = (body: BodyInit) =>
 		body,
 	});
 
-describe.skipIf(!conflictYaml || !boundYaml)(
+describe.skipIf(!conflictYaml || !boundYaml || !fixtureState)(
 	'model import gateway with live PostgreSQL backend',
 	() => {
 		it('preserves the complete typed conflict response', async () => {
@@ -41,6 +48,7 @@ describe.skipIf(!conflictYaml || !boundYaml)(
 				),
 			).toBe(true);
 			expect(body.detail.resolution).toContain('/api/model/export');
+			await expectFixtureUnchanged();
 		});
 
 		it('preserves conflicts from multipart file uploads', async () => {
@@ -49,6 +57,7 @@ describe.skipIf(!conflictYaml || !boundYaml)(
 			const response = await POST(request(body));
 			expect(response.status).toBe(409);
 			expect((await response.json()).detail.conflicts).toHaveLength(7);
+			await expectFixtureUnchanged();
 		});
 
 		it('imports successfully after binding the exported target IDs', async () => {

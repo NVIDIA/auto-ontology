@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from ossie_nvidia_auto_ontology import AutoOntologyConversionError
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from auto_ontology.dal.model_interchange import (
     ModelImportConflictError,
@@ -111,7 +112,9 @@ async def import_model(
         raise HTTPException(status_code=422, detail="YAML must be UTF-8") from exc
 
     try:
-        summary = service.import_model(yaml_text, replace=replace, embed=embed)
+        summary = await run_in_threadpool(
+            service.import_model, yaml_text, replace=replace, embed=embed
+        )
     except ModelImportConflictError as exc:
         raise HTTPException(status_code=409, detail=exc.detail()) from exc
     except ValidationError as exc:

@@ -322,3 +322,155 @@ def test_catalog_labels_do_not_override_exact_id_bindings(catalog: Catalog) -> N
     # catalog-property updates from #250, or reject #581's attribute move.
     table.columns[0].name = "customer_id"
     dal._preflight_import(doc, replace=True)
+
+
+def test_document_only_conflicts_explain_how_to_repair_new_objects(
+    catalog: Catalog,
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import ModelTerm
+
+    doc = AutoOntologyModelDocument()
+    doc.semantic_layer.terms = [
+        ModelTerm(id="duplicate", name="One"),
+        ModelTerm(id="duplicate", name="Two"),
+    ]
+    with pytest.raises(dal.ModelImportConflictError) as error:
+        dal._preflight_import(doc, replace=False)
+    detail = error.value.detail()
+    assert detail["conflicts"][0]["existing_ids"] == []
+    assert "distinct IDs" in detail["resolution"]
+    assert "update their references" in detail["resolution"]
+    assert "remove the duplicate declaration" in detail["resolution"]
+    assert "/api/model/export" in detail["resolution"]
+
+
+def test_new_terms_still_cannot_write_the_same_unique_key(catalog: Catalog) -> None:
+    from auto_ontology.server.model_interchange.schemas import ModelTerm
+
+    doc = AutoOntologyModelDocument()
+    doc.semantic_layer.terms = [
+        ModelTerm(id="one", name="Same"),
+        ModelTerm(id="two", name="Same"),
+    ]
+    with pytest.raises(dal.ModelImportConflictError) as error:
+        dal._preflight_import(doc, replace=False)
+    assert error.value.conflicts[0]["kind"] == "duplicate_payload_path"
+
+
+@pytest.mark.parametrize(
+    "entity,identity,parent",
+    [
+        ("catalog_schema", "sch", "database_id"),
+        ("catalog_table", "tbl", "schema_id"),
+        ("catalog_column", "col", "table_id"),
+    ],
+)
+def test_batch_resolver_validates_parents_before_stamping(
+    catalog: Catalog, entity: str, identity: str, parent: str
+) -> None:
+    table = getattr(dal.s, entity)
+    engine, tables = catalog
+    expected_parent = {"database_id": "db", "schema_id": "sch", "table_id": "tbl"}[
+        parent
+    ]
+    with engine.begin() as connection:
+        connection.execute(
+            tables[entity]
+            .insert()
+            .values(id="a-valid", name="valid", **{parent: expected_parent})
+        )
+    with patch.object(StoreConn, "query_write", autospec=True) as writes:
+        with pytest.raises(dal.ModelImportConflictError) as error:
+            dal._resolve_entities_batch(
+                table,
+                [
+                    ("a-valid", {"name": "valid", parent: expected_parent}),
+                    (identity, {"name": "candidate", parent: "wrong-parent"}),
+                ],
+            )
+    writes.assert_not_called()
+    assert error.value.conflicts == [
+        {
+            "kind": "identity_path_mismatch",
+            "entity_type": entity,
+            "proposed_id": identity,
+            "existing_ids": [identity],
+            "path": ["candidate"],
+        }
+    ]
+
+
+def test_import_worker_does_not_block_unrelated_requests() -> None:
+    import asyncio
+    import threading
+    import httpx
+
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    worker_threads: list[int] = []
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+
+    @app.get("/ping")
+    async def ping() -> dict[str, bool]:
+        return {"ok": True}
+
+    def slow_import(*args: Any, **kwargs: Any) -> dict:
+        worker_threads.append(threading.get_ident())
+        started.set()
+        try:
+            assert release.wait(10), "import worker was not released"
+            return {}
+        finally:
+            finished.set()
+
+    async def exercise() -> None:
+        event_loop_thread = threading.get_ident()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as connection:
+            request = asyncio.create_task(
+                connection.post("/api/model/import", content="data_layer: {}")
+            )
+            try:
+                assert await asyncio.to_thread(started.wait, 2)
+                assert not finished.is_set()
+                response = await asyncio.wait_for(connection.get("/ping"), timeout=2)
+                assert response.status_code == 200
+                assert len(worker_threads) == 1
+                assert worker_threads[0] != event_loop_thread
+            finally:
+                release.set()
+            assert (await request).status_code == 200
+
+    with patch.object(service, "import_model", side_effect=slow_import):
+        asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("entity", ["sql_attribute", "custom_analysis"])
+def test_sql_owner_renames_check_the_key_that_is_actually_updated(
+    catalog: Catalog, entity: str
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    engine, tables = catalog
+    with engine.begin() as connection:
+        connection.execute(
+            tables[entity].insert(),
+            [{"id": "one", "name": "Original"}, {"id": "two", "name": "Taken"}],
+        )
+    doc = document()
+    if entity == "sql_attribute":
+        doc.semantic_layer.sql_attributes.manual.append(
+            ModelSqlAttribute(id="one", name="Taken")
+        )
+    else:
+        doc.semantic_layer.custom_analyses.append(
+            ModelCustomAnalysis(id="one", name="Taken")
+        )
+    with pytest.raises(dal.ModelImportConflictError) as error:
+        dal._preflight_import(doc, replace=False)
+    assert error.value.conflicts[0]["kind"] == "natural_name_conflict"
+    assert set(error.value.conflicts[0]["existing_ids"]) == {"one", "two"}

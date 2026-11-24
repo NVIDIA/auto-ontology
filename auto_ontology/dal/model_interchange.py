@@ -114,7 +114,9 @@ class ModelImportConflictError(ModelInterchangeError):
             "resolution": (
                 "Export the target catalog with /api/model/export and bind the "
                 "document and all its references to the exported IDs before retrying. "
-                "For ambiguous IDs, use a fresh ID for genuinely new objects."
+                "For duplicate declarations of new objects, assign distinct IDs "
+                "and object paths to distinct objects and update their references, "
+                "or remove the duplicate declaration."
             ),
         }
 
@@ -839,14 +841,16 @@ def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> 
         for identity, props, path in nodes:
             key = tuple(props[k] for k in keys)
             identities = list(by_id.get(identity, {}).values())
-            same_key = by_key.get(key, [])
-            # Matching by ID does not rename catalog rows (#250). Check the
-            # uniqueness keys the import will actually persist, not edited labels.
+            # Catalog, Term, and ColumnAttribute imports retain matched rows'
+            # properties. SQL owners are updated later by _persist_sql_object.
+            # Check the keys this writer persists, not unapplied name edits.
             effective_key = (
                 tuple(identities[0][k] for k in keys)
-                if catalog and len(identities) == 1
+                if (catalog or table is s.term or table is s.column_attribute)
+                and len(identities) == 1
                 else key
             )
+            same_key = by_key.get(effective_key, [])
             if table is s.catalog_database and not path and identities:
                 same_key = []  # No database name was supplied to compare.
             # #581 preserves every declared column of a shared attribute.
@@ -879,9 +883,9 @@ def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> 
                 shared_declaration and proposed_keys[effective_key] == identity
             ):
                 kind = "duplicate_payload_path"
-            elif not identities and same_key:
-                # Matched semantic entities may be edited by replacement.
-                # Certification/name-edit decisions belong to #581, not ID binding.
+            elif any(
+                row["id"] not in {r["id"] for r in identities} for row in same_key
+            ):
                 kind = "natural_name_conflict"
             if kind:
                 conflicts.append(
@@ -1049,17 +1053,27 @@ def _resolve_entities_batch(
         deduped.setdefault(imported_id, create_props)
     imported_ids = list(deduped)
 
-    matches: dict[str, set[str]] = {}
-    for row in store().query_read(
-        select(table.c.id, table.c.imported_id).where(
-            table.c.imported_id.in_(imported_ids) | table.c.id.in_(imported_ids)
-        )
-    ):
+    parent_key = {
+        s.catalog_schema: "database_id",
+        s.catalog_table: "schema_id",
+        s.catalog_column: "table_id",
+    }.get(table)
+    fields = [table.c.id, table.c.imported_id]
+    if parent_key:
+        fields.append(table.c[parent_key])
+    statement = select(*fields).where(
+        table.c.imported_id.in_(imported_ids) | table.c.id.in_(imported_ids)
+    )
+    if parent_key:
+        # Keep a validated parent stable until the import transaction commits.
+        statement = statement.order_by(table.c.id).with_for_update()
+    matches: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in store().query_read(statement):
         for identity in (row["imported_id"], row["id"]):
             if identity in deduped:
-                matches.setdefault(identity, set()).add(row["id"])
+                matches.setdefault(identity, {})[row["id"]] = row
 
-    ambiguous = [
+    conflicts = [
         {
             "kind": "ambiguous_id",
             "entity_type": table.name,
@@ -1070,8 +1084,23 @@ def _resolve_entities_batch(
         for identity, live_ids in matches.items()
         if len(live_ids) > 1
     ]
-    if ambiguous:
-        raise ModelImportConflictError(ambiguous)
+    if parent_key:
+        for identity, rows in matches.items():
+            if len(rows) != 1:
+                continue
+            row = next(iter(rows.values()))
+            if row[parent_key] != deduped[identity][parent_key]:
+                conflicts.append(
+                    {
+                        "kind": "identity_path_mismatch",
+                        "entity_type": table.name,
+                        "proposed_id": identity,
+                        "existing_ids": [row["id"]],
+                        "path": [deduped[identity].get("name", "")],
+                    }
+                )
+    if conflicts:
+        raise ModelImportConflictError(conflicts)
     existing = {
         identity: next(iter(live_ids)) for identity, live_ids in matches.items()
     }

@@ -749,18 +749,99 @@ def test_http_reports_catalog_and_all_semantic_conflicts_before_writes(
 
 def test_http_export_and_bind_recovers_from_foreign_physical_ids(world: World) -> None:
     import yaml
+    from auto_ontology.server.model_interchange.schemas import ModelColumn
 
-    response = _post_document(_reid(_document(world), f"{world.prefix}-foreign"))
+    def rewrite(value: Any, mapping: dict[str, str], key: str = "") -> Any:
+        if isinstance(value, dict):
+            return {k: rewrite(v, mapping, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [rewrite(v, mapping, key) for v in value]
+        if isinstance(value, str) and (
+            key == "id" or key.endswith("_id") or key in ("represents", "sql_column_is")
+        ):
+            return mapping.get(value, value)
+        return value
+
+    def identities(
+        document: mi.AutoOntologyModelDocument,
+    ) -> dict[tuple[str, ...], str]:
+        paths: dict[tuple[str, ...], str] = {}
+        for db in document.data_layer.databases:
+            name = db.schemas[0].database_name
+            paths[("database", name)] = db.id
+            for schema in db.schemas:
+                paths[("schema", name, schema.name)] = schema.id
+                for table in schema.tables:
+                    paths[("table", name, schema.name, table.name)] = table.id
+                    for column in table.columns:
+                        paths[
+                            ("column", name, schema.name, table.name, column.name)
+                        ] = column.id
+        for term in document.semantic_layer.terms:
+            paths[("term", term.name)] = term.id
+            for attr in term.columns_attributes:
+                paths[("attribute", term.name, attr.name)] = attr.id
+        return paths
+
+    source = _document(world)
+    foreign_ids = {
+        identity: f"foreign-{identity}" for identity in identities(source).values()
+    }
+    rejected = mi.AutoOntologyModelDocument.model_validate(
+        rewrite(source.model_dump(), foreign_ids)
+    )
+    orders = next(
+        t
+        for t in rejected.data_layer.databases[0].schemas[0].tables
+        if t.name == "orders"
+    )
+    new_column_id = f"{world.prefix}-new-column"
+    orders.columns.append(
+        ModelColumn(
+            id=new_column_id, name="new_evidence", description="Keep this new field"
+        )
+    )
+    response = _post_document(rejected)
     assert response.status_code == 409
     exported = _http_client().post(
         "/api/model/export", json={"databases": [world.database]}
     )
     assert exported.status_code == 200
-    rebound = mi.AutoOntologyModelDocument.model_validate(yaml.safe_load(exported.text))
+    target = identities(
+        mi.AutoOntologyModelDocument.model_validate(yaml.safe_load(exported.text))
+    )
+    mapping = {
+        identity: target[path]
+        for path, identity in identities(rejected).items()
+        if path in target
+    }
+    rebound = mi.AutoOntologyModelDocument.model_validate(
+        rewrite(rejected.model_dump(), mapping)
+    )
     result = _post_document(rebound, replace=True)
-    assert result.status_code == 200
-    assert all(value == 0 for value in result.json()["summary"]["created"].values())
-    assert _post_document(rebound, replace=True).status_code == 200
+    assert result.status_code == 200, result.text
+    created = result.json()["summary"]["created"]
+    assert created["columns"] == 1
+    assert all(value == 0 for key, value in created.items() if key != "columns")
+    added = store().query_read(
+        select(s.catalog_column).where(s.catalog_column.c.imported_id == new_column_id)
+    )
+    assert len(added) == 1
+    assert added[0]["table_id"] == world.orders
+    assert added[0]["description"] == "Keep this new field"
+    assert [
+        (fk.source_column_id, fk.target_column_id)
+        for fk in rebound.data_layer.foreign_keys
+    ] == [(world.customer_ref, world.customer_id)]
+    assert rebound.semantic_layer.terms[0].represents == [world.orders]
+    assert (
+        rebound.semantic_layer.terms[0].columns_attributes[0].column_id
+        == world.order_id
+    )
+    assert rebound.semantic_layer.semantic_fks[0].column_attribute_id == world.attribute
+    repeated = _post_document(rebound, replace=True)
+    assert repeated.status_code == 200
+    assert all(value == 0 for value in repeated.json()["summary"]["created"].values())
 
 
 @pytest.mark.parametrize(
@@ -1026,3 +1107,84 @@ def test_two_payload_aliases_cannot_bind_to_one_semantic_entity(world: World) ->
         c["kind"] == "duplicate_payload_path" and c["proposed_id"] == "other-alias"
         for c in response.json()["detail"]["conflicts"]
     )
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_unapplied_matched_term_names_do_not_create_path_conflicts(
+    world: World, replace: bool
+) -> None:
+    other = _add(s.term, name=f"{world.prefix}-Customer", source=SEMANTIC_SOURCE)
+    _link(s.table__term, table_id=world.customers, term_id=other)
+    document = _document(world)
+    for term in document.semantic_layer.terms:
+        term.name = f"{world.prefix}-Customer"
+    response = _post_document(document, replace=replace)
+    assert response.status_code == 200, response.text
+    assert response.json()["summary"]["created"]["terms"] == 0
+    rows = store().query_read(
+        select(s.term.c.id, s.term.c.name).where(s.term.c.id.in_([world.term, other]))
+    )
+    assert {r["id"]: r["name"] for r in rows} == {
+        world.term: f"{world.prefix}-Order",
+        other: f"{world.prefix}-Customer",
+    }
+
+
+@pytest.mark.parametrize("match", ["id", "imported_id"])
+def test_wrong_parent_committed_after_preflight_is_not_reused(
+    world: World, match: str
+) -> None:
+    from unittest.mock import patch
+    from auto_ontology.dal.session import get_engine
+    from auto_ontology.server.model_interchange.schemas import ModelTable, ModelColumn
+
+    outside_schema = _add(s.catalog_schema, database_id=world.database, name="outside")
+    document = _document(world)
+    proposed_id = f"{world.prefix}-late-table"
+    proposed_column = f"{world.prefix}-late-column"
+    document.data_layer.databases[0].schemas[0].tables.append(
+        ModelTable(
+            id=proposed_id,
+            name="late_table",
+            columns=[ModelColumn(id=proposed_column, name="id")],
+        )
+    )
+    original = mi._import_catalog
+    other_id = proposed_id if match == "id" else f"{world.prefix}-other-live-id"
+    before = mi.fetch_export_rows([world.database])
+
+    def concurrent_insert(*args: Any, **kwargs: Any) -> list[str]:
+        # A different transaction commits after preflight but before resolution.
+        with get_engine().begin() as connection:
+            connection.execute(
+                s.catalog_table.insert().values(
+                    id=other_id,
+                    imported_id=proposed_id if match == "imported_id" else None,
+                    name="late_table",
+                    schema_id=outside_schema,
+                )
+            )
+        return original(*args, **kwargs)
+
+    with patch.object(mi, "_import_catalog", side_effect=concurrent_insert):
+        response = _post_document(document)
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "identity_path_mismatch" and c["proposed_id"] == proposed_id
+        for c in response.json()["detail"]["conflicts"]
+    )
+    # The concurrent writer's row remains, but this import must not attach or
+    # create columns on it. Earlier stamps in our transaction are rolled back.
+    row = store().query_read(
+        select(s.catalog_table).where(s.catalog_table.c.id == other_id)
+    )[0]
+    assert row["schema_id"] == outside_schema
+    assert not store().query_read(
+        select(s.catalog_column.c.id).where(s.catalog_column.c.table_id == other_id)
+    )
+    assert not store().query_read(
+        select(s.catalog_column.c.id).where(
+            s.catalog_column.c.imported_id == proposed_column
+        )
+    )
+    assert mi.fetch_export_rows([world.database]) == before

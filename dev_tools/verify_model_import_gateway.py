@@ -11,6 +11,7 @@ are created and cleaned up; no model/embedding credentials are required.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import socket
@@ -20,6 +21,7 @@ import time
 import uuid
 
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 import uvicorn
 import yaml
@@ -74,6 +76,43 @@ def main() -> None:
     db_ids = summary["database_ids"]
     app = FastAPI()
     app.include_router(router, prefix="/api")
+
+    def fixture_state() -> dict:
+        schemas = select(s.catalog_schema.c.id).where(
+            s.catalog_schema.c.database_id.in_(db_ids)
+        )
+        tables = select(s.catalog_table.c.id).where(
+            s.catalog_table.c.schema_id.in_(schemas)
+        )
+        return jsonable_encoder(
+            {
+                "databases": store().query_read(
+                    select(s.catalog_database)
+                    .where(s.catalog_database.c.id.in_(db_ids))
+                    .order_by(s.catalog_database.c.id)
+                ),
+                "schemas": store().query_read(
+                    select(s.catalog_schema)
+                    .where(s.catalog_schema.c.id.in_(schemas))
+                    .order_by(s.catalog_schema.c.id)
+                ),
+                "tables": store().query_read(
+                    select(s.catalog_table)
+                    .where(s.catalog_table.c.id.in_(tables))
+                    .order_by(s.catalog_table.c.id)
+                ),
+                "columns": store().query_read(
+                    select(s.catalog_column)
+                    .where(s.catalog_column.c.table_id.in_(tables))
+                    .order_by(s.catalog_column.c.id)
+                ),
+            }
+        )
+
+    # Loopback-only acceptance server, not a production endpoint. Every 409
+    # case checks full row state before the later successful import can mask it.
+    app.get("/__fixture_state")(fixture_state)
+    before = fixture_state()
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
@@ -118,6 +157,7 @@ def main() -> None:
                 "PYTHON_API_URL": f"http://127.0.0.1:{port}",
                 "MODEL_IMPORT_CONFLICT_YAML": yaml.safe_dump(document.model_dump()),
                 "MODEL_IMPORT_BOUND_YAML": bound_yaml,
+                "MODEL_IMPORT_FIXTURE_STATE": json.dumps(before),
             },
         )
         assert (
