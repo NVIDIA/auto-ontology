@@ -47,8 +47,16 @@ addopts = "--import-mode=importlib"
 dev = ["pytest>=8"]
 
 [tool.uv]
-# Patched version of a transitive dependency flagged by nSpect.
+# Patched versions of dependencies with known advisories (nSpect, OSV). Constraints,
+# so the published package's own version ranges stay as declared above.
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via mcp)
     "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2 (via httpx)
+    "fastmcp>=3.4.10",  # GHSA-7xgj-8392-5q4r
+    "fastmcp-slim>=3.4.10",  # GHSA-7xgj-8392-5q4r (via fastmcp)
+    "mcp>=1.30.0",  # GHSA-qx49-fqc8-xw99 and four more (via fastmcp)
+    "authlib>=1.9.1",  # GHSA-6v38-4h7w-rj9h, GHSA-8m4g-j4wp-wgcg and seven more (via fastmcp)
+    "joserfc>=1.7.6",  # GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx (via fastmcp, authlib)
+    "dnspython>=2.9.2",  # GHSA-45c3-73f7-pv4m, GHSA-vvf4-9x63-8xvv (via email-validator)
+    "opentelemetry-api>=1.45.2",  # GHSA-mf5v-w3w3-f6cg, GHSA-xcq7-p3pf-p88h (via fastmcp)
 ]
