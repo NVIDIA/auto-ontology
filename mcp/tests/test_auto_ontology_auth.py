@@ -8,17 +8,22 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
 import pytest
 from mcp.server.auth.provider import AccessToken
+from starlette.applications import Starlette
+from starlette.testclient import TestClient
 
 from auto_ontology_mcp.auto_ontology_auth import (
     CLIENT_ID_CLAIM,
     SCOPE_CLAIM,
     USERINFO_PATH,
     AutoOntologyTokenVerifier,
+    build_auto_ontology_auth,
 )
+from auto_ontology_mcp.config import Settings
 
 API_URL = "https://auto_ontology.example"
 TOKEN = "opaque-token"
@@ -96,3 +101,30 @@ def test_an_unreachable_auto_ontology_is_not_reported_as_a_bad_token() -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         _verify(handler)
+
+
+def test_the_advertised_authorization_server_is_better_auths_issuer() -> None:
+    """A client compares this to the metadata's ``issuer`` and refuses on a mismatch.
+
+    Better Auth's issuer is the app's URL plus ``/api/auth``, and it sends that
+    as ``iss`` on the authorization response too. Advertising the bare origin
+    made Codex stop with "Authorization server issuer mismatch" (#560).
+    """
+    settings = Settings(
+        api_url="https://ontology.example:8443",
+        spec_path=Path("unused.json"),
+        host="127.0.0.1",
+        port=3003,
+        timeout_s=5.0,
+        chat_timeout_s=5.0,
+        public_url="https://ontology.example:8443",
+    )
+    app = Starlette(routes=build_auto_ontology_auth(settings).get_routes("/mcp"))
+
+    metadata = TestClient(app).get("/.well-known/oauth-protected-resource/mcp")
+
+    assert metadata.status_code == 200
+    assert metadata.json()["authorization_servers"] == [
+        "https://ontology.example:8443/api/auth"
+    ]
+    assert USERINFO_PATH.startswith("/api/auth/")
