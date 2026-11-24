@@ -37,6 +37,8 @@ from auto_ontology.connectors.bigquery import (
     _TABLE_SCHEMA,
     _decode_credentials,
     _parse_connection_string,
+    _resource_tags,
+    _sql_literal,
     shard_families,
 )
 from auto_ontology.connectors.connection_string_factory import build_connection_string
@@ -156,7 +158,7 @@ class _FakeClient:
 
 
 def _is_shapes_query(sql: str) -> bool:
-    return "STARTS_WITH(table_name" in sql
+    return "clustering_ordinal_position" in sql
 
 
 def _shape_rows(
@@ -165,6 +167,9 @@ def _shape_rows(
     required: dict[str, list[str]] | None = None,
     partitioning: dict[str, str] | None = None,
     clustering: dict[str, list[str]] | None = None,
+    kms: dict[str, str | None] | None = None,
+    tags: dict[str, str | None] | None = None,
+    partition_by: dict[str, str | None] | None = None,
 ) -> _FakeRows:
     """What the column query behind shard families reads for *tables*."""
     return _FakeRows(
@@ -175,6 +180,9 @@ def _shape_rows(
             "is_nullable",
             "is_partitioning_column",
             "clustering_ordinal_position",
+            "kms_key_name",
+            "tags",
+            "partition_by",
         ],
         [
             [
@@ -188,6 +196,9 @@ def _shape_rows(
                     if column in (clustering or {}).get(table, [])
                     else None
                 ),
+                None if kms is None else kms.get(table),
+                None if tags is None else tags.get(table),
+                None if partition_by is None else partition_by.get(table),
             ]
             for table, columns in tables.items()
             for column, kind in columns.items()
@@ -1340,6 +1351,147 @@ def test_no_wildcard_is_formed_over_other_partitioning_or_clustering(
     )
 
 
+def test_no_wildcard_is_formed_over_another_partition_granularity() -> None:
+    """Both partition on ``ts``; only the DDL says one is by day, one by month."""
+    day = TableShape(
+        {"ts": "TIMESTAMP"}, partitioning=frozenset({"ts"}), partition_by="DATE(ts)"
+    )
+    month = TableShape(
+        {"ts": "TIMESTAMP"},
+        partitioning=frozenset({"ts"}),
+        partition_by="TIMESTAMP_TRUNC(ts, MONTH)",
+    )
+
+    assert shard_families(["s_2019", "s_2020"], {"s_2019": month, "s_2020": day}) == []
+
+
+def test_partition_clauses_that_differ_only_in_case_and_spacing_still_collapse() -> (
+    None
+):
+    older = TableShape(
+        {"ts": "TIMESTAMP"}, partitioning=frozenset({"ts"}), partition_by="date( ts )"
+    )
+    newest = TableShape(
+        {"ts": "TIMESTAMP"}, partitioning=frozenset({"ts"}), partition_by="DATE( ts )"
+    )
+
+    assert [
+        f.shards
+        for f in shard_families(
+            ["s_2019", "s_2020"], {"s_2019": older, "s_2020": newest}
+        )
+    ] == [("s_2019", "s_2020")]
+
+
+def test_a_partition_granularity_read_from_the_ddl_keeps_the_shards_apart() -> None:
+    rows = [
+        ["ga", "events_20260101", "BASE TABLE", None],
+        ["ga", "events_20260102", "BASE TABLE", None],
+    ]
+    database = _database(schema="ga")
+    client = _wire(
+        database,
+        _FakeClient(
+            lambda sql: (
+                _shape_rows(
+                    {
+                        "events_20260101": {"ts": "TIMESTAMP"},
+                        "events_20260102": {"ts": "TIMESTAMP"},
+                    },
+                    partitioning={"events_20260101": "ts", "events_20260102": "ts"},
+                    partition_by={
+                        "events_20260101": "TIMESTAMP_TRUNC(ts, MONTH)",
+                        "events_20260102": "DATE(ts)",
+                    },
+                )
+                if _is_shapes_query(sql)
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type", "description"], rows
+                )
+            )
+        ),
+    )
+
+    frame = database.get_tables()
+
+    assert frame["table_name"].tolist() == ["events_20260101", "events_20260102"]
+    shapes_sql = next(sql for sql in client.statements if _is_shapes_query(sql))
+    assert "REGEXP_EXTRACT(d.ddl, r'(?m)^PARTITION BY (.+)$')" in shapes_sql
+
+
+_KMS_KEY = "projects/p/locations/us/keyRings/r/cryptoKeys/k"
+
+
+def test_no_wildcard_is_formed_when_any_match_uses_a_customer_managed_key() -> None:
+    """The same key on every shard still cannot be queried as a wildcard."""
+    shapes = _shapes({"s_2019": {"a": "INT64"}, "s_2020": {"a": "INT64"}})
+    shapes["s_2019"] = TableShape({"a": "INT64"}, kms_key=_KMS_KEY)
+    shapes["s_2020"] = TableShape({"a": "INT64"}, kms_key=_KMS_KEY)
+
+    assert shard_families(["s_2019", "s_2020"], shapes) == []
+
+
+def test_no_wildcard_is_formed_over_a_non_shard_with_a_customer_managed_key() -> None:
+    shapes = _shapes(
+        {
+            "events_20260101": {"id": "INT64"},
+            "events_20260102": {"id": "INT64"},
+            "events_intraday": {"id": "INT64"},
+        }
+    )
+    shapes["events_intraday"] = TableShape({"id": "INT64"}, kms_key=_KMS_KEY)
+
+    assert (
+        shard_families(
+            ["events_20260101", "events_20260102", "events_intraday"], shapes
+        )
+        == []
+    )
+
+
+def test_shards_that_carry_the_same_resource_tags_stay_one_wildcard() -> None:
+    tags = frozenset({("2482/env", "prod"), ("2482/team", "data")})
+    shapes = {
+        "s_2019": TableShape({"a": "INT64"}, tags=tags),
+        "s_2020": TableShape({"a": "INT64"}, tags=tags),
+    }
+
+    assert [f.shards for f in shard_families(["s_2019", "s_2020"], shapes)] == [
+        ("s_2019", "s_2020")
+    ]
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        frozenset({("2482/env", "dev")}),
+        frozenset(),
+        frozenset({("2482/env", "prod"), ("2482/team", "data")}),
+        None,
+    ],
+)
+def test_no_wildcard_is_formed_over_a_different_resource_tag_set(
+    other: frozenset[tuple[str, str]] | None,
+) -> None:
+    shapes = {
+        "s_2019": TableShape({"a": "INT64"}, tags=frozenset({("2482/env", "prod")})),
+        "s_2020": TableShape({"a": "INT64"}, tags=other),
+    }
+
+    assert shard_families(["s_2019", "s_2020"], shapes) == []
+
+
+def test_table_option_literals_decode_to_a_key_and_a_tag_set() -> None:
+    literal = '[STRUCT("2482/env", "prod"), STRUCT("2482/team", "data")]'
+
+    assert _sql_literal(f'"{_KMS_KEY}"') == _KMS_KEY
+    assert _resource_tags(literal) == frozenset(
+        {("2482/env", "prod"), ("2482/team", "data")}
+    )
+    assert _resource_tags("[]") == frozenset()
+    assert _resource_tags("not a struct array") is None
+
+
 def test_a_table_dropped_before_its_columns_were_read_is_left_out() -> None:
     """GA4 drops each day's intraday table; it no longer constrains the wildcard."""
     families = shard_families(
@@ -1479,7 +1631,113 @@ def test_shards_the_wildcard_would_fail_on_stay_tables_of_their_own() -> None:
     frame = database.get_tables()
 
     assert frame["table_name"].tolist() == ["events_20260101", "events_20260102"]
-    assert any("STARTS_WITH(table_name, 'events_')" in sql for sql in client.statements)
+    assert any(
+        "STARTS_WITH(c.table_name, 'events_')" in sql for sql in client.statements
+    )
+
+
+def test_a_table_created_while_shapes_are_read_keeps_shards_separate() -> None:
+    """A new matching table is not silently omitted from wildcard validation."""
+    rows = [
+        ["ga", "events_20260101", "BASE TABLE", None],
+        ["ga", "events_20260102", "BASE TABLE", None],
+    ]
+    database = _database(schema="ga")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: (
+                _shape_rows(
+                    {
+                        "events_20260101": {"id": "INT64"},
+                        "events_20260102": {"id": "INT64"},
+                        "events_20260103": {"id": "STRING"},
+                    }
+                )
+                if _is_shapes_query(sql)
+                else _FakeRows(
+                    ["table_schema", "table_name", "table_type", "description"], rows
+                )
+            )
+        ),
+    )
+
+    assert database.get_tables()["table_name"].tolist() == [
+        "events_20260101",
+        "events_20260102",
+    ]
+
+
+def _two_event_shards(sql: str, **shape: dict[str, str]) -> _FakeRows:
+    rows = [
+        ["ga", "events_20260101", "BASE TABLE", None],
+        ["ga", "events_20260102", "BASE TABLE", None],
+    ]
+    if _is_shapes_query(sql):
+        return _shape_rows(
+            {
+                "events_20260101": {"id": "INT64"},
+                "events_20260102": {"id": "INT64"},
+            },
+            **shape,
+        )
+    return _FakeRows(["table_schema", "table_name", "table_type", "description"], rows)
+
+
+def test_a_customer_managed_key_keeps_the_shards_in_the_catalog() -> None:
+    literal = f'"{_KMS_KEY}"'
+    database = _database(schema="ga")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: _two_event_shards(
+                sql,
+                kms={"events_20260101": literal, "events_20260102": literal},
+            )
+        ),
+    )
+
+    assert database.get_tables()["table_name"].tolist() == [
+        "events_20260101",
+        "events_20260102",
+    ]
+
+
+def test_different_resource_tag_literals_keep_the_shards_in_the_catalog() -> None:
+    database = _database(schema="ga")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: _two_event_shards(
+                sql,
+                tags={
+                    "events_20260101": '[STRUCT("2482/env", "prod")]',
+                    "events_20260102": '[STRUCT("2482/env", "dev")]',
+                },
+            )
+        ),
+    )
+
+    assert database.get_tables()["table_name"].tolist() == [
+        "events_20260101",
+        "events_20260102",
+    ]
+
+
+def test_the_same_resource_tag_literal_still_collapses() -> None:
+    literal = '[STRUCT("2482/env", "prod"), STRUCT("2482/team", "data")]'
+    database = _database(schema="ga")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: _two_event_shards(
+                sql,
+                tags={"events_20260101": literal, "events_20260102": literal},
+            )
+        ),
+    )
+
+    assert database.get_tables()["table_name"].tolist() == ["events_*"]
 
 
 def test_a_wildcard_table_has_the_latest_shard_columns_and_table_suffix() -> None:

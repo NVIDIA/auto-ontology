@@ -40,7 +40,8 @@ These properties of the engine shape this connector:
   :meth:`~BigQueryDatabase.qualify` points the wildcard at that same table, so
   profiling reads one day rather than scanning every shard. No wildcard is
   formed over a prefix where some matching table would fail it (a changed
-  type, a missing ``REQUIRED`` column, other partitioning or clustering), and
+  type, a missing ``REQUIRED`` column, other partitioning or clustering, a
+  customer-managed encryption key, or a different set of resource tags), and
   a shard with a column that schema lacks stays a table of its own.
 * **Unenforced keys.** BigQuery stores primary and foreign keys as metadata
   only. They are reported anyway, because they are the modeller's own statement
@@ -218,6 +219,11 @@ def type_fits(old: str, new: str | None) -> bool:
         return False
 
 
+def _expression(text: str | None) -> str | None:
+    """*text* with case and spacing that do not change its meaning folded away."""
+    return " ".join(text.split()).casefold() if text else None
+
+
 # ``STRING(10)``, ``NUMERIC(10, 2)``: a parameterized type is stored as its base
 # type, so its parameters do not keep a wildcard from reading it.
 _TYPE_PARAMETERS = re.compile(r"\(\s*\d+\s*(?:,\s*\d+\s*)?\)")
@@ -235,14 +241,23 @@ class TableShape:
     partitioning: frozenset[str] = frozenset()
     #: Casefolded names of the clustering columns, in order.
     clustering: tuple[str, ...] = ()
+    #: Cloud KMS cryptoKey resource name, when the table is encrypted with one.
+    kms_key: str | None = None
+    #: Resource tags ``(namespaced key, value)``. ``None`` when unreadable.
+    tags: frozenset[tuple[str, str]] | None = frozenset()
+    #: The DDL's ``PARTITION BY`` expression, which carries the granularity
+    #: (``DATE(ts)`` or ``TIMESTAMP_TRUNC(ts, MONTH)``) the columns do not.
+    partition_by: str | None = None
 
     def breaks(self, schema: TableShape) -> bool:
         """Whether a wildcard with *schema* fails on this table, whatever it selects.
 
         BigQuery fails such a query when a column has another type, when a
         ``REQUIRED`` column of the schema is missing (it cannot read as NULL),
-        or when partitioning or clustering differ -- even when a
-        ``_TABLE_SUFFIX`` filter leaves the table out.
+        when partitioning or clustering differ, when either table is encrypted
+        with a customer-managed key, or when the resource tags differ -- even
+        when a ``_TABLE_SUFFIX`` filter leaves the table out. The same key on
+        every table still fails: a wildcard cannot read a CMEK table at all.
         """
         ours = {
             c.casefold(): _TYPE_PARAMETERS.sub("", t) for c, t in self.columns.items()
@@ -254,7 +269,13 @@ class TableShape:
             any(c in theirs and not type_fits(t, theirs[c]) for c, t in ours.items())
             or not schema.required <= ours.keys()
             or self.partitioning != schema.partitioning
+            or _expression(self.partition_by) != _expression(schema.partition_by)
             or self.clustering != schema.clustering
+            or self.kms_key is not None
+            or schema.kms_key is not None
+            or self.tags is None
+            or schema.tags is None
+            or self.tags != schema.tags
         )
 
     def hides_from(self, schema: TableShape) -> bool:
@@ -317,7 +338,9 @@ def shard_families(
     each table's *shapes*:
 
     * a table the schema :meth:`~TableShape.breaks` on fails every query of
-      the wildcard, so no family is formed over its prefix;
+      the wildcard, so no family is formed over its prefix. That includes a
+      customer-managed key on any match, and resource tags that are not the
+      same set on every match;
     * a shard with a column the schema lacks would lose it, so it stays a
       table of its own, listed in ``also_matches``;
     * a column a shard lacks reads as NULL, so it changes nothing.
@@ -648,14 +671,59 @@ def _dataset_offset(sql: str, dataset: exp.Expression) -> int | None:
 
 def _description(option_value: Any) -> str | None:
     """Decode a ``TABLE_OPTIONS`` description, which arrives as a SQL literal."""
-    if option_value is None or option_value is pd.NA:
+    return _sql_literal(option_value)
+
+
+# One ``STRUCT("key", "value")`` inside a ``tags`` option literal.
+_TAG_PAIR = re.compile(
+    r"""STRUCT\(\s*("(?:\\.|[^"\\])*")\s*,\s*("(?:\\.|[^"\\])*")\s*\)"""
+)
+
+
+def _blank_option(value: Any) -> bool:
+    """Whether a ``TABLE_OPTIONS`` cell carries no value."""
+    if value is None or value is pd.NA:
+        return True
+    return isinstance(value, float) and pd.isna(value)
+
+
+def _sql_literal(value: Any) -> str | None:
+    """The text of a ``TABLE_OPTIONS`` string literal, or ``None`` when empty."""
+    if _blank_option(value):
         return None
-    text = str(option_value)
-    try:
-        decoded = json.loads(text)
-    except json.JSONDecodeError:
-        decoded = text.strip('"')
-    return str(decoded) or None
+    text = str(value).strip()
+    if text in ("", "NULL"):
+        return None
+    if text.startswith('"'):
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            decoded = text.strip('"')
+        text = str(decoded).strip()
+    return text or None
+
+
+def _resource_tags(value: Any) -> frozenset[tuple[str, str]] | None:
+    """Tag pairs in a ``TABLE_OPTIONS`` ``tags`` literal.
+
+    ``None`` when the cell is present but not the ``STRUCT`` array BigQuery
+    returns, so a wildcard is not formed on tags that could not be compared.
+    An absent option is an empty set.
+    """
+    if _blank_option(value):
+        return frozenset()
+    text = str(value).strip()
+    if text in ("", "[]", "NULL"):
+        return frozenset()
+    pairs: list[tuple[str, str]] = []
+    for key, tag_value in _TAG_PAIR.findall(text):
+        try:
+            pairs.append((json.loads(key), json.loads(tag_value)))
+        except json.JSONDecodeError:
+            return None
+    if not pairs:
+        return None
+    return frozenset(pairs)
 
 
 class BigQueryDatabase(SQLDatabase):
@@ -1116,6 +1184,12 @@ class BigQueryDatabase(SQLDatabase):
             if candidates:
                 shapes = self._table_shapes(schema, [f.prefix for f in candidates])
                 candidates = shard_families(names, shapes, **kwargs)
+                appeared = set(shapes) - set(names)
+                candidates = [
+                    family
+                    for family in candidates
+                    if not any(name.startswith(family.prefix) for name in appeared)
+                ]
             families[schema] = {f.wildcard: f for f in candidates}
         # Assigned whole, so a concurrent reader never takes a half-built map
         # for the loaded cache.
@@ -1123,28 +1197,64 @@ class BigQueryDatabase(SQLDatabase):
         self._families = families
 
     def _table_shapes(self, dataset: str, prefixes: list[str]) -> dict[str, TableShape]:
-        """The shape of every table in *dataset* a wildcard over *prefixes* matches."""
+        """The shape of every table in *dataset* a wildcard over *prefixes* matches.
+
+        ``kms_key_name`` and ``tags`` come from ``TABLE_OPTIONS``: a wildcard
+        cannot read a customer-managed key, and it requires one tag set. The
+        ``PARTITION BY`` clause is cut out of ``TABLES.ddl`` server-side, so the
+        rest of each table's DDL is not transferred.
+        """
         matched = " OR ".join(
-            f"STARTS_WITH(table_name, {exp.Literal.string(p).sql(dialect='bigquery')})"
+            f"STARTS_WITH(c.table_name, {exp.Literal.string(p).sql(dialect='bigquery')})"
             for p in prefixes
         )
+        columns_view = self._information_schema(dataset, "COLUMNS")
+        options = self._information_schema(dataset, "TABLE_OPTIONS")
+        tables_view = self._information_schema(dataset, "TABLES")
         frame = self.execute(f"""
             SELECT
-                table_name,
-                column_name,
-                data_type,
-                is_nullable,
-                is_partitioning_column,
-                clustering_ordinal_position
-            FROM {self._information_schema(dataset, "COLUMNS")}
+                c.table_name,
+                c.column_name,
+                c.data_type,
+                c.is_nullable,
+                c.is_partitioning_column,
+                c.clustering_ordinal_position,
+                k.option_value AS kms_key_name,
+                t.option_value AS tags,
+                REGEXP_EXTRACT(d.ddl, r'(?m)^PARTITION BY (.+)$') AS partition_by
+            FROM {columns_view} AS c
+            LEFT JOIN {options} AS k
+                ON k.table_name = c.table_name
+               AND k.option_name = 'kms_key_name'
+            LEFT JOIN {options} AS t
+                ON t.table_name = c.table_name
+               AND t.option_name = 'tags'
+            LEFT JOIN {tables_view} AS d
+                ON d.table_name = c.table_name
             WHERE {matched}
-            ORDER BY table_name, clustering_ordinal_position
+            ORDER BY c.table_name, c.clustering_ordinal_position
         """)
+        for column in ("kms_key_name", "tags", "partition_by"):
+            if column not in frame.columns:
+                frame = frame.assign(**{column: None})
         columns: dict[str, dict[str, str]] = {}
         required: dict[str, set[str]] = {}
         partitioning: dict[str, set[str]] = {}
         clustering: dict[str, list[str]] = {}
-        for table, column, kind, nullable, partitions, cluster in frame[
+        encrypted: dict[str, str | None] = {}
+        tagged: dict[str, frozenset[tuple[str, str]] | None] = {}
+        partitioned_by: dict[str, str | None] = {}
+        for (
+            table,
+            column,
+            kind,
+            nullable,
+            partitions,
+            cluster,
+            key,
+            tag,
+            partition_by,
+        ) in frame[
             [
                 "table_name",
                 "column_name",
@@ -1152,6 +1262,9 @@ class BigQueryDatabase(SQLDatabase):
                 "is_nullable",
                 "is_partitioning_column",
                 "clustering_ordinal_position",
+                "kms_key_name",
+                "tags",
+                "partition_by",
             ]
         ].itertuples(index=False, name=None):
             table, name = str(table), str(column).casefold()
@@ -1162,12 +1275,21 @@ class BigQueryDatabase(SQLDatabase):
                 partitioning.setdefault(table, set()).add(name)
             if pd.notna(cluster):
                 clustering.setdefault(table, []).append(name)
+            if table not in encrypted:
+                encrypted[table] = _sql_literal(key)
+                tagged[table] = _resource_tags(tag)
+                partitioned_by[table] = (
+                    None if _blank_option(partition_by) else str(partition_by)
+                )
         return {
             table: TableShape(
                 names,
                 frozenset(required.get(table, ())),
                 frozenset(partitioning.get(table, ())),
                 tuple(clustering.get(table, ())),
+                encrypted.get(table),
+                tagged.get(table, frozenset()),
+                partitioned_by.get(table),
             )
             for table, names in columns.items()
         }
