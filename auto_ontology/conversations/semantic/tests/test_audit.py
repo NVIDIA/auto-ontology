@@ -866,6 +866,41 @@ class TestCheckingDerived:
         assert derived == []
         assert called.call_count == 0
 
+    @pytest.mark.parametrize("flip", [False, True])
+    def test_both_halves_of_a_mutual_pair_go_whatever_the_order(
+        self, flip: bool
+    ) -> None:
+        derived = [_Derived("a", "b", "supersedes"), _Derived("b", "a", "supersedes")]
+        if flip:
+            derived.reverse()
+        with patch(
+            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
+            return_value=answers((1, "changed"), (2, "changed")),
+        ):
+            assert check_derived(derived, _NODES, _TEXTS) == (0, 2)
+
+        assert derived == []
+
+    def test_a_swap_that_makes_a_mutual_pair_is_caught(self) -> None:
+        derived = [_Derived("a", "b", "supersedes"), _Derived("a", "b", "supersedes")]
+        with patch(
+            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
+            return_value=answers((1, "reversed"), (2, "changed")),
+        ):
+            assert check_derived(derived, _NODES, _TEXTS) == (1, 2)
+
+        assert derived == []
+
+    def test_a_swap_that_settles_a_mutual_pair_keeps_it(self) -> None:
+        derived = [_Derived("a", "b", "supersedes"), _Derived("b", "a", "supersedes")]
+        with patch(
+            "auto_ontology.utils.llm_invoke.invoke_with_structured_output",
+            return_value=answers((1, "reversed"), (2, "changed")),
+        ):
+            assert check_derived(derived, _NODES, _TEXTS) == (1, 0)
+
+        assert {(e.source_id, e.target_id) for e in derived} == {("b", "a")}
+
     def test_a_precedes_against_its_own_dates_is_dropped(self) -> None:
         nodes = [
             node("x", "Later", occurred_on="2024-04-05"),

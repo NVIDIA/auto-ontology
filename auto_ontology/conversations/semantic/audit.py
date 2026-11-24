@@ -991,9 +991,7 @@ def check_derived(
         for number, edge in enumerate(derived)
     ]
 
-    structure = audit_structure(nodes, rows)
-    doomed = {row[PLACE] for row in structure.loops}
-    doomed |= {row[PLACE] for _, row in structure.mutual}
+    doomed = {row[PLACE] for row in audit_structure(nodes, rows).loops}
 
     by_id = {str(node["id"]): node for node in nodes}
 
@@ -1026,6 +1024,22 @@ def check_derived(
             item.reason,
         )
     doomed |= {item.edge[PLACE] for item in report.separate}
+
+    # On the directions as they now stand, since a swap can make a pair mutual
+    # or settle one. Both halves go: nothing here says which way is right.
+    standing = [
+        {
+            "source_id": str(edge.source_id),
+            "target_id": str(edge.target_id),
+            "role": str(edge.role),
+            PLACE: number,
+        }
+        for number, edge in enumerate(derived)
+        if number not in doomed
+    ]
+    doomed |= {
+        row[PLACE] for pair in audit_structure(nodes, standing).mutual for row in pair
+    }
 
     keep = [edge for number, edge in enumerate(derived) if number not in doomed]
     dropped = len(derived) - len(keep)
