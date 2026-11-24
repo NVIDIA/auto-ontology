@@ -470,6 +470,37 @@ def test_a_shared_row_is_not_renamed_into_another_subjects_property(
     assert shared["attribute_key"] == "y"
 
 
+def test_two_shared_rows_do_not_merge_two_keys_on_the_other_subject(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    on_a = _reading("x", "10", 1, "A")
+    shared_y = _reading("y", "20", 2, "A", "B")
+    shared_z = _reading("z", "30", 3, "A", "B")
+
+    _reconcile_with(
+        monkeypatch,
+        KeyGroup(subject="A", keys=["x", "y", "z"]),
+        [on_a, shared_y, shared_z],
+    )
+
+    # B never agreed y and z are one property, so they keep two names on it.
+    assert shared_y["attribute_key"] != shared_z["attribute_key"]
+
+
+def test_shared_rows_of_one_key_are_all_renamed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    on_a = _reading("x", "10", 1, "A")
+    first = _reading("y", "20", 2, "A", "B")
+    again = _reading("y", "25", 4, "A", "B")
+
+    _reconcile_with(
+        monkeypatch, KeyGroup(subject="A", keys=["x", "y"]), [on_a, first, again]
+    )
+
+    assert first["attribute_key"] == again["attribute_key"] == "x"
+
+
 def test_a_shared_row_is_renamed_when_no_other_subject_has_the_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
