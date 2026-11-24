@@ -150,11 +150,17 @@ def test_two_readings_of_one_property_stay_two_nodes() -> None:
 
 def test_one_property_stated_twice_collapses() -> None:
     first = _item(name="Quota", kinds=["state"], key="daily_quota", value="1200/day")
-    second = _item(
-        name="Daily quota", kinds=["state"], key="daily_quota", value="1200/day"
-    )
+    second = _item(name="quota", kinds=["state"], key="daily_quota", value="1200/day")
 
     assert _node_key(first, ["state"]) == _node_key(second, ["state"])
+
+
+def test_one_key_and_value_on_two_features_stay_two_nodes() -> None:
+    """A key is not unique across subjects, and the subject is not known yet."""
+    first = _item(name="Search caching on", key="caching_enabled", value="yes")
+    second = _item(name="Forecast caching on", key="caching_enabled", value="yes")
+
+    assert _node_key(first, ["fact"]) != _node_key(second, ["fact"])
 
 
 def test_a_key_without_a_value_is_dropped_and_the_node_keys_by_name() -> None:

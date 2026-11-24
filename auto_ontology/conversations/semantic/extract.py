@@ -754,18 +754,19 @@ def _pair_key_and_value(item: NodeItem) -> None:
 def _node_key(item: NodeItem, kinds: list[str]) -> tuple[str, str, str]:
     """Identity under which two mentions of one node collapse.
 
-    A thing is its name. A statement is its property *and its value*, because
-    two readings of one quantity have to stay two nodes: keying a statement by
-    property alone is the one mistake that makes a revision unrecoverable --
-    the later 4,800 would overwrite the earlier 3,000 and nothing downstream
-    could tell the value had ever moved.
+    A thing is its name. A statement is its name, property *and value*. The
+    value, because two readings of one quantity have to stay two nodes: keying
+    a statement by property alone is the one mistake that makes a revision
+    unrecoverable -- the later 4,800 would overwrite the earlier 3,000 and
+    nothing downstream could tell the value had ever moved. The name, because
+    the subject is not known yet and a key is not unique across subjects: two
+    features both ``caching_enabled = yes`` are two statements. Mentions of one
+    statement under different names are left to consolidation.
     """
     name = normalise_name(item.name)
     if not any(kind in STATEMENT_KINDS for kind in kinds):
         return (name, "", "")
-    key = normalise_name(item.key)
-    value = normalise_name(item.value)
-    return (name if not key else "", key, value or name)
+    return (name, normalise_name(item.key), normalise_name(item.value))
 
 
 def extract_graph(windows: list[Window]) -> GraphDraft:
