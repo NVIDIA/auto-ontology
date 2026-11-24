@@ -65,6 +65,7 @@ __all__ = [
     "TableColumns",
     "TableExplorationDetails",
     "TableExplorationTerm",
+    "TableSemanticFk",
     "TableSqlQuery",
     "TableSummary",
     "Tag",
@@ -829,12 +830,48 @@ class TableExplorationTerm(TermSummary):
     relationship_types: list[str] = Field(default_factory=list)
 
 
+class TableSemanticFk(ApiModel):
+    """One semantic FK leaving or reaching a table, and how it was made.
+
+    The edge runs from ``source_column`` to ``target_column``, the column that
+    owns the referenced attribute. ``method`` is ``declared`` (a database
+    constraint), ``llm_pick`` (the model's pick among vector-search hits, not
+    checked against values), ``value_confirmed`` (a vector-search hit whose key
+    holds the FK's values) or ``value_match`` (the model's pick among keys
+    found by values alone). ``containment`` is the share of the FK's compared
+    values found in the key, ``vector_distance`` the chosen hit's retriever
+    distance, ``join_verified`` whether joining the two columns returned a
+    row, and ``rationale`` the model's stated reason. Each is ``None`` when it
+    was not measured or the edge predates them.
+    """
+
+    source_table_id: str
+    source_table_name: str | None = None
+    source_schema_name: str | None = None
+    source_column_id: str
+    source_column_name: str | None = None
+    target_table_id: str
+    target_table_name: str | None = None
+    target_schema_name: str | None = None
+    target_column_id: str
+    target_column_name: str | None = None
+    column_attribute_id: str
+    use_in_join_paths: bool = True
+    method: str | None = None
+    containment: float | None = None
+    vector_distance: float | None = None
+    join_verified: bool | None = None
+    rationale: str | None = None
+
+
 class TableExplorationDetails(ApiModel):
-    """The table-detail modal: its SQL queries and one page of its Terms."""
+    """The table-detail modal: its SQL queries, one page of its Terms, and
+    the semantic FKs leaving or reaching it (outgoing first, capped)."""
 
     queries: list[TableSqlQuery] = Field(default_factory=list)
     terms: list[TableExplorationTerm] = Field(default_factory=list)
     terms_total: int | None = None
+    semantic_fks: list[TableSemanticFk] = Field(default_factory=list)
 
 
 class TermExplorationTable(ApiModel):

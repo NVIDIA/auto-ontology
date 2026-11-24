@@ -12,6 +12,7 @@ run BFS over tables while retaining the exact join columns on every edge.
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import asdict, dataclass
 import itertools
 import logging
 from typing import Any
@@ -720,7 +721,32 @@ def _same_database(src_column_id: str, tgt_attr_id: str) -> bool:
     return bool(col_db) and col_db == attr_db
 
 
-def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
+@dataclass(frozen=True)
+class SemanticFkEvidence:
+    """How a SEMANTIC_FK edge was arrived at, stored on the edge.
+
+    ``method`` is one of ``declared`` (a database constraint), ``llm_pick``
+    (the model's pick among vector-search hits, not checked against values),
+    ``value_confirmed`` (a vector-search hit whose key holds the FK's values)
+    or ``value_match`` (the model's pick among keys found by values alone).
+    The other fields are whatever that method measured; ``None`` means it
+    measured nothing of that kind. ``join_verified`` is ``True`` when joining
+    the two columns in the warehouse returned a row, and ``None`` when that
+    check did not run; an edge whose join returns nothing is never stored.
+    """
+
+    method: str
+    containment: float | None = None
+    vector_distance: float | None = None
+    join_verified: bool | None = None
+    rationale: str | None = None
+
+
+def merge_semantic_fk(
+    src_column_id: str,
+    tgt_attr_id: str,
+    evidence: SemanticFkEvidence | None = None,
+) -> bool:
     """Point a column at the attribute it references. Idempotent.
 
     Refuses — writes nothing, returns ``False`` — when the two belong to
@@ -731,6 +757,9 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     it here, rather than in each caller, means every writer — compilation,
     test fixtures, dev tooling — gets the guarantee for free instead of having
     to remember to check first.
+
+    *evidence* is stored with a new edge only; an existing edge keeps the
+    evidence it was written with.
     """
     if not _same_database(src_column_id, tgt_attr_id):
         logger.warning(
@@ -741,7 +770,11 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
         return False
     store().query_write(
         insert(s.column__semantic_fk)
-        .values(column_id=src_column_id, attribute_id=tgt_attr_id)
+        .values(
+            column_id=src_column_id,
+            attribute_id=tgt_attr_id,
+            **(asdict(evidence) if evidence else {}),
+        )
         .on_conflict_do_nothing()
     )
     return True

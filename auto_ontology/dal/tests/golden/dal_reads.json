@@ -6603,6 +6603,27 @@
           "sql": "SELECT f.title, count(r.rental_id) AS rentals FROM rental r JOIN inventory i ON i.inventory_id = r.inventory_id JOIN film f ON f.film_id = i.film_id GROUP BY f.title ORDER BY rentals DESC"
         }
       ],
+      "semantic_fks": [
+        {
+          "column_attribute_id": "<attr:Film/film id/film_id>",
+          "containment": null,
+          "join_verified": null,
+          "method": null,
+          "rationale": null,
+          "source_column_id": "<col:pagila.public.inventory.film_id>",
+          "source_column_name": "film_id",
+          "source_schema_name": "public",
+          "source_table_id": "<table:pagila.public.inventory>",
+          "source_table_name": "inventory",
+          "target_column_id": "<col:pagila.public.film.film_id>",
+          "target_column_name": "film_id",
+          "target_schema_name": "public",
+          "target_table_id": "<table:pagila.public.film>",
+          "target_table_name": "film",
+          "use_in_join_paths": true,
+          "vector_distance": null
+        }
+      ],
       "terms": [
         {
           "description": "A motion picture available for rental.",

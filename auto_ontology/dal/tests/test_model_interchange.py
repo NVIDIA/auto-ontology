@@ -453,6 +453,96 @@ def test_reimport_updates_semantic_fk_join_path_selection(world) -> None:
     assert selected == [{"use_in_join_paths": False}]
 
 
+def _record_evidence(world) -> None:
+    store().query_write(
+        s.column__semantic_fk.update()
+        .where(
+            s.column__semantic_fk.c.column_id == world.customer_ref,
+            s.column__semantic_fk.c.attribute_id == world.attribute,
+        )
+        .values(
+            method="value_match",
+            containment=0.97,
+            vector_distance=None,
+            join_verified=True,
+            rationale="holds the key's values",
+        )
+    )
+
+
+def _stored_evidence(world) -> list[dict]:
+    return store().query_read(
+        select(
+            s.column__semantic_fk.c.method,
+            s.column__semantic_fk.c.containment,
+            s.column__semantic_fk.c.vector_distance,
+            s.column__semantic_fk.c.join_verified,
+            s.column__semantic_fk.c.rationale,
+        ).where(
+            s.column__semantic_fk.c.column_id == world.customer_ref,
+            s.column__semantic_fk.c.attribute_id == world.attribute,
+        )
+    )
+
+
+def test_semantic_fk_evidence_is_exported(world) -> None:
+    _record_evidence(world)
+
+    fk = _document(world).semantic_layer.semantic_fks[0]
+
+    assert (
+        fk.method,
+        fk.containment,
+        fk.vector_distance,
+        fk.join_verified,
+        fk.rationale,
+    ) == ("value_match", 0.97, None, True, "holds the key's values")
+
+
+def test_reimport_replaces_semantic_fk_evidence_it_carries(world) -> None:
+    _record_evidence(world)
+    document = _document(world)
+    fk = document.semantic_layer.semantic_fks[0]
+    fk.method, fk.containment, fk.join_verified, fk.rationale = (
+        "declared",
+        None,
+        None,
+        None,
+    )
+
+    mi.apply_import_model(document, replace=False)
+
+    assert _stored_evidence(world) == [
+        {
+            "method": "declared",
+            "containment": None,
+            "vector_distance": None,
+            "join_verified": None,
+            "rationale": None,
+        }
+    ]
+
+
+def test_reimport_without_evidence_keeps_the_stored_evidence(world) -> None:
+    _record_evidence(world)
+    document = _document(world)
+    fk = document.semantic_layer.semantic_fks[0]
+    fk.method = fk.containment = fk.vector_distance = fk.rationale = None
+    fk.join_verified = None
+
+    mi.apply_import_model(document, replace=False)
+
+    assert _stored_evidence(world) == [
+        {
+            "method": "value_match",
+            "containment": 0.97,
+            "vector_distance": None,
+            "join_verified": True,
+            "rationale": "holds the key's values",
+        }
+    ]
+
+
 def test_an_adopted_row_is_stamped_so_the_next_import_is_faster(world) -> None:
     mi.apply_import_model(_document(world), replace=False)
     row = store().query_read(
