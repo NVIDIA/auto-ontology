@@ -25,8 +25,9 @@ from __future__ import annotations
 import logging
 
 from auto_ontology.retrieval.conversation import search_semantic
+from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
-from auto_ontology.retrieval.text_to_sql.react.information import _clip, _fit
+from auto_ontology.retrieval.text_to_sql.react.information import _clip, _cut, _fit
 
 logger = logging.getLogger(__name__)
 
@@ -48,35 +49,53 @@ _TURN_CHARS = 700
 _LINE_CHARS = 160
 
 
+def _fence(tag: str, attributes: str, body: str) -> str:
+    """*body* inside ``<tag>``, with any closing tag in it escaped.
+
+    Retrieved text is stored user input and model-written prose; the system
+    prompt says what is inside these tags is data, and an unescaped closing
+    tag would let the rest of it read as something else.
+    """
+    body = body.replace(f"</{tag}", f"<\\/{tag}")
+    return f"<{tag}{attributes}>\n{body}\n</{tag}>"
+
+
 def _turn_block(hit: object) -> str:
     """One turn in full: where it was said, what was asked, what was answered."""
-    return "\n".join(
-        [
-            _turn_header(hit),
-            f"  ASKED: {_clip(hit.question, _TURN_CHARS)}",  # type: ignore[attr-defined]
-            f"  ANSWERED: {_clip(hit.answer, _TURN_CHARS)}",  # type: ignore[attr-defined]
-        ]
+    return _fence(
+        "turn",
+        _turn_attributes(hit),
+        "\n".join(
+            [
+                f"ASKED: {_clip(hit.question, _TURN_CHARS)}",  # type: ignore[attr-defined]
+                f"ANSWERED: {_clip(hit.answer, _TURN_CHARS)}",  # type: ignore[attr-defined]
+            ]
+        ),
     )
 
 
 def _turn_line(hit: object) -> str:
     """One turn as a single line: enough to ask for it, not enough to answer."""
-    return f"{_turn_header(hit)} {_clip(hit.question, _LINE_CHARS)}"
+    return _fence(
+        "turn",
+        _turn_attributes(hit),
+        f"ASKED: {_clip(hit.question, _LINE_CHARS)}",  # type: ignore[attr-defined]
+    )
 
 
-def _turn_header(hit: object) -> str:
-    """``TURN`` with the session and date, when the transcript carried them.
+def _turn_attributes(hit: object) -> str:
+    """The turn number, with the session and date when the transcript had them.
 
     Session and turn numbers are kept because some questions are about the
     conversation rather than its subject -- when something was first raised,
     what came before what -- and those cannot be answered from the text alone.
     """
-    parts = [f"TURN {hit.turn_index}"]  # type: ignore[attr-defined]
+    parts = [f' n="{hit.turn_index}"']  # type: ignore[attr-defined]
     if hit.session_index is not None:  # type: ignore[attr-defined]
-        parts.append(f"session {hit.session_index}")  # type: ignore[attr-defined]
+        parts.append(f' session="{hit.session_index}"')  # type: ignore[attr-defined]
     if hit.time_anchor:  # type: ignore[attr-defined]
-        parts.append(str(hit.time_anchor))  # type: ignore[attr-defined]
-    return f"[{', '.join(parts)}]"
+        parts.append(f' said_on="{hit.time_anchor}"')  # type: ignore[attr-defined]
+    return "".join(parts)
 
 
 def conversation(ctx: ToolContext, query: str) -> str:
@@ -102,7 +121,10 @@ def conversation(ctx: ToolContext, query: str) -> str:
 
     blocks = []
     if hits.note:
-        blocks.append(hits.note)
+        # Cut before fencing, so a long note is never cut through its tag.
+        room = max(config.max_observation_chars() - 200, 1)
+        note = hits.note if len(hits.note) <= room else _cut(hits.note, room)
+        blocks.append(_fence("conversation_note", "", note))
     for position, hit in enumerate(hits.turns):
         blocks.append(_turn_block(hit) if position < _FULL_TURNS else _turn_line(hit))
     return _fit(blocks, "turns", "narrow the query to see them", "\n\n")
