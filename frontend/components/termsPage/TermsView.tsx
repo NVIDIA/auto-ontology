@@ -1691,7 +1691,7 @@ export const TermsView = () => {
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
 				<Icon name={IconName.Terms} className="h-5 w-5 text-body dark:text-zinc-300" />
 				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-					Terms
+					Business Glossary
 				</h1>
 			</header>
 
