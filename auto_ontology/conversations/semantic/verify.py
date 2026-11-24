@@ -644,6 +644,12 @@ statement:
                yours to make -- so say 'inaccuracy' and write nothing else of
                substance.
 
+When STATEMENTS ALREADY TAKEN FROM THIS TURN are listed, check them first. If
+one of them already states this retraction, about the SAME thing the claim is
+about, say 'recorded' and write nothing else of substance. One on the same
+property but about a different thing -- another feature, another service --
+does not count: the retraction is still missing.
+
 Then, for a retraction:
 
   name         Short, 1-8 words, naming the DENIAL -- 'Never obtained an API
@@ -666,9 +672,10 @@ claim, return nothing."""
 
 
 class _DenialItem(BaseModel):
-    kind: Literal["retraction", "inaccuracy"] = Field(
+    kind: Literal["retraction", "inaccuracy", "recorded"] = Field(
         description="'retraction' if the speaker takes back something they said; "
-        "'inaccuracy' if the claim is merely recorded wrongly."
+        "'inaccuracy' if the claim is merely recorded wrongly; 'recorded' if a "
+        "statement already taken from this turn states this retraction."
     )
     name: str = Field(description="Short name for the denial, 1-8 words.")
     description: str = Field(description="One sentence, the transcript's terms.")
@@ -730,9 +737,10 @@ def build_denials(
     # Statements extraction drew from a single turn, by turn. If the prompt
     # produced 'Never obtained an API key' from turn 35, repairing turn 35 again
     # writes the same retraction twice; the extractor got there first, and one
-    # of the two nodes is then a duplicate the graph cannot pair cleanly. Only
-    # a statement on the claim's own key counts: nearly every turn yields some
-    # statement, and one about something else does not answer this claim.
+    # of the two nodes is then a duplicate the graph cannot pair cleanly. Those
+    # on the claim's own key are shown to the model rather than taken as proof:
+    # a key is shared across subjects, so 'Forecast caching on' would otherwise
+    # stand in for the retraction of 'Search caching on'.
     spoken_for: dict[int, list[NodeDraft]] = {}
     for node in already:
         if node.is_statement and node.key and len(node.turn_indexes) == 1:
@@ -746,16 +754,11 @@ def build_denials(
             continue
 
         claim = item.node
-        if claim.key and any(
-            node is not claim and node.key == claim.key
+        taken = [
+            node
             for node in spoken_for.get(item.turn_index, ())
-        ):
-            logger.info(
-                "Skipping turn %d: extraction already states %r on its own.",
-                item.turn_index,
-                claim.key,
-            )
-            continue
+            if claim.key and node is not claim and node.key == claim.key
+        ]
         # One retraction per claim, not per citation. Four turns denied one
         # 'caching with Map' node on the first live run, which would have put
         # four near-identical statements in the graph for a single conflict.
@@ -765,6 +768,11 @@ def build_denials(
         reading = (
             f"\nThe claim records {claim.key} = {claim.value}." if claim.key else ""
         )
+        if taken:
+            reading += "\n\nSTATEMENTS ALREADY TAKEN FROM THIS TURN:\n" + "\n".join(
+                f"- {node.name}: {node.description} ({node.key} = {node.value})"
+                for node in taken
+            )
         result = invoke_with_structured_output(
             get_llm_client(temperature=0.0, max_tokens=1024),
             [
@@ -781,6 +789,13 @@ def build_denials(
         )
         if result is None:
             logger.warning("No denial returned for %r.", claim.name)
+            continue
+        if result.kind == "recorded" and taken:
+            logger.info(
+                "Skipping turn %d: extraction already states the retraction of %r.",
+                item.turn_index,
+                claim.name,
+            )
             continue
         if result.kind != "retraction":
             logger.info(

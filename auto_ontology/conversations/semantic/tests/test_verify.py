@@ -443,7 +443,7 @@ class _Denial:
         description: str = "said so",
         evidence: str = "",
         value: str = "",
-        kind: Literal["retraction", "inaccuracy"] = "retraction",
+        kind: Literal["retraction", "inaccuracy", "recorded"] = "retraction",
     ) -> None:
         self.name, self.description = name, description
         self.evidence, self.value = evidence, value
@@ -566,9 +566,9 @@ class TestBuildDenials:
 
         assert [node.name for node in built] == ["Never obtained one"]
 
-    def test_a_statement_on_the_claims_key_skips_the_turn(self, answer):
+    def test_a_statement_the_model_says_is_the_retraction_skips_the_turn(self, answer):
         answer([])
-        self._returns(_Denial("Never obtained one", evidence="never actually"))
+        self._returns(_Denial("", kind="recorded"))
         claim = statement(
             "API key obtained", {16, 35}, key="api_key_obtained", value="yes"
         )
@@ -577,6 +577,39 @@ class TestBuildDenials:
         built = build_denials(_denies(claim), {35: TURN_35}, already=[claim, stated])
 
         assert built == []
+
+    def test_a_same_key_statement_about_another_thing_does_not_skip(self, answer):
+        answer([])
+        self._returns(_Denial("Search caching off", evidence="never actually"))
+        claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
+        other = statement("Forecast caching on", {35}, key="caching", value="yes")
+
+        built = build_denials(_denies(claim), {35: TURN_35}, already=[claim, other])
+
+        assert [node.name for node in built] == ["Search caching off"]
+
+    def test_the_same_key_statements_are_shown_to_the_model(self, answer):
+        answer([])
+        seen: list = []
+        claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
+        other = statement("Forecast caching on", {35}, key="caching", value="yes")
+        import auto_ontology.utils.llm_invoke as llm
+
+        llm.invoke_with_structured_output = lambda _c, messages, _s: (
+            seen.append(messages[1].content) or _Denial("", kind="recorded")
+        )
+
+        build_denials(_denies(claim), {35: TURN_35}, already=[claim, other])
+
+        assert "STATEMENTS ALREADY TAKEN FROM THIS TURN" in seen[0]
+        assert "Forecast caching on" in seen[0]
+
+    def test_recorded_with_nothing_listed_is_not_a_skip(self, answer):
+        answer([])
+        self._returns(_Denial("", kind="recorded"))
+        claim = statement("Search caching on", {16, 35}, key="caching", value="yes")
+
+        assert build_denials(_denies(claim), {35: TURN_35}, already=[claim]) == []
 
     def test_an_empty_report_builds_nothing(self, answer):
         answer([])
