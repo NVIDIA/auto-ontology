@@ -175,6 +175,25 @@ def test_one_property_stated_twice_collapses() -> None:
     assert _node_key(first, ["state"]) == _node_key(second, ["state"])
 
 
+@pytest.mark.parametrize(
+    ("one", "other"), [("-5 USD", "5 USD"), ("<30", "30"), ("95%", "95")]
+)
+def test_a_value_differing_only_in_a_sign_is_another_reading(
+    one: str, other: str
+) -> None:
+    first = _item(name="Balance", kinds=["state"], key="balance", value=one)
+    second = _item(name="Balance", kinds=["state"], key="balance", value=other)
+
+    assert _node_key(first, ["state"]) != _node_key(second, ["state"])
+
+
+def test_a_value_differing_only_in_case_and_spacing_collapses() -> None:
+    first = _item(name="Size", kinds=["state"], key="size", value="3.1 MB")
+    second = _item(name="Size", kinds=["state"], key="size", value=" 3.1  mb")
+
+    assert _node_key(first, ["state"]) == _node_key(second, ["state"])
+
+
 def test_the_known_list_is_capped_and_keeps_the_vocabulary(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

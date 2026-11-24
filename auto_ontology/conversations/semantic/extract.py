@@ -801,7 +801,10 @@ def _node_key(item: NodeItem, kinds: list[str]) -> tuple[str, str, str]:
     name = normalise_name(item.name)
     if not any(kind in STATEMENT_KINDS for kind in kinds):
         return (name, "", "")
-    return (name, normalise_name(item.key), normalise_name(item.value))
+    # The value keeps its signs and punctuation: -5 and 5, or <30 and 30, are
+    # two readings, which a name's normalisation would make one.
+    value = " ".join((item.value or "").casefold().split())
+    return (name, normalise_name(item.key), value)
 
 
 def extract_graph(windows: list[Window]) -> GraphDraft:
