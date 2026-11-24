@@ -785,14 +785,17 @@ def test_dated_events_order_by_date_not_by_turn() -> None:
     """A transcript often mentions two events in the opposite order to the one
     they occurred in."""
     rows = [
+        # The later event on the earlier turn, so a derivation that ordered by
+        # turn number would come out the other way round rather than agreeing
+        # by accident.
         _statement(
             "wireframe",
             kinds=["event"],
-            turn_indexes=[21],
+            turn_indexes=[16],
             occurred_on=date(2024, 3, 12),
         ),
         _statement(
-            "key", kinds=["event"], turn_indexes=[16], occurred_on=date(2024, 3, 10)
+            "key", kinds=["event"], turn_indexes=[21], occurred_on=date(2024, 3, 10)
         ),
     ]
 
