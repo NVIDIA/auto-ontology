@@ -218,69 +218,142 @@ def populate_conversation_graph(
     )
 
     ledger = _Ledger(conversation_id)
+    texts = _turn_texts(windows)
     graph = extract_graph(windows)
     ledger.note("extract", graph, found=f"{len(windows)} window(s)")
 
     if verify:
-        # Before consolidation renames anything: the edge is judged in the
-        # extractor's own words, which are the words the turns are written in.
-        # The subject edges are not here to be checked, and do not need to be --
-        # they are chosen from a closed list of nodes rather than asserted.
-        from auto_ontology.conversations.semantic.verify import (
-            build_denials,
-            detach_bad_citations,
-            drop_unsupported,
-            verify_edges,
-            verify_node_citations,
-        )
+        _verify_extraction(graph, texts, ledger)
+    _settle_names(graph, ledger, review=verify)
+    _choose_subjects(graph, turns, ledger, agentic=subject_agent, check=verify)
+    merged_keys = _reconcile_draft_keys(graph)
+    ledger.note(
+        "reconcile keys",
+        graph,
+        found=f"{merged_keys} key name(s) merged onto one quantity",
+    )
+    stored = _write_graph(
+        graph,
+        database_name=database_name,
+        conversation_id=conversation_id,
+        reset_vectors=reset_vectors,
+    )
+    statements = [row for row in stored if row["kinds"] != ["object"]]
+    _attach_subjects(stored, statements)
+    derived, semantic = _write_semantic_edges(
+        statements, stored, texts, ledger, check=verify, relate=relate
+    )
 
-        texts = _turn_texts(windows)
-        # Dropped, and only the contradicted ones. This was report-only for a
-        # long time: with dropping on it once removed 21 edges of 213 and
-        # `information_extraction` fell from 0.917 to 0.417, because two of the
-        # deletions were ``built_with html5`` and ``built_with css3``, rejected
-        # for naming HTML5 where the turn wrote HTML, and the answer to "what
-        # technologies did I use" lost two of its four items.
-        #
-        # Those two cases were then written into the prompt by name, and the
-        # same draft re-measured under it: 6 unsupported rather than 21, with
-        # HTML5 and CSS3 both supported, and five of the six genuinely false --
-        # a hand-written helper attributed to a library, a framework the user
-        # had chosen against. An
-        # ``absent`` verdict is still not grounds for anything, being a defect
-        # in the edge's attribution rather than evidence against the relation.
-        edge_report = verify_edges(graph.edges, texts)
-        graph.edges[:] = drop_unsupported(graph.edges, edge_report)
-        ledger.note(
-            "verify edges",
-            graph,
-            found=(
-                f"{len(edge_report.unsupported)} contradicted and dropped, "
-                f"{len(edge_report.absent)} absent and kept, of "
-                f"{edge_report.checked} checked"
-            ),
-        )
-        # Before consolidation for the same reason, and before the subject pass
-        # because a statement citing a turn that denies it is a statement whose
-        # subject was chosen from the wrong evidence.
-        citations = verify_node_citations(graph.nodes, texts)
-        # Built before the citations are detached, while the claims still name
-        # the turns that contradict them -- that pairing is the whole input.
-        graph.nodes.extend(build_denials(citations, texts, graph.nodes))
-        detached = detach_bad_citations(citations)
-        ledger.note(
-            "verify nodes",
-            graph,
-            found=f"{len(citations.denies)} denied, {detached} citation(s) detached",
-        )
+    vectors = _embed(
+        database_name=database_name,
+        conversation_id=conversation_id,
+        stored=stored,
+        reset=reset_vectors,
+    )
+    paths = _embed_paths(
+        database_name=database_name,
+        conversation_id=conversation_id,
+        reset=reset_vectors,
+    )
 
+    ledger.record("embed", found=f"{vectors} node vector(s), {paths} path vector(s)")
+    ledger.summarise()
+
+    elapsed = time.monotonic() - started
+    things = len(stored) - len(statements)
+    logger.info(
+        "Conversation %s done: %d node(s) (%d thing, %d statement), "
+        "%d knowledge edge(s), %d semantic edge(s), %d vector(s), %d path(s) "
+        "in %.1fs.",
+        conversation_id,
+        len(stored),
+        things,
+        len(statements),
+        len(graph.edges),
+        semantic,
+        vectors,
+        paths,
+        elapsed,
+    )
+    return GraphResult(
+        conversation_id=conversation_id,
+        nodes=len(stored),
+        things=things,
+        statements=len(statements),
+        knowledge_edges=len(graph.edges),
+        derived_edges=len(derived),
+        semantic_edges=semantic,
+        vectors=vectors,
+        paths=paths,
+        seconds=elapsed,
+    )
+
+
+def _verify_extraction(
+    graph: GraphDraft, texts: dict[int, str], ledger: _Ledger
+) -> None:
+    """Read the extracted edges and citations back against their turns."""
+    # Before consolidation renames anything: the edge is judged in the
+    # extractor's own words, which are the words the turns are written in.
+    # The subject edges are not here to be checked, and do not need to be --
+    # they are chosen from a closed list of nodes rather than asserted.
+    from auto_ontology.conversations.semantic.verify import (
+        build_denials,
+        detach_bad_citations,
+        drop_unsupported,
+        verify_edges,
+        verify_node_citations,
+    )
+
+    # Dropped, and only the contradicted ones. This was report-only for a
+    # long time: with dropping on it once removed 21 edges of 213 and
+    # `information_extraction` fell from 0.917 to 0.417, because two of the
+    # deletions were ``built_with html5`` and ``built_with css3``, rejected
+    # for naming HTML5 where the turn wrote HTML, and the answer to "what
+    # technologies did I use" lost two of its four items.
+    #
+    # Those two cases were then written into the prompt by name, and the
+    # same draft re-measured under it: 6 unsupported rather than 21, with
+    # HTML5 and CSS3 both supported, and five of the six genuinely false --
+    # a hand-written helper attributed to a library, a framework the user
+    # had chosen against. An
+    # ``absent`` verdict is still not grounds for anything, being a defect
+    # in the edge's attribution rather than evidence against the relation.
+    edge_report = verify_edges(graph.edges, texts)
+    graph.edges[:] = drop_unsupported(graph.edges, edge_report)
+    ledger.note(
+        "verify edges",
+        graph,
+        found=(
+            f"{len(edge_report.unsupported)} contradicted and dropped, "
+            f"{len(edge_report.absent)} absent and kept, of "
+            f"{edge_report.checked} checked"
+        ),
+    )
+    # Before consolidation for the same reason, and before the subject pass
+    # because a statement citing a turn that denies it is a statement whose
+    # subject was chosen from the wrong evidence.
+    citations = verify_node_citations(graph.nodes, texts)
+    # Built before the citations are detached, while the claims still name
+    # the turns that contradict them -- that pairing is the whole input.
+    graph.nodes.extend(build_denials(citations, texts, graph.nodes))
+    detached = detach_bad_citations(citations)
+    ledger.note(
+        "verify nodes",
+        graph,
+        found=f"{len(citations.denies)} denied, {detached} citation(s) detached",
+    )
+
+
+def _settle_names(graph: GraphDraft, ledger: _Ledger, *, review: bool) -> None:
+    """Merge duplicate names, drop reversed containments, split homonyms."""
     merges = consolidate_graph(
         graph,
         _embed_names(graph.nodes),
         # The plan is reviewed, not the result: once a duplicate is absorbed
         # its turns and evidence are in the survivor and the row is gone, so
         # this is the last point at which a merge can be reconsidered.
-        review=review_merges if verify else None,
+        review=review_merges if review else None,
     )
     ledger.note(
         "consolidate",
@@ -299,10 +372,21 @@ def populate_conversation_graph(
     )
     _disambiguate(graph.nodes)
     ledger.note("disambiguate", graph, found="same name, different thing")
+
+
+def _choose_subjects(
+    graph: GraphDraft,
+    turns: list[dict[str, Any]],
+    ledger: _Ledger,
+    *,
+    agentic: bool,
+    check: bool,
+) -> None:
+    """Give each statement its subject, and check the keyed ones if asked."""
     # After the names are settled and before the write: the subjects are
     # answered in the names that will be stored, and land in the same
     # transaction as the edges they replace.
-    if subject_agent:
+    if agentic:
         subjects = assign_subjects_agentic(graph, turns)
     else:
         subjects = assign_subjects(graph, turns)
@@ -311,7 +395,7 @@ def populate_conversation_graph(
         graph,
         found=f"{subjects} statement(s) given a subject",
     )
-    if verify:
+    if check:
         # Immediately after the subjects and still before the write, which is
         # the only window where a wrong one can be corrected rather than
         # reported: the endpoints are still names here, which is what the model
@@ -326,12 +410,16 @@ def populate_conversation_graph(
                 f"{subject_report.checked} keyed reading(s)"
             ),
         )
-    merged_keys = _reconcile_draft_keys(graph)
-    ledger.note(
-        "reconcile keys",
-        graph,
-        found=f"{merged_keys} key name(s) merged onto one quantity",
-    )
+
+
+def _write_graph(
+    graph: GraphDraft,
+    *,
+    database_name: str,
+    conversation_id: str,
+    reset_vectors: bool,
+) -> list[dict[str, Any]]:
+    """Replace the stored graph, and return the nodes that landed with their ids."""
     _check_writable(graph.nodes)
     name_of = {normalise_name(node.name): node for node in graph.nodes}
 
@@ -390,7 +478,7 @@ def populate_conversation_graph(
         )
 
     # The ids that landed, paired back with the fields derivation reads.
-    stored = [
+    return [
         {
             "id": node_id,
             "name": node.name,
@@ -406,9 +494,21 @@ def populate_conversation_graph(
         for node in graph.nodes
         if (node_id := node_ids.get(normalise_name(node.name)))
     ]
-    statements = [row for row in stored if row["kinds"] != ["object"]]
-    _attach_subjects(stored, statements)
 
+
+def _write_semantic_edges(
+    statements: list[dict[str, Any]],
+    stored: list[dict[str, Any]],
+    texts: dict[int, str],
+    ledger: _Ledger,
+    *,
+    check: bool,
+    relate: bool,
+) -> tuple[list[Any], int]:
+    """Derive, check and adjudicate the semantic edges, and write them.
+
+    Returns the derived edges and how many semantic edges were written.
+    """
     derived, decided = derive_edges(statements)
     roles = Counter(edge.role for edge in derived)
     ledger.record(
@@ -417,7 +517,7 @@ def populate_conversation_graph(
         found=", ".join(f"{count} {role}" for role, count in roles.most_common())
         or "nothing to derive",
     )
-    if verify:
+    if check:
         # Between derivation and the write, which is the only moment these
         # edges exist and can still be changed: they are the one layer
         # ``verify`` has never seen, and once written nothing deletes or
@@ -451,50 +551,7 @@ def populate_conversation_graph(
                 else f"{len(ruled)} pair(s) ruled on"
             ),
         )
-
-    vectors = _embed(
-        database_name=database_name,
-        conversation_id=conversation_id,
-        stored=stored,
-        reset=reset_vectors,
-    )
-    paths = _embed_paths(
-        database_name=database_name,
-        conversation_id=conversation_id,
-        reset=reset_vectors,
-    )
-
-    ledger.record("embed", found=f"{vectors} node vector(s), {paths} path vector(s)")
-    ledger.summarise()
-
-    elapsed = time.monotonic() - started
-    things = len(stored) - len(statements)
-    logger.info(
-        "Conversation %s done: %d node(s) (%d thing, %d statement), "
-        "%d knowledge edge(s), %d semantic edge(s), %d vector(s), %d path(s) "
-        "in %.1fs.",
-        conversation_id,
-        len(stored),
-        things,
-        len(statements),
-        len(graph.edges),
-        semantic,
-        vectors,
-        paths,
-        elapsed,
-    )
-    return GraphResult(
-        conversation_id=conversation_id,
-        nodes=len(stored),
-        things=things,
-        statements=len(statements),
-        knowledge_edges=len(graph.edges),
-        derived_edges=len(derived),
-        semantic_edges=semantic,
-        vectors=vectors,
-        paths=paths,
-        seconds=elapsed,
-    )
+    return derived, semantic
 
 
 def _turn_texts(windows: list[Window]) -> dict[int, str]:
