@@ -24,6 +24,11 @@ def test_limit_dialects_keep_the_sql_byte_for_byte(dialect: str) -> None:
     assert with_row_limit(_QUERY, 20, dialect) == f"{_QUERY} LIMIT 20"
 
 
+# Registered dialects that cap rows without LIMIT, each rewritten by sqlglot.
+# Adding one here is the deliberate step the test below asks for.
+_REWRITTEN_DIALECTS = {"oracle": "FETCH FIRST 5 ROWS ONLY"}
+
+
 def test_every_registered_connector_keeps_limit() -> None:
     # Guards the claim above for the real connectors, not a hand-kept list: a
     # connector whose dialect does not spell LIMIT should be a deliberate change.
@@ -31,9 +36,11 @@ def test_every_registered_connector_keeps_limit() -> None:
         dialect = connector_cls.dialect.fget(MagicMock())
         if not isinstance(dialect, str):
             continue
-        assert with_row_limit("SELECT 1", 5, dialect) == "SELECT 1 LIMIT 5", (
-            connector_cls.__name__
-        )
+        sql = with_row_limit("SELECT 1 FROM t", 5, dialect)
+        if dialect in _REWRITTEN_DIALECTS:
+            assert sql.endswith(_REWRITTEN_DIALECTS[dialect]), connector_cls.__name__
+        else:
+            assert sql == "SELECT 1 FROM t LIMIT 5", connector_cls.__name__
 
 
 def test_oracle_uses_fetch_first() -> None:

@@ -467,6 +467,36 @@ def test_join_validation_retries_as_text_after_a_type_error() -> None:
     assert 'CAST(s."customer_ref" AS TEXT) = CAST(t."id" AS TEXT)' in retry
 
 
+def test_join_validation_casts_to_the_connectors_text_type() -> None:
+    # Oracle spells TEXT as CLOB, and ``=`` rejects a CLOB (ORA-22849 on 23ai),
+    # so the retry has to ask for a type the engine can compare.
+    keys = _join_keys(
+        RuntimeError("ORA-01722: invalid number"),
+        pd.DataFrame({"hit": [1]}),
+        dialect="oracle",
+    )
+    keys.connector.text_cast_type = "VARCHAR2(4000)"
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    retry = keys.connector.execute.call_args.args[0]
+    assert (
+        'CAST(s."customer_ref" AS VARCHAR2(4000)) = CAST(t."id" AS VARCHAR2(4000))'
+    ) in retry
+    assert "CLOB" not in retry
+
+
+def test_join_validation_keeps_clickhouse_nullable_text_cast() -> None:
+    # Parsing the type in the connector's dialect would read TEXT as a bare
+    # ClickHouse String and drop the Nullable() this SQL has always carried.
+    keys = _join_keys(
+        RuntimeError("type mismatch"), pd.DataFrame({"hit": [1]}), dialect="clickhouse"
+    )
+    keys.connector.text_cast_type = "TEXT"
+
+    assert semantic_fk._join_returns_rows(keys, _fk_column([1]), "attr")
+    assert "AS Nullable(String))" in keys.connector.execute.call_args.args[0]
+
+
 def test_join_validation_rejects_when_both_attempts_fail() -> None:
     keys = _join_keys(RuntimeError("bad"), RuntimeError("still bad"))
 

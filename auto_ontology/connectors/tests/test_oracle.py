@@ -7,17 +7,14 @@ from typing import Any
 import oracledb
 import pytest
 from pytest import MonkeyPatch
+from sqlglot import exp
 
 from auto_ontology.connectors.base import StatementTimeout
 from auto_ontology.connectors.connection_string_factory import build_connection_string
-from auto_ontology.connectors.oracle import (
-    OracleDatabase,
-    _parse_connection_string,
-    drop_database_qualifier,
-    to_oracle_sql,
-)
+from auto_ontology.connectors.oracle import OracleDatabase, _parse_connection_string
 from auto_ontology.connectors.registry import create_connector
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
+from auto_ontology.semantic.visit_enter import probe_ascending_distinct_values
 
 _CONNECTION_STRING = "oracle://scott:tiger@localhost:1521/FREEPDB1"
 
@@ -222,79 +219,36 @@ def test_execute_returns_dataframe_and_closes_connection(
     assert connection.closed
 
 
-def test_execute_drops_the_database_qualifier(driver: SimpleNamespace) -> None:
-    # The catalog knows a table as database.schema.table, and generated SQL can
-    # carry all three; Oracle rejects that spelling (ORA-03048 on 23ai).
+def test_execute_sends_statements_as_written(driver: SimpleNamespace) -> None:
+    # No rewriting: callers write Oracle SQL because ``dialect`` says so, and
+    # what the agent wrote is what the user is shown, so it must be what ran.
     database = OracleDatabase(_CONNECTION_STRING)
-
-    database.execute(
-        'SELECT e."NAME" FROM FREEPDB1.HR."EMPLOYEES" e '
-        'ORDER BY e."SALARY" DESC FETCH FIRST 2 ROWS ONLY'
-    )
-
-    assert driver.connections[-1].executed == [
-        (
-            'SELECT e."NAME" FROM HR."EMPLOYEES" e '
-            'ORDER BY e."SALARY" DESC FETCH FIRST 2 ROWS ONLY',
-            [],
-        )
+    statements = [
+        'SELECT * FROM "HR"."EMPLOYEES" LIMIT 1000',
+        "SELECT COUNT(*) AS n FROM (SELECT 1 FROM DUAL) AS t",
+        'SELECT e."NAME" FROM FREEPDB1.HR."EMPLOYEES" e',
     ]
 
+    for statement in statements:
+        database.execute(statement)
 
-def test_database_qualifier_is_dropped_from_tables_and_columns() -> None:
-    rewritten = drop_database_qualifier(
-        'SELECT "FREEPDB1"."HR"."EMPLOYEES"."NAME" FROM "FREEPDB1"."HR"."EMPLOYEES" '
-        "JOIN freepdb1.hr.departments d ON d.id = 1",
-        "FREEPDB1",
-    )
-
-    assert "FREEPDB1" not in rewritten.upper()
-    assert 'FROM "HR"."EMPLOYEES"' in rewritten
-    assert "JOIN hr.departments d" in rewritten
+    sent = [connection.executed[0][0] for connection in driver.connections[1:]]
+    assert sent == statements
 
 
-def test_only_this_connections_database_is_dropped() -> None:
-    sql = "SELECT * FROM OTHERDB.HR.EMPLOYEES"
-
-    assert drop_database_qualifier(sql, "FREEPDB1") == sql
-
-
-def test_a_schema_named_like_the_database_is_left_alone(
+def test_a_syntax_error_reaches_the_caller_without_a_retry(
     driver: SimpleNamespace,
 ) -> None:
-    database = OracleDatabase("oracle://hr:pw@localhost:1521/HR")
-
-    database.execute("SELECT * FROM HR.EMPLOYEES")
-
-    assert driver.connections[-1].executed == [("SELECT * FROM HR.EMPLOYEES", [])]
-
-
-def test_execute_rewrites_limit_before_sending(driver: SimpleNamespace) -> None:
+    # The agent's run_sql hands Oracle's error back to the model, which is how
+    # a LIMIT it should not have written gets fixed.
     database = OracleDatabase(_CONNECTION_STRING)
+    driver.results.append(_oracle_error("ORA-00933"))
 
-    database.execute('SELECT * FROM "HR"."EMPLOYEES" LIMIT 1000')
+    with pytest.raises(oracledb.DatabaseError):
+        database.execute('SELECT * FROM "HR"."EMPLOYEES" LIMIT 5')
 
-    assert driver.connections[-1].executed == [
-        ('SELECT * FROM "HR"."EMPLOYEES" FETCH FIRST 1000 ROWS ONLY', [])
-    ]
-
-
-@pytest.mark.parametrize("code", ["ORA-00933", "ORA-00907", "ORA-03048"])
-def test_execute_retries_once_when_oracle_rejects_the_syntax(
-    driver: SimpleNamespace, code: str
-) -> None:
-    database = OracleDatabase(_CONNECTION_STRING)
-    driver.results.extend([_oracle_error(code), (["N"], [(3,)])])
-
-    result = database.execute("SELECT COUNT(*) AS n FROM (SELECT 1 FROM DUAL) AS t")
-
-    connection = driver.connections[-1]
-    assert [statement for statement, _ in connection.executed] == [
-        "SELECT COUNT(*) AS n FROM (SELECT 1 FROM DUAL) AS t",
-        "SELECT COUNT(*) AS n FROM (SELECT 1 FROM DUAL) t",
-    ]
-    assert result.iloc[0, 0] == 3
-    assert connection.closed
+    assert len(driver.connections[-1].executed) == 1
+    assert driver.connections[-1].closed
 
 
 def test_execute_does_not_retry_other_errors(driver: SimpleNamespace) -> None:
@@ -308,27 +262,30 @@ def test_execute_does_not_retry_other_errors(driver: SimpleNamespace) -> None:
     assert driver.connections[-1].closed
 
 
-def test_core_probe_queries_become_valid_oracle() -> None:
-    # The shapes issued by semantic/visit_enter.py, semantic/semantic_fk.py and
-    # retrieval/text_to_sql/db_probe, none of which Oracle accepts as written.
-    assert (
-        to_oracle_sql('SELECT DISTINCT "A" FROM "HR"."T" WHERE "A" IS NOT NULL LIMIT 5')
-        == 'SELECT DISTINCT "A" FROM "HR"."T" WHERE NOT "A" IS NULL '
-        "FETCH FIRST 5 ROWS ONLY"
+def test_core_profiling_queries_reach_oracle_as_valid_oracle(
+    driver: SimpleNamespace,
+) -> None:
+    # End to end through the real connector: the core writes the row limit in
+    # Oracle's syntax itself, so nothing has to be rewritten on the way.
+    database = OracleDatabase(_CONNECTION_STRING)
+    driver.results.append((["ID"], [(1,), (2,)]))
+
+    values = probe_ascending_distinct_values(database, "HR", "EMPLOYEES", "ID")
+
+    assert values == [1, 2]
+    statement = driver.connections[-1].executed[0][0]
+    # sqlglot's Oracle output spells IS NOT NULL as NOT ... IS NULL; same meaning.
+    assert statement == (
+        'SELECT DISTINCT "ID" FROM "HR"."EMPLOYEES" WHERE NOT "ID" IS NULL '
+        'ORDER BY "ID" FETCH FIRST 20 ROWS ONLY'
     )
-    overlap = to_oracle_sql(
-        'SELECT COUNT(*) AS n FROM (SELECT "A" FROM "HR"."T" LIMIT 1) AS present '
-        'UNION ALL SELECT COUNT(*) FROM (SELECT "A" FROM "HR"."T" LIMIT 1) AS shared'
-    )
-    assert "LIMIT" not in overlap
-    assert " AS present" not in overlap and " AS shared" not in overlap
-    assert overlap.count("FETCH FIRST 1 ROWS ONLY") == 2
 
 
-def test_unparseable_sql_is_left_for_oracle_to_report() -> None:
-    sql = "SELECT owner FROM all_tables WHERE owner = :1 LIMIT"
-
-    assert to_oracle_sql(sql) == sql
+def test_text_cast_type_is_comparable_in_oracle() -> None:
+    # The base default, TEXT, becomes CLOB in Oracle, which ``=`` rejects.
+    assert OracleDatabase.text_cast_type == "VARCHAR2(4000)"
+    cast = exp.cast(exp.column("x"), OracleDatabase.text_cast_type)
+    assert cast.sql(dialect="oracle") == "CAST(x AS VARCHAR2(4000))"
 
 
 def test_timeout_is_set_per_call_and_becomes_statement_timeout(

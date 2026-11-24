@@ -812,7 +812,14 @@ def _join_probe_sql(
         table=exp.to_identifier("t"),
     )
     if as_text:
-        left, right = exp.cast(left, "TEXT"), exp.cast(right, "TEXT")
+        # The connector names the type, because only it knows whether its
+        # engine's spelling of TEXT can be compared (Oracle's, CLOB, cannot).
+        cast_type = getattr(connector, "text_cast_type", None)
+        if not isinstance(cast_type, str) or not cast_type:
+            cast_type = "TEXT"
+        # Parsed without a dialect on purpose: reading TEXT as ClickHouse
+        # would drop the Nullable() the rendered cast has always carried.
+        left, right = exp.cast(left, cast_type), exp.cast(right, cast_type)
     condition = exp.EQ(this=left, expression=right)
     try:
         rendered = condition.sql(dialect=dialect)

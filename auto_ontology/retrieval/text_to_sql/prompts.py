@@ -108,8 +108,8 @@ _MYSQL_DIALECT_RULES = (
 
 
 # Oracle rejects several things the generic rules (and the model's habits from
-# other engines) produce. The connector rewrites ``LIMIT`` as a safety net, but
-# a rule keeps the SQL shown to the user the SQL that actually ran.
+# other engines) produce. The connector runs SQL as written, so these rules are
+# the only guard; a miss comes back to the model as Oracle's own error.
 _ORACLE_DIALECT_RULES = (
     "**Oracle-specific (STRICT — these OVERRIDE the generic rules above and will error at execution)**\n"
     "- Oracle has no LIMIT. Wherever a rule above says to add LIMIT n, write "
