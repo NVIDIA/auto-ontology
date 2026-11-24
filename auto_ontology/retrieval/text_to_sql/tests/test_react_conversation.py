@@ -159,7 +159,46 @@ def test_it_stays_inside_the_observation_budget(
     # a SQL answer may still need.
     _found(monkeypatch, FakeHits(note="n" * 2_000, turns=_turns(40, size=5_000)))
 
-    assert len(conversation(ctx, "rate limit")) <= config.max_observation_chars()
+    assert (
+        len(conversation(ctx, "rate limit"))
+        <= config.max_conversation_observation_chars()
+    )
+
+
+def test_a_turn_is_given_more_room_than_a_table_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transcript hit runs an order of magnitude longer than a catalog one."""
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", raising=False)
+    monkeypatch.delenv(
+        "TEXT_TO_SQL_REACT_MAX_CONVERSATION_OBSERVATION_CHARS", raising=False
+    )
+
+    assert config.max_conversation_observation_chars() == 24_000
+    assert config.max_observation_chars() == 8_000
+
+
+def test_a_narrowed_general_budget_narrows_conversations_with_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller shrinking the window meant every observation, this one included:
+    a default that outlived the setting would overflow the context it protects."""
+    monkeypatch.delenv(
+        "TEXT_TO_SQL_REACT_MAX_CONVERSATION_OBSERVATION_CHARS", raising=False
+    )
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "4000")
+
+    assert config.max_conversation_observation_chars() == 4_000
+
+
+def test_the_conversation_budget_outranks_the_general_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "4000")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_CONVERSATION_OBSERVATION_CHARS", "12000")
+
+    assert config.max_conversation_observation_chars() == 12_000
+    assert config.max_observation_chars() == 4_000
 
 
 def test_a_note_that_grows_when_escaped_still_fits_with_its_fence_closed(
@@ -167,12 +206,12 @@ def test_a_note_that_grows_when_escaped_still_fits_with_its_fence_closed(
 ) -> None:
     # Fits before escaping, overflows after: each closing tag gains a character.
     tag = "</conversation_note>"
-    note = tag * ((config.max_observation_chars() - 200) // len(tag))
+    note = tag * ((config.max_conversation_observation_chars() - 200) // len(tag))
     _found(monkeypatch, FakeHits(note=note))
 
     text = conversation(ctx, "rate limit")
 
-    assert len(text) <= config.max_observation_chars()
+    assert len(text) <= config.max_conversation_observation_chars()
     assert text.count("</conversation_note>") == 1
     assert text.endswith("\n</conversation_note>")
     assert text.count("<\\/conversation_note>") > 100

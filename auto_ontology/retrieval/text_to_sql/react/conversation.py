@@ -34,7 +34,7 @@ from auto_ontology.retrieval.text_to_sql.react.information import _clip, _cut, _
 #: The same two tiers ``information`` uses for terms, and here it is the
 #: difference between working and not. One conversation turn is a question and
 #: an answer, often a pasted code block, and a handful of them exceed
-#: :func:`config.max_observation_chars` on their own -- the BEAM reader is
+#: :func:`config.max_conversation_observation_chars` on their own -- the BEAM reader is
 #: given 29,000 characters of them. Spending the whole observation budget on
 #: this leaves no room for the tables a SQL answer still needs, on a question
 #: that may turn out to need both.
@@ -131,11 +131,14 @@ def conversation(ctx: ToolContext, query: str) -> str:
             "recorded; either way the answer is not here."
         )
 
+    limit = config.max_conversation_observation_chars()
     blocks = []
     if hits.note:
-        # Under the room _fit keeps, so it never has to cut the note itself.
-        room = max(config.max_observation_chars() - 200, 1)
+        # Clear of the 120 _fit holds back for its own trailer, so the note is
+        # never cut a second time -- once _fence has wrapped it, a cut there
+        # takes the closing fence with it.
+        room = max(limit - 200, 1)
         blocks.append(_fence("conversation_note", "", hits.note, room))
     for position, hit in enumerate(hits.turns):
         blocks.append(_turn_block(hit) if position < _FULL_TURNS else _turn_line(hit))
-    return _fit(blocks, "turns", "narrow the query to see them", "\n\n")
+    return _fit(blocks, "turns", "narrow the query to see them", "\n\n", limit)
