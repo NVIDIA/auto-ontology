@@ -742,6 +742,40 @@ def test_get_fks_pairs_composite_key_columns_exactly() -> None:
     ]
 
 
+def test_a_key_into_another_project_is_left_out() -> None:
+    """``other-project.sales.events_20260101`` is not this connection's ``sales``."""
+    foreign = ForeignKey(
+        name="fk_foreign",
+        referenced_table=TableReference.from_string(
+            "other-project.sales.events_20260101"
+        ),
+        column_references=[ColumnReference("event_id", "id")],
+    )
+    local = ForeignKey(
+        name="fk_local",
+        referenced_table=TableReference.from_string("my-project.sales.orders"),
+        column_references=[ColumnReference("order_id", "id")],
+    )
+    database = _database(schema="sales")
+    _wire(
+        database,
+        _FakeClient(
+            lambda sql: _FakeRows(
+                ["table_schema", "table_name"], [["sales", "order_lines"]]
+            ),
+            tables={
+                "my-project.sales.order_lines": _table_with_foreign_keys(foreign, local)
+            },
+        ),
+    )
+
+    frame = database.get_fks()
+
+    assert frame[["column_name", "referenced_table"]].to_dict("records") == [
+        {"column_name": "order_id", "referenced_table": "orders"}
+    ]
+
+
 def test_get_fks_without_constraints_is_empty_and_shaped() -> None:
     database = _database(schema="sales")
     _wire(database, _FakeClient())

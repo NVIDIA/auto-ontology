@@ -1135,6 +1135,10 @@ class BigQueryDatabase(SQLDatabase):
             keys = getattr(resource.table_constraints, "foreign_keys", None) or []
             for key in keys:
                 referenced = key.referenced_table
+                # The catalog names tables by dataset alone, so a key into
+                # another project would land on this project's namesake.
+                if referenced.project != self._owner(referenced.dataset_id):
+                    continue
                 for pair in key.column_references:
                     rows.append(
                         {
