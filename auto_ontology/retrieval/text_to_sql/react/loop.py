@@ -183,12 +183,14 @@ def _retrieve(
         answer = conversation(ctx, query)
         ctx.conversation_retrieved = True
         return answer
-    if not ctx.calculation_answers:
+    if purpose != "sql" or not ctx.calculation_answers:
         # The catalog is the SQL view, so falling through to it when querying
         # is switched off searches a source this episode was told not to use.
         # On a database of transcripts there is no schema behind it at all,
         # and the model spends a call to be told so -- or to be handed an
-        # error from a table that need never have been touched.
+        # error from a table that need never have been touched. A source asked
+        # for by name and switched off is refused too: tables in its place
+        # read as that source having found nothing.
         offered = ", ".join(
             prompts.purposes_for(
                 ctx.calculation_answers,

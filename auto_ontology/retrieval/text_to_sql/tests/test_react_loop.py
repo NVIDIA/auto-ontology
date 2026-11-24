@@ -723,7 +723,7 @@ def test_retrieve_for_information_shows_the_information_view(
     assert "purpose=information" in model.seen[0][0].content
 
 
-def test_calculation_only_retrieve_has_no_purpose_and_ignores_one(
+def test_calculation_only_retrieve_has_no_purpose_and_refuses_one(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(loop, "information", lambda *_a, **_k: "never")
@@ -737,7 +737,9 @@ def test_calculation_only_retrieve_has_no_purpose_and_ignores_one(
     result = loop.run_episode(model, ctx, "q")
 
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
-    assert observations[0] == "TABLE orders (for orders)"
+    assert observations[0] == (
+        "Error: purpose 'information' is not available here. Use sql instead."
+    )
     retrieve = prompts.tools_for(EpisodeMode.SQL)[0]
     assert "purpose" not in retrieve["function"]["parameters"]["properties"]
 
@@ -967,9 +969,9 @@ def test_a_conversation_search_reaches_the_conversation_view(
     assert conversation_ctx.conversation_retrieved is True
 
 
-def test_the_purpose_is_ignored_when_conversations_are_off(ctx: ToolContext) -> None:
-    # Not an error: an off source is one the model was never offered, so the
-    # call falls back to the SQL view rather than spending a turn on a refusal.
+def test_the_purpose_is_refused_when_conversations_are_off(ctx: ToolContext) -> None:
+    # Tables in place of the conversations asked for would read as nothing
+    # having been said.
     model = ScriptedModel(
         [
             _reply(call("retrieve", "1", query="rate limit", purpose="conversation")),
@@ -980,7 +982,9 @@ def test_the_purpose_is_ignored_when_conversations_are_off(ctx: ToolContext) -> 
     result = loop.run_episode(model, ctx, "q")
 
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
-    assert observations[0] == "TABLE orders (for rate limit)"
+    assert observations[0] == (
+        "Error: purpose 'conversation' is not available here. Use sql instead."
+    )
     assert ctx.conversation_retrieved is False
 
 
