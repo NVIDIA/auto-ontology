@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import delete, select
@@ -25,7 +26,7 @@ from auto_ontology.dal.session import store
 
 
 @pytest.fixture
-def database_name():
+def database_name() -> Iterator[str]:
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
