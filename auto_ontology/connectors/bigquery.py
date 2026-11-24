@@ -72,7 +72,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, TypeVar
 from urllib.parse import parse_qs, unquote, urlparse
@@ -547,6 +547,19 @@ def _is_job_timeout(exc: BaseException) -> bool:
     return False
 
 
+def _listing_timeouts() -> tuple[type[BaseException], ...]:
+    """The errors a ``tabledata.list`` read that ran out of time raises."""
+    import requests
+    from google.api_core import exceptions as api_errors
+
+    return (
+        requests.Timeout,
+        api_errors.DeadlineExceeded,
+        api_errors.RetryError,
+        concurrent.futures.TimeoutError,
+    )
+
+
 def _dataset_offset(sql: str, dataset: exp.Expression) -> int | None:
     """Where *dataset*'s identifier starts in *sql*, if sqlglot recorded it.
 
@@ -824,7 +837,12 @@ class BigQueryDatabase(SQLDatabase):
         if not parameters:
             sample = self._table_sample(sql)
             if sample is not None:
-                frame = self._read_rows(*sample, timeout_s=left())
+                try:
+                    frame = self._read_rows(*sample, left=left)
+                except _listing_timeouts() as exc:
+                    if timeout_s is None:
+                        raise
+                    raise StatementTimeout.since(timeout_s, started) from exc
                 if frame is not None:
                     return frame
         budget = left()
@@ -902,15 +920,34 @@ class BigQueryDatabase(SQLDatabase):
         columns: list[str] | None,
         limit: int,
         *,
-        timeout_s: float | None = None,
+        left: Callable[[], float | None] = lambda: None,
     ) -> pd.DataFrame | None:
         """The first *limit* rows of a stored table; ``None`` to run it as a query.
 
+        *left* gives the rest of the statement's budget before each request. It
+        bounds the client's retries as well as each attempt: ``timeout`` alone
+        caps one HTTP attempt, and the default retry repeats timed-out attempts
+        for up to ten minutes.
+
         Views and external tables have no stored rows to list, and anything the
-        listing cannot answer falls back to the query it was asked as.
+        listing cannot answer falls back to the query it was asked as -- also a
+        denial, since a table with row access policies refuses the listing but
+        answers a query, and a refused query is not billed. Broken credentials
+        and timeouts are raised instead: the query would fail the same way, or
+        would spend the time the listing already ran out of.
         """
+        from google.api_core import exceptions as api_errors
+        from google.auth import exceptions as auth_errors
+        from google.cloud.bigquery.retry import DEFAULT_RETRY
+
+        def within() -> dict[str, Any]:
+            budget = left()
+            if budget is None:
+                return {"timeout": None, "retry": DEFAULT_RETRY}
+            return {"timeout": budget, "retry": DEFAULT_RETRY.with_timeout(budget)}
+
         try:
-            table = self.client.get_table(table_id, timeout=timeout_s)
+            table = self.client.get_table(table_id, **within())
             if table.table_type != "TABLE" or not table.schema:
                 return None
             by_name = {field.name.casefold(): field for field in table.schema}
@@ -921,10 +958,16 @@ class BigQueryDatabase(SQLDatabase):
             else:
                 return None
             rows = self.client.list_rows(
-                table, selected_fields=fields, max_results=limit, timeout=timeout_s
+                table, selected_fields=fields, max_results=limit, **within()
             )
             names = columns if columns is not None else [f.name for f in fields]
             return pd.DataFrame([list(row.values()) for row in rows], columns=names)
+        except (
+            api_errors.Unauthorized,
+            auth_errors.GoogleAuthError,
+            *_listing_timeouts(),
+        ):
+            raise
         except Exception:
             logger.debug("Listing %s failed; running it as a query", table_id)
             return None

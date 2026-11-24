@@ -143,7 +143,9 @@ class _FakeClient:
     def list_datasets(self, project: str | None = None) -> list[_FakeDataset]:
         return [_FakeDataset(name) for name in self._datasets]
 
-    def get_table(self, table_id: str, timeout: float | None = None) -> Any:
+    def get_table(
+        self, table_id: str, timeout: float | None = None, retry: Any = None
+    ) -> Any:
         return self._tables[table_id]
 
     def close(self) -> None:
@@ -1417,12 +1419,19 @@ class _ListingClient(_FakeClient):
         self._stored = _StoredTable(table_type)
         self.listed: list[tuple[list[str], int]] = []
 
-    def get_table(self, table_id: str, timeout: float | None = None) -> Any:
+    def get_table(
+        self, table_id: str, timeout: float | None = None, retry: Any = None
+    ) -> Any:
         assert table_id == "bigquery-public-data.ga.visitors"
         return self._stored
 
     def list_rows(
-        self, table: Any, selected_fields: Any, max_results: int, timeout: Any
+        self,
+        table: Any,
+        selected_fields: Any,
+        max_results: int,
+        timeout: Any,
+        retry: Any = None,
     ) -> list[_FakeRow]:
         self.listed.append(([f.name for f in selected_fields], max_results))
         return [_FakeRow([1, "a"][: len(selected_fields)])]
@@ -1506,6 +1515,114 @@ def test_a_slow_listing_spends_the_budget_the_query_would_have_had(
         )
 
     assert client.statements == []
+
+
+def test_listing_rows_gets_only_what_reading_the_table_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(
+        "auto_ontology.connectors.bigquery.time.monotonic", lambda: clock[0]
+    )
+    database, client = _listing()
+    stored = client._stored
+    timeouts: list[float | None] = []
+    retry_timeouts: list[float | None] = []
+
+    def slow_get_table(table_id: str, timeout: float | None, retry: Any) -> Any:
+        timeouts.append(timeout)
+        retry_timeouts.append(retry.timeout)
+        clock[0] += 20
+        return stored
+
+    def list_rows(
+        table: Any, selected_fields: Any, max_results: int, timeout: Any, retry: Any
+    ) -> list[_FakeRow]:
+        timeouts.append(timeout)
+        retry_timeouts.append(retry.timeout)
+        return [_FakeRow([1, "a"])]
+
+    client.get_table = slow_get_table  # type: ignore[method-assign]
+    client.list_rows = list_rows  # type: ignore[method-assign]
+
+    database.execute(
+        "SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5", timeout_s=30
+    )
+
+    assert timeouts == [30, 10]
+    assert retry_timeouts == [30, 10]
+
+
+def test_listing_without_a_budget_keeps_the_default_retry() -> None:
+    from google.cloud.bigquery.retry import DEFAULT_RETRY
+
+    database, client = _listing()
+    retries: list[Any] = []
+
+    def get_table(table_id: str, timeout: float | None, retry: Any) -> Any:
+        retries.append(retry)
+        return client._stored
+
+    client.get_table = get_table  # type: ignore[method-assign]
+
+    database.execute("SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5")
+
+    assert retries == [DEFAULT_RETRY]
+
+
+def _failing_listing(error: BaseException) -> tuple[BigQueryDatabase, _ListingClient]:
+    database, client = _listing()
+
+    def fail(*args: Any, **kwargs: Any) -> list[_FakeRow]:
+        raise error
+
+    client.list_rows = fail  # type: ignore[method-assign]
+    return database, client
+
+
+def test_broken_credentials_are_raised_without_a_query() -> None:
+    from google.auth.exceptions import RefreshError
+
+    database, client = _failing_listing(RefreshError("invalid_grant"))
+
+    with pytest.raises(RefreshError):
+        database.execute("SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5")
+
+    assert client.statements == []
+
+
+def test_a_listing_refused_by_row_access_policies_falls_back_to_the_query() -> None:
+    """Such a table answers a query, filtered, but refuses tabledata.list."""
+    from google.api_core.exceptions import Forbidden
+
+    database, client = _failing_listing(
+        Forbidden("User does not have full access for table due to row access policies")
+    )
+
+    database.execute("SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5")
+
+    assert len(client.statements) == 1
+
+
+def test_a_listing_that_times_out_is_a_statement_timeout() -> None:
+    import requests
+
+    database, client = _failing_listing(requests.ReadTimeout("read timed out"))
+
+    with pytest.raises(StatementTimeout):
+        database.execute(
+            "SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5", timeout_s=30
+        )
+
+    assert client.statements == []
+
+
+def test_a_listing_it_cannot_answer_falls_back_to_the_query() -> None:
+    database, client = _failing_listing(ValueError("unsupported field type RANGE"))
+
+    database.execute("SELECT * FROM `bigquery-public-data.ga.visitors` LIMIT 5")
+
+    assert len(client.statements) == 1
 
 
 def test_a_view_runs_as_a_query() -> None:
