@@ -34,7 +34,7 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
     _run_sql,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
-from auto_ontology.retrieval.text_to_sql.react import config, prompts
+from auto_ontology.retrieval.text_to_sql.react import config, fanout, prompts
 from auto_ontology.retrieval.text_to_sql.react.answer_numbers import numbers_check
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.empty_result import (
@@ -49,6 +49,7 @@ from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,
     connector_for,
+    join_fanouts,
     no_database_error,
     run_sql,
 )
@@ -119,6 +120,9 @@ def submit(
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
+    fanouts = join_fanouts(ctx, connector, check.statement)
+    if refusal := fanout.submit_refusal(ctx, fanouts, sql, resubmit):
+        return refusal, None
     if not _can_run_queries(ctx):
         # Running it would be refused, and a refusal is not a wrong query.
         unrun = QueryResponse(result=[], sliced=False)

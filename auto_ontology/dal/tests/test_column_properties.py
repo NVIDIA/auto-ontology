@@ -221,6 +221,31 @@ def test_key_columns_count_only_fully_distinct_unique_columns(world) -> None:
     assert sorted(keys["unique"]) == ["id", "legacy_code"]
 
 
+def test_table_key_profile_keeps_the_columns_that_repeat(world) -> None:
+    """The fanout check needs the measured repeats, not only the unique columns."""
+    world.table("asn")
+    for position, name in enumerate(("ID", "supplier_id", "note"), 1):
+        world.column("asn", name, position=position)
+    asn = world.tables["asn"]
+    store().query_write(
+        s.catalog_table.update().where(s.catalog_table.c.id == asn).values(pk=["ID"])
+    )
+    d.store_column_uniqueness(asn, {"ID": True, "supplier_id": False})
+    d.store_column_distinct_ratios(asn, {"ID": 1.0, "supplier_id": 0.25})
+
+    profile = d.fetch_table_key_profile(asn)
+
+    assert profile == {
+        "pk": ["id"],
+        "columns": {
+            "id": (True, 1.0),
+            "supplier_id": (False, 0.25),
+            "note": (None, None),
+        },
+    }
+    assert d.fetch_table_key_profile(str(uuid.uuid4())) is None
+
+
 # --------------------------------------------------------------------------
 # store_column_date_formats
 # --------------------------------------------------------------------------

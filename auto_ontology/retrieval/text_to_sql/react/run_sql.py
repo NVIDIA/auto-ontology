@@ -43,7 +43,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_for_sql,
     wildcard_for,
 )
-from auto_ontology.retrieval.text_to_sql.react import config
+from auto_ontology.retrieval.text_to_sql.react import config, fanout
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 
 logger = logging.getLogger(__name__)
@@ -383,6 +383,17 @@ def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResu
     return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
 
 
+def join_fanouts(
+    ctx: ToolContext, connector: SQLDatabase, statement: exp.Expression | None
+) -> list[fanout.Fanout]:
+    """Aggregates in *statement* that a join repeats (:mod:`.fanout`)."""
+    if statement is None:
+        return []
+    database_name = getattr(connector, "database_name", None)
+    catalog = catalog_for(ctx, connector)
+    return fanout.safe_find_fanouts(statement, catalog, ctx, database_name)
+
+
 def connector_for(ctx: ToolContext, sql: str | None = None) -> SQLDatabase | None:
     """The database the episode's SQL runs on.
 
@@ -491,7 +502,8 @@ def run_sql(ctx: ToolContext, sql: str) -> str:
     text = render_rows(frame)
     if config.grep_enabled():
         text = _save_page(ctx, frame, text)
-    return _clip(text)
+    hint = fanout.run_sql_hint(join_fanouts(ctx, connector, check.statement))
+    return _clip(text) + hint
 
 
 def _save_page(ctx: ToolContext, frame: Any, text: str) -> str:

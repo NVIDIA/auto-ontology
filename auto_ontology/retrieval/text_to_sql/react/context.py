@@ -70,6 +70,9 @@ class ToolContext:
     back for citing numbers its rows don't hold (#252), which it does once per
     episode; ``last_answer_attempt`` is set by the loop when the model would
     get no turn to answer again, so that check stays out of the way.
+
+    ``fanout_refused`` holds the SQL texts ``submit`` refused once for a join
+    that repeats an aggregate's rows; the same text is accepted the second time.
     """
 
     retriever: Any
@@ -102,6 +105,7 @@ class ToolContext:
     empty_result_checked: bool = False
     answer_numbers_checked: bool = False
     last_answer_attempt: bool = False
+    fanout_refused: set[str] = field(default_factory=set)
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
