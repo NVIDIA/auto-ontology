@@ -62,6 +62,13 @@ class DataAnswer(BaseModel):
         default="",
         description="What the agent did, one line per step it took.",
     )
+    error_code: str | None = Field(
+        default=None,
+        description=(
+            "Machine-readable reason when known. source_permission_denied means "
+            "the selected data source denied the last executed final query."
+        ),
+    )
 
 
 def _parse_rows(raw: Any) -> list[dict[str, Any]]:
@@ -99,6 +106,7 @@ def _build_answer(payload: dict[str, Any]) -> DataAnswer:
         row_count=len(rows),
         truncated=len(rows) > MAX_ROWS,
         reasoning=str(payload.get("thoughts") or ""),
+        error_code=payload.get("error_code"),
     )
 
 

@@ -120,6 +120,7 @@ def submit(
     db_response = _run_sql(
         sql, connector, record_numeric_kinds=ctx.numeric_type_alignment
     )
+    ctx.submit_permission_denied = db_response.permission_denied
     if db_response.error:
         return (
             f"Not accepted. The database returned an error: {db_response.error}",
