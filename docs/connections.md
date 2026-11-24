@@ -65,6 +65,10 @@ name** (not a SID), and it is the connection's database name. The connector
 uses `python-oracledb` in thin mode, so no Oracle Instant Client is needed;
 Oracle Database 12.1 or later is required.
 
+Thin mode needs the account to have an 11g or 12c password verifier. An
+account that only has the 10g one is refused with `DPY-3015`; resetting its
+password on a database that allows the newer verifiers fixes that.
+
 Add `?protocol=tcps` to connect over TLS, for example
 `oracle://user:password@host:2484/service_name?protocol=tcps`. The server
 certificate is always verified: it must chain to a trusted CA and name the

@@ -215,8 +215,8 @@ class OracleDatabase(SQLDatabase):
     supports_statement_timeout = True
 
     # ``TEXT`` is ``CLOB`` in Oracle, and a CLOB cannot be compared with ``=``
-    # (ORA-22849 on 23ai), so the semantic FK join check's cast-to-text retry could
-    # never succeed. 4000 is the VARCHAR2 ceiling unless the database runs with
+    # (ORA-22849 on 23ai, ORA-00932 on 19c), so the semantic FK join check's
+    # cast-to-text retry could never succeed. 4000 is the VARCHAR2 ceiling unless the database runs with
     # MAX_STRING_SIZE=EXTENDED; a longer value fails the retry, which leaves
     # that join unconfirmed, as before.
     text_cast_type = "VARCHAR2(4000)"
