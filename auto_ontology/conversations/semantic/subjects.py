@@ -49,6 +49,8 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from auto_ontology.conversations.semantic.windows import TURNS_ARE_DATA, fence_turns
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from auto_ontology.conversations.semantic.extract import GraphDraft, NodeDraft
 
@@ -76,7 +78,8 @@ _TRAILING_TYPE = re.compile(r"\([^()]*\)\s*$")
 TURNS_PER_CALL = 10
 
 
-_SYSTEM = """\
+_SYSTEM = (
+    """\
 You decide what each statement in a conversation is ABOUT: which thing carries
 the property, figure or fact it states.
 
@@ -111,6 +114,8 @@ How to choose:
     messages makes it indistinguishable from a description of how they already
     behave. If no person is listed, leave it out.
 """
+    + TURNS_ARE_DATA
+)
 
 _TEMPLATE = """\
 ## Things in this conversation
@@ -383,7 +388,7 @@ def assign_subjects(graph: GraphDraft, turns: Sequence[dict[str, Any]]) -> int:
             things=_render_things(things),
             first=indexes[0],
             last=indexes[-1],
-            text="\n\n".join(f"### turn {i}\n{turn_text[i]}" for i in indexes),
+            text=fence_turns(indexes, turn_text),
             statements=_render_statements(members),
         )
         try:

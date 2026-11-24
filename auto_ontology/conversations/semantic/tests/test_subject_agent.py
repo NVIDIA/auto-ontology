@@ -70,22 +70,22 @@ class TestReadingTurns:
 
     def test_one_turn_asked_for_twice_is_read_once(self) -> None:
         out = _read_turns([7, 7], {7: "body"})
-        assert out.count("### turn 7") == 1
+        assert out.count('<turn n="7">') == 1
 
-    def test_a_long_read_is_clipped(self) -> None:
+    def test_a_long_read_is_clipped_inside_its_fence(self) -> None:
         out = _read_turns([7], {7: "x" * (MAX_OBSERVATION_CHARS + 500)})
-        assert len(out) <= MAX_OBSERVATION_CHARS + len("\n[truncated]")
-        assert out.endswith("[truncated]")
+        assert out.count("x") == MAX_OBSERVATION_CHARS
+        assert out.endswith("[truncated]\n</turn>")
 
 
 class TestFindingTurns:
     def test_it_answers_where_a_phrase_was_used(self) -> None:
         out = _find_turns("prototype", {0: "the prototype is fast", 7: "unrelated"})
-        assert "### turn 0" in out
-        assert "### turn 7" not in out
+        assert '<turn n="0">' in out
+        assert '<turn n="7">' not in out
 
     def test_the_search_ignores_case(self) -> None:
-        assert "### turn 0" in _find_turns("PROTOTYPE", {0: "the prototype"})
+        assert '<turn n="0">' in _find_turns("PROTOTYPE", {0: "the prototype"})
 
     def test_a_phrase_in_no_turn_says_so(self) -> None:
         assert "No turn uses" in _find_turns("absent", {0: "the prototype"})
@@ -97,7 +97,7 @@ class TestFindingTurns:
         """A word used everywhere is not a lead, and should not read as one."""
         text = {index: "the app" for index in range(MAX_SEARCH_HITS + 4)}
         out = _find_turns("app", text)
-        assert out.count("### turn ") == MAX_SEARCH_HITS
+        assert out.count("<turn n=") == MAX_SEARCH_HITS
         assert f"{MAX_SEARCH_HITS + 4} turns use it" in out
 
 

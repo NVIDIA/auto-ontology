@@ -119,7 +119,9 @@ class TestRendering:
     def test_turns_are_labelled_and_ordered(self):
         rendered = _render_turns({3, 1}, {1: "first", 3: "third"})
 
-        assert rendered == "[turn 1] first\n\n[turn 3] third"
+        assert rendered == (
+            '<turn n="1">\nfirst\n</turn>\n\n<turn n="3">\nthird\n</turn>'
+        )
 
     def test_edges_are_numbered_from_one(self):
         rendered = _render_edges(

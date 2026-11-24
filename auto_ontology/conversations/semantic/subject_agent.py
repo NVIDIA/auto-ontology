@@ -50,6 +50,11 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from auto_ontology.conversations.semantic.windows import (
+    TURNS_ARE_DATA,
+    fence_turn,
+    fence_turns,
+)
 from auto_ontology.conversations.semantic.subjects import (
     SubjectChoice,
     _accept,
@@ -156,7 +161,8 @@ class AgentStep(BaseModel):
     )
 
 
-_SYSTEM = """\
+_SYSTEM = (
+    """\
 You decide what each statement in a conversation is ABOUT: which thing carries
 the property, figure or fact it states.
 
@@ -204,8 +210,11 @@ noun you cannot resolve from the turns you have, read more before answering:
 Reading is not required. Answer directly when the turns you have already settle
 it, and spend the tool calls on the statements that are genuinely unresolved.
 """
+    + TURNS_ARE_DATA
+)
 
-_REGROUP_SYSTEM = """\
+_REGROUP_SYSTEM = (
+    """\
 You are shown measurements from one conversation that were recorded under the
 SAME property key but attached to DIFFERENT subjects. For each key, say whether
 those readings are one quantity that changed over the conversation, or separate
@@ -228,6 +237,8 @@ How to decide:
 Answer only for the keys that are one quantity, naming the one subject that
 carries it, exactly as it is written in the list.
 """
+    + TURNS_ARE_DATA
+)
 
 _REGROUP_TEMPLATE = """\
 ## Keys recorded against more than one subject
@@ -285,8 +296,7 @@ def _read_turns(wanted: Sequence[int], turn_text: dict[int, str]) -> str:
     known = [index for index in dict.fromkeys(wanted) if index in turn_text]
     if not known:
         return "No such turns."
-    blocks = [f"### turn {index}\n{turn_text[index]}" for index in known]
-    return _clip("\n\n".join(blocks))
+    return _fenced(known, turn_text)
 
 
 def _find_turns(query: str, turn_text: dict[int, str]) -> str:
@@ -299,19 +309,29 @@ def _find_turns(query: str, turn_text: dict[int, str]) -> str:
     if not hits:
         return f"No turn uses {query!r}."
     shown = hits[:MAX_SEARCH_HITS]
-    blocks = [f"### turn {index}\n{turn_text[index]}" for index in shown]
     more = (
         f"\n\n({len(hits)} turns use it; showing {len(shown)}: {shown})"
         if len(hits) > len(shown)
         else ""
     )
-    return _clip("\n\n".join(blocks) + more)
+    return _fenced(shown, turn_text) + more
 
 
-def _clip(text: str) -> str:
-    if len(text) <= MAX_OBSERVATION_CHARS:
-        return text
-    return text[:MAX_OBSERVATION_CHARS] + "\n[truncated]"
+def _fenced(indexes: Sequence[int], turn_text: dict[int, str]) -> str:
+    """Fenced turns within :data:`MAX_OBSERVATION_CHARS` of text.
+
+    Clipped inside the turn rather than across the joined result, so a cut
+    never leaves a ``<turn>`` tag open.
+    """
+    blocks, room = [], MAX_OBSERVATION_CHARS
+    for index in indexes:
+        body = turn_text[index]
+        if len(body) > room:
+            blocks.append(fence_turn(index, body[:room] + "\n[truncated]"))
+            break
+        blocks.append(fence_turn(index, body))
+        room -= len(body)
+    return "\n\n".join(blocks)
 
 
 def _subjects_of(
@@ -490,9 +510,7 @@ def _regroup(
         candidates=_render_candidates(candidates, subjects),
         first=indexes[0] if indexes else 0,
         last=indexes[-1] if indexes else 0,
-        text="\n\n".join(
-            f"### turn {i}\n{turn_text[i]}" for i in cited if i in turn_text
-        ),
+        text=fence_turns([i for i in cited if i in turn_text], turn_text),
     )
     step = _converse(
         [SystemMessage(content=_REGROUP_SYSTEM), HumanMessage(content=prompt)],
@@ -590,7 +608,7 @@ def assign_subjects_agentic(graph: GraphDraft, turns: Sequence[dict[str, Any]]) 
             things=_render_things(things),
             first=indexes[0],
             last=indexes[-1],
-            text="\n\n".join(f"### turn {i}\n{turn_text[i]}" for i in indexes),
+            text=fence_turns(indexes, turn_text),
             statements=_render_statements(members),
         )
         step = _converse(

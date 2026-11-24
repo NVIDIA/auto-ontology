@@ -46,6 +46,12 @@ from typing import TYPE_CHECKING, Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from auto_ontology.conversations.semantic.windows import (
+    TURNS_ARE_DATA,
+    fence_turn,
+    fence_turns,
+)
+
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime only
     from auto_ontology.conversations.semantic.extract import EdgeDraft, NodeDraft
 
@@ -107,7 +113,8 @@ class VerificationReport:
 # ---------------------------------------------------------------------------
 
 
-_SYSTEM = """You check claims about a conversation against the conversation.
+_SYSTEM = (
+    """You check claims about a conversation against the conversation.
 
 You are shown some turns of a transcript, then a numbered list of RELATIONS
 that were extracted from exactly those turns. For each relation, say whether
@@ -150,6 +157,8 @@ the relation, 'absent' is the honest answer.
 
 Give a verdict for every relation, identified by its number. Keep each reason
 to one short clause."""
+    + TURNS_ARE_DATA
+)
 
 
 class _VerdictItem(BaseModel):
@@ -217,7 +226,7 @@ def _batch(
 
 
 def _render_turns(indexes: set[int], turns: Mapping[int, str]) -> str:
-    return "\n\n".join(f"[turn {index}] {turns[index]}" for index in sorted(indexes))
+    return fence_turns(sorted(indexes), turns)
 
 
 def _render_edges(edges: Sequence[EdgeDraft]) -> str:
@@ -390,7 +399,8 @@ class CitationReport:
         return self.denies + self.unrelated
 
 
-_CITATION_SYSTEM = """You check which turns support a claim about a conversation.
+_CITATION_SYSTEM = (
+    """You check which turns support a claim about a conversation.
 
 You are shown some turns of a transcript, then numbered CLAIMS, each listing the
 turns it was extracted from. For every claim-and-turn pair, say what that turn
@@ -414,6 +424,8 @@ and still be unsupported by a particular turn.
 
 Give a verdict for every pair, identified by the claim's number and the turn's
 number. Keep each reason to one short clause."""
+    + TURNS_ARE_DATA
+)
 
 
 class _CitationItem(BaseModel):
@@ -610,7 +622,8 @@ def detach_bad_citations(report: CitationReport) -> int:
 # ---------------------------------------------------------------------------
 
 
-_DENIAL_SYSTEM = """You record a retraction as its own statement.
+_DENIAL_SYSTEM = (
+    """You record a retraction as its own statement.
 
 You are shown ONE turn of a transcript and ONE claim that the turn contradicts.
 The claim is in a knowledge graph; the retraction is not, which is the hole you
@@ -648,6 +661,8 @@ State only what the turn states. You are not deciding which side is true, and
 you are not summarising the dispute: the claim stays in the graph, and a later
 step draws the relation between the two. If the turn does not actually deny the
 claim, return nothing."""
+    + TURNS_ARE_DATA
+)
 
 
 class _DenialItem(BaseModel):
@@ -756,7 +771,7 @@ def build_denials(
                 SystemMessage(content=_DENIAL_SYSTEM),
                 HumanMessage(
                     content=(
-                        f"TURN {item.turn_index}:\n\n{body}\n\n"
+                        f"TURN:\n\n{fence_turn(item.turn_index, body)}\n\n"
                         f"CLAIM IT CONTRADICTS:\n{claim.name}\n"
                         f"{claim.description}{reading}"
                     )

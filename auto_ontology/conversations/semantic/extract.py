@@ -48,7 +48,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from auto_ontology.conversations.semantic.windows import Window
+from auto_ontology.conversations.semantic.windows import TURNS_ARE_DATA, Window
 
 logger = logging.getLogger(__name__)
 
@@ -282,10 +282,11 @@ class GraphDraft:
 # Prompt
 # ---------------------------------------------------------------------------
 
-_SYSTEM = """You build a knowledge graph from a chat transcript.
+_SYSTEM = (
+    """You build a knowledge graph from a chat transcript.
 
-You are shown ONE WINDOW of a longer conversation as turns labelled
-[turn N, date], plus the nodes already found in earlier windows. Extract the
+You are shown ONE WINDOW of a longer conversation as <turn n="N" said_on="date">
+blocks, plus the nodes already found in earlier windows. Extract the
 nodes this window adds and the relations between them.
 
 A NODE is anything the conversation talks about. Give each a `type` (the domain
@@ -515,6 +516,8 @@ Rules:
 - Return empty lists when the window states nothing worth recording.
 - Do not invent anything the transcript does not say.
 """
+    + TURNS_ARE_DATA
+)
 
 
 # ---------------------------------------------------------------------------

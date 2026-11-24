@@ -79,6 +79,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from auto_ontology.conversations.semantic.windows import TURNS_ARE_DATA, fence_turns
+
 if TYPE_CHECKING:
     from auto_ontology.conversations.semantic.extract import GraphDraft
 
@@ -173,7 +175,8 @@ class PairAnswers(BaseModel):
     answers: list[PairAnswer] = Field(default_factory=list)
 
 
-_SYSTEM = """You check claims that a value in a conversation was revised.
+_SYSTEM = (
+    """You check claims that a value in a conversation was revised.
 
 You are shown turns of a transcript, then numbered PAIRS of readings that were
 recorded under the same property for the same thing. Each pair was read as one
@@ -202,6 +205,8 @@ removing a true one, which the reader cannot ask for again.
 
 Give a verdict for every pair, by its number. Keep each reason to one clause.
 """
+    + TURNS_ARE_DATA
+)
 
 _TEMPLATE = """\
 ## Transcript
@@ -327,7 +332,7 @@ def audit_revisions(
         batch = ready[start : start + BATCH_PAIRS]
         indexes = sorted({index for _, _, turns in batch for index in turns})
         prompt = _TEMPLATE.format(
-            text="\n\n".join(f"### turn {i}\n{texts[i]}" for i in indexes),
+            text=fence_turns(indexes, texts),
             pairs="\n".join(
                 f"{number}. {described}"
                 for number, (_, described, _) in enumerate(batch, start=1)
@@ -379,7 +384,8 @@ def audit_revisions(
     return report
 
 
-_SUBJECT_SYSTEM = """You check which thing a measurement was recorded against.
+_SUBJECT_SYSTEM = (
+    """You check which thing a measurement was recorded against.
 
 You are shown turns of a transcript, then numbered READINGS. Each reading is a
 value taken from the conversation together with the thing it was filed under.
@@ -399,6 +405,8 @@ figure mentioned nearby.
 
 Answer 'unsure' rather than guessing. Give a verdict for every reading.
 """
+    + TURNS_ARE_DATA
+)
 
 
 class SubjectAnswer(BaseModel):
@@ -527,7 +535,7 @@ def check_subjects(
         batch = ready[start : start + BATCH_PAIRS]
         indexes = sorted({index for *_, cited in batch for index in cited})
         prompt = _TEMPLATE.format(
-            text="\n\n".join(f"### turn {i}\n{texts[i]}" for i in indexes),
+            text=fence_turns(indexes, texts),
             pairs="\n".join(
                 f"{number}. {described}"
                 for number, (_, _, _, described, _) in enumerate(batch, start=1)
