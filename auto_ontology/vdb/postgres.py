@@ -29,6 +29,9 @@ from langchain_postgres import Column, PGEngine, PGVectorStore
 logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
+_LABEL_METADATA_COLUMN = "label"
+#: ``PGVectorStore``'s default, which ``_get_store`` does not override.
+_CONTENT_COLUMN = "content"
 
 #: Namespace for row ids derived from a record's own ``id``. Fixed, so the same
 #: record maps to the same row on every run.
@@ -39,9 +42,6 @@ def _row_id(metadata: dict[str, Any]) -> str | None:
     """The row id for a record, or ``None`` to let the store pick one."""
     record_id = str(metadata.get("id") or "").strip()
     return str(uuid.uuid5(_ROW_ID_NAMESPACE, record_id)) if record_id else None
-
-
-_LABEL_METADATA_COLUMN = "label"
 
 
 class _UnusableEmbeddings(Embeddings):
@@ -561,6 +561,38 @@ class PostgresVDB:
             conversation_id,
         )
         return deleted
+
+    def ids_with_content_containing(
+        self, node_ids: list[str], fragment: str
+    ) -> list[str]:
+        """The metadata ``id`` of each row among *node_ids* whose text holds *fragment*.
+
+        Matched through ``langchain_metadata ->> 'id'`` for the reason
+        :meth:`delete_by_id` is, and with ``strpos`` rather than ``LIKE`` so a
+        ``%`` or ``_`` in *fragment* is literal. Empty when the collection
+        table does not exist yet.
+        """
+        if not node_ids or not self._table_exists():
+            return []
+
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                # Identifiers are internal config, composed as in delete_by_id.
+                cur.execute(
+                    sql.SQL(
+                        """
+                        SELECT DISTINCT langchain_metadata ->> 'id'
+                        FROM {table}
+                        WHERE langchain_metadata ->> 'id' = ANY(%s)
+                          AND strpos({content}, %s) > 0
+                        """
+                    ).format(
+                        table=sql.Identifier(self.schema_name, self.collection_name),
+                        content=sql.Identifier(_CONTENT_COLUMN),
+                    ),
+                    (list(node_ids), fragment),
+                )
+                return [row[0] for row in cur.fetchall()]
 
     def retrieval(
         self,

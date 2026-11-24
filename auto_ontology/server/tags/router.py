@@ -13,6 +13,7 @@ from auto_ontology.dal import tags as dal
 from auto_ontology.dal.owners import edit_subject
 from auto_ontology.dal.pii import untag_attributes_of_column
 from auto_ontology.dal.session import write_transaction
+from auto_ontology.ingestion_service.pii import run_pii_withholding
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.models import TagTargetType
 from auto_ontology.server.owners import enforce_edit
@@ -307,6 +308,10 @@ def attach_tag(request: Request, tag_id: str, body: TagTarget) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if tags is None:
         raise _target_or_tag_missing(tag_id, body.type, body.id)
+    if body.type.value == dal.TARGET_COLUMN and any(
+        dal.is_protected_tag(tag) for tag in tags
+    ):
+        run_pii_withholding("tags", [body.id])
     return _chips(tags)
 
 

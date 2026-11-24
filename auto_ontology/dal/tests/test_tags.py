@@ -60,7 +60,10 @@ from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.pii import (  # noqa: E402
+    clear_values_of_pii_columns,
+    fetch_attributes_of_pii_columns,
     mark_columns_pii_processed,
+    pii_tagged_column_ids,
     realign_sql_attribute_pii,
     tag_attributes_of_tagged_columns,
     untag_attributes_of_column,
@@ -961,6 +964,108 @@ def test_mark_columns_pii_processed_chunks_id_lists_past_the_bind_batch(
 
 def test_mark_columns_pii_processed_is_a_no_op_on_an_empty_list() -> None:
     assert mark_columns_pii_processed([]) == 0
+
+
+def test_pii_tagged_column_ids_returns_only_labelled_columns(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "auto_ontology.dal.pii.get_tag_by_name", lambda _name: {"id": tagged.tag}
+    )
+    monkeypatch.setattr("auto_ontology.dal.pii.IN_QUERY_BATCH", 2)
+    extras = [
+        _add(s.catalog_column, table_id=tagged.table, name=f"col{i}") for i in range(3)
+    ]
+    tagged.label(column_id=tagged.column)
+
+    assert pii_tagged_column_ids([*extras, tagged.column]) == {tagged.column}
+
+
+def test_clear_values_of_pii_columns_clears_tagged_columns_once(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "auto_ontology.dal.pii.get_tag_by_name", lambda _name: {"id": tagged.tag}
+    )
+    profile = {
+        "sample_values": '["a@b.c"]',
+        "distinct_values": '["a@b.c"]',
+        "is_unique": True,
+        "distinct_ratio": 1.0,
+        "format": "YYYY",
+    }
+    email = _add(s.catalog_column, table_id=tagged.table, name="email", **profile)
+    status = _add(s.catalog_column, table_id=tagged.table, name="status", **profile)
+    tagged.label(column_id=email)
+
+    assert clear_values_of_pii_columns() == 1
+
+    rows = {
+        row["id"]: row
+        for row in store().query_read(
+            select(s.catalog_column).where(s.catalog_column.c.id.in_([email, status]))
+        )
+    }
+    assert all(rows[email][name] is None for name in profile)
+    assert all(rows[status][name] == value for name, value in profile.items())
+    assert clear_values_of_pii_columns() == 0
+
+
+def test_clear_values_of_pii_columns_keeps_to_the_given_ids(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "auto_ontology.dal.pii.get_tag_by_name", lambda _name: {"id": tagged.tag}
+    )
+    first = _add(s.catalog_column, table_id=tagged.table, name="a", sample_values="[1]")
+    second = _add(
+        s.catalog_column, table_id=tagged.table, name="b", sample_values="[2]"
+    )
+    tagged.label(column_id=first)
+    tagged.label(column_id=second)
+
+    assert clear_values_of_pii_columns([second]) == 1
+    assert clear_values_of_pii_columns([]) == 0
+    (row,) = store().query_read(
+        select(s.catalog_column.c.sample_values).where(s.catalog_column.c.id == first)
+    )
+    assert row["sample_values"] == "[1]"
+
+
+def test_fetch_attributes_of_pii_columns_ignores_the_profile(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cleared column still names its attributes: their vectors may not be."""
+    monkeypatch.setattr(
+        "auto_ontology.dal.pii.get_tag_by_name", lambda _name: {"id": tagged.tag}
+    )
+    tagged.link(
+        s.column__has_attribute,
+        column_id=tagged.column,
+        attribute_id=tagged.column_attribute,
+    )
+
+    assert fetch_attributes_of_pii_columns([tagged.column]) == []
+
+    tagged.label(column_id=tagged.column)
+
+    assert fetch_attributes_of_pii_columns([tagged.column]) == [
+        {
+            "attribute_id": tagged.column_attribute,
+            "table_id": tagged.table,
+            "database_name": tagged.prefix,
+        }
+    ]
+    assert fetch_attributes_of_pii_columns([]) == []
+
+
+def test_pii_tagged_column_ids_is_empty_without_the_pii_tag(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("auto_ontology.dal.pii.get_tag_by_name", lambda _name: None)
+    tagged.label(column_id=tagged.column)
+
+    assert pii_tagged_column_ids([tagged.column]) == set()
 
 
 # --------------------------------------------------------------------------
