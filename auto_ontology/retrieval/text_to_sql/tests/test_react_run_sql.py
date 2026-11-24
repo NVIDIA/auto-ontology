@@ -325,6 +325,62 @@ def test_connector_for_prefers_the_target_database() -> None:
     assert tool.connector_for(ctx) is second
 
 
+def _shown(database_name: str, schema: str, name: str) -> dict:
+    return {
+        "id": f"{database_name}.{schema}.{name}",
+        "database_name": database_name,
+        "schema_name": schema,
+        "name": name,
+    }
+
+
+def _connectors(*names: str) -> list[SQLiteConnector]:
+    connectors = []
+    for name in names:
+        connector = SQLiteConnector(SHOP_SCRIPT)
+        connector.database_name = name
+        connectors.append(connector)
+    return connectors
+
+
+def test_connector_for_routes_by_the_tables_the_sql_reads() -> None:
+    census, works = _connectors("census", "adventureworks")
+    ctx = ToolContext(None, [census, works])
+    for table in (
+        _shown("census", "acs", "state_2014"),
+        _shown("adventureworks", "main", "salesorderheader"),
+        _shown("census", "acs", "county_2014"),
+    ):
+        ctx.seen_tables[table["id"]] = table
+
+    assert tool.connector_for(ctx) is None
+    sql = "SELECT SUM(totaldue) FROM main.salesorderheader"
+    assert tool.connector_for(ctx, sql) is works
+    assert tool.connector_for(ctx, "SELECT 1 FROM main.missing") is None
+
+
+def test_a_name_in_two_databases_has_nowhere_to_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop, works = _connectors("shop", "adventureworks")
+    monkeypatch.setattr(tool, "catalog_for", lambda *_: CATALOG)
+    ctx = show_shop_tables(ToolContext(None, [shop, works]))
+    for table in (
+        _shown("adventureworks", "main", "orders"),
+        _shown("shop", "main", "orders"),
+    ):
+        ctx.seen_tables[table["id"]] = table
+    sql = "SELECT COUNT(*) FROM orders"
+
+    assert tool.connector_for(ctx, sql) is None
+    assert tool.run_sql(ctx, sql).startswith(
+        "Error: the tables this query reads are in more than one database "
+        "(adventureworks, shop)"
+    )
+    ctx.database_name = "adventureworks"
+    assert tool.connector_for(ctx, sql) is works
+
+
 def test_catalog_for_loads_only_the_connectors_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -381,3 +437,49 @@ def test_catalog_for_falls_back_to_every_schema_without_a_database_name(
     tool.catalog_for(ctx, connector)
 
     assert ctx.schemas == {None: {"public": ["schema-a", "schema-b"]}}
+
+
+GA_CATALOG = FakeCatalog(
+    {"ga_sessions_*": ["visitId", "totals", "_TABLE_SUFFIX"], "visitors": ["id"]},
+    owners={"ga_sessions_*": ["ga"], "visitors": ["ga"]},
+)
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        "ga_sessions_*",
+        "ga_sessions_20170801",
+        "ga_sessions_2017*",
+        "ga_sessions_201708*",
+    ],
+)
+def test_shards_and_partial_wildcards_check_as_the_wildcard_table(table: str) -> None:
+    sql = f"SELECT visitId FROM `ga.{table}`"
+    check = tool.check_sql(sql, "bigquery", GA_CATALOG)
+    ctx = ToolContext(None, [])
+    ctx.show_table("ga", "ga_sessions_*")
+
+    assert check.problems == []
+    assert tool.tables_not_shown(check.statement, ctx, GA_CATALOG) == []
+
+
+def test_a_shard_name_without_a_wildcard_table_stays_unknown() -> None:
+    check = tool.check_sql(
+        "SELECT id FROM `ga.visitors_20170801`", "bigquery", GA_CATALOG
+    )
+
+    assert check.problems == ['Unknown table: "ga"."visitors_20170801"']
+
+
+def test_an_unshown_wildcard_is_not_in_view_by_its_shard_name() -> None:
+    check = tool.check_sql(
+        "SELECT visitId FROM `ga.ga_sessions_20170801`", "bigquery", GA_CATALOG
+    )
+
+    problems = tool.tables_not_shown(check.statement, ToolContext(None, []), GA_CATALOG)
+
+    assert problems == [
+        "Not in view: ga.ga_sessions_20170801. Retrieve it (its exact name works) "
+        "before using it."
+    ]

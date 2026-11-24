@@ -45,6 +45,7 @@ from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,
     connector_for,
+    no_database_error,
     run_sql,
 )
 
@@ -106,9 +107,9 @@ def submit(
                 None,
             )
         return "Accepted.", Submission("", response, assumptions, None)
-    connector = connector_for(ctx)
+    connector = connector_for(ctx, sql)
     if connector is None:
-        return "Error: no database to run on. Retrieve the tables you need first.", None
+        return no_database_error(ctx, sql), None
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
@@ -116,6 +117,7 @@ def submit(
         # Running it would be refused, and a refusal is not a wrong query.
         unrun = QueryResponse(result=[], sliced=False)
         submission = Submission(sql, (response or "").strip(), assumptions, unrun)
+        ctx.submitted_database = getattr(connector, "database_name", None)
         return "Accepted without running it: no budget left for a query.", submission
     db_response = _run_sql(
         sql, connector, record_numeric_kinds=ctx.numeric_type_alignment
@@ -131,6 +133,7 @@ def submit(
             f"instead:\n{db_response.sql_correction}"
         ), None
     submission = Submission(sql, (response or "").strip(), assumptions, db_response)
+    ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission
 
 
