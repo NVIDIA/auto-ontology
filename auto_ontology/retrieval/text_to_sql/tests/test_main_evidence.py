@@ -234,3 +234,15 @@ def test_an_episode_allowed_to_do_nothing_is_refused(main_module: ModuleType) ->
         _state_with(
             main_module, calculation=False, information=False, conversation=False
         )
+
+
+def test_no_calculation_without_the_submit_tool_is_refused(
+    main_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Words are answered through submit; without it nothing could be answered.
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_SUBMIT_TOOL", "false")
+
+    with pytest.raises(ValueError, match="needs the submit tool"):
+        _state_with(main_module, connectors=[], calculation=False, conversation=True)
+
+    assert _state_with(main_module)["calculation"] is True

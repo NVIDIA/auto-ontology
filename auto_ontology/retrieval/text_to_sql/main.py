@@ -14,7 +14,10 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.node_labels import NODE_LABELS
 from auto_ontology.retrieval.text_to_sql.react.agent import STEP_NAME as REACT_STEP
-from auto_ontology.retrieval.text_to_sql.react.config import prediction_enabled
+from auto_ontology.retrieval.text_to_sql.react.config import (
+    prediction_enabled,
+    submit_tool_enabled,
+)
 from auto_ontology.retrieval.text_to_sql.react.prompts import custom_prompts_section
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -66,6 +69,14 @@ def _build_state(payload: AgentRequest) -> AgentState:
             "AgentRequest turns off calculation, information and "
             "conversation, which leaves the agent nothing it may do. Switch at "
             "least one on."
+        )
+    # An answer in words goes through the submit tool, so without it an
+    # episode that may not query has no way to answer at all.
+    if not sources["calculation"] and not submit_tool_enabled():
+        raise ValueError(
+            "calculation=False needs the submit tool to answer in words, and "
+            "TEXT_TO_SQL_REACT_SUBMIT_TOOL turns it off. Enable the submit tool "
+            "or set calculation=True."
         )
 
     connectors = payload.get("connectors", [])
