@@ -39,6 +39,7 @@ lost.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -622,8 +623,24 @@ def _clean_kinds(kinds: list[str]) -> list[str]:
     return statements or (["object"] if seen else [])
 
 
-#: Most nodes listed in one window's prompt; about 15 tokens each.
-_KNOWN_CAP = 300
+#: Environment name for the ceiling on nodes listed in one window's prompt.
+_KNOWN_CAP_ENV = "CONVERSATION_EXTRACT_KNOWN_CAP"
+
+
+def _known_cap() -> int:
+    """Most nodes listed in one window's prompt, or zero to list them all.
+
+    Off unless asked for. Each line costs about 15 tokens and is re-sent in
+    every window, so a transcript long enough makes its own history the
+    expensive part -- but a node the window cannot see is one it may introduce
+    again under another name, which is the failure this list exists to prevent.
+    Which of the two costs more is a property of the transcript, so it is the
+    caller's to decide and not ours to assume.
+    """
+    try:
+        return max(int(os.environ.get(_KNOWN_CAP_ENV, "").strip() or 0), 0)
+    except ValueError:
+        return 0
 
 
 def _format_known(drafts: Iterable[NodeDraft]) -> str:
@@ -636,11 +653,15 @@ def _format_known(drafts: Iterable[NodeDraft]) -> str:
     reading is current was never built and a reader answered from a date
     instead.
 
-    Capped at :data:`_KNOWN_CAP` lines, or the prompt grows with every window
-    and a long transcript pays for its history quadratically. What is kept is
-    what there is to reuse: every thing, and one statement per key, then the
-    unkeyed statements while room is left -- the most recent of each first,
-    since a later window most often returns to what was just discussed.
+    One line per name and per key: a second line repeating a key the window
+    already has teaches it nothing and costs the room a name it has not seen
+    would have taken.
+
+    Every one of them, unless :func:`_known_cap` sets a ceiling. Under a
+    ceiling what is kept is what there is most to reuse: every thing, and one
+    statement per key, then the unkeyed statements while room is left -- the
+    most recent of each first, since a later window most often returns to what
+    was just discussed.
     """
     drafts = list(drafts)
     by_key: dict[str, NodeDraft] = {}
@@ -653,14 +674,15 @@ def _format_known(drafts: Iterable[NodeDraft]) -> str:
             by_key[draft.key] = draft
         else:
             unkeyed.append(draft)
+    cap = _known_cap()
     ranked = [*reversed(by_key.values()), *reversed(unkeyed)]
-    kept = {id(draft) for draft in ranked[:_KNOWN_CAP]}
-    if len(kept) < len(drafts):
+    kept = {id(draft) for draft in (ranked[:cap] if cap else ranked)}
+    if cap and len(kept) < len(ranked):
         logger.warning(
             "Listing %d of %d known nodes in the window prompt (cap %d).",
             len(kept),
-            len(drafts),
-            _KNOWN_CAP,
+            len(ranked),
+            cap,
         )
     listed = []
     for draft in drafts:
