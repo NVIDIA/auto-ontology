@@ -678,15 +678,21 @@ def _check_writable(nodes: list[NodeDraft]) -> None:
     problems: list[str] = []
     valid = set(CONVERSATION_NODE_KINDS)
 
-    seen: dict[str, str] = {}
+    def described(node: NodeDraft) -> str:
+        reading = f", {node.key} = {node.value}" if node.key else ""
+        return (
+            f"{node.name!r} ({node.type}{reading}, turns {sorted(node.turn_indexes)})"
+        )
+
+    seen: dict[str, NodeDraft] = {}
     for node in nodes:
         normalized = normalise_name(node.name)
-        if normalized in seen:
+        if (first := seen.get(normalized)) is not None:
             problems.append(
-                f"name {node.name!r} used twice (as {seen[normalized]!r} "
-                f"and {node.key!r})"
+                f"name used twice: {described(first)} and {described(node)}"
             )
-        seen[normalized] = node.key or node.type
+        else:
+            seen[normalized] = node
 
         if not node.kinds:
             problems.append(f"{node.name!r} has no kinds")
