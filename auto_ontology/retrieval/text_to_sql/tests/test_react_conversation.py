@@ -204,6 +204,10 @@ def test_the_conversation_budget_outranks_the_general_one(
 def test_a_note_that_grows_when_escaped_still_fits_with_its_fence_closed(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Pinned, because the assertion on the escaped tags needs a note long
+    # enough to hold more than a hundred of them, and a deployment is free to
+    # set a budget that leaves room for fewer.
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_CONVERSATION_OBSERVATION_CHARS", "8000")
     # Fits before escaping, overflows after: each closing tag gains a character.
     tag = "</conversation_note>"
     note = tag * ((config.max_conversation_observation_chars() - 200) // len(tag))
