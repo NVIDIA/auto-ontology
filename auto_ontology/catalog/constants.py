@@ -31,7 +31,6 @@ class Labels:
         TABLE,
         COLUMN,
         SQL,
-        CONVERSATION,
     ]
 
 
