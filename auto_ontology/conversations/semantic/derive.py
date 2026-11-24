@@ -112,19 +112,20 @@ def _revisions(nodes: Sequence[dict[str, Any]]) -> list[SemanticEdge]:
         # A reading that repeats the value just before it is the same reading
         # stated twice, not a revision. Only the one just before: going back to
         # an earlier value -- 3000, then 4800, then 3000 -- is a revision, and
-        # deduplicating across the whole group would make 4800 current.
-        ordered: list[dict[str, Any]] = []
-        for node in sorted(group, key=_last_turn):
-            value = (node.get("value") or "").strip().casefold()
-            if not value:
-                continue
-            if ordered and value == (ordered[-1].get("value") or "").strip().casefold():
-                continue
-            ordered.append(node)
+        # deduplicating across the whole group would make 4800 current. The
+        # repeat stays in the sequence with no edge to its twin, so the next
+        # reading is compared against the turn the value was last stated in.
+        ordered = [
+            node
+            for node in sorted(group, key=_last_turn)
+            if (node.get("value") or "").strip()
+        ]
         if len(ordered) < 2:
             continue
 
         for earlier, later in itertools.pairwise(ordered):
+            if _same_value(earlier, later):
+                continue
             same_turn = _last_turn(earlier) == _last_turn(later)
             source, target = (earlier, later) if same_turn else (later, earlier)
             pair = (str(source["id"]), str(target["id"]))
@@ -151,6 +152,12 @@ def _revisions(nodes: Sequence[dict[str, Any]]) -> list[SemanticEdge]:
                 )
             )
     return edges
+
+
+def _same_value(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return (left.get("value") or "").strip().casefold() == (
+        right.get("value") or ""
+    ).strip().casefold()
 
 
 def _orderings(nodes: Sequence[dict[str, Any]]) -> list[SemanticEdge]:

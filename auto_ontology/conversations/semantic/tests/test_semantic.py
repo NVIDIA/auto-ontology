@@ -542,6 +542,24 @@ def test_going_back_to_an_earlier_value_is_a_revision() -> None:
     }
 
 
+def test_a_repeat_keeps_its_turn_for_the_next_comparison() -> None:
+    """4800 restated in turn 9 beside a 3000 is a conflict in turn 9, not a
+    revision of the 4800 from turn 5."""
+    rows = [
+        _statement("first", attribute_key="cap", value="3000", turn_indexes=[1]),
+        _statement("raised", attribute_key="cap", value="4800", turn_indexes=[5]),
+        _statement("restated", attribute_key="cap", value="4800", turn_indexes=[9]),
+        _statement("lowered", attribute_key="cap", value="3000", turn_indexes=[9]),
+    ]
+
+    edges, _ = derive_edges(rows)
+
+    assert {(e.source_id, e.role, e.target_id) for e in edges} == {
+        ("raised", "supersedes", "first"),
+        ("restated", "contradicts", "lowered"),
+    }
+
+
 def test_dated_events_order_by_date_not_by_turn() -> None:
     """A transcript often mentions two events in the opposite order to the one
     they occurred in."""
