@@ -11,11 +11,13 @@ showed the model, each with the furthest stage that can be established:
     The definition was put in front of the model. Nothing shows it was used.
 ``reference``
     Retrieved, the submitted SQL reads a table the analysis reads, and it
-    keeps every WHERE/HAVING condition of the analysis (column names compared
-    without their ``table__`` semantic prefix). Aggregates, joins and table
-    overlap do not count, and a changed or opposite filter leaves the analysis
-    at ``retrieved``; so does an analysis with no filter, since nothing can
-    then be compared. This is still a heuristic, not proof the model followed
+    keeps every WHERE/HAVING condition of the analysis. Conditions are compared
+    by the table each column belongs to (aliases resolved, ``table__`` semantic
+    prefixes removed), so the same column name on another table does not match,
+    and only those of the answer count, not of a CTE nothing reads. Aggregates,
+    joins and table overlap do not count, and a changed or opposite filter
+    leaves the analysis at ``retrieved``; so does an analysis with no filter,
+    since nothing can then be compared. This is still a heuristic, not proof the model followed
     the definition; the submitted SQL is generated, not the saved analysis.
 ``executed``
     The submitted SQL, which is what ran, is the analysis's SQL, or contains it
@@ -74,28 +76,110 @@ def _parse(sql: str | None, dialect: str | None) -> list[exp.Expression]:
         return []
 
 
+def _enclosing_ctes(node: exp.Expression) -> list[str]:
+    """Names of every CTE *node* sits inside, innermost first."""
+    names: list[str] = []
+    parent = node.parent
+    while parent is not None:
+        if isinstance(parent, exp.CTE):
+            names.append(parent.alias_or_name.lower())
+        parent = parent.parent
+    return names
+
+
+def _live_ctes(root: exp.Expression) -> set[str]:
+    """The CTEs that contribute to the answer of *root*.
+
+    A CTE is live when the answer query reads it, or a live CTE does. A CTE that
+    nothing live reads, or only another unused CTE does, does not contribute to the
+    answer, so what it filters or reads says nothing about the answer.
+    """
+    defined = {c.alias_or_name.lower() for c in root.find_all(exp.CTE)}
+    live: set[str] = set()
+    while True:
+        read = {
+            t.name.lower()
+            for t in root.find_all(exp.Table)
+            if t.name and all(n in live for n in _enclosing_ctes(t))
+        }
+        new = (read & defined) - live
+        if not new:
+            return live
+        live |= new
+
+
+def _is_live(node: exp.Expression, live: set[str]) -> bool:
+    return all(name in live for name in _enclosing_ctes(node))
+
+
 def _tables(sql: str | None, dialect: str | None) -> set[str]:
-    """Physical tables read, leaving out names that are only CTE aliases."""
+    """Physical tables the answer reads, leaving out CTE names and unused CTEs."""
     names: set[str] = set()
     for statement in _parse(sql, dialect):
         ctes = {c.alias_or_name.lower() for c in statement.find_all(exp.CTE)}
+        live = _live_ctes(statement)
         names |= {
             t.name.lower()
             for t in statement.find_all(exp.Table)
-            if t.name and t.name.lower() not in ctes
+            if t.name and t.name.lower() not in ctes and _is_live(t, live)
         }
     return names
 
 
-def _bare_columns(node: exp.Expression) -> exp.Expression:
-    """*node* with ``table__column`` semantic names reduced to ``column``."""
-    node = node.copy()
-    for column in node.find_all(exp.Column):
-        name = column.name
-        if "__" in name:
-            column.set("this", exp.to_identifier(name.rsplit("__", 1)[1]))
-        column.set("table", None)
-    return node
+def _sources(select: exp.Expression) -> dict[str, str]:
+    """What each qualifier in *select*'s own FROM and JOINs stands for.
+
+    A table alias or name maps to the table; a derived table's alias to itself.
+    """
+    out: dict[str, str] = {}
+    for table in select.find_all(exp.Table):
+        if table.name and table.find_ancestor(exp.Select) is select:
+            out[table.alias_or_name.lower()] = table.name.lower()
+            out[table.name.lower()] = table.name.lower()
+    for subquery in select.find_all(exp.Subquery):
+        if subquery.alias and subquery.find_ancestor(exp.Select) is select:
+            out[subquery.alias.lower()] = subquery.alias.lower()
+    return out
+
+
+def _owner(column: exp.Column) -> str | None:
+    """The table *column* belongs to, as far as the SQL says.
+
+    The table its qualifier names, looked up from the nearest SELECT outwards (a
+    correlated subquery uses the outer query's aliases); else the one source of
+    the nearest SELECT. A ``table__column`` prefix is not used: it names the
+    concept (``order_line``), not necessarily the table (``order_lines``).
+    """
+    qualifier = (column.table or "").lower()
+    select = column.find_ancestor(exp.Select)
+    if qualifier:
+        while select is not None:
+            if qualifier in (sources := _sources(select)):
+                return sources[qualifier]
+            select = select.find_ancestor(exp.Select)
+        return qualifier
+    if select is not None and len(owners := set(_sources(select).values())) == 1:
+        return next(iter(owners))
+    return None
+
+
+def _with_owned_columns(statement: exp.Expression) -> exp.Expression:
+    """A copy of *statement* whose columns read ``owner.column``.
+
+    Aliases become the table they stand for and ``table__column`` semantic names
+    become ``column``, so a filter compares equal to the same filter written with
+    another alias or the physical name, and not to one on another table's column
+    of the same name.
+    """
+    statement = statement.copy()
+    for column in list(statement.find_all(exp.Column)):
+        owner = _owner(column)
+        name = column.name.rsplit("__", 1)[-1]
+        column.set("this", exp.to_identifier(name))
+        column.set("table", exp.to_identifier(owner) if owner else None)
+        column.set("db", None)
+        column.set("catalog", None)
+    return statement
 
 
 def _conjuncts(condition: exp.Expression) -> list[exp.Expression]:
@@ -107,24 +191,21 @@ def _conjuncts(condition: exp.Expression) -> list[exp.Expression]:
 
 
 def _filters(sql: str | None, dialect: str | None) -> set[str]:
-    """The WHERE/HAVING conditions of *sql*, one entry per AND-ed condition."""
+    """The WHERE/HAVING conditions of *sql*'s answer, one per AND-ed condition.
+
+    Conditions of a CTE nothing reads are left out. Each names the table its
+    columns belong to.
+    """
     out: set[str] = set()
     for statement in _parse(sql, dialect):
-        for clause in statement.find_all(exp.Where, exp.Having):
+        live = _live_ctes(statement)
+        owned = _with_owned_columns(statement)
+        for clause in owned.find_all(exp.Where, exp.Having):
+            if not _is_live(clause, live):
+                continue
             for part in _conjuncts(clause.this):
-                out.add(_bare_columns(part).sql(dialect=dialect, normalize=True))
+                out.add(part.sql(dialect=dialect, normalize=True))
     return out
-
-
-def _referenced(select: exp.Expression, root: exp.Expression) -> bool:
-    """Whether every CTE enclosing *select* is read somewhere in *root*."""
-    read = {t.name.lower() for t in root.find_all(exp.Table)}
-    node = select.parent
-    while node is not None:
-        if isinstance(node, exp.CTE) and node.alias_or_name.lower() not in read:
-            return False
-        node = node.parent
-    return True
 
 
 def _runs_whole(
@@ -137,9 +218,10 @@ def _runs_whole(
     if len(statements) != 1:
         return False
     root = statements[0]
+    live = _live_ctes(root)
     return any(
         select.sql(dialect=dialect, normalize=True) == normalised
-        and _referenced(select, root)
+        and _is_live(select, live)
         for select in root.find_all(exp.Select, exp.SetOperation)
     )
 

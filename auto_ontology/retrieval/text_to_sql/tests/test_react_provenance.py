@@ -119,3 +119,65 @@ def test_the_saved_sql_as_a_subquery_counts_as_executed() -> None:
     wrapped = f"SELECT * FROM ({SAVED}) AS b"
 
     assert _stage(custom_analyses_used(_ctx(), wrapped)) == "executed"
+
+
+def _stage_of(saved: str, submitted: str) -> str:
+    return _stage(custom_analyses_used(_ctx(saved), submitted))
+
+
+def test_a_filter_on_another_table_does_not_satisfy_the_saved_filter() -> None:
+    saved = (
+        "SELECT COUNT(*) FROM orders o JOIN customers c ON c.id = o.customer_id "
+        "WHERE o.status = 'open'"
+    )
+    on_customers = saved.replace("WHERE o.status", "WHERE c.status")
+
+    assert _stage_of(saved, on_customers) == "retrieved"
+
+
+def test_the_same_filter_under_other_aliases_still_counts() -> None:
+    saved = (
+        "SELECT COUNT(*) FROM orders o JOIN customers c ON c.id = o.customer_id "
+        "WHERE o.status = 'open'"
+    )
+    renamed = (
+        "SELECT COUNT(*) FROM orders AS ord JOIN customers AS cu "
+        "ON cu.id = ord.customer_id WHERE ord.status = 'open' AND cu.tier = 1"
+    )
+    bare = "SELECT COUNT(*) FROM orders WHERE status = 'open'"
+    semantic = "SELECT COUNT(*) FROM orders WHERE orders__status = 'open'"
+
+    assert _stage_of(saved, renamed) == "reference"
+    assert _stage_of(saved, bare) == "reference"
+    assert _stage_of(semantic, bare) == "reference"
+
+
+def test_a_filter_inside_an_unused_cte_is_not_a_filter_of_the_answer() -> None:
+    saved = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20"
+    submitted = (
+        "WITH unused AS (SELECT id FROM order_lines WHERE quantity >= 20) "
+        "SELECT SUM(quantity) FROM order_lines WHERE quantity < 20"
+    )
+
+    assert _stage_of(saved, submitted) == "retrieved"
+
+
+def test_a_filter_inside_a_cte_the_answer_reads_still_counts() -> None:
+    saved = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20"
+    submitted = (
+        "WITH big AS (SELECT quantity FROM order_lines WHERE quantity >= 20) "
+        "SELECT SUM(quantity) FROM big"
+    )
+
+    assert _stage_of(saved, submitted) == "reference"
+
+
+def test_a_cte_only_an_unused_cte_reads_did_not_run_the_saved_sql() -> None:
+    saved = "SELECT SUM(quantity) AS total FROM order_lines"
+    chained = f"WITH b AS ({saved}), unused AS (SELECT * FROM b) SELECT 1 AS one"
+    direct = f"WITH b AS ({saved}) SELECT * FROM b"
+    through = f"WITH b AS ({saved}), c AS (SELECT * FROM b) SELECT * FROM c"
+
+    assert _stage_of(saved, chained) == "retrieved"
+    assert _stage_of(saved, direct) == "executed"
+    assert _stage_of(saved, through) == "executed"

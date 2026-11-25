@@ -267,7 +267,7 @@ def test_provenance_reaches_the_final_response(
     saved = "SELECT SUM(order_line__quantity) FROM order_lines WHERE order_line__quantity >= 20"
     submitted = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20"
 
-    def episode(_llm, ctx, **_kwargs):
+    def episode(_llm: Any, ctx: ToolContext, **_kwargs: Any) -> EpisodeResult:
         ctx.shown_analyses["a1"] = {"id": "a1", "name": "bulk_units", "sql": saved}
         db = SimpleNamespace(
             result=[{"sum": 3}], numeric_kinds=None, values_digest=None
@@ -295,7 +295,7 @@ def test_a_prediction_and_an_unanswered_episode_report_retrieved_analyses(
         SQLUnconstructableAgent,
     )
 
-    def episode(_llm, ctx, **_kwargs):
+    def episode(_llm: Any, ctx: ToolContext, **_kwargs: Any) -> EpisodeResult:
         ctx.shown_analyses["a1"] = {"id": "a1", "name": "n", "sql": "SELECT 1"}
         if ctx.question.startswith("predict"):
             return EpisodeResult(
