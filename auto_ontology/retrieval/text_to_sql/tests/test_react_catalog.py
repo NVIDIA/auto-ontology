@@ -1006,6 +1006,33 @@ def test_a_clipped_join_route_can_be_retrieved_after_both_tables_were_shown(
     assert len(calls["join"]) == 2
 
 
+def test_a_clipped_pair_does_not_starve_an_untried_join_route(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    branch = {**ORDERS, "id": "t-branch", "name": "branch"}
+    ctx = _ctx()
+    ctx.seen_tables.update(
+        {"t-customers": CUSTOMERS, "t-orders": ORDERS, "t-branch": branch}
+    )
+    monkeypatch.setattr(tool, "_JOIN_PAIRS_PER_CALL", 1)
+    monkeypatch.setattr(tool.config, "max_observation_chars", lambda: 250)
+    monkeypatch.setattr(tool, "_resolve_tables", lambda *_: (["t-customers"], {}))
+    find_path = tool.find_join_path
+
+    def path_with_one_oversized_route(anchor: str, dest: str) -> list[dict]:
+        hops = find_path(anchor, dest)
+        if dest.startswith("orders."):
+            return [{**hops[0], "source_column": "x" * 500}]
+        return hops
+
+    monkeypatch.setattr(tool, "find_join_path", path_with_one_oversized_route)
+
+    assert "not shown" in tool.retrieve(ctx, "customers")
+    assert len(calls["join"]) == 1
+    assert "JOIN crm.customers ↔ sales.branch" in tool.retrieve(ctx, "customers")
+    assert len(calls["join"]) == 2
+
+
 def test_an_uncertified_definition_still_follows_the_tables(calls: dict) -> None:
     text = tool.retrieve(_ctx(), "how is revenue calculated")
 

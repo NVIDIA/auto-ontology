@@ -584,29 +584,31 @@ def _join_lines(
 ) -> list[_JoinRoute]:
     """Find routes involving a result table and another visible or new table."""
     lines: list[_JoinRoute] = []
-    considered: set[frozenset[str]] = set()
+    candidates: dict[frozenset[str], tuple[dict, dict]] = {}
     others = list(ctx.seen_tables.values()) + new_tables
-    # A later search can retry a route clipped on the call that introduced its
-    # endpoints. It need only find one of those endpoints again.
+    # A later search can retry a clipped route by finding either endpoint.
     revisit = [ctx.seen_tables[tid] for tid in table_ids if tid in ctx.seen_tables]
     for table in new_tables + revisit:
         for other in others:
             pair = frozenset((str(table["id"]), str(other["id"])))
-            if len(pair) < 2 or pair in ctx.joined_pairs or pair in considered:
-                continue
-            if len(considered) >= _JOIN_PAIRS_PER_CALL:
-                return lines
-            considered.add(pair)
-            anchor = _anchor_column_id(ctx, table)
-            dest = _anchor_column_id(ctx, other)
-            hops = find_join_path(anchor, dest) if anchor and dest else []
-            if not hops:
-                ctx.joined_pairs.add(pair)
-                continue
-            line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
-                _hop_text(h) for h in hops
-            )
-            lines.append(_JoinRoute(pair, line, hops))
+            if len(pair) == 2 and pair not in ctx.joined_pairs:
+                candidates.setdefault(pair, (table, other))
+    # Probe untried pairs before retrying clipped ones. An oversized prefix
+    # must not consume the lookup budget on every search.
+    pairs = sorted(candidates, key=lambda pair: pair in ctx.deferred_join_pairs)
+    for pair in pairs[:_JOIN_PAIRS_PER_CALL]:
+        table, other = candidates[pair]
+        anchor = _anchor_column_id(ctx, table)
+        dest = _anchor_column_id(ctx, other)
+        hops = find_join_path(anchor, dest) if anchor and dest else []
+        if not hops:
+            ctx.joined_pairs.add(pair)
+            ctx.deferred_join_pairs.discard(pair)
+            continue
+        line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
+            _hop_text(h) for h in hops
+        )
+        lines.append(_JoinRoute(pair, line, hops))
     return lines
 
 
@@ -813,7 +815,10 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     for route in join_routes:
         if route.line in kept:
             ctx.joined_pairs.add(route.pair)
+            ctx.deferred_join_pairs.discard(route.pair)
             ctx.join_paths.append({"path": route.hops})
+        else:
+            ctx.deferred_join_pairs.add(route.pair)
     for block, hit in analysis_by_block.items():
         if kept.get(block) == block:
             ctx.shown_analyses[str(hit["id"])] = {
