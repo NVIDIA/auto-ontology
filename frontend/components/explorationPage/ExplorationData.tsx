@@ -92,9 +92,7 @@ export const ActiveDataCard = ({
 }: ActiveDataCardProps) => (
 	<section className="absolute right-4 top-20 bottom-28 z-20 flex w-[380px] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 		<header className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-			<p className="text-xs font-semibold text-body dark:text-zinc-300">
-				Showing info on this Data Object
-			</p>
+			<p className="text-xs font-semibold text-body">Showing info on this Data Object</p>
 			<Button
 				theme={ButtonTheme.IconNeutral}
 				size={Size.SMALL}
@@ -135,7 +133,7 @@ export const ActiveDataCard = ({
 				<PropertyRow label="ID" value={node.id} monospace />
 			</div>
 			<div className="grid grid-cols-2 gap-2">
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					Columns: {node.columnsCount}
 					<DetailLinkButton
 						count={node.columnsCount}
@@ -143,7 +141,7 @@ export const ActiveDataCard = ({
 						label="View Columns"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					SQL Queries: {node.sqlCount}
 					<DetailLinkButton
 						count={node.sqlCount}
@@ -151,7 +149,7 @@ export const ActiveDataCard = ({
 						label="View SQL queries"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					Terms: {node.termsCount}
 					<DetailLinkButton
 						count={node.termsCount}
@@ -159,7 +157,7 @@ export const ActiveDataCard = ({
 						label="View Terms"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					Related Tables: {node.relationshipCount}
 					<DetailLinkButton
 						count={node.relationshipCount}

@@ -11,13 +11,9 @@ const InviteInvalid = () => (
 		<div className="flex max-w-sm flex-col items-center gap-4 text-center">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-heading dark:text-zinc-100">
-					Auto Ontology
-				</span>
+				<span className="text-xl font-semibold text-heading">Auto Ontology</span>
 			</div>
-			<p className="text-sm text-body dark:text-zinc-300">
-				This invitation is invalid or has expired.
-			</p>
+			<p className="text-sm text-body">This invitation is invalid or has expired.</p>
 		</div>
 	</div>
 );

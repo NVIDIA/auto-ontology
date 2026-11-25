@@ -194,7 +194,7 @@ export const UsersManager = () => {
 			header: 'User',
 			cell: (user) => (
 				<div>
-					<div className="font-medium">{user.name || '—'}</div>
+					<div className="font-semibold">{user.name || '—'}</div>
 					<div className="text-xs text-secondary">{user.email}</div>
 				</div>
 			),
@@ -308,7 +308,7 @@ export const UsersManager = () => {
 				invitation.url ? (
 					<div className="group flex min-w-0 items-center gap-1">
 						<code
-							className="min-w-0 truncate font-mono text-xs text-body dark:text-zinc-300"
+							className="min-w-0 truncate font-mono text-xs text-body"
 							title={invitation.url}
 						>
 							{invitation.url}
@@ -345,9 +345,7 @@ export const UsersManager = () => {
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-6xl">
 				<div className="mb-4">
-					<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
-						Users
-					</h1>
+					<h1 className="mb-1 text-xl font-semibold text-heading">Users</h1>
 					<p className="text-xs text-secondary">
 						Admins manage users; viewers can read the other pages and use chat.
 					</p>
@@ -372,9 +370,7 @@ export const UsersManager = () => {
 				<div className="mt-8">
 					<div className="mb-3 flex items-start justify-between gap-4">
 						<div className="min-w-0">
-							<h2 className="mb-1 text-sm font-semibold text-heading dark:text-zinc-100">
-								Invitations
-							</h2>
+							<h2 className="mb-1 text-sm font-semibold text-heading">Invitations</h2>
 							<p className="text-xs text-secondary">
 								Invite by email. Copy the link and send it yourself — they set a
 								password on it. A join invite creates the account; a reset invite

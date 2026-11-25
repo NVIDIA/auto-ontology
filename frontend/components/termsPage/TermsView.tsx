@@ -140,10 +140,7 @@ const TermCard = ({
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0 space-y-0.5">
 					<div className="flex min-w-0 items-center gap-2">
-						<Icon
-							name={IconName.Terms}
-							className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
-						/>
+						<Icon name={IconName.Terms} className="h-4 w-4 shrink-0 text-body" />
 						<Text as="h2" text={term.name} variant={TextVariant.CardTitle} fill />
 					</div>
 					{term.synonyms && term.synonyms.length > 0 && (
@@ -155,19 +152,17 @@ const TermCard = ({
 					)}
 				</div>
 				<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-					<span className="inline-flex items-center gap-1 text-sm font-semibold text-heading dark:text-zinc-100">
+					<span className="inline-flex items-center gap-1 text-sm font-semibold text-heading">
 						<Icon name={IconName.Tag} className="h-4 w-4" />
 						Tags
 					</span>
 					{shownTags.length === 0 ? (
-						<span className="text-sm text-[#B3B4B7]">None</span>
+						<span className="text-sm text-disabled">None</span>
 					) : (
 						shownTags.map((tag) => <Label key={tag.id} label={tag.name} />)
 					)}
 					{hiddenTagCount > 0 ? (
-						<span className="text-xs text-secondary dark:text-zinc-400">
-							+{hiddenTagCount}
-						</span>
+						<span className="text-xs text-secondary">+{hiddenTagCount}</span>
 					) : null}
 					<OwnerLabel owner={findOwner(owners, term.owner_id)} />
 					<CertificationBadge status={certificationStatus} />
@@ -178,9 +173,7 @@ const TermCard = ({
 				{term.description != null && term.description.trim() !== '' ? (
 					<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
 				) : (
-					<p className="text-sm italic text-secondary dark:text-zinc-500">
-						No Description Available
-					</p>
+					<p className="text-sm italic text-secondary">No Description Available</p>
 				)}
 			</div>
 
@@ -189,14 +182,14 @@ const TermCard = ({
 				{/* Column Attributes */}
 				<div className="border-r border-zinc-200 dark:border-zinc-700">
 					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
+						<span className="text-xs font-semibold text-secondary">
 							Column Attributes
 						</span>
 					</div>
 					<div className="flex items-center">
-						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
+						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body">
 							<span>Column Attributes</span>
-							<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
+							<span className="ml-1.5 font-semibold text-heading">
 								{columnAttributeCount}
 							</span>
 						</span>
@@ -206,14 +199,12 @@ const TermCard = ({
 				{/* SQL Attributes */}
 				<div className="border-r border-zinc-200 dark:border-zinc-700">
 					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							SQL Attributes
-						</span>
+						<span className="text-xs font-semibold text-secondary">SQL Attributes</span>
 					</div>
 					<div className="flex items-center">
-						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
+						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body">
 							<span>SQL Attributes</span>
-							<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
+							<span className="ml-1.5 font-semibold text-heading">
 								{sqlAttributeCount}
 							</span>
 						</span>
@@ -223,24 +214,18 @@ const TermCard = ({
 				{/* Related Terms */}
 				<div className="border-r border-zinc-200 dark:border-zinc-700">
 					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							Related Terms
-						</span>
+						<span className="text-xs font-semibold text-secondary">Related Terms</span>
 					</div>
-					<div className="flex items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
+					<div className="flex items-center justify-between px-4 py-3 text-sm text-body">
 						<span>Related Terms</span>
-						<span className="font-medium text-heading dark:text-zinc-100">
-							{relatedCount}
-						</span>
+						<span className="font-semibold text-heading">{relatedCount}</span>
 					</div>
 				</div>
 
 				{/* Zones */}
 				<div>
 					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-							Zones
-						</span>
+						<span className="text-xs font-semibold text-secondary">Zones</span>
 					</div>
 					<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
 						{term.zones.length > 0 ? (
@@ -253,7 +238,7 @@ const TermCard = ({
 								/>
 							))
 						) : (
-							<span className="text-sm text-secondary dark:text-zinc-400">-</span>
+							<span className="text-sm text-secondary">-</span>
 						)}
 					</div>
 				</div>
@@ -286,9 +271,9 @@ const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) =>
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900';
 
-const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-semibold text-heading';
 
 export const TermsView = () => {
 	const router = useRouter();
@@ -1499,13 +1484,13 @@ export const TermsView = () => {
 					/>
 
 					{sqlEditValidationMessage != null && (
-						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60">
 							{sqlEditValidationMessage}
 						</p>
 					)}
 
 					{sqlEditError != null && (
-						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
 							{sqlEditError}
 						</p>
 					)}
@@ -1671,13 +1656,13 @@ export const TermsView = () => {
 					</div>
 
 					{sqlAttrValidationMessage != null && (
-						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60">
 							{sqlAttrValidationMessage}
 						</p>
 					)}
 
 					{sqlAttrSubmitError != null && (
-						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
 							{sqlAttrSubmitError}
 						</p>
 					)}
@@ -1689,10 +1674,8 @@ export const TermsView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.Terms} className="h-5 w-5 text-body dark:text-zinc-300" />
-				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-					Business Glossary
-				</h1>
+				<Icon name={IconName.Terms} className="h-5 w-5 text-body" />
+				<h1 className="text-xl font-semibold text-heading">Business Glossary</h1>
 			</header>
 
 			<InfiniteScroll
@@ -1719,10 +1702,10 @@ export const TermsView = () => {
 
 				{!loading && error != null && terms.length === 0 && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
-						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
+						<h2 className="text-xl font-semibold text-error">
 							Couldn&apos;t load terms
 						</h2>
-						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-error/80 dark:border-red-900/40 dark:bg-red-950/40">
 							{error}
 						</pre>
 						{/* `reload`, not `loadMore`: a failed first page leaves

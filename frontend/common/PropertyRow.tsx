@@ -19,14 +19,10 @@ export const PropertyRow = ({ label, value, monospace = false, className }: Prop
 	>
 		<div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
 			{/* Dark in both themes, so the light-theme text tokens do not apply here. */}
-			<span className="text-xs font-medium text-zinc-400">{label}</span>
+			<span className="text-xs font-semibold text-disabled">{label}</span>
 			{value !== '' && <CopyButton text={value} />}
 		</div>
-		<p
-			className={`p-3 text-xs leading-relaxed wrap-anywhere text-zinc-100 ${
-				monospace ? 'font-mono' : ''
-			}`}
-		>
+		<p className={`p-3 text-xs wrap-anywhere text-light ${monospace ? 'font-mono' : ''}`}>
 			{value || '—'}
 		</p>
 	</div>

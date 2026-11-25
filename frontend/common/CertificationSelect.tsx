@@ -59,7 +59,7 @@ export const CertificationSelect = ({
 		},
 		{
 			label: 'Certified',
-			icon: <Icon name={IconName.Certification} className="h-4 w-4 text-[#76b900]" />,
+			icon: <Icon name={IconName.Certification} className="h-4 w-4 text-action" />,
 			onClick: () => {
 				void select(true);
 			},

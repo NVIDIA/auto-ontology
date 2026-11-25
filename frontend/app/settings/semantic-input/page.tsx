@@ -46,7 +46,7 @@ const PromptEditor = ({
 	return (
 		<div className="space-y-3 p-4">
 			<div className="rounded-lg border border-zinc-200/90 bg-white p-4 dark:border-zinc-700/90 dark:bg-zinc-900/60">
-				<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-secondary">
+				<span className="mb-2 block text-xs font-semibold uppercase text-secondary">
 					Prompt
 				</span>
 				<div className="space-y-2">
@@ -56,7 +56,7 @@ const PromptEditor = ({
 						onChange={(e) => setValue(e.target.value)}
 						rows={3}
 						placeholder="Enter Your Custom Prompt Prefix…"
-						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-600"
+						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:placeholder:text-disabled"
 					/>
 					<div className="flex justify-end gap-2">
 						<Button
@@ -92,10 +92,8 @@ const AcronymRow = ({
 	onDelete: (a: Acronym) => void;
 }) => (
 	<tr className="border-b border-zinc-100 transition-colors last:border-b-0 hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50">
-		<td className="px-3 py-2 font-medium text-heading dark:text-zinc-200">{acronym.name}</td>
-		<td className="px-3 py-2 wrap-anywhere text-heading dark:text-zinc-200">
-			{acronym.description}
-		</td>
+		<td className="px-3 py-2 font-semibold text-heading">{acronym.name}</td>
+		<td className="px-3 py-2 wrap-anywhere text-heading">{acronym.description}</td>
 		<td className="relative px-2 py-2 text-right">
 			<PopoverMenu
 				items={[
@@ -248,10 +246,8 @@ const AcronymsSection = () => {
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 			<div className="flex items-center justify-between">
 				<div className="flex items-baseline gap-2">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						Glossary
-					</h2>
-					<span className="text-sm text-secondary dark:text-zinc-400">
+					<h2 className="text-sm font-semibold text-heading">Glossary</h2>
+					<span className="text-sm text-secondary">
 						Define definitions for your account, department, or database context
 					</span>
 				</div>
@@ -317,29 +313,25 @@ const AcronymsSection = () => {
 				canSubmit={Boolean(canSubmit)}
 			>
 				<div>
-					<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
-						Name
-					</label>
+					<label className="mb-1.5 block text-sm font-semibold text-heading">Name</label>
 					<input
 						type="text"
 						value={name}
 						onChange={(e) => setName(e.target.value)}
 						placeholder="Name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30'}`}
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30'}`}
 					/>
 					{nameExists && (
-						<p className="mt-1 text-xs text-red-500 dark:text-red-400">
+						<p className="mt-1 text-xs text-error">
 							An acronym with this name already exists
 						</p>
 					)}
 					{checkingName && name.trim() && (
-						<p className="mt-1 text-xs text-secondary dark:text-zinc-500">
-							Checking name…
-						</p>
+						<p className="mt-1 text-xs text-secondary">Checking name…</p>
 					)}
 				</div>
 				<div>
-					<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
+					<label className="mb-1.5 block text-sm font-semibold text-heading">
 						Description
 					</label>
 					<textarea
@@ -347,7 +339,7 @@ const AcronymsSection = () => {
 						onChange={(e) => setDescription(e.target.value)}
 						placeholder="Add Short Description"
 						rows={4}
-						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30"
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30"
 					/>
 				</div>
 			</ModalCreateNewItem>
@@ -401,10 +393,8 @@ const SettingsSection = ({
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 			<div className="flex items-center justify-between border-b border-zinc-200/90 px-5 py-3.5 dark:border-zinc-700/90">
 				<div className="flex items-baseline gap-2">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{title}
-					</h2>
-					<span className="text-sm text-secondary dark:text-zinc-400">{subtitle}</span>
+					<h2 className="text-sm font-semibold text-heading">{title}</h2>
+					<span className="text-sm text-secondary">{subtitle}</span>
 				</div>
 				<Button
 					theme={ButtonTheme.Outline}
@@ -427,10 +417,10 @@ const SettingsSection = ({
 			) : hasPrompts ? (
 				<div className="space-y-3 p-4">
 					<div className="rounded-lg border border-zinc-200/90 bg-white p-4 dark:border-zinc-700/90 dark:bg-zinc-900/60">
-						<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-secondary">
+						<span className="mb-2 block text-xs font-semibold uppercase text-secondary">
 							Prompt
 						</span>
-						<p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed text-body dark:text-zinc-300">
+						<p className="whitespace-pre-wrap wrap-anywhere text-sm text-body">
 							{prompts[0].content}
 						</p>
 					</div>
@@ -514,7 +504,7 @@ export default function SemanticInputSettingsPage() {
 	return (
 		<>
 			{error ? (
-				<div className="shrink-0 border-b border-red-200/90 bg-red-50 px-7 py-3 text-sm text-red-800 sm:px-10 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+				<div className="shrink-0 border-b border-red-200/90 bg-red-50 px-7 py-3 text-sm text-error sm:px-10 dark:border-red-900/50 dark:bg-red-950/40">
 					{error}
 				</div>
 			) : null}

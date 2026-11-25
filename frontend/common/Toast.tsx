@@ -25,10 +25,10 @@ type ToastProps = {
 // the viewport (matches `Snackbar` from omnichat's Alert/styled.tsx).
 
 const iconColorClass: Record<ToastVariant, string> = {
-	[ToastVariant.Error]: 'text-red-600 dark:text-red-400',
+	[ToastVariant.Error]: 'text-error',
 	[ToastVariant.Success]: 'text-emerald-600 dark:text-emerald-400',
 	[ToastVariant.Info]: 'text-sky-600 dark:text-sky-400',
-	[ToastVariant.Loading]: 'text-[#76b900]',
+	[ToastVariant.Loading]: 'text-action',
 };
 
 const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
@@ -115,13 +115,9 @@ export const Toast = ({
 			<div className="pointer-events-auto flex max-w-md items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
 				<VariantIcon variant={variant} />
 				{resolvedTitle ? (
-					<span className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{resolvedTitle}
-					</span>
+					<span className="text-sm font-semibold text-heading">{resolvedTitle}</span>
 				) : null}
-				<span className="text-sm text-heading dark:text-zinc-200">
-					{capitalizeFirst(message)}
-				</span>
+				<span className="text-sm text-heading">{capitalizeFirst(message)}</span>
 				<Button
 					theme={ButtonTheme.IconNeutral}
 					size={Size.SMALL}

@@ -28,7 +28,7 @@ const EXPIRY_OPTIONS: { label: string; days?: number }[] = [
 ];
 
 const inputClassName =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-heading outline-none focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-heading outline-none focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-700 dark:bg-zinc-900';
 
 const isExpired = (token: ApiToken): boolean =>
 	token.expires_at != null && new Date(token.expires_at).getTime() <= Date.now();
@@ -128,9 +128,7 @@ export const ApiTokensView = () => {
 			header: 'Name',
 			truncate: true,
 			cell: (token) => (
-				<span className="font-medium text-heading dark:text-zinc-100">
-					{token.name ?? 'Unnamed'}
-				</span>
+				<span className="font-semibold text-heading">{token.name ?? 'Unnamed'}</span>
 			),
 		},
 		{
@@ -139,7 +137,7 @@ export const ApiTokensView = () => {
 			width: 'w-44',
 			nowrap: true,
 			cell: (token) => (
-				<code className="font-mono text-xs text-secondary dark:text-zinc-400">
+				<code className="font-mono text-xs text-secondary">
 					{token.start ? `${token.start}…` : '—'}
 				</code>
 			),
@@ -166,9 +164,7 @@ export const ApiTokensView = () => {
 			cell: (token) => {
 				if (!token.expires_at) return 'Never';
 				return (
-					<span
-						className={isExpired(token) ? 'text-red-600 dark:text-red-400' : undefined}
-					>
+					<span className={isExpired(token) ? 'text-error' : undefined}>
 						{formatDate(token.expires_at)}
 					</span>
 				);
@@ -201,10 +197,8 @@ export const ApiTokensView = () => {
 			<div className="w-full max-w-4xl space-y-5">
 				<div className="flex items-start justify-between gap-4">
 					<div className="min-w-0">
-						<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
-							API Tokens
-						</h1>
-						<p className="mt-1 text-xs text-secondary dark:text-zinc-400">
+						<h1 className="text-base font-semibold text-heading">API Tokens</h1>
+						<p className="mt-1 text-xs text-secondary">
 							Call the Auto Ontology API from scripts without signing in. A token acts
 							as you — it can do exactly what your account can, and nothing more.
 						</p>
@@ -219,10 +213,10 @@ export const ApiTokensView = () => {
 					<div className="rounded-lg border border-[#76b900]/40 bg-[#76b900]/5 p-4">
 						<div className="flex items-start justify-between gap-3">
 							<div className="min-w-0">
-								<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+								<h2 className="text-sm font-semibold text-heading">
 									Copy your token now
 								</h2>
-								<p className="mt-1 text-xs text-body dark:text-zinc-400">
+								<p className="mt-1 text-xs text-body dark:text-secondary">
 									Auto Ontology stores only a hash of it, so this is the one and
 									only time it can be shown. Send it as the <code>x-api-key</code>{' '}
 									header.
@@ -237,7 +231,7 @@ export const ApiTokensView = () => {
 							</Button>
 						</div>
 						<div className="group mt-3 flex items-center gap-2 rounded-md bg-zinc-900 px-3 py-2 dark:bg-zinc-950">
-							<code className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100">
+							<code className="min-w-0 flex-1 truncate font-mono text-xs text-light">
 								{freshToken}
 							</code>
 							<CopyButton text={freshToken} className="opacity-100" />
@@ -245,9 +239,7 @@ export const ApiTokensView = () => {
 					</div>
 				) : null}
 
-				{loading ? (
-					<p className="text-sm text-secondary dark:text-zinc-400">Loading…</p>
-				) : null}
+				{loading ? <p className="text-sm text-secondary">Loading…</p> : null}
 
 				{!loading && tokens.length === 0 ? (
 					<EmptyState
@@ -269,14 +261,10 @@ export const ApiTokensView = () => {
 				className="w-full max-w-md"
 			>
 				<div className="space-y-4 p-5">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						New API token
-					</h2>
+					<h2 className="text-sm font-semibold text-heading">New API token</h2>
 
 					<label className="block space-y-1.5">
-						<span className="text-xs font-medium text-body dark:text-zinc-300">
-							Name
-						</span>
+						<span className="text-xs font-semibold text-body">Name</span>
 						<input
 							className={inputClassName}
 							value={name}
@@ -287,9 +275,7 @@ export const ApiTokensView = () => {
 					</label>
 
 					<label className="block space-y-1.5">
-						<span className="text-xs font-medium text-body dark:text-zinc-300">
-							Expires
-						</span>
+						<span className="text-xs font-semibold text-body">Expires</span>
 						<select
 							className={inputClassName}
 							value={expiryIndex}
@@ -303,9 +289,7 @@ export const ApiTokensView = () => {
 						</select>
 					</label>
 
-					{createError ? (
-						<p className="text-xs text-red-600 dark:text-red-400">{createError}</p>
-					) : null}
+					{createError ? <p className="text-xs text-error">{createError}</p> : null}
 
 					<div className="flex justify-end gap-2">
 						<Button

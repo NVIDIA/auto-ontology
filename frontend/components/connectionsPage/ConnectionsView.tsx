@@ -141,7 +141,7 @@ export const ConnectionsView = () => {
 	if (error) {
 		return (
 			<div className="flex h-full w-full flex-1 flex-col items-center justify-center gap-3 px-6">
-				<p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+				<p className="text-sm text-error">{error}</p>
 				<Button
 					theme={ButtonTheme.Secondary}
 					size={Size.REGULAR}

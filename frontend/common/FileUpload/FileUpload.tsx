@@ -110,12 +110,10 @@ export const FileUpload = ({
 						}`
 			} ${className}`}
 		>
-			<Icon name={IconName.Upload} className="h-6 w-6 text-secondary dark:text-zinc-500" />
+			<Icon name={IconName.Upload} className="h-6 w-6 text-secondary" />
 			{value ? (
 				<div className="flex items-center gap-2">
-					<span className="text-sm font-medium text-heading dark:text-zinc-200">
-						{value.name}
-					</span>
+					<span className="text-sm font-semibold text-heading">{value.name}</span>
 					<Button
 						theme={ButtonTheme.IconNeutral}
 						size={Size.SMALL}
@@ -133,8 +131,8 @@ export const FileUpload = ({
 				</div>
 			) : (
 				<>
-					<p className="text-sm text-body dark:text-zinc-300">
-						<span className="font-medium text-[#5e9400] dark:text-[#a3d63a]">
+					<p className="text-sm text-body">
+						<span className="font-semibold text-[#5e9400] dark:text-[#a3d63a]">
 							{label}
 						</span>{' '}
 						or drag and drop

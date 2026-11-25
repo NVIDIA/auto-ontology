@@ -410,15 +410,15 @@ export function DataWorkspaceView() {
 			<div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-4 py-16 text-center">
 				<div className="rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
 					<div
-						className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-2xl dark:bg-red-950/80"
+						className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-xl dark:bg-red-950/80"
 						aria-hidden
 					>
 						⚠
 					</div>
-					<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
+					<h2 className="text-xl font-semibold text-error">
 						Couldn&apos;t load databases
 					</h2>
-					<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+					<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-error/80 dark:border-red-900/40 dark:bg-red-950/40">
 						{loadError}
 					</pre>
 				</div>

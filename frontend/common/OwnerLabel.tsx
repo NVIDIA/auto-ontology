@@ -18,8 +18,8 @@ const initials = (name: string): string => {
 export const OwnerLabel = ({ owner }: { owner?: OwnerLabelOwner | null }) => {
 	if (owner == null) {
 		return (
-			<span className="inline-flex min-w-0 items-center gap-2 text-sm text-body dark:text-zinc-300">
-				<span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400">
+			<span className="inline-flex min-w-0 items-center gap-2 text-sm text-body">
+				<span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-secondary dark:bg-zinc-700">
 					<Icon name={IconName.User} className="h-3.5 w-3.5" />
 				</span>
 				<span className="truncate">Unassigned</span>
@@ -27,15 +27,15 @@ export const OwnerLabel = ({ owner }: { owner?: OwnerLabelOwner | null }) => {
 		);
 	}
 	return (
-		<span className="inline-flex min-w-0 items-center gap-2 text-sm text-body dark:text-zinc-300">
+		<span className="inline-flex min-w-0 items-center gap-2 text-sm text-body">
 			{owner.kind === 'group' ? (
 				<span
-					className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white ${groupColorClass(owner.color)}`}
+					className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-light ${groupColorClass(owner.color)}`}
 				>
 					<Icon name={IconName.Users} className="h-3.5 w-3.5" />
 				</span>
 			) : (
-				<span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#76b900] text-[10px] font-semibold text-white">
+				<span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#76b900] text-xs font-semibold text-light">
 					{initials(owner.name)}
 				</span>
 			)}

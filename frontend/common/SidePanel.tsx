@@ -113,7 +113,7 @@ const PanelBlock = ({
 	children: ReactNode;
 }) => (
 	<section className="min-w-0">
-		<h2 className="mb-2 text-sm font-semibold text-heading dark:text-zinc-100">{title}</h2>
+		<h2 className="mb-2 text-sm font-semibold text-heading">{title}</h2>
 		<div
 			className={`min-w-0 rounded-lg border bg-white p-3.5 dark:bg-zinc-950 ${
 				editing
@@ -133,7 +133,7 @@ const CalendarIcon = () => (
 		stroke="currentColor"
 		strokeWidth="1.5"
 		aria-hidden="true"
-		className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
+		className="h-4 w-4 shrink-0 text-secondary"
 	>
 		<path
 			strokeLinecap="round"
@@ -147,18 +147,18 @@ const ActivityBody = ({ bulk }: { bulk: SidePanelActivity }) => {
 	const name = bulk.author?.name || bulk.author?.email || '';
 	const neverModified = bulk.title === 'Last Modified' && name === '' && bulk.date == null;
 	if (neverModified) {
-		return <p className="text-sm text-secondary dark:text-zinc-400">—</p>;
+		return <p className="text-sm text-secondary">—</p>;
 	}
 	const label = name || AUTO_GENERATED_LABEL;
 	return (
 		<div className="space-y-3">
-			<span className="flex min-w-0 items-center gap-2 text-sm text-body dark:text-zinc-300">
+			<span className="flex min-w-0 items-center gap-2 text-sm text-body">
 				<span
 					aria-hidden="true"
-					className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
+					className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
 						name === ''
-							? 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400'
-							: 'bg-[#76b900] text-white'
+							? 'bg-zinc-200 text-secondary dark:bg-zinc-700'
+							: 'bg-[#76b900] text-light'
 					}`}
 				>
 					{label.charAt(0).toUpperCase()}
@@ -166,7 +166,7 @@ const ActivityBody = ({ bulk }: { bulk: SidePanelActivity }) => {
 				<span className="truncate">{label}</span>
 			</span>
 			{bulk.date != null && (
-				<span className="flex items-center gap-2 text-sm text-body dark:text-zinc-300">
+				<span className="flex items-center gap-2 text-sm text-body">
 					<CalendarIcon />
 					{formatDate(bulk.date, 'MMM DD, YYYY')}
 				</span>
@@ -249,7 +249,7 @@ const TagEditor = ({
 					}))}
 					header={
 						unassigned.length === 0 ? (
-							<p className="px-3 py-1.5 text-xs text-secondary dark:text-zinc-400">
+							<p className="px-3 py-1.5 text-xs text-secondary">
 								{section.options.length === 0
 									? 'No tags exist yet'
 									: 'Every tag is already applied'}
@@ -271,7 +271,7 @@ const TagEditor = ({
 				/>
 			</div>
 			{tags.length === 0 ? (
-				<p className="text-sm text-secondary dark:text-zinc-400">No Tags Added</p>
+				<p className="text-sm text-secondary">No Tags Added</p>
 			) : (
 				<ul className="flex w-full min-w-0 flex-wrap gap-1.5">
 					{tags.map((tag) => (
@@ -290,7 +290,7 @@ const TagEditor = ({
 
 const TagList = ({ tags }: { tags: ComposerTagChip[] }) =>
 	tags.length === 0 ? (
-		<p className="text-sm text-secondary dark:text-zinc-400">No Tags Added</p>
+		<p className="text-sm text-secondary">No Tags Added</p>
 	) : (
 		<ul className="flex w-full min-w-0 flex-wrap gap-1.5">
 			{[...tags].sort(byName).map((tag) => (

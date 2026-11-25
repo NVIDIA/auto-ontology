@@ -16,7 +16,7 @@ import { Toast } from '@/common/Toast';
 const SSO_PROVIDER_ID = 'sso';
 
 const inputClass =
-	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-disabled dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-400';
+	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-disabled dark:border-zinc-600 dark:bg-zinc-900 dark:disabled:bg-zinc-800/50';
 
 export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvider[] }) => {
 	// Seeded from the server (see page.tsx) so the correct view renders on first
@@ -97,9 +97,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-xl">
-				<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
-					Single Sign-On (OIDC)
-				</h1>
+				<h1 className="mb-1 text-xl font-semibold text-heading">Single Sign-On (OIDC)</h1>
 				<p className="mb-4 text-xs text-secondary">
 					Configure a single OpenID Connect provider. Endpoints are discovered from the
 					issuer. The client secret is stored securely and never shown again.
@@ -109,7 +107,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 					<div className="flex flex-col gap-1.5">
 						<label
 							htmlFor="issuer"
-							className="text-xs font-medium text-body dark:text-zinc-400"
+							className="text-xs font-semibold text-body dark:text-secondary"
 						>
 							Issuer URL
 						</label>
@@ -127,7 +125,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 					<div className="flex flex-col gap-1.5">
 						<label
 							htmlFor="clientId"
-							className="text-xs font-medium text-body dark:text-zinc-400"
+							className="text-xs font-semibold text-body dark:text-secondary"
 						>
 							Client ID
 						</label>
@@ -144,7 +142,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 					<div className="flex flex-col gap-1.5">
 						<label
 							htmlFor="clientSecret"
-							className="text-xs font-medium text-body dark:text-zinc-400"
+							className="text-xs font-semibold text-body dark:text-secondary"
 						>
 							Client Secret
 						</label>

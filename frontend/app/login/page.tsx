@@ -16,7 +16,7 @@ import { resumeAuthorizeFromApp } from '@/auth/oauth-loopback';
 import { SkeletonVariant } from '@/enums/skeleton';
 
 const inputClass =
-	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
+	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900';
 
 const LoginLoading = () => (
 	<div
@@ -158,7 +158,10 @@ const LoginForm = () => {
 	return (
 		<form onSubmit={handleSubmit} className="flex w-full max-w-sm flex-col gap-4">
 			<div className="flex flex-col gap-1.5">
-				<label htmlFor="email" className="text-xs font-medium text-body dark:text-zinc-400">
+				<label
+					htmlFor="email"
+					className="text-xs font-semibold text-body dark:text-secondary"
+				>
 					Email
 				</label>
 				<input
@@ -174,7 +177,7 @@ const LoginForm = () => {
 			<div className="flex flex-col gap-1.5">
 				<label
 					htmlFor="password"
-					className="text-xs font-medium text-body dark:text-zinc-400"
+					className="text-xs font-semibold text-body dark:text-secondary"
 				>
 					Password
 				</label>
@@ -189,7 +192,7 @@ const LoginForm = () => {
 				/>
 			</div>
 
-			{error ? <p className="text-xs text-red-500">{error}</p> : null}
+			{error ? <p className="text-xs text-error">{error}</p> : null}
 
 			<Button
 				theme={ButtonTheme.Primary}
@@ -222,9 +225,7 @@ const LoginPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-heading dark:text-zinc-100">
-					Auto Ontology
-				</span>
+				<span className="text-xl font-semibold text-heading">Auto Ontology</span>
 			</div>
 			<Suspense fallback={<LoginLoading />}>
 				<LoginForm />

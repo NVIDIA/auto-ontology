@@ -166,7 +166,7 @@ const LegendItem = ({
 }) => {
 	const color = NODE_TYPE_ACCENT_COLOR[kind];
 	return (
-		<span className="flex items-center gap-1.5 text-xs font-medium text-body dark:text-zinc-200">
+		<span className="flex items-center gap-1.5 text-xs font-semibold text-body">
 			<span
 				className="h-3 w-3 rounded-full border"
 				style={{ borderColor: color, backgroundColor: `${color}33` }}
@@ -2176,7 +2176,7 @@ export const ExplorationView = () => {
 												}
 												className={`h-4 w-4 shrink-0 ${
 													node.layer === ExplorationLayer.Semantic
-														? 'text-[#76b900]'
+														? 'text-action'
 														: 'text-[#3b82b6]'
 												}`}
 											/>
@@ -2202,7 +2202,7 @@ export const ExplorationView = () => {
 
 			{!loading && error != null && (
 				<div className="flex h-full items-center justify-center px-6 text-center">
-					<div className="rounded-xl border border-red-200 bg-white px-8 py-6 text-sm text-red-700 shadow-lg dark:border-red-900/50 dark:bg-zinc-900 dark:text-red-300">
+					<div className="rounded-xl border border-red-200 bg-white px-8 py-6 text-sm text-error shadow-lg dark:border-red-900/50 dark:bg-zinc-900">
 						Couldn&apos;t load exploration: {error}
 					</div>
 				</div>
@@ -2307,7 +2307,7 @@ export const ExplorationView = () => {
 				)}
 
 			<div className="absolute bottom-4 right-4 z-20 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-				<p className="text-xs text-secondary dark:text-zinc-400">
+				<p className="text-xs text-secondary">
 					Viewing:{' '}
 					{layer === ExplorationLayer.Semantic ? 'Semantic Objects' : 'Data Objects'}
 				</p>

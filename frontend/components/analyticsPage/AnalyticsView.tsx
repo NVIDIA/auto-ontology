@@ -29,7 +29,7 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		header: 'Timestamp',
 		width: 'w-44',
 		nowrap: true,
-		className: 'text-body dark:text-zinc-300',
+		className: 'text-body',
 		cell: (row) => formatDate(row.question_timestamp),
 	},
 	{
@@ -38,7 +38,7 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		width: 'w-40',
 		nowrap: true,
 		truncate: true,
-		className: 'text-body dark:text-zinc-300',
+		className: 'text-body',
 		cell: (row) => row.user.name || row.user.email,
 		title: (row) => row.user.name || row.user.email,
 	},
@@ -47,7 +47,7 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		header: 'Source',
 		width: 'w-24',
 		nowrap: true,
-		className: 'text-body dark:text-zinc-300 uppercase',
+		className: 'text-body uppercase',
 		cell: (row) => row.source ?? '—',
 		title: (row) => row.source ?? '',
 	},
@@ -55,7 +55,7 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		key: 'question',
 		header: 'Question',
 		truncate: true,
-		className: 'text-body dark:text-zinc-300',
+		className: 'text-body',
 		cell: (row) => row.question,
 		title: (row) => row.question ?? '',
 	},
@@ -63,7 +63,7 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		key: 'response',
 		header: 'Reasoning',
 		truncate: true,
-		className: 'text-body dark:text-zinc-300',
+		className: 'text-body',
 		cell: (row) => row.response,
 		title: (row) => row.response ?? '',
 	},
@@ -157,10 +157,8 @@ export const AnalyticsView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.ChartLine} className="h-5 w-5 text-body dark:text-zinc-300" />
-				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-					Analytics
-				</h1>
+				<Icon name={IconName.ChartLine} className="h-5 w-5 text-body" />
+				<h1 className="text-xl font-semibold text-heading">Analytics</h1>
 				<div className="ml-auto">
 					<Button
 						theme={ButtonTheme.Primary}

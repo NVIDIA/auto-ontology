@@ -18,13 +18,13 @@ const PILL_CLASS: Record<CertificationStatus, string> = {
 	[CertificationStatus.Partial]:
 		'border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300',
 	[CertificationStatus.Pending]:
-		'border-zinc-200 bg-zinc-100 text-secondary dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400',
+		'border-zinc-200 bg-zinc-100 text-secondary dark:border-zinc-700 dark:bg-zinc-800',
 };
 
 const ICON_CLASS: Record<CertificationStatus, string> = {
-	[CertificationStatus.Certified]: 'text-[#76b900]',
+	[CertificationStatus.Certified]: 'text-action',
 	[CertificationStatus.Partial]: 'text-amber-500',
-	[CertificationStatus.Pending]: 'text-secondary dark:text-zinc-500',
+	[CertificationStatus.Pending]: 'text-secondary',
 };
 
 export type CertificationBadgeProps = {
@@ -83,7 +83,7 @@ export const CertificationBadge = ({
 				/>
 				<span
 					aria-hidden
-					className="pointer-events-none absolute bottom-full left-1/2 z-[1000] mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-body opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+					className="pointer-events-none absolute bottom-full left-1/2 z-[1000] mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-body opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 dark:border-zinc-700 dark:bg-zinc-800"
 				>
 					{title}
 				</span>
@@ -94,7 +94,7 @@ export const CertificationBadge = ({
 	return (
 		<span
 			title={title}
-			className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${PILL_CLASS[status]} ${className}`}
+			className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${PILL_CLASS[status]} ${className}`}
 		>
 			<Icon name={IconName.Certification} className="h-3.5 w-3.5" />
 			{title}

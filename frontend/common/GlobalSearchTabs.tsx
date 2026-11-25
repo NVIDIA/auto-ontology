@@ -23,8 +23,8 @@ type GlobalSearchTabsProps = {
 
 const tabClass = (selected: boolean) =>
 	selected
-		? 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-2.5 py-1.5 text-white'
-		: 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-body shadow-sm ring-1 ring-zinc-200 hover:bg-[#76b900]/10 hover:text-[#4d7a00] dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700 dark:hover:bg-[#76b900]/15';
+		? 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-2.5 py-1.5 text-light'
+		: 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-body shadow-sm ring-1 ring-zinc-200 hover:bg-[#76b900]/10 hover:text-[#4d7a00] dark:bg-zinc-800 dark:ring-zinc-700 dark:hover:bg-[#76b900]/15';
 
 export const totalGlobalSearchCount = (counts: Record<string, number>): number =>
 	Object.values(counts).reduce((sum, value) => sum + value, 0);
@@ -63,7 +63,7 @@ export const GlobalSearchTabs = ({ counts, selected, onSelect }: GlobalSearchTab
 				className={tabClass(selected === GLOBAL_SEARCH_ALL_TAB)}
 			>
 				<Icon name={IconName.Exploration} className="h-3.5 w-3.5 shrink-0" />
-				<span className="text-sm font-medium">All</span>
+				<span className="text-sm font-semibold">All</span>
 				<span className="text-sm font-normal">{allCount.toLocaleString()}</span>
 			</button>
 			{typeTabs.map((type) => {
@@ -78,7 +78,7 @@ export const GlobalSearchTabs = ({ counts, selected, onSelect }: GlobalSearchTab
 						className={tabClass(isSelected)}
 					>
 						<Icon name={SEARCH_TYPE_ICON[type]} className="h-3.5 w-3.5 shrink-0" />
-						<span className="text-sm font-medium">{SEARCH_TYPE_TAB_LABEL[type]}</span>
+						<span className="text-sm font-semibold">{SEARCH_TYPE_TAB_LABEL[type]}</span>
 						<span className="text-sm font-normal">
 							{(counts[type] ?? 0).toLocaleString()}
 						</span>

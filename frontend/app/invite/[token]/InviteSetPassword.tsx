@@ -14,7 +14,7 @@ import { Size, ButtonTheme } from '@/enums/button';
 import { InvitationKind } from '@/enums/invitation';
 
 const inputClass =
-	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
+	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900';
 
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
@@ -73,13 +73,11 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 			<div className="flex w-full max-w-sm flex-col items-center gap-6">
 				<div className="flex items-center gap-2">
 					<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-					<span className="text-lg font-semibold text-heading dark:text-zinc-100">
-						Auto Ontology
-					</span>
+					<span className="text-xl font-semibold text-heading">Auto Ontology</span>
 				</div>
 				{savedWithoutSession ? (
 					<div className="flex w-full flex-col gap-4">
-						<p className="text-sm text-body dark:text-zinc-300">
+						<p className="text-sm text-body">
 							{kind === InvitationKind.Reset
 								? 'Password updated. Sign in to continue.'
 								: 'Account created. Sign in to continue.'}
@@ -98,17 +96,17 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 						onSubmit={(event) => void handleSubmit(event)}
 						className="flex w-full flex-col gap-4"
 					>
-						<p className="text-xs text-secondary dark:text-zinc-400">
+						<p className="text-xs text-secondary">
 							{kind === InvitationKind.Reset
 								? 'Set a new password for '
 								: 'Set a password for '}
-							<span className="font-medium text-body">{email}</span>
+							<span className="font-semibold text-body">{email}</span>
 							{kind === InvitationKind.Reset ? '.' : ' to finish joining.'}
 						</p>
 						<div className="flex flex-col gap-1.5">
 							<label
 								htmlFor="invite-email"
-								className="text-xs font-medium text-body dark:text-zinc-400"
+								className="text-xs font-semibold text-body dark:text-secondary"
 							>
 								Email
 							</label>
@@ -123,7 +121,7 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 						<div className="flex flex-col gap-1.5">
 							<label
 								htmlFor="invite-password"
-								className="text-xs font-medium text-body dark:text-zinc-400"
+								className="text-xs font-semibold text-body dark:text-secondary"
 							>
 								Password
 							</label>
@@ -142,7 +140,7 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 						<div className="flex flex-col gap-1.5">
 							<label
 								htmlFor="invite-password-confirm"
-								className="text-xs font-medium text-body dark:text-zinc-400"
+								className="text-xs font-semibold text-body dark:text-secondary"
 							>
 								Confirm password
 							</label>
@@ -158,7 +156,7 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 								className={inputClass}
 							/>
 						</div>
-						{error ? <p className="text-xs text-red-500">{error}</p> : null}
+						{error ? <p className="text-xs text-error">{error}</p> : null}
 						<Button
 							theme={ButtonTheme.Primary}
 							size={Size.REGULAR}

@@ -12,7 +12,7 @@ import { Size, ButtonTheme } from '@/enums/button';
 import type { UpdateUserInput, User } from '@/types/auth';
 
 const inputClass =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-heading outline-none focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-secondary dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:disabled:bg-zinc-800';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-heading outline-none focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-secondary dark:border-zinc-700 dark:bg-zinc-900 dark:disabled:bg-zinc-800';
 
 type EditUserModalProps = {
 	user: User;
@@ -43,11 +43,11 @@ export const EditUserModal = ({
 					onEdit({ name: name.trim(), role });
 				}}
 			>
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">Edit user</h2>
-				<p className="text-xs text-secondary dark:text-zinc-400">{user.email}</p>
+				<h2 className="text-sm font-semibold text-heading">Edit user</h2>
+				<p className="text-xs text-secondary">{user.email}</p>
 
 				<label className="block space-y-1.5" htmlFor="edit-user-name">
-					<span className="text-xs font-medium text-body dark:text-zinc-300">Name</span>
+					<span className="text-xs font-semibold text-body">Name</span>
 					<input
 						id="edit-user-name"
 						className={inputClass}
@@ -60,7 +60,7 @@ export const EditUserModal = ({
 				</label>
 
 				<label className="block space-y-1.5" htmlFor="edit-user-role">
-					<span className="text-xs font-medium text-body dark:text-zinc-300">Role</span>
+					<span className="text-xs font-semibold text-body">Role</span>
 					<select
 						id="edit-user-role"
 						className={inputClass}
@@ -78,7 +78,7 @@ export const EditUserModal = ({
 				{roleLockedReason ? (
 					<p className="text-xs text-secondary">{roleLockedReason}</p>
 				) : null}
-				{error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+				{error ? <p className="text-xs text-error">{error}</p> : null}
 
 				<div className="flex justify-end gap-2">
 					<Button

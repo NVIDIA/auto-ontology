@@ -101,7 +101,7 @@ export const InfiniteScroll = ({
 			)}
 			{error != null && (
 				<div className="flex flex-col items-center gap-2 py-4">
-					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>
+					<p className="text-sm text-error">{error}</p>
 					<Button
 						theme={ButtonTheme.Secondary}
 						size={Size.SMALL}

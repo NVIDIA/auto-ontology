@@ -59,7 +59,7 @@ const modifiedLabel = (tag: Tag): string =>
  * — because the table aligns cells to their top edge. Without it the dates
  * would sit a few pixels above the avatar beside them.
  */
-const CELL_LINE = 'text-xs leading-5 text-secondary dark:text-zinc-400';
+const CELL_LINE = 'text-xs text-secondary';
 
 /**
  * Who an author column names, with the initial the rest of the app draws a
@@ -79,7 +79,7 @@ const TagAuthorCell = ({ author }: { author: TagAuthor | null | undefined }) => 
 		<span className="flex min-w-0 items-center gap-2">
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${name === '' ? 'bg-zinc-200 text-secondary dark:bg-zinc-700 ' : 'bg-[#76b900] text-light'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>
@@ -249,14 +249,11 @@ const TagsList = () => {
 					onClick={(e) => e.stopPropagation()}
 					className="flex min-w-0 items-center gap-3"
 				>
-					<Icon
-						name={IconName.Tag}
-						className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-500"
-					/>
+					<Icon name={IconName.Tag} className="h-4 w-4 shrink-0 text-secondary" />
 					<Text text={tag.name} />
 				</Link>
 			),
-			className: 'text-heading dark:text-zinc-200',
+			className: 'text-heading',
 		},
 		{
 			key: 'created_by',
@@ -352,9 +349,7 @@ const TagsList = () => {
 			>
 				<div className="w-full space-y-5">
 					<div className="flex items-center gap-3">
-						<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
-							Tags
-						</h1>
+						<h1 className="text-base font-semibold text-heading">Tags</h1>
 						{tags.length > 0 || searching ? (
 							<div className="ml-auto">
 								<Button
@@ -389,7 +384,7 @@ const TagsList = () => {
 					) : null}
 
 					{!loading && error != null && tags.length === 0 ? (
-						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
 							{error}
 						</div>
 					) : null}
@@ -450,14 +445,11 @@ const TagsList = () => {
 				<div>
 					<label
 						htmlFor="tag-name"
-						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading dark:text-zinc-100"
+						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading"
 					>
-						<Icon
-							name={IconName.Tag}
-							className="h-4 w-4 text-secondary dark:text-zinc-400"
-						/>
+						<Icon name={IconName.Tag} className="h-4 w-4 text-secondary" />
 						Tag Name
-						<span className="font-normal text-secondary dark:text-zinc-500">
+						<span className="font-normal text-secondary">
 							(Max. {MAX_TAG_NAME_LENGTH})
 						</span>
 					</label>
@@ -474,12 +466,12 @@ const TagsList = () => {
 							setSubmitError(null);
 						}}
 						placeholder="Type Tag Name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${submitError == null ? 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600' : 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30'}`}
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 ${submitError == null ? 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600' : 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30'}`}
 					/>
 				</div>
 
 				{submitError ? (
-					<div className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+					<div className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-error dark:border-red-900/50 dark:bg-red-950/40">
 						{submitError}
 					</div>
 				) : null}
@@ -510,7 +502,7 @@ const TagsList = () => {
 export const TagsSettingsSkeleton = () => (
 	<main className={TAGS_PANEL_CLASSNAME}>
 		<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
-			<h1 className="text-base font-semibold text-heading dark:text-zinc-100">Tags</h1>
+			<h1 className="text-base font-semibold text-heading">Tags</h1>
 			<div className="py-2" role="status" aria-label="Loading tags">
 				<SkeletonRows rows={4} />
 			</div>

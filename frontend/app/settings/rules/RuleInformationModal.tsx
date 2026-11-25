@@ -33,13 +33,9 @@ export const scopeLabel = (rule: Rule): string => {
 
 const Row = ({ icon, label, children }: { icon: IconName; label: string; children: ReactNode }) => (
 	<div className="flex items-start gap-2 text-sm">
-		<Icon
-			name={icon}
-			className="mt-0.5 h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
-			aria-hidden
-		/>
-		<span className="font-semibold text-heading dark:text-zinc-100">{label}:</span>
-		<span className="min-w-0 text-body dark:text-zinc-300">{children}</span>
+		<Icon name={icon} className="mt-0.5 h-4 w-4 shrink-0 text-secondary" aria-hidden />
+		<span className="font-semibold text-heading">{label}:</span>
+		<span className="min-w-0 text-body">{children}</span>
 	</div>
 );
 
@@ -70,11 +66,8 @@ export const RuleInformationModal = ({
 	<Modal open={rule != null} onClose={onClose} className="w-full max-w-lg">
 		<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 			<div className="flex min-w-0 items-center gap-2">
-				<Icon
-					name={IconName.Lightning}
-					className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
-				/>
-				<h2 className="min-w-0 truncate text-base font-semibold text-heading dark:text-zinc-100">
+				<Icon name={IconName.Lightning} className="h-5 w-5 shrink-0 text-body" />
+				<h2 className="min-w-0 truncate text-base font-semibold text-heading">
 					{rule?.name}
 				</h2>
 			</div>
@@ -96,12 +89,10 @@ export const RuleInformationModal = ({
 					<div className="flex items-center gap-2">
 						<Icon
 							name={IconName.Users}
-							className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
+							className="h-4 w-4 shrink-0 text-secondary"
 							aria-hidden
 						/>
-						<span className="font-semibold text-heading dark:text-zinc-100">
-							Created By
-						</span>
+						<span className="font-semibold text-heading">Created By</span>
 						<RuleAuthor author={rule.created_by_user} />
 					</div>
 
@@ -112,14 +103,12 @@ export const RuleInformationModal = ({
 						<div className="flex items-center gap-2">
 							<Icon
 								name={IconName.Pencil}
-								className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
+								className="h-4 w-4 shrink-0 text-secondary"
 								aria-hidden
 							/>
-							<span className="font-semibold text-heading dark:text-zinc-100">
-								Renamed By
-							</span>
+							<span className="font-semibold text-heading">Renamed By</span>
 							<RuleAuthor author={rule.modified_by_user} />
-							<span className="ml-auto shrink-0 text-xs text-secondary dark:text-zinc-400">
+							<span className="ml-auto shrink-0 text-xs text-secondary">
 								{formatDate(rule.modified)}
 							</span>
 						</div>

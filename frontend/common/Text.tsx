@@ -53,21 +53,19 @@ const CLAMP_CLASS = {
 
 const VARIANT_CLASS: Record<TextVariant, string> = {
 	[TextVariant.Inherit]: '',
-	[TextVariant.PageTitle]:
-		'text-2xl font-semibold tracking-tight text-heading dark:text-zinc-100',
-	[TextVariant.CardTitle]: 'text-base font-semibold tracking-tight text-body dark:text-zinc-100',
-	[TextVariant.Heading]: 'text-sm font-semibold text-heading dark:text-zinc-100',
-	[TextVariant.Subheading]: 'text-sm font-medium text-heading dark:text-zinc-100',
-	[TextVariant.Body]: 'text-sm text-body dark:text-zinc-300',
-	[TextVariant.Strong]: 'font-medium',
-	[TextVariant.Caption]: 'text-xs text-secondary dark:text-zinc-500',
-	[TextVariant.Detail]: 'text-xs leading-5 text-secondary dark:text-zinc-400',
-	[TextVariant.Label]: 'text-xs font-semibold text-secondary dark:text-zinc-400',
-	[TextVariant.Overline]:
-		'text-xs font-semibold uppercase tracking-wide text-secondary dark:text-zinc-400',
+	[TextVariant.PageTitle]: 'text-xl font-semibold text-heading',
+	[TextVariant.CardTitle]: 'text-base font-semibold text-body',
+	[TextVariant.Heading]: 'text-sm font-semibold text-heading',
+	[TextVariant.Subheading]: 'text-sm font-semibold text-heading',
+	[TextVariant.Body]: 'text-sm text-body',
+	[TextVariant.Strong]: 'font-semibold',
+	[TextVariant.Caption]: 'text-xs text-secondary',
+	[TextVariant.Detail]: 'text-xs text-secondary',
+	[TextVariant.Label]: 'text-xs font-semibold text-secondary',
+	[TextVariant.Overline]: 'text-xs font-semibold uppercase text-secondary',
 };
 const TOOLTIP_CLASS =
-	'z-[1000] block max-h-[60vh] max-w-[min(500px,90vw)] overflow-y-auto whitespace-pre-wrap wrap-anywhere rounded-lg border border-zinc-200 bg-white p-2 text-xs leading-5 text-body shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
+	'z-[1000] block max-h-[60vh] max-w-[min(500px,90vw)] overflow-y-auto whitespace-pre-wrap wrap-anywhere rounded-lg border border-zinc-200 bg-white p-2 text-xs text-body shadow-xl dark:border-zinc-700 dark:bg-zinc-800';
 
 const cx = (...classes: (string | false | undefined)[]) => classes.filter(Boolean).join(' ');
 export const Text = ({

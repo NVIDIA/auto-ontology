@@ -184,7 +184,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 					// Tags must allow duplicates conceptually, but we dedup. Use `tag-idx`
 					// as a stable-ish key while still tolerating repeated text content.
 					key={`${tag}-${idx}`}
-					className="inline-flex max-w-[min(24rem,100%)] items-center gap-1 rounded-md border border-[#76b900]/40 bg-[#76b900]/10 px-2 py-0.5 text-xs font-medium text-[#3f6b00] dark:border-[#76b900]/40 dark:bg-[#76b900]/15 dark:text-[#cdeb86]"
+					className="inline-flex max-w-[min(24rem,100%)] items-center gap-1 rounded-md border border-[#76b900]/40 bg-[#76b900]/10 px-2 py-0.5 text-xs font-semibold text-[#3f6b00] dark:bg-[#76b900]/15 dark:text-[#cdeb86]"
 				>
 					<Text text={tag} />
 					{!disabled && (
@@ -222,7 +222,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 				onBlur={handleBlur}
 				placeholder={value.length === 0 ? placeholder : ''}
 				aria-label={ariaLabel ?? 'Add tag'}
-				className="min-w-[6rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-sm text-heading outline-none placeholder:text-secondary disabled:cursor-not-allowed dark:text-zinc-100"
+				className="min-w-[6rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-sm text-heading outline-none placeholder:text-secondary disabled:cursor-not-allowed"
 			/>
 		</div>
 	);

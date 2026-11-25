@@ -375,10 +375,8 @@ export const DiscoveryView = ({ initialQuery = '', handoverId = '' }: DiscoveryV
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.Discovery} className="h-5 w-5 text-body dark:text-zinc-300" />
-				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-					Discovery
-				</h1>
+				<Icon name={IconName.Discovery} className="h-5 w-5 text-body" />
+				<h1 className="text-xl font-semibold text-heading">Discovery</h1>
 			</header>
 			<div className="flex min-h-0 flex-1">
 				<BackPanelLayout
@@ -435,11 +433,11 @@ export const DiscoveryView = ({ initialQuery = '', handoverId = '' }: DiscoveryV
 							{!loading &&
 								items.length > 0 &&
 								(untaggedSearch ? (
-									<p className="shrink-0 text-xs text-secondary dark:text-zinc-400">
+									<p className="shrink-0 text-xs text-secondary">
 										A search for untagged objects cannot be saved as a rule
 									</p>
 								) : taggableCount === 0 ? (
-									<p className="shrink-0 text-xs text-secondary dark:text-zinc-400">
+									<p className="shrink-0 text-xs text-secondary">
 										These results cannot carry tags, so a rule cannot be saved
 										from them
 									</p>
@@ -461,7 +459,7 @@ export const DiscoveryView = ({ initialQuery = '', handoverId = '' }: DiscoveryV
 											onSelect={setSelectedTab}
 										/>
 									) : countsFailed && !countsLoading ? (
-										<div className="flex items-center gap-2 px-2 pb-2 text-sm text-secondary dark:text-zinc-400">
+										<div className="flex items-center gap-2 px-2 pb-2 text-sm text-secondary">
 											<span>Result counts are unavailable.</span>
 											<Button
 												theme={ButtonTheme.Minimal}
@@ -481,7 +479,7 @@ export const DiscoveryView = ({ initialQuery = '', handoverId = '' }: DiscoveryV
 								</div>
 							)}
 						{showLimitBanner && (
-							<p className="shrink-0 px-6 py-2 text-sm text-secondary dark:text-zinc-400">
+							<p className="shrink-0 px-6 py-2 text-sm text-secondary">
 								Viewing the top {GLOBAL_SEARCH_LIST_LIMIT} results. Try filtering
 								for more accurate results.
 							</p>

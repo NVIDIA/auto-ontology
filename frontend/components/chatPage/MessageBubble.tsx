@@ -43,9 +43,7 @@ const QueryResultsSection = ({
 }: QueryResultsSectionProps) => (
 	<div className={className}>
 		<div className="mb-1 flex items-center justify-between">
-			<span className="text-xs font-medium text-secondary dark:text-zinc-400">
-				Query results
-			</span>
+			<span className="text-xs font-semibold text-secondary">Query results</span>
 			{parsedTable && (
 				<Button
 					theme={ButtonTheme.Secondary}
@@ -59,15 +57,11 @@ const QueryResultsSection = ({
 				</Button>
 			)}
 		</div>
-		{!sqlResponse && <p className="text-xs italic text-secondary dark:text-zinc-500">null</p>}
+		{!sqlResponse && <p className="text-xs italic text-secondary">null</p>}
 		{sqlResponse && singleCell && (
 			<div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
-				<span className="text-xs text-secondary dark:text-zinc-400">
-					{singleCell.column}:{' '}
-				</span>
-				<span className="text-sm font-semibold text-heading dark:text-zinc-100">
-					{singleCell.value}
-				</span>
+				<span className="text-xs text-secondary">{singleCell.column}: </span>
+				<span className="text-sm font-semibold text-heading">{singleCell.value}</span>
 			</div>
 		)}
 		{sqlResponse && parsedTable && !singleCell && <DynamicTable table={parsedTable} />}
@@ -75,10 +69,10 @@ const QueryResultsSection = ({
 			<div className="group relative overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950">
 				<div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
 					{/* Dark in both themes, so the light-theme text tokens do not apply here. */}
-					<span className="text-xs font-medium text-zinc-400">Raw</span>
+					<span className="text-xs font-semibold text-disabled">Raw</span>
 					<CopyButton text={sqlResponse} />
 				</div>
-				<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-zinc-100">
+				<pre className="overflow-x-auto p-3 text-xs text-light">
 					<code>{sqlResponse}</code>
 				</pre>
 			</div>
@@ -121,17 +115,10 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 		<div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
 			<div
 				className={`max-w-[80%] rounded-2xl px-4 py-3 ${wideAssistant ? 'w-full' : ''} ${
-					isUser
-						? 'bg-[#76b900] text-white'
-						: 'bg-zinc-100 text-heading dark:bg-zinc-800 dark:text-zinc-100'
+					isUser ? 'bg-[#76b900] text-light' : 'bg-zinc-100 text-heading dark:bg-zinc-800'
 				}`}
 			>
-				{showText && (
-					<FormattedContent
-						content={message.content}
-						className="text-sm leading-relaxed"
-					/>
-				)}
+				{showText && <FormattedContent content={message.content} className="text-sm" />}
 
 				{showSql && (
 					<SqlBlock
@@ -153,7 +140,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 					/>
 				)}
 
-				<time className="mt-1.5 block text-right text-[10px] opacity-50">
+				<time className="mt-1.5 block text-right text-xs opacity-50">
 					{formatDate(message.timestamp, 'HH:mm')}
 				</time>
 			</div>

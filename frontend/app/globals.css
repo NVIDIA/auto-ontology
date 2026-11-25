@@ -8,17 +8,134 @@
 @import 'tailwindcss';
 
 @theme {
-	--color-foreground: #09090b;
+	--color-foreground: #171b20;
 
 	/*
-	 * Design-system text tones (text-heading / text-body / text-secondary /
-	 * text-disabled). The palette only defines light-mode values, so dark mode
-	 * keeps its per-component `dark:text-zinc-*` overrides.
+	 * Design-system colors (Figma "★ Design System" → variables, "AO-IL Theme"). Light values
+	 * live here; dark values are swapped in below under prefers-color-scheme.
 	 */
-	--color-heading: #252a30;
-	--color-body: #4c5054;
-	--color-secondary: #85878a;
-	--color-disabled: #b3b4b7;
+
+	/* Text (variables: Text/*) */
+	--color-heading: #171b20;
+	--color-body: #2b3036; /* Text/Primary */
+	--color-secondary: #5a5e64;
+	--color-disabled: #8d9096;
+
+	/*
+	 * Typography (Figma "Typography"): SF Pro, which cannot be bundled, so it is the system
+	 * font: SF Pro on Apple devices, the platform UI font elsewhere. Weights 400 / 590 (Semibold)
+	 * / 860 (Heavy); line-height is font-size x 1.5, with the tighter 18 / 20 px lines the
+	 * Body and Semi styles use.
+	 */
+	--font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', system-ui, sans-serif;
+	--font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+	--text-xs: 0.75rem; /* Body 12 / Semi 12 / Italic 12 */
+	--text-xs--line-height: 1.125rem; /* 18 */
+	--text-sm: 0.875rem; /* Body 14 / Semi 14 / Italic 14 */
+	--text-sm--line-height: 1.25rem; /* 20 */
+	--text-base: 1rem; /* Body 16 / Semi 16 */
+	--text-base--line-height: 1.5rem; /* 24 */
+	--text-xl: 1.25rem; /* Title 20 */
+	--text-xl--line-height: 1.25rem; /* 20 */
+	--text-title: 2rem; /* Title 32 / XBold 32 */
+	--text-title--line-height: 2rem;
+
+	--color-light: #ffffff; /* Text/Light – on action fills */
+	--color-link: #3172c6;
+	--color-link-hover: #0a95ff;
+	--color-text-edit: #b9dafe;
+
+	/* Background/* */
+	--color-surface-system: #f5f7f9;
+	--color-surface-notification: #edeff0;
+	--color-surface-default: #ffffff;
+	--color-surface-code: #252a30;
+	--color-surface-text-edit: #f1f8ff;
+	--color-surface-popup: rgb(76 80 84 / 0.75);
+
+	/* Action/* (NVIDIA green) */
+	--color-action: #76b900;
+	--color-action-dark-hover: #56a700;
+	--color-action-selected: #ddedbf;
+	--color-action-light-hover: #f1f8e5;
+	--color-action-fill: #4f8a00;
+	--color-action-fill-hover: #437c00;
+
+	/* Status/* and Status BG/* (status color at 20%) */
+	--color-error: #ea0027;
+	--color-success: #00b9ad;
+	--color-warning: #ffc800;
+	--color-error-bg: rgb(234 0 39 / 0.2);
+	--color-success-bg: rgb(0 185 173 / 0.2);
+	--color-warning-bg: rgb(255 200 0 / 0.2);
+	--color-link-hover-bg: rgb(10 149 255 / 0.2);
+
+	/* Illustration/* */
+	--color-illustration-green: #ddedbf;
+	--color-illustration-green-light: #f1f8e5;
+
+	/* Effect/* (shadows) */
+	--color-shadow-ambient: rgb(24 39 75 / 0.08);
+	--color-shadow-key: rgb(24 39 75 / 0.12);
+	--color-shadow-menu: rgb(80 80 80 / 0.25);
+	--color-shadow-backdrop: rgb(80 80 80 / 0.1);
+
+	/* Objects/* – data-type colors. *-bg = the same color at 20% (Object BG/*). */
+	--color-obj-metric: #f3c65b;
+	--color-obj-fields: #f9b145;
+	--color-obj-table: #f19f7a;
+	--color-obj-project: #da4430;
+	--color-obj-datamodel: #e86680;
+	--color-obj-column: #da308b;
+	--color-obj-analysis: #bb3bdc;
+	--color-obj-dashboard: #8c63e4;
+	--color-obj-temp-tables: #6838d0;
+	--color-obj-site: #214384;
+	--color-obj-visualization: #4c6bba;
+	--color-obj-workbook: #6c91f1;
+	--color-obj-database: #2da9d7;
+	--color-obj-dataflow: #91cde3;
+	--color-obj-term: #47bac5;
+	--color-obj-schema: #7cd49f;
+	--color-obj-published-ds: #7ac297;
+	--color-obj-tag: #a7cb77;
+	--color-obj-query: #289f34;
+	--color-obj-attribute: #21843d;
+
+	/* Object Visual/* – darker variants for text/icons on light backgrounds */
+	--color-objv-metric: #845e03;
+	--color-objv-fields: #915700;
+	--color-objv-table: #b94714;
+	--color-objv-project: #b63321;
+	--color-objv-datamodel: #c51e3f;
+	--color-objv-column: #b62171;
+	--color-objv-analysis: #a123c1;
+	--color-objv-dashboard: #7340df;
+	--color-objv-temp-tables: #6838d0;
+	--color-objv-site: #214384;
+	--color-objv-visualization: #4361ae;
+	--color-objv-workbook: #215aea;
+	--color-objv-database: #1c7292;
+	--color-objv-dataflow: #257593;
+	--color-objv-term: #27737a;
+	--color-objv-schema: #287b49;
+	--color-objv-published-ds: #377750;
+	--color-objv-tag: #58762d;
+	--color-objv-query: #1e7726;
+	--color-objv-attribute: #1d7335;
+
+	/*
+	 * Grey scale. Only the stops with a single, unambiguous design-system role
+	 * are overridden; 300–600 are shared between light borders and dark text, so
+	 * they keep Tailwind's defaults until those usages move to the tokens above.
+	 */
+	--color-zinc-50: #f5f7f9;
+	--color-zinc-100: #f4f4f5; /* Grey 100 – headers */
+	--color-zinc-200: #e9eaea; /* Grey 200 – dividers */
+	--color-zinc-700: #3f3f46; /* Grey 300 – strong (dark) */
+	--color-zinc-800: #2e2e33; /* Grey 200 – dividers (dark) */
+	--color-zinc-900: #222226; /* Default surface (dark) */
+	--color-zinc-950: #121214; /* System surface (dark) */
 
 	--animate-progress-indeterminate: progress-indeterminate 1.4s ease-in-out infinite;
 }
@@ -48,7 +165,87 @@
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--color-foreground: #fafafa;
+		--color-foreground: #ffffff;
+
+		--color-heading: #ffffff;
+		--color-body: #f0f0f3;
+		--color-secondary: #b8b8c1;
+		--color-disabled: #8a8a94;
+		--color-text-edit: #244973;
+		--color-link: #589bf2;
+		--color-link-hover: #80bfff;
+
+		--color-surface-system: #121214;
+		--color-surface-notification: #1b1b1d;
+		--color-surface-default: #222226;
+		--color-surface-code: #0d0d0f;
+		--color-surface-text-edit: rgb(155 189 190 / 0.12);
+		--color-surface-popup: rgb(9 9 11 / 0.8);
+
+		--color-action: #8ad21a;
+		--color-action-dark-hover: #639800;
+		--color-action-selected: rgb(138 210 26 / 0.28);
+		--color-action-light-hover: rgb(138 210 26 / 0.12);
+		--color-action-fill: #8ad21a;
+		--color-action-fill-hover: #a3e33a;
+
+		--color-error: #f12c2c;
+		--color-success: #1ad1c5;
+		--color-warning: #ffd233;
+		--color-error-bg: rgb(241 44 44 / 0.2);
+		--color-success-bg: rgb(26 209 197 / 0.2);
+		--color-warning-bg: rgb(255 210 51 / 0.2);
+		--color-link-hover-bg: rgb(128 191 255 / 0.2);
+
+		--color-illustration-green: #333e24;
+		--color-illustration-green-light: #2a3025;
+
+		--color-shadow-ambient: rgb(0 0 0 / 0.28);
+		--color-shadow-key: rgb(0 0 0 / 0.36);
+		--color-shadow-menu: rgb(0 0 0 / 0.4);
+		--color-shadow-backdrop: rgb(0 0 0 / 0.24);
+
+		--color-obj-metric: #f5ca63;
+		--color-obj-fields: #eb9f59;
+		--color-obj-table: #f4aa90;
+		--color-obj-project: #e55c4c;
+		--color-obj-datamodel: #ee72a0;
+		--color-obj-column: #e34ba0;
+		--color-obj-analysis: #b160e8;
+		--color-obj-dashboard: #9973ed;
+		--color-obj-temp-tables: #7a62e0;
+		--color-obj-site: #4770d1;
+		--color-obj-visualization: #5d8fb3;
+		--color-obj-workbook: #75a4f7;
+		--color-obj-database: #47bce8;
+		--color-obj-dataflow: #a6dceb;
+		--color-obj-term: #5ec4dc;
+		--color-obj-schema: #90dec4;
+		--color-obj-published-ds: #70c1d7;
+		--color-obj-tag: #b6d48b;
+		--color-obj-query: #42ba4e;
+		--color-obj-attribute: #3ca359;
+
+		--color-objv-metric: #f5ca63;
+		--color-objv-fields: #eb9f59;
+		--color-objv-table: #f4aa90;
+		--color-objv-project: #eb8074;
+		--color-objv-datamodel: #f080a9;
+		--color-objv-column: #ea77b7;
+		--color-objv-analysis: #c284ed;
+		--color-objv-dashboard: #ad8ef0;
+		--color-objv-temp-tables: #a291e9;
+		--color-objv-site: #7c99de;
+		--color-objv-visualization: #7ca5c2;
+		--color-objv-workbook: #7aa7f7;
+		--color-objv-database: #47bce8;
+		--color-objv-dataflow: #a6dceb;
+		--color-objv-term: #5ec4dc;
+		--color-objv-schema: #90dec4;
+		--color-objv-published-ds: #70c1d7;
+		--color-objv-tag: #b6d48b;
+		--color-objv-query: #44bd50;
+		--color-objv-attribute: #43b663;
 	}
 }
 
@@ -109,8 +306,8 @@
 	background: transparent;
 	color: inherit;
 	font-size: 0.875rem;
-	font-weight: 500;
-	line-height: 1;
+	font-weight: 600;
+	line-height: 1.25rem;
 	cursor: pointer;
 	transition:
 		background-color 0.15s ease,
@@ -119,7 +316,7 @@
 
 .nv-pagination-arrow-button:hover:not(:disabled),
 .nv-pagination-page-list .nv-tabs-trigger:hover {
-	background-color: #f4f4f5; /* zinc-100 */
+	background-color: var(--color-zinc-100);
 }
 
 .nv-pagination-arrow-button:disabled {
@@ -166,8 +363,8 @@
 }
 
 .nv-pagination-page-list .nv-tabs-trigger[data-state='active'] {
-	background-color: rgba(118, 185, 0, 0.15);
-	color: #76b900; /* NVIDIA green */
+	background-color: var(--color-action-selected);
+	color: var(--color-action);
 }
 
 .nv-pagination-item-range-text {
@@ -176,15 +373,15 @@
 
 @media (prefers-color-scheme: dark) {
 	.nv-pagination-root {
-		color: #a1a1aa; /* zinc-400 */
+		color: var(--color-secondary);
 	}
 	.nv-pagination-arrow-button,
 	.nv-pagination-page-list .nv-tabs-trigger {
-		color: #d4d4d8; /* zinc-300 */
+		color: var(--color-body);
 	}
 	.nv-pagination-arrow-button:hover:not(:disabled),
 	.nv-pagination-page-list .nv-tabs-trigger:hover {
-		background-color: #27272a; /* zinc-800 */
+		background-color: var(--color-zinc-800);
 	}
 }
 
@@ -218,24 +415,22 @@ body {
 
 /* ── ResultChart (agent-authored ```chart fences) ─────────────────────── */
 :root {
-	--color-brand: #76b900;
+	--color-brand: var(--color-action);
 	--result-chart-neutral: #8c8c95;
 	--result-chart-fg: var(--color-heading);
 	--result-chart-muted: var(--color-secondary);
-	--result-chart-border: #e4e4e7;
-	--result-chart-surface: #fafafa;
-	--result-chart-tooltip-bg: #18181b;
-	--result-chart-tooltip-fg: #fafafa;
+	--result-chart-border: var(--color-zinc-200);
+	--result-chart-surface: var(--color-surface-system);
+	--result-chart-tooltip-bg: var(--color-surface-code);
+	--result-chart-tooltip-fg: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--result-chart-fg: #fafafa;
-		--result-chart-muted: #a1a1aa;
-		--result-chart-border: #3f3f46;
-		--result-chart-surface: #18181b;
-		--result-chart-tooltip-bg: #fafafa;
-		--result-chart-tooltip-fg: #18181b;
+		--result-chart-border: var(--color-zinc-700);
+		--result-chart-surface: var(--color-surface-default);
+		--result-chart-tooltip-bg: #ffffff;
+		--result-chart-tooltip-fg: #1b1b1d;
 	}
 }
 
@@ -256,13 +451,13 @@ body {
 }
 
 .result-chart-title {
-	font-size: 0.9375rem;
+	font-size: 1rem;
 	font-weight: 600;
-	line-height: 1.3;
+	line-height: 1.5;
 }
 
 .result-chart-sub {
-	font-size: 0.8125rem;
+	font-size: 0.875rem;
 	color: var(--result-chart-muted);
 }
 
@@ -323,7 +518,7 @@ body {
 .result-chart-catlabel,
 .result-chart-unit {
 	fill: var(--result-chart-muted);
-	font-size: 10px;
+	font-size: 0.75rem;
 }
 
 .result-chart-note {
@@ -338,7 +533,7 @@ body {
 	background: var(--result-chart-tooltip-bg);
 	color: var(--result-chart-tooltip-fg);
 	font-size: 0.75rem;
-	line-height: 1.3;
+	line-height: 1.5;
 	white-space: nowrap;
 	box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
 	transform: translate(-50%, -120%);
@@ -370,9 +565,8 @@ body {
 .result-chart-kpi-k {
 	min-width: 0;
 	width: 100%;
-	font-size: 0.6875rem;
-	font-weight: 500;
-	letter-spacing: 0.02em;
+	font-size: 0.75rem;
+	font-weight: 600;
 	text-transform: uppercase;
 	color: var(--result-chart-muted);
 	overflow-wrap: anywhere;
@@ -384,7 +578,7 @@ body {
 	width: 100%;
 	font-size: 1.25rem;
 	font-weight: 600;
-	line-height: 1.2;
+	line-height: 1;
 	overflow-wrap: anywhere;
 	word-break: break-word;
 }
@@ -403,11 +597,11 @@ body {
 }
 
 .result-chart-kpi.tone-warn .result-chart-kpi-v {
-	color: #e8b500;
+	color: var(--color-warning);
 }
 
 .result-chart-kpi.tone-alarm .result-chart-kpi-v {
-	color: #e5484d;
+	color: var(--color-error);
 }
 
 .result-chart-carousel {
@@ -424,7 +618,7 @@ body {
 }
 
 .result-chart-carousel-title {
-	font-size: 0.9375rem;
+	font-size: 1rem;
 	font-weight: 600;
 }
 
