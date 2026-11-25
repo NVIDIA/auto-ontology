@@ -277,7 +277,7 @@ def test_probes_are_skipped_without_statement_timeout(ctx: ToolContext) -> None:
     assert len(_executed(ctx)) == 1
 
 
-def test_a_rejection_on_the_last_turn_ends_without_an_answer(
+def test_the_last_answer_attempt_is_accepted_without_probes(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
@@ -291,8 +291,11 @@ def test_a_rejection_on_the_last_turn_ends_without_an_answer(
 
     result = loop.run_episode(model, ctx, "q")
 
-    assert result.submission is None
-    assert result.reason == "budget_exhausted"
+    assert result.reason == "submitted"
+    assert result.submission is not None
+    assert result.submission.db_response is not None
+    assert result.submission.db_response.result == ["[]"]
+    assert len(_executed(ctx)) == 1
 
 
 def test_a_final_run_sql_is_told_to_run_again(

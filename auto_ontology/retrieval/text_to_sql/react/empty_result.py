@@ -21,8 +21,8 @@ model that has seen the evidence and submits the same query again is
 believed; a different query is checked on its own. When the
 evidence cannot be gathered, the rejection says so instead of passing the
 empty result as checked. Where queries are charged nothing is probed, since
-the model decides what to spend. A rejection on the episode's last call ends
-it without an answer, as any other rejected submission does.
+the model decides what to spend. The episode's last answer attempt is accepted
+without probing because the model would get no turn to use the evidence.
 """
 
 from __future__ import annotations
@@ -83,9 +83,11 @@ def empty_result_rejection(
 ) -> str | None:
     """Why an empty result from a filtered query is not accepted yet, or ``None``.
 
-    ``None`` for a result with rows, a query without WHERE or HAVING, and a
-    query this already rejected once.
+    ``None`` on the last answer attempt, for a result with rows, a query without
+    WHERE or HAVING, and a query this already rejected once.
     """
+    if ctx.last_answer_attempt:
+        return None
     if (
         statement is None
         or not is_empty_result(db_response)

@@ -70,7 +70,8 @@ class ToolContext:
     refused, so the episode can still submit instead of trying to run one.
 
     ``empty_result_checked`` holds the queries ``submit`` held back once for
-    an empty result to check their filters; the same query is accepted next.
+    an empty result to check their filters; the same query is accepted next,
+    and a query on the last answer attempt is accepted without checking.
 
     ``answer_numbers_checked`` records that ``submit`` already sent an answer
     back for citing numbers its rows don't hold (#252), which it does once per
