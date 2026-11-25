@@ -34,6 +34,7 @@ from typing import Any
 from sqlglot import exp
 
 from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.infra.feature_flags import get_sql_query_timeout_seconds
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import QueryResponse
 from auto_ontology.retrieval.text_to_sql.db_probe import ProbeExecutor
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
@@ -114,8 +115,16 @@ def empty_result_rejection(
             else "no filter compares a column with a value"
         )
         return _unchecked(reason, again)
+    if getattr(connector, "supports_statement_timeout", False) is not True:
+        return _unchecked(
+            "the connector cannot cap probe statements in time",
+            again,
+        )
     executor = ProbeExecutor(
-        connector, max_calls=_MAX_PROBES, max_rows=_SAMPLE_VALUES + 1
+        connector,
+        max_calls=_MAX_PROBES,
+        max_rows=_SAMPLE_VALUES + 1,
+        total_timeout_s=get_sql_query_timeout_seconds(),
     )
     lines = [_probe(executor, f, f.table, dialect) for f in probed if f.table]
     if not any(entry["ok"] for entry in executor.log):

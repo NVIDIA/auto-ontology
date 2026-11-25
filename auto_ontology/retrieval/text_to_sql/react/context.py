@@ -78,7 +78,8 @@ class ToolContext:
     get no turn to answer again, so that check stays out of the way.
 
     ``fanout_refused`` holds the SQL texts ``submit`` refused once for a join
-    that repeats an aggregate's rows; the same text is accepted the second time.
+    that repeats an aggregate's rows; the same text is accepted the second time,
+    and on the last answer attempt the first.
     """
 
     connectors: list[SQLDatabase]

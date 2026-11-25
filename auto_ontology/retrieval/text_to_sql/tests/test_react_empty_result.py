@@ -5,6 +5,8 @@
 import pytest
 from langchain_core.messages import AIMessage
 
+from auto_ontology.retrieval.text_to_sql.db_probe import executor as executor_module
+from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from auto_ontology.retrieval.text_to_sql.react import empty_result, loop
 from auto_ontology.retrieval.text_to_sql.react import run_sql as run_sql_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
@@ -37,6 +39,7 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
     monkeypatch.setattr(empty_result, "catalog_for", lambda *_: catalog)
     context = ToolContext(connectors=[SQLiteConnector(SCRIPT)])
+    context.connectors[0].supports_statement_timeout = True
     for name in CATALOG:
         context.show_table(None, name)
     return context
@@ -110,8 +113,8 @@ def test_range_keys_are_read_whatever_their_case(
     connector = ctx.connectors[0]
     execute = connector.execute
 
-    def upper_case_columns(sql: str):
-        frame = execute(sql)
+    def upper_case_columns(sql: str, timeout_s: float | None = None):
+        frame = execute(sql, timeout_s=timeout_s)
         return frame.rename(columns=str.upper)
 
     monkeypatch.setattr(connector, "execute", upper_case_columns)
@@ -229,10 +232,10 @@ def test_failing_probes_are_reported_as_missing_evidence(
     connector = ctx.connectors[0]
     execute = connector.execute
 
-    def first_query_only(sql: str):
+    def first_query_only(sql: str, timeout_s: float | None = None):
         if connector.executed:
             raise RuntimeError("permission denied")
-        return execute(sql)
+        return execute(sql, timeout_s=timeout_s)
 
     monkeypatch.setattr(connector, "execute", first_query_only)
 
@@ -241,6 +244,37 @@ def test_failing_probes_are_reported_as_missing_evidence(
     assert submission is None
     assert "could not be checked against the stored values" in observation
     assert "permission denied" in observation
+
+
+def test_all_probes_share_one_time_budget(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = ctx.connectors[0]
+    timeouts: list[float | None] = []
+    execute = connector.execute
+
+    def record_timeout(sql: str, timeout_s: float | None = None):
+        timeouts.append(timeout_s)
+        return execute(sql, timeout_s=timeout_s)
+
+    times = iter([100.0, 103.0, 111.0])
+    monkeypatch.setattr(executor_module.time, "monotonic", lambda: next(times, 111.0))
+    monkeypatch.setattr(connector, "execute", record_timeout)
+    executor = ProbeExecutor(connector, total_timeout_s=10)
+
+    assert executor.run("SELECT 1")["ok"] is True
+    assert executor.run("SELECT 2")["error"] == "probe time budget exhausted"
+    assert timeouts == [pytest.approx(7.0)]
+
+
+def test_probes_are_skipped_without_statement_timeout(ctx: ToolContext) -> None:
+    ctx.connectors[0].supports_statement_timeout = False
+
+    observation, submission = loop.submit(ctx, TYPE_MISMATCH)
+
+    assert submission is None
+    assert "connector cannot cap probe statements in time" in observation
+    assert len(_executed(ctx)) == 1
 
 
 def test_a_rejection_on_the_last_turn_ends_without_an_answer(

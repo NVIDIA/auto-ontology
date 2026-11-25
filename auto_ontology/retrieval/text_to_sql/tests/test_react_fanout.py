@@ -665,3 +665,43 @@ def test_episode_fixes_the_query_after_the_refusal(ctx: ToolContext) -> None:
     assert result.submission.sql == PRE_AGGREGATED
     refusal = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
     assert "asn" in refusal
+
+
+def test_the_last_answer_attempt_is_not_refused(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal there would end the episode with no answer at all."""
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
+    monkeypatch.setattr(loop, "retrieve", lambda *_a, **_k: "TABLES")
+    model = ScriptedModel(
+        [
+            AIMessage(content="", tool_calls=[call("retrieve", "1", query="a")]),
+            AIMessage(
+                content="",
+                tool_calls=[call("submit", "2", sql=GROUPED_OWNER_SUM, response="x")],
+            ),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.submission.sql == GROUPED_OWNER_SUM
+
+
+def test_the_draft_submitted_for_the_model_is_not_refused(ctx: ToolContext) -> None:
+    """run_sql only notes a fanout, and the draft has no turn to be resent in."""
+    ctx.can_run_queries = lambda: ctx.sql_runs < 1
+    model = ScriptedModel(
+        [
+            AIMessage(
+                content="", tool_calls=[call("run_sql", "1", sql=GROUPED_OWNER_SUM)]
+            ),
+            AIMessage(content="Stuck."),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted_draft"
+    assert result.submission.sql == GROUPED_OWNER_SUM

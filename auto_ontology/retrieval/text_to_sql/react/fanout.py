@@ -503,9 +503,10 @@ def submit_refusal(
 ) -> str | None:
     """Why ``submit`` refuses *sql*, the first time only; ``None`` to accept it.
 
-    *resubmit* says how to send the same query again, as in ``submit``.
+    *resubmit* says how to send the same query again, as in ``submit``. On the
+    last answer attempt there is no turn to send it again in, so it is accepted.
     """
-    if not fanouts or sql in ctx.fanout_refused:
+    if not fanouts or ctx.last_answer_attempt or sql in ctx.fanout_refused:
         return None
     ctx.fanout_refused.add(sql)
     return (

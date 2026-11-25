@@ -243,6 +243,8 @@ def _submit_draft(
     """Submit the latest drafted query when the budget ended the episode."""
     if not draft:
         return None
+    # The model gets no turn to resend a draft that is sent back.
+    ctx.last_answer_attempt = True
     observation, submission = submit(ctx, draft)
     trajectory.append({"role": "draft_submission", "content": observation})
     if submission is None:
