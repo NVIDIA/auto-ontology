@@ -201,8 +201,8 @@ export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 	};
 
 	return (
-		<nav className="relative h-full w-[60px] shrink-0 border-r border-[#e9eaea] bg-white font-sf dark:border-[#2e2e33] dark:bg-[#222226]">
-			<div className="group/rail absolute inset-y-0 left-0 flex w-full flex-col gap-3 overflow-hidden bg-white px-3 py-4 hover:z-30 hover:w-[148px] hover:shadow-[0_2px_6px_rgba(80,80,80,0.25)] dark:bg-[#222226] dark:hover:shadow-[0_2px_6px_rgba(0,0,0,0.4)]">
+		<nav className="relative h-full w-[60px] shrink-0 border-r border-[#e9eaea] bg-white font-sf dark:border-[#2e2e33] dark:bg-[#18181b]">
+			<div className="group/rail absolute inset-y-0 left-0 flex w-full flex-col gap-3 overflow-hidden bg-white px-3 py-4 hover:z-30 hover:w-[148px] hover:shadow-[0_2px_6px_rgba(80,80,80,0.25)] dark:bg-[#18181b] dark:hover:shadow-[0_2px_6px_rgba(0,0,0,0.4)]">
 				{visibleItems.map(renderItem)}
 			</div>
 		</nav>
