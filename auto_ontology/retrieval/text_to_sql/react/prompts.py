@@ -195,18 +195,30 @@ def submit_reminder(
     *,
     shorten_answer: bool = False,
     resubmit: str = "submit this version",
+    value_anchors: list[dict[str, str]] | None = None,
 ) -> str:
-    """The question, its evidence and the output rules, beside the model's final query.
+    """The question, its evidence, its verified values and the output rules,
+    beside the model's final query.
 
     Sent instead of running the first final query: by then the rules are many
     turns back, and a model that no longer applies them still reads what is
-    in front of it.
+    in front of it. The values come without the guidance the first message
+    gave them, which the model has already read once.
     """
     evidence = (evidence or "").strip()
+    found, absent = _anchor_lines(value_anchors)
+    if absent:
+        found.append(f"- Stored nowhere: {', '.join(sorted(set(absent)))}")
     sections = [
         "Not run yet. Check your query against the question once more.",
         f"QUESTION\n{question.strip()}",
         f"EVIDENCE\n{evidence}" if evidence else "",
+        (
+            "VERIFIED DATABASE VALUES (filter on these columns and spellings)\n"
+            + "\n".join(found)
+            if found
+            else ""
+        ),
         SHORT_ANSWER_RULES if shorten_answer else _REMINDER_RULES,
         f"YOUR QUERY\n{sql}",
         f"If it already does all of this, {resubmit} again unchanged and it will "
@@ -273,16 +285,12 @@ def sql_examples_section(sql_examples: list[dict[str, str]] | None) -> str:
     )
 
 
-def value_anchors_section(value_anchors: list[dict[str, str]] | None) -> str:
-    """Question phrases looked up in this database; "" when none were.
-
-    Each anchor is a fact about the live data: the phrase is stored in this
-    column with this spelling, or (``kind="absent"``) stored nowhere. The schema
-    alone cannot tell a code column from a display column holding the same
-    label, and filtering the wrong one still returns rows.
-    """
+def _anchor_lines(
+    value_anchors: list[dict[str, str]] | None,
+) -> tuple[list[str], list[str]]:
+    """One line per phrase found in the data, and the phrases stored nowhere."""
     if not value_anchors:
-        return ""
+        return [], []
     # Between columns of one table a row count decides nothing while reading as
     # though it did (MailCity can hold a city in more rows than City), so it is
     # dropped where columns of the same table compete.
@@ -324,6 +332,18 @@ def value_anchors_section(value_anchors: list[dict[str, str]] | None) -> str:
         gloss = (anchor.get("description") or "").strip()
         named = f" ({gloss})" if gloss else ""
         found.append(f'- "{phrase}": {table}."{column}"{named} {claim}')
+    return found, absent
+
+
+def value_anchors_section(value_anchors: list[dict[str, str]] | None) -> str:
+    """Question phrases looked up in this database; "" when none were.
+
+    Each anchor is a fact about the live data: the phrase is stored in this
+    column with this spelling, or (``kind="absent"``) stored nowhere. The schema
+    alone cannot tell a code column from a display column holding the same
+    label, and filtering the wrong one still returns rows.
+    """
+    found, absent = _anchor_lines(value_anchors)
     if not found and not absent:
         return ""
 

@@ -124,6 +124,7 @@ def submit(
             sql,
             shorten_answer=ctx.shorten_answer,
             resubmit=resubmit,
+            value_anchors=ctx.value_anchors,
         )
         return reminder, None
     if not _can_run_queries(ctx):
@@ -262,6 +263,7 @@ def run_episode(
     ctx.question = ctx.question or question
     ctx.evidence = (evidence or "").strip()
     ctx.shorten_answer = shorten_answer
+    ctx.value_anchors = list(value_anchors or [])
     system_prompt = prompts.system_prompt_for(
         mode, dialect, information_answers=ctx.information_answers
     )

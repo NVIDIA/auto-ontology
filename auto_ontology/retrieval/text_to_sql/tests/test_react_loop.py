@@ -972,6 +972,44 @@ def test_the_reminder_repeats_the_short_answer_rules_when_asked(
     assert prompts.SHORT_ANSWER_RULES in shown
 
 
+def test_the_reminder_repeats_the_verified_values(
+    ctx: ToolContext, reminder: None
+) -> None:
+    submit = call("submit", "1", sql=FINAL_SQL, response="x")
+    model = ScriptedModel([_reply(submit), _reply({**submit, "id": "2"})])
+    anchors = [
+        {
+            "phrase": "active",
+            "tbl": "customers",
+            "col": "status",
+            "stored_value": "ACTIVE",
+        },
+        {"phrase": "gold", "kind": "absent"},
+    ]
+
+    result = loop.run_episode(model, ctx, "q", value_anchors=anchors)
+
+    shown = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert (
+        "VERIFIED DATABASE VALUES (filter on these columns and spellings)\n"
+        '- "active": customers."status" = \'ACTIVE\'\n'
+        '- Stored nowhere: "gold"'
+    ) in shown
+    assert "Use these when choosing a filter" not in shown
+
+
+def test_without_anchors_the_reminder_has_no_values_section(
+    ctx: ToolContext, reminder: None
+) -> None:
+    submit = call("submit", "1", sql=FINAL_SQL, response="x")
+    model = ScriptedModel([_reply(submit), _reply({**submit, "id": "2"})])
+
+    result = loop.run_episode(model, ctx, "q")
+
+    shown = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert "VERIFIED DATABASE VALUES" not in shown
+
+
 def test_the_reminder_is_sent_once(ctx: ToolContext, reminder: None) -> None:
     fixed = FINAL_SQL.replace("SUM(", "TOTAL(", 1)
     model = ScriptedModel(

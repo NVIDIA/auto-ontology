@@ -63,7 +63,7 @@ class ToolContext:
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
 
-    ``evidence`` and ``shorten_answer`` are what the submit reminder repeats
+    ``evidence``, ``value_anchors`` and ``shorten_answer`` are what the submit reminder repeats
     beside the final query; ``reminded`` records that it was sent, since it is
     sent once an episode.
     """
@@ -96,6 +96,7 @@ class ToolContext:
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
     evidence: str = ""
+    value_anchors: list[dict[str, str]] = field(default_factory=list)
     shorten_answer: bool = False
     reminded: bool = False
 
