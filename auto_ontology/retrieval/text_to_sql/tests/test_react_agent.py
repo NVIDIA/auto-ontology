@@ -94,6 +94,43 @@ def test_calculation_only_turns_information_answers_off(
     assert contexts[0].information_answers is False
 
 
+def test_information_is_the_callers_switch_and_defaults_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contexts = []
+
+    def episode(_llm: object, ctx: object, *a: object, **k: object) -> EpisodeResult:
+        contexts.append(ctx)
+        return _episode(None, "budget_exhausted")
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    # Calculation and information default on, conversation off, and each is
+    # the caller's to set; calculation_only is the older spelling of the first
+    # alone and overrides all three.
+    for state, expected in (
+        ({}, (True, True, False)),
+        ({"information": False}, (True, False, False)),
+        ({"conversation": True}, (True, True, True)),
+        # Conversation alone: the shape a database of transcripts needs.
+        (
+            {"calculation": False, "information": False, "conversation": True},
+            (False, False, True),
+        ),
+        # A grader that scores the SQL cannot read a prose answer, whether or
+        # not the caller also asked for one.
+        ({"conversation": True, "calculation_only": True}, (True, False, False)),
+    ):
+        agent_module.ReactSQLAgent().execute({**_state(), **state})
+        ctx = contexts[-1]
+        got = (
+            ctx.calculation_answers,
+            ctx.information_answers,
+            ctx.conversation_answers,
+        )
+        assert got == expected, state
+
+
 def test_examples_anchors_and_short_answers_reach_the_episode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

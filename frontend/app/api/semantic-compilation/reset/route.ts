@@ -5,9 +5,10 @@
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 
-// semanticCompilationApi.reset — delete every database's compiled semantic
-// layer. Destructive, so it sits behind `manage` rather than the `read` tier
-// that may view the toggle.
+// semanticCompilationApi.reset — delete the compiled semantic layer. Scoped to
+// one database when `database_name` is given, every database otherwise.
+// Destructive, so it sits behind `manage` rather than the `read` tier that
+// may view the toggle.
 export const POST = withPermission({ semanticCompilation: ['manage'] })((req) =>
 	proxyToBackend(req),
 );

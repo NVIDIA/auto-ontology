@@ -134,6 +134,18 @@ ENTITIES: dict[str, EntitySpec] = {
         columns=_cols(s.custom_analysis),
         natural_key=("name",),
     ),
+    # A turn has no name to be unique by, so its natural key is its position:
+    # the (conversation, turn) pair within the database. That is what makes
+    # re-ingesting a transcript converge on the same rows instead of appending
+    # a second copy of every exchange.
+    Labels.CONVERSATION: EntitySpec(
+        label=Labels.CONVERSATION,
+        table=s.conversation,
+        columns=_cols(s.conversation),
+        parent_column="database_id",
+        parent_label=Labels.DB,
+        natural_key=("parent", "conversation_id", "turn_index"),
+    ),
     # The semantic write path routes through here too: creating a SqlAttribute
     # persists its statement with `add_query`, exactly as an ingest does, so
     # the attribute lands with the same table and column links -- which is what

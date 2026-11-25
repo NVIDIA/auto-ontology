@@ -36,6 +36,7 @@ In [`frontend/CLAUDE.md`](./frontend/CLAUDE.md), loaded when working under `fron
 - **API prefix**: All routes under `/api/`. Routes live in `auto_ontology/server/datasources/router.py`, orchestration in `auto_ontology/server/datasources/service.py`.
 - **Type hints**: Required on all function signatures.
 - **Exception handlers**: Use plain `def` (not `async def`) for `@app.exception_handler` functions. They perform no async I/O, so synchronous handlers are preferred.
+- **Blocking proxy I/O**: The semantic reset route uses plain `def` so FastAPI dispatches its synchronous ingestion-service HTTP request to a worker thread, not the event loop. Keep that dispatch when modifying the route; scoped and unscoped resets still return the same 202 response.
 
 ## Git
 

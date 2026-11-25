@@ -154,3 +154,79 @@ def test_sampling_skip_is_logged_without_connector(
     messages = [record.getMessage() for record in caplog.records]
     assert "[orders] Skipping value sampling — no live connector for 'mydb'" in messages
     assert not any("Sampling column values" in m for m in messages)
+
+
+def test_sql_attribute_extraction_is_off_by_default(
+    _stubbed: None, monkeypatch: MonkeyPatch
+) -> None:
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        visit_enter, "_extract_sql_attrs_for_terms", lambda *a, **k: calls.append(a)
+    )
+
+    result = visit_enter.process_table(
+        TABLE, CTX, domain_summary=None, database_name="mydb"
+    )
+
+    assert calls == []
+    assert result.sql_attr_names == []
+
+
+def test_sql_attribute_extraction_runs_last_when_enabled(
+    _stubbed: None, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(
+        visit_enter, "_extract_sql_attrs_for_terms", lambda *_a, **_k: ["Margin"]
+    )
+    embedder = SimpleNamespace(embed_term=lambda *_a: None)
+
+    with caplog.at_level(logging.INFO, logger="auto_ontology.semantic.visit_enter"):
+        result = visit_enter.process_table(
+            TABLE,
+            CTX,
+            domain_summary=None,
+            embedder=embedder,
+            database_name="mydb",
+            extract_table_sql_attributes=True,
+        )
+
+    starts = [m for m in (r.getMessage() for r in caplog.records) if m.endswith("…")]
+    assert starts[-1] == "[orders] Extracting SQL attributes…"
+    assert result.sql_attr_names == ["Margin"]
+
+
+def test_sql_attribute_extraction_leaves_out_pii_columns(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    seen: list[list[str]] = []
+
+    def _extract(_table: Any, columns: list[dict], *_a: Any) -> list[str]:
+        seen.append([c["name"] for c in columns])
+        return []
+
+    monkeypatch.setattr(visit_enter, "_extract_sql_attributes_for_table", _extract)
+    ctx = {
+        "columns": [{"name": "price"}, {"name": "cost"}, {"name": "email"}],
+        "fks": [],
+    }
+    attrs = {
+        "Order": [
+            {"source_column": "price"},
+            {"source_column": "cost"},
+            {"source_column": "email"},
+        ],
+        "Customer": [{"source_column": "email"}, {"source_column": "cost"}],
+    }
+
+    visit_enter._extract_sql_attrs_for_terms(
+        TABLE,
+        ctx,
+        [{"id": "t1", "name": "Order"}, {"id": "t2", "name": "Customer"}],
+        attrs,
+        "mydb",
+        pii_columns={"email"},
+        profiling={"price": {"sample_values": [10, 20]}},
+    )
+
+    # Customer is left with one column once email is dropped, so it is skipped.
+    assert seen == [["price", "cost"]]

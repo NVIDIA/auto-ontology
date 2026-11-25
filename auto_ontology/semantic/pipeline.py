@@ -19,6 +19,7 @@ from auto_ontology.dal.datasources import (
 from auto_ontology.infra.feature_flags import (
     is_distinct_value_probing_enabled,
     is_semantic_fk_db_query_prevented,
+    is_table_sql_attribute_extraction_enabled,
 )
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
@@ -164,6 +165,12 @@ def compile_semantic_layer(
             "PREVENT_SEMANTIC_FK_DB_QUERIES is set — skipping the key-value "
             "probes semantic FK resolution would compare"
         )
+    is_extract_table_sql_attributes = is_table_sql_attribute_extraction_enabled()
+    if is_extract_table_sql_attributes:
+        logger.info(
+            "ENABLE_TABLE_SQL_ATTRIBUTES is set — proposing SQL attributes from "
+            "each term's columns"
+        )
 
     # Set the first time a table is dropped, so the "we are cancelling" line is
     # logged once rather than once per table.
@@ -211,6 +218,7 @@ def compile_semantic_layer(
                 database_name=database_name,
                 probe_distinct_values=is_probe_distinct_values,
                 probe_key_values=is_probe_key_values,
+                extract_table_sql_attributes=is_extract_table_sql_attributes,
                 commit_slot=commit_slot,
             )
         except Exception:
@@ -233,9 +241,10 @@ def compile_semantic_layer(
             if result is not None:
                 count += 1
                 logger.debug(
-                    "  terms=%s attrs=%s",
+                    "  terms=%s attrs=%s sql_attrs=%s",
                     result.term_names,
                     result.attr_names,
+                    result.sql_attr_names,
                 )
 
     if is_cancelled():

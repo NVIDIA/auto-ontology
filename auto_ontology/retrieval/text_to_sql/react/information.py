@@ -33,7 +33,7 @@ from auto_ontology.dal.terms import (
 )
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
-from auto_ontology.retrieval.text_to_sql.react.retrieve import (
+from auto_ontology.retrieval.text_to_sql.react.catalog import (
     _definition_block,
     _meaning_hits,
     _merge_hits,
@@ -42,8 +42,6 @@ from auto_ontology.retrieval.text_to_sql.react.retrieve import (
     resolve_kinds,
 )
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_TERM
-
-PURPOSES = ("sql", "information")
 
 _DESCRIPTION_CHARS = 200
 _SQL_CHARS = 600
@@ -64,14 +62,20 @@ def _cut(block: str, budget: int) -> str:
     return kept.rstrip() + "…"
 
 
-def _fit(blocks: list[str], noun: str, hint: str, sep: str) -> str:
+def _fit(
+    blocks: list[str], noun: str, hint: str, sep: str, limit: int | None = None
+) -> str:
     """*blocks* up to the observation limit, with a count of the rest.
 
     The first block is always shown, cut to the room there is when it alone is
     too long. Narrowing the query cannot shrink a block that matches again, so
     dropping it would leave the model with nothing it could act on.
+
+    *limit* overrides the general ceiling, for a caller whose blocks are not
+    catalog entries -- a conversation turn runs an order of magnitude longer
+    than a table, and has its own.
     """
-    limit = config.max_observation_chars()
+    limit = config.max_observation_chars() if limit is None else limit
     budget = max(limit - 120, 1)
     shown: list[str] = []
     used = 0
