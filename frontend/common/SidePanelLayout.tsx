@@ -183,7 +183,8 @@ export const SidePanelLayout = ({
 	const expandedWidth = width == null ? expandedWidthClass : '';
 
 	return (
-		<div className={`flex h-full w-full bg-white dark:bg-zinc-950 ${className}`}>
+		// The page behind the panel takes the design's System background.
+		<div className={`flex h-full w-full bg-white dark:bg-[#121214] ${className}`}>
 			<aside
 				ref={asideRef}
 				// The dragged width is a runtime value, so it cannot be a class.
