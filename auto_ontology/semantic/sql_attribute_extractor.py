@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
+import numbers
 import re
 from typing import Any
 
+import sqlglot
 from langchain_core.messages import HumanMessage, SystemMessage
+from sqlglot import exp
 
 from auto_ontology.semantic.models import (
     SqlAttributeExtractionResult,
@@ -161,37 +164,68 @@ _SINGLE_COLUMN_ALIAS = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-_WHERE_WITH_LITERAL = re.compile(
-    r"\bWHERE\b.+?(?:=\s*'|IN\s*\()",
-    re.IGNORECASE | re.DOTALL,
-)
-
-_QUOTED_LITERAL = re.compile(r"'([^']*)'")
+_WHERE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
 
-def _collect_sample_values(columns: list[dict[str, Any]]) -> set[str]:
-    """Return a lowercased flat set of all sample values across the given columns."""
-    values: set[str] = set()
-    for col in columns:
-        values.update(str(v).lower() for v in _sample_list(col))
-    return values
+def _is_number(value: Any) -> bool:
+    return isinstance(value, numbers.Number) and not isinstance(value, bool)
+
+
+def _literal_in_samples(literal: exp.Literal, samples: list[Any]) -> bool:
+    """Exact match: strings by case-sensitive text, numbers by numeric value."""
+    if literal.is_string:
+        return any(isinstance(s, str) and s == literal.this for s in samples)
+    try:
+        value = float(literal.this)
+    except ValueError:
+        return False
+    return any(_is_number(s) and float(s) == value for s in samples)
+
+
+def _compared_column(
+    predicate: exp.Expression,
+) -> tuple[exp.Column, list[exp.Literal]] | None:
+    """The bare column and the literals an ``=``, ``<>`` or ``IN`` compares it with."""
+    if isinstance(predicate, exp.In):
+        column, others = predicate.this, predicate.expressions
+    elif isinstance(predicate.this, exp.Column):
+        column, others = predicate.this, [predicate.expression]
+    else:
+        column, others = predicate.expression, [predicate.this]
+    if not isinstance(column, exp.Column):
+        return None
+    return column, [other for other in others if isinstance(other, exp.Literal)]
 
 
 def _where_literals_valid(expression: str, columns: list[dict[str, Any]]) -> bool:
-    """Return False if the expression has a WHERE literal not backed by sample values."""
-    if not _WHERE_WITH_LITERAL.search(expression):
+    """Every WHERE literal compared with a column must be one of *its* samples.
+
+    String literals that cannot be tied to a known column by ``=``, ``<>`` or
+    ``IN`` fail too: the prompt only allows filtering on sampled values.
+    """
+    try:
+        where = sqlglot.parse_one(expression).args.get("where")
+    except sqlglot.errors.ParseError:
+        return not _WHERE.search(expression)
+    if where is None:
         return True
 
-    all_samples = _collect_sample_values(columns)
-    if not all_samples:
-        return False
+    samples_by_column = {col["name"].lower(): _sample_list(col) for col in columns}
+    checked: set[int] = set()
+    for predicate in where.find_all(exp.EQ, exp.NEQ, exp.In):
+        pair = _compared_column(predicate)
+        if pair is None:
+            continue
+        column, literals = pair
+        samples = samples_by_column.get(column.name.lower())
+        for literal in literals:
+            if not samples or not _literal_in_samples(literal, samples):
+                return False
+            checked.add(id(literal))
 
-    literals = _QUOTED_LITERAL.findall(expression)
-    if not literals:
-        # Numeric comparisons cannot be checked without the schema.
-        return True
-
-    return all(lit.lower() in all_samples for lit in literals)
+    return all(
+        id(lit) in checked for lit in where.find_all(exp.Literal) if lit.is_string
+    )
 
 
 def _uses_length_arithmetic(expression: str) -> bool:
