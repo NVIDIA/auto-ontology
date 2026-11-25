@@ -49,6 +49,19 @@ def test_history_excludes_results_charts_and_errors() -> None:
     assert history[0].sql_code == "SELECT SUM(revenue) FROM sales"
 
 
+def test_history_keeps_an_answer_that_only_starts_like_an_error() -> None:
+    rows = [
+        _row("user", "Which agent missed the target?"),
+        _row("assistant", "Agent failed to meet its target in two regions."),
+    ]
+
+    history = _rows_to_history(rows)
+
+    assert [turn.response for turn in history] == [
+        "Agent failed to meet its target in two regions."
+    ]
+
+
 def test_history_keeps_only_latest_five_completed_turns() -> None:
     rows = []
     for index in range(7):
