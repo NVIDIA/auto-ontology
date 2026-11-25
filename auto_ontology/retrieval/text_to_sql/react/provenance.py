@@ -76,52 +76,69 @@ def _parse(sql: str | None, dialect: str | None) -> list[exp.Expression]:
         return []
 
 
-def _enclosing_ctes(node: exp.Expression) -> list[str]:
-    """Names of every CTE *node* sits inside, innermost first."""
-    names: list[str] = []
+def _enclosing_ctes(node: exp.Expression) -> list[exp.CTE]:
+    """Every CTE definition *node* sits inside, innermost first."""
+    found: list[exp.CTE] = []
     parent = node.parent
     while parent is not None:
         if isinstance(parent, exp.CTE):
-            names.append(parent.alias_or_name.lower())
+            found.append(parent)
         parent = parent.parent
-    return names
+    return found
 
 
-def _live_ctes(root: exp.Expression) -> set[str]:
-    """The CTEs that contribute to the answer of *root*.
+def _cte_read_by(table: exp.Table) -> exp.CTE | None:
+    """The CTE definition *table* names, or ``None`` for a physical table.
 
-    A CTE is live when the answer query reads it, or a live CTE does. A CTE that
-    nothing live reads, or only another unused CTE does, does not contribute to the
-    answer, so what it filters or reads says nothing about the answer.
+    The nearest enclosing WITH that defines the name, so two CTEs that share a
+    name in different scopes stay two definitions.
     """
-    defined = {c.alias_or_name.lower() for c in root.find_all(exp.CTE)}
-    live: set[str] = set()
+    name = table.name.lower()
+    node = table.parent
+    while node is not None:
+        clause = node.args.get("with_") or node.args.get("with")
+        if clause is not None:
+            for cte in clause.expressions:
+                if cte.alias_or_name.lower() == name:
+                    return cte
+        node = node.parent
+    return None
+
+
+def _live_ctes(root: exp.Expression) -> set[int]:
+    """The CTE definitions that contribute to the answer of *root*, by ``id``.
+
+    A definition is live when the answer query reads it, or a live CTE does. One
+    that nothing live reads, or only another unused CTE does, does not contribute
+    to the answer, so what it filters or reads says nothing about the answer.
+    """
+    live: set[int] = set()
     while True:
-        read = {
-            t.name.lower()
-            for t in root.find_all(exp.Table)
-            if t.name and all(n in live for n in _enclosing_ctes(t))
-        }
-        new = (read & defined) - live
+        new = {
+            id(cte)
+            for table in root.find_all(exp.Table)
+            if table.name
+            and all(id(c) in live for c in _enclosing_ctes(table))
+            and (cte := _cte_read_by(table)) is not None
+        } - live
         if not new:
             return live
         live |= new
 
 
-def _is_live(node: exp.Expression, live: set[str]) -> bool:
-    return all(name in live for name in _enclosing_ctes(node))
+def _is_live(node: exp.Expression, live: set[int]) -> bool:
+    return all(id(cte) in live for cte in _enclosing_ctes(node))
 
 
 def _tables(sql: str | None, dialect: str | None) -> set[str]:
     """Physical tables the answer reads, leaving out CTE names and unused CTEs."""
     names: set[str] = set()
     for statement in _parse(sql, dialect):
-        ctes = {c.alias_or_name.lower() for c in statement.find_all(exp.CTE)}
         live = _live_ctes(statement)
         names |= {
             t.name.lower()
             for t in statement.find_all(exp.Table)
-            if t.name and t.name.lower() not in ctes and _is_live(t, live)
+            if t.name and _cte_read_by(t) is None and _is_live(t, live)
         }
     return names
 
@@ -134,8 +151,9 @@ def _sources(select: exp.Expression) -> dict[str, str]:
     out: dict[str, str] = {}
     for table in select.find_all(exp.Table):
         if table.name and table.find_ancestor(exp.Select) is select:
+            # Once aliased, the table's own name is not a qualifier: another
+            # table may carry it as its alias.
             out[table.alias_or_name.lower()] = table.name.lower()
-            out[table.name.lower()] = table.name.lower()
     for subquery in select.find_all(exp.Subquery):
         if subquery.alias and subquery.find_ancestor(exp.Select) is select:
             out[subquery.alias.lower()] = subquery.alias.lower()
@@ -198,8 +216,8 @@ def _filters(sql: str | None, dialect: str | None) -> set[str]:
     """
     out: set[str] = set()
     for statement in _parse(sql, dialect):
-        live = _live_ctes(statement)
         owned = _with_owned_columns(statement)
+        live = _live_ctes(owned)
         for clause in owned.find_all(exp.Where, exp.Having):
             if not _is_live(clause, live):
                 continue

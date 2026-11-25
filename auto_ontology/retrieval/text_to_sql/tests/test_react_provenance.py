@@ -181,3 +181,36 @@ def test_a_cte_only_an_unused_cte_reads_did_not_run_the_saved_sql() -> None:
     assert _stage_of(saved, chained) == "retrieved"
     assert _stage_of(saved, direct) == "executed"
     assert _stage_of(saved, through) == "executed"
+
+
+def test_two_ctes_with_one_name_are_judged_one_at_a_time() -> None:
+    saved = "SELECT SUM(quantity) AS total FROM order_lines"
+    # The outer ``b`` is read; the ``b`` inside the derived table never is.
+    submitted = (
+        "WITH b AS (SELECT 1 AS total) SELECT b.total FROM b CROSS JOIN ("
+        f"WITH b AS ({saved}) SELECT 2 AS other) AS d"
+    )
+
+    assert _stage_of(saved, submitted) == "retrieved"
+
+
+def test_a_table_never_read_by_a_live_scope_adds_no_overlap_or_filter() -> None:
+    saved = "SELECT COUNT(*) FROM order_lines WHERE quantity >= 20"
+    submitted = (
+        "WITH b AS (SELECT 1 AS n) SELECT b.n FROM b CROSS JOIN ("
+        "WITH b AS (SELECT id FROM order_lines WHERE quantity >= 20) "
+        "SELECT 2 AS other) AS d"
+    )
+
+    assert _stage_of(saved, submitted) == "retrieved"
+
+
+def test_an_alias_is_not_overwritten_by_another_tables_own_name() -> None:
+    saved = "SELECT COUNT(*) FROM orders WHERE status = 'open'"
+    submitted = (
+        "SELECT COUNT(*) FROM orders AS customers "
+        "JOIN customers AS c ON c.id = customers.customer_id "
+        "WHERE customers.status = 'open'"
+    )
+
+    assert _stage_of(saved, submitted) == "reference"
