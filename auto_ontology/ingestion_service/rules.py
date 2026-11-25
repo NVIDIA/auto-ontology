@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from auto_ontology.ingestion_service.pii import run_pii_withholding
 from auto_ontology.server.rules.service import reapply_rules
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ def replay_rules(label: str) -> None:
         reapply_rules()
     except Exception:
         logger.exception("%s: could not re-apply tagging rules", label)
+    # A rule can put PII on a column; its values go the moment it does.
+    run_pii_withholding(label)
 
 
 async def replay_rules_in_thread(label: str) -> None:

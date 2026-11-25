@@ -639,6 +639,179 @@ def test_distinct_probe_is_gated_but_the_row_sample_is_not(
     assert sum("SELECT DISTINCT" in s for s in on_sql) == 1
 
 
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_pii_columns_are_left_out_of_the_row_sample(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame(
+        {"status": ["open", "open", "closed"], "Order Id": [1, 2, 3]}
+    )
+    columns = [
+        {"name": "email", "data_type": "text"},
+        {"name": "status", "data_type": "text"},
+        {"name": "Order Id", "data_type": "integer"},
+    ]
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+
+    result = calculate_columns_profiling(
+        table, columns, connector, probe_distinct_values=False, pii_columns={"email"}
+    )
+
+    sql = connector.execute.call_args_list[0][0][0]
+    assert sql == 'SELECT "status", "Order Id" FROM "public"."orders" LIMIT 1000'
+    assert set(result) == {"status", "Order Id"}
+    assert "email" not in mock_store_samples.call_args[0][1]
+
+
+def test_a_table_of_only_pii_columns_is_not_sampled() -> None:
+    connector = _mock_connector()
+    columns = [{"name": "email", "data_type": "text"}]
+    table = {"id": "t1", "name": "users", "schema_name": "public"}
+
+    assert (
+        calculate_columns_profiling(table, columns, connector, pii_columns={"email"})
+        == {}
+    )
+    connector.execute.assert_not_called()
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+@patch("auto_ontology.semantic.visit_enter.pii_tagged_column_ids")
+def test_profiling_looks_up_pii_tags_when_not_given(
+    mock_pii_ids: MagicMock,
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    mock_pii_ids.return_value = {"c-email"}
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame({"status": ["open"]})
+    columns = [
+        {"id": "c-email", "name": "email", "data_type": "text"},
+        {"id": "c-status", "name": "status", "data_type": "text"},
+    ]
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+
+    calculate_columns_profiling(table, columns, connector, probe_distinct_values=False)
+
+    mock_pii_ids.assert_called_once_with(["c-email", "c-status"])
+    assert connector.execute.call_args_list[0][0][0].startswith('SELECT "status" FROM')
+
+
+@patch("auto_ontology.semantic.visit_enter._store_key_distinct_values")
+@patch("auto_ontology.semantic.visit_enter.clear_column_values")
+@patch("auto_ontology.semantic.visit_enter.pii_tagged_column_ids")
+@patch("auto_ontology.semantic.visit_enter.calculate_columns_profiling")
+@patch("auto_ontology.semantic.visit_enter._resolve_connector")
+@patch("auto_ontology.semantic.visit_enter.merge_column_attribute")
+@patch("auto_ontology.semantic.visit_enter.upsert_table_term")
+@patch("auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("auto_ontology.semantic.visit_enter.extract_term")
+def test_process_table_withholds_pii_columns(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_upsert_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+    mock_resolve: MagicMock,
+    mock_profiling: MagicMock,
+    mock_pii_ids: MagicMock,
+    mock_clear: MagicMock,
+    mock_key_probe: MagicMock,
+) -> None:
+    from auto_ontology.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_term.return_value = TableTermsResult(terms=[])
+    mock_profiling.return_value = {}
+    mock_pii_ids.return_value = {"c-email"}
+    seen_by_fk_prompt: list[object] = []
+
+    def _suggest(table: object, ctx: dict, samples: object) -> PotentialFkResult:
+        seen_by_fk_prompt.extend(c.get("sample_values") for c in ctx["columns"])
+        return PotentialFkResult(pk_column_names=["email", "account_id"])
+
+    mock_fk_suggest.side_effect = _suggest
+
+    table = {"id": "t1", "name": "users", "description": "", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {
+                "id": "c-email",
+                "name": "email",
+                "data_type": "text",
+                "sample_values": '["a@b.c"]',
+            },
+            {
+                "id": "c-acct",
+                "name": "account_id",
+                "data_type": "integer",
+                "sample_values": "[1, 2]",
+            },
+        ],
+        "fks": [],
+    }
+
+    process_table(table, ctx, domain_summary=None, database_name="db")
+
+    assert mock_profiling.call_args.kwargs["pii_columns"] == {"email"}
+    mock_clear.assert_called_once_with("t1", ["email"])
+    assert seen_by_fk_prompt == [None, "[1, 2]"]
+    assert mock_key_probe.call_args[0][2] == {"account_id"}
+
+
+@patch("auto_ontology.semantic.visit_enter._store_key_distinct_values")
+@patch("auto_ontology.semantic.visit_enter.clear_column_values")
+@patch("auto_ontology.semantic.visit_enter.pii_tagged_column_ids")
+@patch("auto_ontology.semantic.visit_enter.calculate_columns_profiling")
+@patch("auto_ontology.semantic.visit_enter._resolve_connector")
+@patch("auto_ontology.semantic.visit_enter.merge_column_attribute")
+@patch("auto_ontology.semantic.visit_enter.upsert_table_term")
+@patch("auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("auto_ontology.semantic.visit_enter.extract_term")
+def test_process_table_samples_nothing_when_pii_tags_are_unreadable(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_upsert_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+    mock_resolve: MagicMock,
+    mock_profiling: MagicMock,
+    mock_pii_ids: MagicMock,
+    mock_clear: MagicMock,
+    mock_key_probe: MagicMock,
+) -> None:
+    from auto_ontology.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_term.return_value = TableTermsResult(terms=[])
+    mock_fk_suggest.return_value = PotentialFkResult(pk_column_names=["account_id"])
+    mock_pii_ids.side_effect = RuntimeError("store down")
+
+    table = {"id": "t1", "name": "users", "description": "", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {
+                "id": "c-acct",
+                "name": "account_id",
+                "data_type": "integer",
+                "sample_values": "[1, 2]",
+            },
+        ],
+        "fks": [],
+    }
+
+    process_table(table, ctx, domain_summary=None, database_name="db")
+
+    mock_profiling.assert_not_called()
+    mock_key_probe.assert_not_called()
+    assert ctx["columns"][0]["sample_values"] is None
+    mock_clear.assert_called_once_with("t1", ["account_id"])
+
+
 @patch("auto_ontology.semantic.visit_enter.get_connectors")
 @patch("auto_ontology.semantic.visit_enter.merge_column_attribute")
 @patch("auto_ontology.semantic.visit_enter.upsert_table_term")
@@ -1099,6 +1272,18 @@ def test_key_value_probe_reads_the_lowest_distinct_values() -> None:
         'SELECT DISTINCT "Order Id" FROM "raw"."orders" WHERE "Order Id" IS NOT NULL '
         'ORDER BY "Order Id" LIMIT 20'
     )
+
+
+@pytest.mark.parametrize("empty", [pd.DataFrame(), pd.DataFrame({"id": []})])
+def test_key_value_probe_of_a_column_with_no_values_returns_none_of_them(
+    empty: pd.DataFrame,
+) -> None:
+    connector = _mock_connector()
+    connector.supports_statement_timeout = False
+    connector.execute.return_value = empty
+
+    assert probe_ascending_distinct_values(connector, "raw", "orders", "id") == []
+    assert not _sampling_breaker.is_open(connector)
 
 
 def test_key_value_probe_failure_counts_toward_the_breaker() -> None:

@@ -15,6 +15,7 @@ from auto_ontology.catalog.table_filter import TableFilter, from_connection
 from auto_ontology.connectors.base import SQLDatabase
 
 from auto_ontology.connectors.connection_string_factory import build_connection_string
+from auto_ontology.connectors.bigquery import BigQueryDatabase
 from auto_ontology.connectors.clickhouse import ClickHouseDatabase
 from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
@@ -57,6 +58,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "mongodb": MongoDBDatabase,
     "sqlite": SQLiteDatabase,
     "trino": TrinoDatabase,
+    "bigquery": BigQueryDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
@@ -95,12 +97,15 @@ def _redact(connection_string: str) -> str:
 
     An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
     and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
-    on every connector failure. A MongoDB ``tls_ca_data`` bundle is collapsed
-    for the same reason, and the MongoDB options that carry secrets are masked.
+    on every connector failure. A BigQuery service-account key travels in the
+    query string rather than the password slot, so it is masked separately.
+    A MongoDB ``tls_ca_data`` bundle is collapsed for the same reason as the
+    truststore, and the MongoDB options that carry secrets are masked.
     """
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )
+    connection_string = re.sub(r"(credentials=)[^&]+", r"\1***", connection_string)
     connection_string = re.sub(
         r"(tls_ca_data=)[^&;]+", r"\1<certificates>", connection_string
     )
@@ -184,7 +189,8 @@ def create_connector(
 
     *schemas* is an optional ingestion allowlist. It is only honoured by
     connectors that support schema filtering (currently Databricks, Snowflake,
-    Kyuubi, and Trino); for others it is ignored so their behaviour is unchanged.
+    Kyuubi, Trino, and BigQuery); for others it is ignored so their behaviour is
+    unchanged.
 
     *table_filter* is the connection's regex allow/deny pair. Unlike *schemas*
     it applies to every connector, because it is enforced centrally in
@@ -212,6 +218,7 @@ def create_connector(
             SnowflakeDatabase,
             KyuubiDatabase,
             TrinoDatabase,
+            BigQueryDatabase,
         ):
             connector = connector_class(connection_string, schemas=schemas)
         else:
@@ -315,7 +322,7 @@ def get_connectors() -> list[SQLDatabase]:
 
         # Each spec is (connection_string, schema_allowlist, table_filter). The
         # schema filter is honoured only during ingestion introspection
-        # (Databricks, Snowflake, Kyuubi, and Trino); it is inert for retrieval,
+        # (Databricks, Snowflake, Kyuubi, Trino, and BigQuery); it is inert for retrieval,
         # which executes SQL rather than introspecting. The table filter is
         # likewise ingestion-only, but applies to every connector.
         try:

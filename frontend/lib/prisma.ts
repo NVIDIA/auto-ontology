@@ -27,7 +27,9 @@ function buildConnectionString(): string {
 		);
 	}
 
-	return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+	// Percent-encode the credentials: a password with `@`, `:`, `/` or a space
+	// otherwise splits the URL (the driver reads part of it as the host).
+	return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
 
 function createPrismaClient(): PrismaClient {
@@ -37,9 +39,9 @@ function createPrismaClient(): PrismaClient {
 
 /** Lazy singleton — only connects when first accessed at runtime, not at import/build time. */
 export function getPrisma(): PrismaClient {
-	const client = globalForPrisma.prisma ?? createPrismaClient();
-	if (process.env.NODE_ENV !== 'production') {
-		globalForPrisma.prisma = client;
-	}
+	const existing = globalForPrisma.prisma;
+	if (existing) return existing;
+	const client = createPrismaClient();
+	globalForPrisma.prisma = client;
 	return client;
 }
