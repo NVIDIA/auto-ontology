@@ -49,6 +49,7 @@ The URL scheme selects the connector:
 | Snowflake     | `snowflake://`              | yes           |
 | ClickHouse    | `clickhouse://`             | yes           |
 | Trino         | `trino://`                  | yes           |
+| BigQuery      | `bigquery://`               | yes           |
 | Apache Kyuubi | `kyuubi://`                 | yes           |
 | HeavyDB       | `heavydb://`                | yes           |
 | DuckDB        | `duckdb://`                 | no            |
@@ -56,6 +57,50 @@ The URL scheme selects the connector:
 
 The registry lives in
 [`auto_ontology/connectors/registry.py`](../auto_ontology/connectors/registry.py).
+
+### BigQuery
+
+A BigQuery connection binds one project, and its datasets are the schemas.
+There is no UI form for it yet. A connection saved through
+`POST /api/connections` (`type: bigquery`) must carry a service-account JSON
+key in `credentials_json`; the account needs **BigQuery Data Viewer** and
+**BigQuery Job User** on the project. A `CONNECTION_STRINGS` URL can instead
+point at a key file, or omit credentials and run as the pod's Application
+Default Credentials:
+
+```text
+bigquery://my-project?location=US&credentials=<URL-safe base64 JSON key>
+bigquery://my-project?schema=analytics&credentials_file=/secrets/sa.json
+```
+
+To query datasets that live in another project (public datasets such as
+`bigquery-public-data`, say), give the connection a name in the path and list
+its datasets. Jobs are billed to the host project, and `dataset.table` in
+generated SQL resolves to the dataset's own project. Only a `CONNECTION_STRINGS`
+URL can do this: a connection saved through the API has no `dataset=`
+parameters and reads only its own project's datasets.
+
+```text
+bigquery://my-billing-project/austin?dataset=bigquery-public-data.austin_311&dataset=bigquery-public-data.austin_crime
+```
+
+Every query job is capped at 40 GiB billed (`maximum_bytes_billed=` overrides
+it); a profiling query over the cap fails without being billed, and that column
+is left unprofiled. Query history is read from `JOBS_BY_PROJECT` only when
+`location` is set, and needs `bigquery.jobs.listAll`.
+
+#### Rolling back to a release without BigQuery
+
+A release without the BigQuery connector cannot load a `bigquery` connection,
+and one connection it cannot load leaves it with none at all. Before
+downgrading:
+
+1. Delete every BigQuery connection saved through the API with
+   `DELETE /api/connections/{database_name}`. This also removes the catalog
+   ingested from it.
+2. Remove any `bigquery://` entries from `CONNECTION_STRINGS`.
+
+After upgrading again, recreate the connections and re-ingest them.
 
 ## Vault
 

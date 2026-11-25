@@ -15,6 +15,7 @@ import {
 	type KeyboardEvent,
 } from 'react';
 import { Text } from '@/common/Text';
+import { isImeComposing } from '@/lib/imeComposition';
 
 export type TagInputHandle = {
 	/** Forces any pending text in the input to be committed as a tag. */
@@ -133,6 +134,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 	);
 
 	const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+		if (isImeComposing(e)) return;
 		if (commitKeySet.has(e.key)) {
 			// Tab should only commit when there is a pending draft, otherwise let it
 			// move focus naturally so the user can leave the field.

@@ -42,8 +42,58 @@ def test_numeric_y_is_summed_per_category() -> None:
     assert "subtitle" not in spec
     assert spec["series"][0]["key"] == "AverageOrderValue"
     assert spec["data"] == [
-        {"OrderType": "Non-Promotional", "AverageOrderValue": 2432.75},
         {"OrderType": "Promotional", "AverageOrderValue": 3100.5},
+        {"OrderType": "Non-Promotional", "AverageOrderValue": 2432.75},
+    ]
+
+
+def test_bar_aggregation_preserves_row_order_without_alphabetical_resort() -> None:
+    """A query returning ranked rows (e.g. ORDER BY revenue DESC) must not be re-sorted A-Z."""
+    df = pd.DataFrame(
+        {
+            "Customer": ["Zulu Corp", "Alpha Inc", "Bravo LLC"],
+            "Revenue": [1000, 800, 600],
+        }
+    )
+    spec = build_chart_spec(df, _plot(x="Customer", y="Revenue"))
+    assert spec is not None
+    assert [d["Customer"] for d in spec["data"]] == [
+        "Zulu Corp",
+        "Alpha Inc",
+        "Bravo LLC",
+    ]
+
+
+def test_grouped_bar_aggregation_with_hue_preserves_x_order() -> None:
+    """When a hue dimension is present, the primary category order must match input order."""
+    df = pd.DataFrame(
+        {
+            "Quarter": ["Q3", "Q1", "Q3", "Q1"],
+            "Region": ["East", "East", "West", "West"],
+            "Sales": [50, 20, 60, 30],
+        }
+    )
+    spec = build_chart_spec(df, _plot(x="Quarter", y="Sales", hue="Region"))
+    assert spec is not None
+    assert [d["Quarter"] for d in spec["data"]] == ["Q3", "Q1"]
+
+
+def test_time_series_line_aggregation_preserves_ascending_order_for_ordered_types() -> (
+    None
+):
+    """Ordered types (line, area) sort x ascending so truncation and plotting work chronologically."""
+    df = pd.DataFrame(
+        {
+            "Date": ["2026-03-01", "2026-01-01", "2026-02-01"],
+            "Revenue": [300, 100, 200],
+        }
+    )
+    spec = build_chart_spec(df, _plot(x="Date", y="Revenue", plot_type="line"))
+    assert spec is not None
+    assert [d["Date"] for d in spec["data"]] == [
+        "2026-01-01",
+        "2026-02-01",
+        "2026-03-01",
     ]
 
 
@@ -260,3 +310,19 @@ def test_kpi_on_multiple_rows_falls_through_to_a_real_chart() -> None:
 def test_missing_columns_skip_the_chart() -> None:
     df = pd.DataFrame({"a": [1], "b": [2]})
     assert build_chart_spec(df, _plot(x="nope", y="b")) is None
+
+
+def test_line_chart_with_hue_tolerates_mixed_type_x_values() -> None:
+    """Ints and strings in x can't be sorted; the chart keeps first-seen order."""
+    df = pd.DataFrame(
+        {
+            "Period": [2, "n/a", 1, 2, "n/a", 1],
+            "Region": ["East", "East", "East", "West", "West", "West"],
+            "Sales": [10, 20, 30, 40, 50, 60],
+        }
+    )
+    spec = build_chart_spec(
+        df, _plot(x="Period", y="Sales", hue="Region", plot_type="line")
+    )
+    assert spec is not None
+    assert [d["Period"] for d in spec["data"]] == [2, "n/a", 1]

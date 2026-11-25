@@ -2,7 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ReAct agent's ``retrieve`` tool: free-text search over the ontology.
+"""Free-text search of the catalog, for ``retrieve``'s two schema purposes.
+
+The catalog is the database as described: its tables and columns, and the
+Terms and ColumnAttributes laid over them. ``purpose="sql"`` is answered from
+here directly and ``purpose="information"`` through :mod:`information`, which
+renders these same hits as prose. The third purpose, ``conversation``, is not
+the catalog and lives in :mod:`conversation`.
 
 The fixed pipeline searches once, on entities an LLM extracted from the
 question, and then filters the hits with more LLM calls. This tool takes the
@@ -61,6 +67,10 @@ from auto_ontology.retrieval.data_access.candidates import _get_candidates_infor
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.siblings import sibling_lines
+from auto_ontology.utils.retriever import (
+    get_data_objects_retriever,
+    get_semantic_objects_retriever,
+)
 from auto_ontology.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
@@ -135,7 +145,7 @@ def _identifier_words(query: str) -> list[str]:
 def _meaning_hits(ctx: ToolContext, query: str, labels: list[str]) -> list[dict]:
     return list(
         _get_candidates_information(
-            ctx.retriever,
+            get_semantic_objects_retriever(),
             query,
             list_of_semantic=labels,
             database_name=ctx.database_name,
@@ -153,11 +163,11 @@ def _uncovered_physical_hits(
     the semantic search alone could never land on them.
     """
     physical = [_PHYSICAL_LABELS[lb] for lb in labels if lb in _PHYSICAL_LABELS]
-    if not physical or ctx.data_retriever is None:
+    if not physical:
         return []
     hits = list(
         _get_candidates_information(
-            ctx.data_retriever,
+            get_data_objects_retriever(),
             query,
             list_of_semantic=physical,
             database_name=ctx.database_name,
@@ -310,7 +320,19 @@ def _resolve_tables(
 
 
 def _in_database(ctx: ToolContext, table: dict) -> bool:
-    return not ctx.database_name or table.get("database_name") == ctx.database_name
+    """Whether *table* is one the episode can query.
+
+    The catalog can still hold a database whose connection is gone; its tables
+    would send the model after SQL that has nowhere to run.
+    """
+    database_name = table.get("database_name")
+    if ctx.database_name:
+        return database_name == ctx.database_name
+    if not database_name or not ctx.connectors:
+        return True
+    return any(
+        getattr(c, "database_name", None) == database_name for c in ctx.connectors
+    )
 
 
 def _qualified(table: dict) -> str:

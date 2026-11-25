@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import threading
+import time
 from queue import Empty
 from typing import Any, Generator
 
@@ -233,10 +234,18 @@ class PrewarmedWorker:
             args=(self._in_q, self._out_q),
             daemon=True,
         )
+        # Set by ``drain_until_ready`` when the subprocess reports an init
+        # error or exits before sending READY; ``events()`` raises it.
+        self._startup_error: str | None = None
         self._proc.start()
 
     def is_alive(self) -> bool:
         return self._proc.is_alive()
+
+    @property
+    def startup_error(self) -> str | None:
+        """Why the subprocess failed to start, or None if it hasn't failed."""
+        return self._startup_error
 
     def submit(
         self,
@@ -257,7 +266,12 @@ class PrewarmedWorker:
         ones, so SQL executes under that user's own Databricks grants.
         *evidence* is optional authoritative evidence kept separate from
         the question.
+
+        A worker whose startup failed has no child reading the input pipe, so
+        nothing is queued. ``events()`` then reports the startup error.
         """
+        if self._startup_error is not None:
+            return
         self._in_q.put(
             (
                 _MSG_ASK,
@@ -278,9 +292,12 @@ class PrewarmedWorker:
         ``None`` is yielded when the queue is empty so the router can write
         an SSE heartbeat comment to keep proxies/load balancers happy.
         Returns when the worker emits ``done`` or the subprocess dies.
-        Raises ``RuntimeError`` on worker-reported errors.
+        Raises ``RuntimeError`` on worker-reported errors, and right away if
+        the worker failed to start.
         """
 
+        if self._startup_error is not None:
+            raise RuntimeError(f"chat worker failed to start: {self._startup_error}")
         while True:
             try:
                 tag, value = self._out_q.get(timeout=_QUEUE_POLL_S)
@@ -301,17 +318,42 @@ class PrewarmedWorker:
     def drain_until_ready(self, timeout: float | None = None) -> bool:
         """Block until the subprocess has finished its imports.
 
-        Returns False if the worker errored or didn't become ready within
-        the timeout. The pool uses this on warm spawns to log health; the
-        request path doesn't need to wait — submit/events handle a still-
-        warming worker transparently (they just block longer).
+        Returns True once the worker reports READY. Returns False when the
+        worker reports an init error or exits before READY — both record
+        ``startup_error`` — or when *timeout* elapses while it is still
+        warming. The queue is polled so a child that dies during startup
+        (import error, bad environment, OOM) ends the wait instead of
+        blocking it forever.
         """
 
-        try:
-            tag, _ = self._out_q.get(timeout=timeout)
-        except Empty:
-            return False
-        return tag == _TAG_READY
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            wait = _QUEUE_POLL_S
+            if deadline is not None:
+                wait = min(wait, max(deadline - time.monotonic(), 0.0))
+            try:
+                tag, value = self._out_q.get(timeout=wait)
+            except Empty:
+                if not self._proc.is_alive():
+                    # The child may have queued its error just before exiting.
+                    try:
+                        tag, value = self._out_q.get_nowait()
+                    except Empty:
+                        self._startup_error = (
+                            "worker exited during startup "
+                            f"(exit code {self._proc.exitcode})"
+                        )
+                        return False
+                elif deadline is not None and time.monotonic() >= deadline:
+                    return False
+                else:
+                    continue
+            if tag == _TAG_READY:
+                return True
+            if tag == _TAG_ERROR:
+                self._startup_error = str(value)
+                return False
+            # Nothing else is sent before READY; ignore anything stray.
 
     def kill(self) -> None:
         proc = self._proc
@@ -355,7 +397,14 @@ class WarmPool:
         # ``acquire()`` is more likely to hand back a fully warm worker.
         # We don't enforce a timeout — initial imports can be slow on
         # cold caches and we'd rather wait than serve a half-warm one.
-        worker.drain_until_ready()
+        if not worker.drain_until_ready():
+            # Don't keep a worker that failed to start as the standby;
+            # ``acquire()`` cold-starts one and reports the failure.
+            logger.error(
+                "Standby chat worker failed to start: %s", worker.startup_error
+            )
+            worker.kill()
+            return
         with self._lock:
             if self._standby is None:
                 self._standby = worker
@@ -371,7 +420,12 @@ class WarmPool:
             return w
         # Standby missing/dead — pay cold start synchronously this once.
         w = PrewarmedWorker()
-        w.drain_until_ready()
+        if not w.drain_until_ready():
+            # Hand the failed worker back anyway: its ``events()`` raises the
+            # startup error, which the router streams as an error event, and
+            # releasing it spawns a replacement standby.
+            logger.error("Chat worker failed to start: %s", w.startup_error)
+            w.kill()
         return w
 
     def return_alive(self, worker: PrewarmedWorker) -> None:
