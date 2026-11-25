@@ -63,8 +63,8 @@ class ToolContext:
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
 
-    ``empty_result_checked`` records that ``submit`` has held back one empty
-    result to check its filters; the next one is accepted.
+    ``empty_result_checked`` holds the queries ``submit`` held back once for
+    an empty result to check their filters; the same query is accepted next.
 
     ``answer_numbers_checked`` records that ``submit`` already sent an answer
     back for citing numbers its rows don't hold (#252), which it does once per
@@ -102,7 +102,7 @@ class ToolContext:
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
-    empty_result_checked: bool = False
+    empty_result_checked: set[str] = field(default_factory=set)
     answer_numbers_checked: bool = False
     last_answer_attempt: bool = False
     fanout_refused: set[str] = field(default_factory=set)

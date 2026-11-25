@@ -157,6 +157,33 @@ def test_an_aggregate_filter_is_named_as_not_checked(ctx: ToolContext) -> None:
     assert "- Not checked: COUNT(*) > 5" in observation
 
 
+def test_each_new_empty_query_is_checked_and_a_resubmission_accepted(
+    ctx: ToolContext,
+) -> None:
+    first = "SELECT order_id FROM sales_orders WHERE status = 'OPNE'"
+    second = "SELECT order_id FROM sales_orders WHERE status = 'CLOESD'"
+
+    assert loop.submit(ctx, first)[1] is None
+    observation, submission = loop.submit(ctx, second)
+
+    assert submission is None
+    assert "Stored values: 'OPEN', 'SHIPPED'." in observation
+    assert loop.submit(ctx, second)[0] == "Accepted."
+
+
+def test_a_having_alias_is_not_probed_as_a_table_column(ctx: ToolContext) -> None:
+    observation, submission = loop.submit(
+        ctx,
+        "SELECT site_id, SUM(amount) AS amount FROM sales_orders "
+        "GROUP BY site_id HAVING amount > 500",
+    )
+
+    assert submission is None
+    assert "amount > 500" in observation
+    assert "Stored range" not in observation
+    assert len(_executed(ctx)) == 1
+
+
 def test_an_empty_result_without_a_filter_is_accepted(ctx: ToolContext) -> None:
     observation, submission = loop.submit(
         ctx, "SELECT order_id FROM sales_orders LIMIT 0"

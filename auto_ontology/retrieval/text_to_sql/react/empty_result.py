@@ -16,8 +16,9 @@ through :class:`ProbeExecutor`. One that matches nothing gets its stored
 values: those equal to the literal as text ignoring case, or a sample, or the
 stored range. The findings go back to the model as a rejected submission.
 
-It happens once per episode. An empty result can be the right answer, and the
-model that has seen the evidence and submits again is believed. When the
+It happens once per query. An empty result can be the right answer, and the
+model that has seen the evidence and submits the same query again is
+believed; a different query is checked on its own. When the
 evidence cannot be gathered, the rejection says so instead of passing the
 empty result as checked. Where queries are charged nothing is probed, since
 the model decides what to spend. A rejection on the episode's last call ends
@@ -81,17 +82,19 @@ def empty_result_rejection(
 ) -> str | None:
     """Why an empty result from a filtered query is not accepted yet, or ``None``.
 
-    ``None`` for a result with rows, a query without WHERE or HAVING, and every
-    submission after the first one this rejected.
+    ``None`` for a result with rows, a query without WHERE or HAVING, and a
+    query this already rejected once.
     """
     if (
-        ctx.empty_result_checked
-        or statement is None
+        statement is None
         or not is_empty_result(db_response)
         or not any(statement.find_all(exp.Where, exp.Having))
     ):
         return None
-    ctx.empty_result_checked = True
+    query = statement.sql()
+    if query in ctx.empty_result_checked:
+        return None
+    ctx.empty_result_checked.add(query)
     again = f"If 0 rows is the right answer, {resubmit} again."
     if ctx.cost_status is not None or ctx.can_run_queries is not None:
         return _unchecked("queries here are charged, so none were run", again)
@@ -157,7 +160,9 @@ def literal_filters(statement: exp.Expression, catalog: CatalogNames) -> list[_F
                 continue
             subject, literals = sides
             table = None
-            if not subject.find(*_NOT_PROBED_ALONE):
+            if not subject.find(*_NOT_PROBED_ALONE) and not _reads_output_alias(
+                subject, node
+            ):
                 table = _table_of(subject, node, derived, catalog)
             filters.append(_Filter(node, subject, literals, table))
     return filters
@@ -173,6 +178,29 @@ def _negated(node: exp.Expression) -> bool:
             return True
         parent = parent.parent
     return False
+
+
+def _reads_output_alias(subject: exp.Expression, predicate: exp.Expression) -> bool:
+    """Whether *subject* names an output of its SELECT, as ``HAVING cnt > 5`` does.
+
+    Such a name is not a column of any table, or not the same value as one, so
+    it cannot be probed alone. ``status AS status`` is still the column.
+    """
+    select = predicate.find_ancestor(exp.Select)
+    if select is None:
+        return False
+    outputs = {
+        e.alias.lower()
+        for e in select.expressions
+        if e.alias
+        and not (
+            isinstance(e.this, exp.Column) and e.this.name.lower() == e.alias.lower()
+        )
+    }
+    return any(
+        not column.table and column.name.lower() in outputs
+        for column in subject.find_all(exp.Column)
+    )
 
 
 def _is_value(node: exp.Expression | None) -> bool:

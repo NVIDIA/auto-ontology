@@ -199,10 +199,13 @@ def _cell_values(rows: list[dict[str, Any]]) -> list[float]:
 
 
 def _derived_values(rows: list[dict[str, Any]]) -> list[float]:
-    """What follows simply from the rows: the row count and each column's sum.
+    """What follows simply from the rows: each column's sum.
 
-    For a short result also the ratios a response states as percentages: one
-    cell over another in the same row, and a cell's share of its column.
+    The row count is not here: it is a count, never a ratio, so it only
+    supports a number written without a percent sign. For a short result also the ratios a response states as percentages: one
+    cell over another in the same row, and a cell's share of its column. A cell
+    over itself, or its share of a column it alone makes up, is always 1 and
+    would support any "100%".
     """
     numeric = [
         {c: n for c, v in row.items() if (n := _cell_number(v)) is not None}
@@ -212,12 +215,14 @@ def _derived_values(rows: list[dict[str, Any]]) -> list[float]:
     for row in numeric:
         for column, number in row.items():
             sums[column] = sums.get(column, 0.0) + number
-    derived = [float(len(rows)), *sums.values()]
+    derived = list(sums.values())
     if len(rows) <= _RATIO_ROWS:
         for row in numeric:
             cells = list(row.items())[:_RATIO_COLUMNS]
-            derived.extend(a / b for _, a in cells for _, b in cells if a and b)
-            derived.extend(n / sums[c] for c, n in cells if sums[c])
+            derived.extend(
+                a / b for ca, a in cells for cb, b in cells if ca != cb and a and b
+            )
+            derived.extend(n / sums[c] for c, n in cells if sums[c] and n != sums[c])
     return derived
 
 
@@ -238,7 +243,9 @@ def _stated(text: str) -> set[float]:
 
 def _checked(response: str, question: str, sql: str) -> list[_Cited]:
     """The cited numbers worth checking against the rows."""
-    stated = _stated(question) | {float(n) for n in _SQL_NUMBER.findall(sql or "")}
+    # Either sign: the pattern cannot tell ``balance < -100`` from ``qty-100``.
+    in_sql = {float(n) for n in _SQL_NUMBER.findall(sql or "")}
+    stated = _stated(question) | in_sql | {-n for n in in_sql}
     return [
         c
         for c in _numbers(_prose(response))
@@ -269,7 +276,11 @@ def contradicted_numbers(
     if not checked:
         return []
     support = cells + _derived_values(rows)
-    if any(_supported(c, support) for c in checked):
+    count = [float(len(rows))]
+    if any(
+        _supported(c, support) or (not c.percent and _supported(c, count))
+        for c in checked
+    ):
         return []
     if any(_supported(c, cells) for c in _numbers(_prose(response)) if not c.year):
         return []

@@ -232,6 +232,23 @@ def test_a_percentage_of_two_cells_or_of_a_column_passes() -> None:
     assert contradicted_numbers("North has 30% of units.", shares) == []
 
 
+def test_a_cell_over_itself_does_not_support_100_percent() -> None:
+    assert contradicted_numbers("100% of orders were late.", [{"late": 493}]) == [
+        "100%"
+    ]
+    rows = [{"late": 493, "all": 1000}]
+    assert contradicted_numbers("100% of orders were late.", rows) == ["100%"]
+
+
+def test_a_negative_sql_number_keeps_its_sign() -> None:
+    sql = "SELECT id, balance FROM accounts WHERE balance < -100"
+    rows = [{"id": 501, "balance": -250}]
+
+    assert (
+        contradicted_numbers("Every account below -100 is listed.", rows, "", sql) == []
+    )
+
+
 def test_a_scaled_number_is_compared_at_its_scale() -> None:
     rows = [{"revenue": 1234567.89}]
 
