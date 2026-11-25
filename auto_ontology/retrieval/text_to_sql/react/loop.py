@@ -36,11 +36,12 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.conversation import conversation
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.information import information
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predict
-from auto_ontology.retrieval.text_to_sql.react.retrieve import retrieve
+from auto_ontology.retrieval.text_to_sql.react.catalog import retrieve
 from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,
@@ -79,6 +80,17 @@ class EpisodeResult:
     prediction: Prediction | None = None
 
 
+def _prose_sources(ctx: ToolContext) -> str:
+    """The sources this episode may answer in words from, named as the model
+    would call them, so a refusal says what to do rather than only what not to."""
+    offered = []
+    if prompts.information_answers_offered(ctx.information_answers):
+        offered.append("the catalog (purpose=information)")
+    if prompts.conversation_answers_offered(ctx.conversation_answers):
+        offered.append("past conversations (purpose=conversation)")
+    return " or ".join(offered)
+
+
 def submit(
     ctx: ToolContext,
     sql: str = "",
@@ -94,16 +106,21 @@ def submit(
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
-        if not prompts.information_answers_offered(ctx.information_answers):
+        if not prompts.prose_answers_offered(
+            ctx.information_answers, ctx.conversation_answers
+        ):
             return "Error: sql is empty.", None
         response = (response or "").strip()
         if not response:
             return "Error: sql and response are both empty.", None
-        if not ctx.information_retrieved:
+        # Either source will do, and which one is not checked against what the
+        # answer says: the rule is that the words were looked up, not that they
+        # came from a particular place.
+        if not (ctx.information_retrieved or ctx.conversation_retrieved):
             return (
-                "Not accepted. An answer without SQL has to come from the catalog: "
-                "retrieve what you will say first (purpose=information), or write "
-                "a query.",
+                f"Not accepted. An answer without SQL has to come from "
+                f"{_prose_sources(ctx)}: retrieve what you will say first, or "
+                "write a query.",
                 None,
             )
         return "Accepted.", Submission("", response, assumptions, None)
@@ -148,7 +165,12 @@ def _call_key(name: str, args: dict) -> str:
 def _retrieve(
     ctx: ToolContext, query: str, kinds: list[str] | None, purpose: str
 ) -> str:
-    """The SQL view, or the information view when information answers are on."""
+    """The SQL view, or one of the other two when their source is switched on.
+
+    One function rather than a tool each, because the three are one search
+    rendered three ways and the stated direction is that the sources converge.
+    A view is cheap to fold into another view; three sibling tools are not.
+    """
     if purpose == "information" and prompts.information_answers_offered(
         ctx.information_answers
     ):
@@ -158,6 +180,31 @@ def _retrieve(
         # that found nothing did return, and still counts.
         ctx.information_retrieved = True
         return answer
+    if purpose == "conversation" and prompts.conversation_answers_offered(
+        ctx.conversation_answers
+    ):
+        # The search sets conversation_retrieved itself: a refused query or a
+        # missing database returns without searching, and is not evidence.
+        return conversation(ctx, query)
+    if purpose != "sql" or not ctx.calculation_answers:
+        # The catalog is the SQL view, so falling through to it when querying
+        # is switched off searches a source this episode was told not to use.
+        # On a database of transcripts there is no schema behind it at all,
+        # and the model spends a call to be told so -- or to be handed an
+        # error from a table that need never have been touched. A source asked
+        # for by name and switched off is refused too: tables in its place
+        # read as that source having found nothing.
+        offered = ", ".join(
+            prompts.purposes_for(
+                ctx.calculation_answers,
+                ctx.information_answers,
+                ctx.conversation_answers,
+            )
+        )
+        return (
+            f"Error: purpose {purpose!r} is not available here. "
+            f"Use {offered or 'submit'} instead."
+        )
     return retrieve(ctx, query, kinds)
 
 
@@ -186,9 +233,17 @@ def _with_cost_status(ctx: ToolContext, text: str) -> str:
 def _dispatch(
     ctx: ToolContext, name: str, args: dict, offered: list[str]
 ) -> tuple[str, Submission | Prediction | None]:
+    # A model that omits *purpose* gets the first source this episode offers,
+    # not whichever one happened to be written here. Defaulting to "sql" sent a
+    # conversation-only episode to the catalog, which on a database of
+    # transcripts holds nothing and may not even have the tables to be asked.
+    purposes = prompts.purposes_for(
+        ctx.calculation_answers, ctx.information_answers, ctx.conversation_answers
+    )
+    first_purpose = purposes[0] if purposes else "sql"
     handlers: dict[str, Callable[..., str]] = {
-        ToolName.RETRIEVE: lambda query="", kinds=None, purpose="sql": _retrieve(
-            ctx, query, kinds, purpose
+        ToolName.RETRIEVE: lambda query="", kinds=None, purpose=first_purpose: (
+            _retrieve(ctx, query, kinds, purpose)
         ),
         ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
         ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
@@ -237,9 +292,16 @@ def run_episode(
     *sql_examples*, *value_anchors* and *shorten_answer* shape a SQL answer, so
     a ``predict`` episode ignores them.
     """
-    writes_sql = mode != EpisodeMode.PREDICT
+    # A predict episode ends with a prediction; a no-calculation episode
+    # cannot write a query at all. Neither wants the dialect rules, the
+    # exemplars or the value anchors, all of which only shape SQL.
+    writes_sql = mode != EpisodeMode.PREDICT and ctx.calculation_answers
     system_prompt = prompts.system_prompt_for(
-        mode, dialect, information_answers=ctx.information_answers
+        mode,
+        dialect,
+        calculation_answers=ctx.calculation_answers,
+        information_answers=ctx.information_answers,
+        conversation_answers=ctx.conversation_answers,
     )
     if custom_prompts:
         system_prompt = f"{system_prompt}\n\n{custom_prompts}"
@@ -263,7 +325,12 @@ def run_episode(
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
     ]
-    tools = prompts.tools_for(mode, information_answers=ctx.information_answers)
+    tools = prompts.tools_for(
+        mode,
+        calculation_answers=ctx.calculation_answers,
+        information_answers=ctx.information_answers,
+        conversation_answers=ctx.conversation_answers,
+    )
     offered = [t["function"]["name"] for t in tools]
     bound = llm.bind_tools(tools)
     budget = config.max_tool_calls()
@@ -275,28 +342,35 @@ def run_episode(
 
     while True:
         last_turn = calls >= budget
-        if (
-            mode != EpisodeMode.PREDICT
-            and not out_of_queries
-            and not _can_run_queries(ctx)
-        ):
+        if writes_sql and not out_of_queries and not _can_run_queries(ctx):
             out_of_queries = True
             no_queries_left = prompts.no_queries_left_for()
             messages.append(HumanMessage(content=no_queries_left))
             trajectory.append({"role": "human", "content": no_queries_left})
             tools = prompts.tools_for(
-                mode, last_turn=True, information_answers=ctx.information_answers
+                mode,
+                last_turn=True,
+                calculation_answers=ctx.calculation_answers,
+                information_answers=ctx.information_answers,
+                conversation_answers=ctx.conversation_answers,
             )
             offered = [t["function"]["name"] for t in tools]
             bound = llm.bind_tools(tools)
         if last_turn:
             last_call = prompts.last_call_for(
-                mode, information_answers=ctx.information_answers
+                mode,
+                calculation_answers=ctx.calculation_answers,
+                information_answers=ctx.information_answers,
+                conversation_answers=ctx.conversation_answers,
             )
             messages.append(HumanMessage(content=last_call))
             trajectory.append({"role": "human", "content": last_call})
             tools = prompts.tools_for(
-                mode, last_turn=True, information_answers=ctx.information_answers
+                mode,
+                last_turn=True,
+                calculation_answers=ctx.calculation_answers,
+                information_answers=ctx.information_answers,
+                conversation_answers=ctx.conversation_answers,
             )
             offered = [t["function"]["name"] for t in tools]
             bound = llm.bind_tools(tools)
@@ -329,7 +403,12 @@ def run_episode(
                     if fallback is not None:
                         return fallback
                 return EpisodeResult(None, "no_submission", calls, trajectory)
-            nudge = prompts.nudge_for(mode, information_answers=ctx.information_answers)
+            nudge = prompts.nudge_for(
+                mode,
+                calculation_answers=ctx.calculation_answers,
+                information_answers=ctx.information_answers,
+                conversation_answers=ctx.conversation_answers,
+            )
             messages.append(HumanMessage(content=nudge))
             trajectory.append({"role": "human", "content": nudge})
             continue

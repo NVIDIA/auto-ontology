@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from auto_ontology.retrieval.text_to_sql.react import retrieve as tool
+from auto_ontology.retrieval.text_to_sql.react import catalog as tool
 from auto_ontology.retrieval.text_to_sql.react import siblings
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 
@@ -67,11 +67,28 @@ ATTRIBUTE_COLUMNS = {
 }
 
 
+SEMANTIC_STORE = object()
+DATA_STORE = object()
+
+
+@pytest.fixture(autouse=True)
+def stores(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the two collections the tool opens when it searches.
+
+    Patched rather than passed: the tool opens the store it needs where it
+    needs it, so there is no handle to hand it. Sentinels, because a test
+    asserts which of the two a search went to, never what it holds.
+    """
+    monkeypatch.setattr(tool, "get_semantic_objects_retriever", lambda: SEMANTIC_STORE)
+    monkeypatch.setattr(tool, "get_data_objects_retriever", lambda: DATA_STORE)
+
+
 @pytest.fixture
 def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Stub every data-access call the tool makes, recording what it asked."""
     seen: dict[str, list[Any]] = {
         "meaning": [],
+        "physical": [],
         "names": [],
         "name_scopes": [],
         "join": [],
@@ -84,13 +101,17 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     }
 
     def meaning(
-        _retriever: object,
+        retriever: object,
         query: str,
         list_of_semantic: list[str],
         database_name: str | None,
         per_label_k: dict[str, int],
     ) -> list[dict]:
-        seen["meaning"].append((query, list_of_semantic, database_name))
+        # Kept apart by which collection was searched. One search of meaning
+        # goes to each, and a test that asked what the semantic layer was
+        # sent should not have to count the physical call in between.
+        where = "meaning" if retriever is SEMANTIC_STORE else "physical"
+        seen[where].append((query, list_of_semantic, database_name))
         return [dict(h) for h in meaning_hits.get(query, [])]
 
     def names(
@@ -163,7 +184,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(retriever=object(), connectors=[], database_name="shop")
+    return ToolContext(connectors=[], database_name="shop")
 
 
 def test_definition_comes_back_with_its_sql_and_its_table(calls: dict) -> None:
@@ -307,7 +328,7 @@ def test_physical_names_are_searched_in_the_target_database_only(
 def test_names_are_searched_everywhere_without_a_target_database(
     calls: dict,
 ) -> None:
-    ctx = ToolContext(retriever=object(), connectors=[])
+    ctx = ToolContext(connectors=[])
 
     tool.retrieve(ctx, "customers")
 
@@ -479,7 +500,6 @@ def test_empty_query_is_refused(calls: dict) -> None:
 def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     """Two retrievers: the semantic one finds nothing, the data one finds a
     covered column, an uncovered foreign key and a covered table."""
-    data_retriever = object()
     seen: dict[str, list] = {"coverage": []}
 
     def meaning(
@@ -489,7 +509,7 @@ def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         database_name: str | None,
         per_label_k: dict[str, int],
     ) -> list[dict]:
-        if retriever is not data_retriever:
+        if retriever is not DATA_STORE:
             return []
         seen["labels"] = list_of_semantic
         return [
@@ -515,14 +535,7 @@ def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
 
     monkeypatch.setattr(tool, "_get_candidates_information", meaning)
     monkeypatch.setattr(tool, "fetch_semantic_coverage", coverage)
-    seen["ctx"] = [
-        ToolContext(
-            retriever=object(),
-            data_retriever=data_retriever,
-            connectors=[],
-            database_name="shop",
-        )
-    ]
+    seen["ctx"] = [ToolContext(connectors=[], database_name="shop")]
     return seen
 
 
@@ -732,9 +745,7 @@ def with_siblings(calls: dict, monkeypatch: pytest.MonkeyPatch) -> CountingConne
 def test_a_near_copy_is_named_with_rows_and_differences(
     with_siblings: CountingConnector,
 ) -> None:
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     text = tool.retrieve(ctx, "how is revenue calculated")
 
     assert (
@@ -750,9 +761,7 @@ def test_a_near_copy_is_named_with_rows_and_differences(
 def test_a_near_copy_is_named_once_per_episode(
     with_siblings: CountingConnector,
 ) -> None:
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     tool.retrieve(ctx, "how is revenue calculated")
     ctx.seen_tables.clear()
     again = tool.retrieve(ctx, "how is revenue calculated")
@@ -765,9 +774,7 @@ def test_a_count_is_qualified_by_the_connector_and_capped_in_time(
     with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_SIBLING_COUNT_TIMEOUT_S", "3")
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     tool.retrieve(ctx, "how is revenue calculated")
 
     assert with_siblings.sql == [
@@ -784,9 +791,7 @@ def test_a_table_the_connector_cannot_qualify_is_named_without_a_count(
         raise ValueError(f"Trino requires a schema to qualify {table!r}")
 
     monkeypatch.setattr(with_siblings, "qualify", refuse)
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     text = tool.retrieve(ctx, "how is revenue calculated")
 
     assert "SIMILAR sales.orders ~ sales.orders_archive: 4 shared columns" in text
@@ -797,9 +802,7 @@ def test_counts_past_the_limit_are_left_off_and_not_cached(
     with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_SIBLING_COUNTS", "1")
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     text = tool.retrieve(ctx, "how is revenue calculated")
 
     assert "SIMILAR sales.orders (120 rows) ~ sales.orders_archive: " in text
@@ -841,7 +844,10 @@ def test_a_lookup_copied_into_a_wide_table_is_not_a_sibling() -> None:
 
 def test_tables_of_unconnected_databases_are_not_offered() -> None:
     connected = ToolContext(
-        None, [SimpleNamespace(database_name="a"), SimpleNamespace(database_name="b")]
+        connectors=[
+            SimpleNamespace(database_name="a"),
+            SimpleNamespace(database_name="b"),
+        ]
     )
 
     assert tool._in_database(connected, {"database_name": "a"})
@@ -850,7 +856,7 @@ def test_tables_of_unconnected_databases_are_not_offered() -> None:
 
 
 def test_a_single_connection_does_not_offer_another_databases_tables() -> None:
-    connected = ToolContext(None, [SimpleNamespace(database_name="a")])
+    connected = ToolContext(connectors=[SimpleNamespace(database_name="a")])
 
     assert tool._in_database(connected, {"database_name": "a"})
     assert not tool._in_database(connected, {"database_name": "gone"})

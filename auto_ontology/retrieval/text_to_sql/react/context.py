@@ -49,13 +49,19 @@ class ToolContext:
     table on a join route or the other copy on a SIMILAR line is one the model
     is told to use, though its columns were never listed.
 
-    ``retriever`` searches the semantic collection; ``data_retriever`` the one
-    tables and columns are embedded in, for what the semantic layer leaves out.
-
     ``information_answers`` lets ``submit`` take an information question's answer
     with no SQL; it stays off wherever a grader scores the SQL.
     ``information_retrieved`` records that ``retrieve`` showed the information
     view, which such an answer has to come from; a SQL-view search does not count.
+
+    ``conversation_answers`` is the same switch for a third source, this
+    database's past conversations, and off by default because most databases
+    have none. ``conversation_retrieved`` is its half of the same evidence
+    rule: an answer that cites a past conversation has to have searched one.
+
+    ``calculation_answers`` is whether querying the data is on the table at
+    all. Off, no ``run_sql`` is offered and ``connectors`` may be empty -- the
+    state a database holding transcripts and no tables is in.
 
     ``cost_status`` is for callers that charge for queries: it returns what the
     model has left to spend and what each action costs, read fresh each time
@@ -64,13 +70,14 @@ class ToolContext:
     refused, so the episode can still submit instead of trying to run one.
     """
 
-    retriever: Any
     connectors: list[SQLDatabase]
     database_name: str | None = None
-    data_retriever: Any = None
     numeric_type_alignment: bool = False
+    calculation_answers: bool = True
     information_answers: bool = False
     information_retrieved: bool = False
+    conversation_answers: bool = False
+    conversation_retrieved: bool = False
     question: str = ""
     prediction_llm: Any = None
     custom_prompts: str = ""
