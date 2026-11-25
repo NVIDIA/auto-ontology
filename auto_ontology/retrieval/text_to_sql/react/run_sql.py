@@ -45,6 +45,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.utils.sql_identifiers import quoted_if_needed
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,7 @@ def tables_not_shown(
             )
             continue
         problems.append(
-            f"Not in view: {'.'.join(p for p in (table.db, table.name) if p)}. "
+            f"Not in view: {_as_written(table, ctx.dialect)}. "
             "Retrieve it (its exact name works) before using it."
         )
     return list(dict.fromkeys(problems))[:_MAX_PROBLEMS]
@@ -381,6 +382,13 @@ def check_query(ctx: ToolContext, connector: SQLDatabase, sql: str) -> CheckResu
         if problems := foreign_catalogs(check.statement, bound):
             return CheckResult(problems, check.statement)
     return CheckResult(tables_not_shown(check.statement, ctx, catalog), check.statement)
+
+
+def _as_written(table: exp.Table, dialect: str | None) -> str:
+    parts = (table.args.get("db"), table.this)
+    return ".".join(
+        quoted_if_needed(p.name, dialect) if p.quoted else p.name for p in parts if p
+    )
 
 
 def connector_for(ctx: ToolContext, sql: str | None = None) -> SQLDatabase | None:

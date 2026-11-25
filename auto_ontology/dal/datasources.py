@@ -1050,7 +1050,7 @@ def fetch_columns_for_table(
 
 
 def _semantic_fk_target_expr() -> ColumnElement:
-    """``schema.table.column`` a catalog column's semantic FK lands on.
+    """``[schema, table, column]`` a catalog column's semantic FK lands on.
 
     The FK points at an attribute; the column that owns the attribute is the
     target. Correlated on ``catalog_column``.
@@ -1061,8 +1061,7 @@ def _semantic_fk_target_expr() -> ColumnElement:
     semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
     return (
         select(
-            func.concat_ws(
-                ".",
+            func.json_build_array(
                 semantic_schema.c.name,
                 semantic_table.c.name,
                 semantic_target.c.name,
@@ -1117,7 +1116,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
     ``semantic_fk`` resolves the referenced attribute back to its owning column
-    and returns that target as ``schema.table.column`` for SQL prompts.
+    and returns that target as ``schema.table.column`` for SQL prompts;
+    ``semantic_fk_parts`` is the same target as ``[schema, table, column]``.
     """
     if not table_ids:
         return []
@@ -1137,7 +1137,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
-                semantic_fk_target.label("semantic_fk"),
+                semantic_fk_target.label("semantic_fk_parts"),
             )
             .select_from(
                 _table_join().join(
@@ -1182,7 +1182,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
-                    "semantic_fk": row["semantic_fk"],
+                    "semantic_fk": ".".join(parts)
+                    if (parts := row["semantic_fk_parts"])
+                    else None,
+                    "semantic_fk_parts": parts,
                 }
             )
     return list(tables.values())

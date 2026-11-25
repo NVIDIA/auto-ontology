@@ -4094,7 +4094,12 @@
             "is_nullable": false,
             "name": "customer_id",
             "sample_values": null,
-            "semantic_fk": "public.customer.customer_id"
+            "semantic_fk": "public.customer.customer_id",
+            "semantic_fk_parts": [
+              "customer",
+              "customer_id",
+              "public"
+            ]
           },
           {
             "data_type": "integer",
@@ -4103,7 +4108,8 @@
             "is_nullable": false,
             "name": "inventory_id",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "integer",
@@ -4112,7 +4118,8 @@
             "is_nullable": false,
             "name": "rental_id",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "integer",
@@ -4121,7 +4128,8 @@
             "is_nullable": false,
             "name": "staff_id",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -4130,7 +4138,8 @@
             "is_nullable": false,
             "name": "rental_date",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -4139,7 +4148,8 @@
             "is_nullable": false,
             "name": "last_update",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -4148,7 +4158,8 @@
             "is_nullable": true,
             "name": "return_date",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           }
         ],
         "database_name": "pagila",
@@ -4170,7 +4181,8 @@
             "is_nullable": false,
             "name": "film_id",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "integer",
@@ -4179,7 +4191,8 @@
             "is_nullable": false,
             "name": "language_id",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "integer",
@@ -4188,7 +4201,8 @@
             "is_nullable": true,
             "name": "original_language_id",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "mpaa_rating",
@@ -4197,7 +4211,8 @@
             "is_nullable": true,
             "name": "rating",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "numeric",
@@ -4206,7 +4221,8 @@
             "is_nullable": false,
             "name": "rental_rate",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "numeric",
@@ -4215,7 +4231,8 @@
             "is_nullable": false,
             "name": "replacement_cost",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "smallint",
@@ -4224,7 +4241,8 @@
             "is_nullable": false,
             "name": "rental_duration",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "smallint",
@@ -4233,7 +4251,8 @@
             "is_nullable": true,
             "name": "length",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "text",
@@ -4242,7 +4261,8 @@
             "is_nullable": false,
             "name": "title",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "text",
@@ -4251,7 +4271,8 @@
             "is_nullable": true,
             "name": "description",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "text[]",
@@ -4260,7 +4281,8 @@
             "is_nullable": true,
             "name": "special_features",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -4269,7 +4291,8 @@
             "is_nullable": false,
             "name": "last_update",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "tsvector",
@@ -4278,7 +4301,8 @@
             "is_nullable": false,
             "name": "fulltext",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           },
           {
             "data_type": "year",
@@ -4287,7 +4311,8 @@
             "is_nullable": true,
             "name": "release_year",
             "sample_values": null,
-            "semantic_fk": null
+            "semantic_fk": null,
+            "semantic_fk_parts": null
           }
         ],
         "database_name": "pagila",
