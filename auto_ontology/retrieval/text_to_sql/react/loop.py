@@ -183,9 +183,9 @@ def _retrieve(
     if purpose == "conversation" and prompts.conversation_answers_offered(
         ctx.conversation_answers
     ):
-        answer = conversation(ctx, query)
-        ctx.conversation_retrieved = True
-        return answer
+        # The search sets conversation_retrieved itself: a refused query or a
+        # missing database returns without searching, and is not evidence.
+        return conversation(ctx, query)
     if purpose != "sql" or not ctx.calculation_answers:
         # The catalog is the SQL view, so falling through to it when querying
         # is switched off searches a source this episode was told not to use.

@@ -116,6 +116,10 @@ def conversation(ctx: ToolContext, query: str) -> str:
     An empty *query* is an error rather than a listing. ``information`` lists
     every table for one because the set of tables is small, closed and useful
     on its own; the set of everything ever said is none of those.
+
+    Sets ``ctx.conversation_retrieved`` once the search has returned, including
+    when it found nothing: "nothing recorded" is an answer the search supports.
+    A refused query or a missing database searched nothing and leaves it unset.
     """
     query = (query or "").strip()
     if not query:
@@ -124,6 +128,7 @@ def conversation(ctx: ToolContext, query: str) -> str:
         return "No database selected, so there are no conversations to search."
 
     hits = search_semantic(query, database_name=ctx.database_name)
+    ctx.conversation_retrieved = True
     if not hits.note and not hits.turns:
         return (
             f"Nothing was said about {query!r} in this database's past "

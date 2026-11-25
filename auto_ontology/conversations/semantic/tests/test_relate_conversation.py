@@ -4,8 +4,8 @@
 
 """Re-relating a transcript replaces its semantic edges in one step.
 
-The model call sits between the delete and the write, and a failure there must
-not leave the transcript with no semantic edges at all.
+The model's adjudication finishes before anything is deleted, so a failed
+adjudication must leave the transcript's existing semantic edges in place.
 """
 
 from __future__ import annotations

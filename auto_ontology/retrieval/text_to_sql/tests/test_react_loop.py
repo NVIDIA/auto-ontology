@@ -928,11 +928,15 @@ def test_retries_end_and_the_episode_gives_up(
     assert len(sleeps) == 2
 
 
+def _searched(searched: ToolContext, query: str) -> str:
+    """Stands in for a conversation search that ran, flag included."""
+    searched.conversation_retrieved = True
+    return f"TURN 14 (for {query})"
+
+
 @pytest.fixture
 def conversation_ctx(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> ToolContext:
-    monkeypatch.setattr(
-        loop, "conversation", lambda _ctx, query: f"TURN 14 (for {query})"
-    )
+    monkeypatch.setattr(loop, "conversation", _searched)
     ctx.conversation_answers = True
     return ctx
 
@@ -1005,6 +1009,21 @@ def test_a_conversation_answer_needs_a_conversation_search_first(
     assert submission is not None and submission.sql == ""
 
 
+@pytest.mark.parametrize("query", ["", "   "])
+def test_a_refused_conversation_search_is_not_evidence(
+    ctx: ToolContext, query: str
+) -> None:
+    ctx.conversation_answers = True
+
+    observation = loop._retrieve(ctx, query, None, "conversation")
+    refused, submission = loop.submit(ctx, "", response="Nothing was recorded.")
+
+    assert observation.startswith("Error:")
+    assert ctx.conversation_retrieved is False
+    assert submission is None
+    assert "past conversations (purpose=conversation)" in refused
+
+
 def test_the_prompt_names_conversations_only_when_they_are_on() -> None:
     off = prompts.system_prompt_for(EpisodeMode.SQL, "mysql", information_answers=True)
     on = prompts.system_prompt_for(
@@ -1065,9 +1084,7 @@ def test_a_conversation_only_episode_answers_without_a_warehouse(
 ) -> None:
     # The state a database holding transcripts and no tables is in. Nothing
     # here has a connector, and the episode still reaches an answer.
-    monkeypatch.setattr(
-        loop, "conversation", lambda _ctx, query: f"TURN 14 (for {query})"
-    )
+    monkeypatch.setattr(loop, "conversation", _searched)
     ctx = ToolContext(
         connectors=[],
         database_name="beam",

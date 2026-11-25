@@ -227,6 +227,8 @@ def test_nothing_found_says_so_rather_than_coming_back_empty(
     _found(monkeypatch, FakeHits())
 
     assert "Nothing was said" in conversation(ctx, "rate limit")
+    # A search that found nothing still supports "nothing was recorded".
+    assert ctx.conversation_retrieved is True
 
 
 def test_an_empty_query_is_an_error_not_a_listing(
@@ -238,6 +240,7 @@ def test_an_empty_query_is_an_error_not_a_listing(
 
     assert conversation(ctx, "   ").startswith("Error:")
     assert calls == []
+    assert ctx.conversation_retrieved is False
 
 
 def test_no_database_means_nothing_to_search(
@@ -245,7 +248,9 @@ def test_no_database_means_nothing_to_search(
 ) -> None:
     calls = _found(monkeypatch, FakeHits())
 
-    answer = conversation(ToolContext(connectors=[]), "rate limit")
+    unselected = ToolContext(connectors=[])
+    answer = conversation(unselected, "rate limit")
 
     assert "No database selected" in answer
     assert calls == []
+    assert unselected.conversation_retrieved is False
