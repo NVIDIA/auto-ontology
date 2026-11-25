@@ -129,7 +129,7 @@ underlying databases.
 | `ask_question` | **The primary tool.** Ask a question in plain language; get the answer, the SQL Auto-Ontology ran, and the rows. |
 | `check_answerable` | Grade whether the semantic layer covers a question. Cheap pre-flight before `ask_question`. |
 | `check_readiness` | Whether this deployment can answer anything at all. |
-| `search_terms` | Search the business glossary. |
+| `search_terms` | Search the business glossary by name, description, and synonym. |
 | `get_term` | One term: description, synonyms, related terms. |
 | `get_term_columns` | The physical columns a term maps to. |
 | `get_term_sql_attributes` | The SQL attributes defined under a term. |

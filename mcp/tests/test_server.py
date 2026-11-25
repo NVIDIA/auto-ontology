@@ -65,6 +65,7 @@ def test_publishes_exactly_the_curated_tools_plus_the_handwritten_ones() -> None
     assert names == {spec.name for spec in CURATED} | {
         "ask_question",
         "check_readiness",
+        "search_terms",
     }
 
 
@@ -271,9 +272,9 @@ def test_rejects_a_spec_with_no_paths(tmp_path: Path) -> None:
 def test_refuses_to_start_when_a_curated_endpoint_disappeared(tmp_path: Path) -> None:
     # Starting anyway would produce a healthy-looking server missing a tool.
     spec = json.loads(DEFAULT_SPEC_PATH.read_text(encoding="utf-8"))
-    del spec["paths"]["/api/terms"]
+    del spec["paths"]["/api/terms/{term_id}"]
     trimmed = tmp_path / "spec.json"
     trimmed.write_text(json.dumps(spec), encoding="utf-8")
 
-    with pytest.raises(ConfigError, match="GET /api/terms"):
+    with pytest.raises(ConfigError, match=r"GET /api/terms/\{term_id\}"):
         load_spec(_settings(trimmed))

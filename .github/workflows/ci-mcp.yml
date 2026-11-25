@@ -107,7 +107,11 @@ jobs:
           # Derived rather than a literal count: the curated tools exist only if
           # the wheel carried the spec, which is what this job is guarding, and a
           # tool added or renamed upstream should not have to be restated here.
-          expected = {spec.name for spec in CURATED} | {"ask_question", "check_readiness"}
+          expected = {spec.name for spec in CURATED} | {
+              "ask_question",
+              "check_readiness",
+              "search_terms",
+          }
 
           async def main() -> None:
               try:
