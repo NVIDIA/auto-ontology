@@ -85,15 +85,12 @@ def submit(
     response: str = "",
     assumptions: str = "",
     resubmit: str = "submit this version",
-    remind: bool = True,
 ) -> tuple[str, Submission | None]:
     """Check and run a final query; the submission when it ran cleanly.
 
     A failed submission is an observation, not the end of the episode: the
     model sees why and can fix it. When the caller's budget can no longer pay
     for a query, the query is accepted after the schema checks without running.
-    With *remind*, the episode's first query that passes the checks comes back
-    beside the question instead of running.
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -116,17 +113,6 @@ def submit(
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
-    if remind and not ctx.reminded:
-        ctx.reminded = True
-        reminder = prompts.submit_reminder(
-            ctx.question,
-            ctx.evidence,
-            sql,
-            shorten_answer=ctx.shorten_answer,
-            resubmit=resubmit,
-            value_anchors=ctx.value_anchors,
-        )
-        return reminder, None
     if not _can_run_queries(ctx):
         # Running it would be refused, and a refusal is not a wrong query.
         unrun = QueryResponse(result=[], sliced=False)
@@ -185,11 +171,34 @@ def _submit_draft(
     """Submit the latest drafted query when the budget ended the episode."""
     if not draft:
         return None
-    observation, submission = submit(ctx, draft, remind=False)
+    observation, submission = submit(ctx, draft)
     trajectory.append({"role": "draft_submission", "content": observation})
     if submission is None:
         return None
     return EpisodeResult(submission, "submitted_draft", calls, trajectory)
+
+
+def _run_draft(ctx: ToolContext, sql: str, last_turn: bool) -> str:
+    """Run a draft; the episode's first one that runs comes back with the reminder."""
+    runs = ctx.sql_runs
+    observation = run_sql(ctx, sql)
+    ran = ctx.sql_runs > runs and not observation.startswith("Error from the database")
+    # On the last turn there is no turn left to act on a reminder.
+    if not ran or ctx.reminded or last_turn:
+        return observation
+    ctx.reminded = True
+    answer_with = (
+        "submit it" if config.submit_tool_enabled() else "run it with final=true"
+    )
+    reminder = prompts.query_reminder(
+        ctx.question,
+        ctx.evidence,
+        (sql or "").strip().rstrip(";"),
+        shorten_answer=ctx.shorten_answer,
+        answer_with=answer_with,
+        value_anchors=ctx.value_anchors,
+    )
+    return f"{observation}\n\n{reminder}"
 
 
 def _with_cost_status(ctx: ToolContext, text: str) -> str:
@@ -208,7 +217,7 @@ def _dispatch(
         ToolName.RETRIEVE: lambda query="", kinds=None, purpose="sql": _retrieve(
             ctx, query, kinds, purpose
         ),
-        ToolName.RUN_SQL: lambda sql="": run_sql(ctx, sql),
+        ToolName.RUN_SQL: lambda sql="": _run_draft(ctx, sql, last_turn),
         ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
             ctx, page, pattern, offset
         ),
@@ -216,16 +225,12 @@ def _dispatch(
     try:
         if name not in offered:
             return f"Unknown tool {name!r}. Use {', '.join(offered)}.", None
-        # On the last turn a reminder would leave no turn to act on it.
         if name == ToolName.SUBMIT:
-            return submit(ctx, **args, remind=not last_turn)
+            return submit(ctx, **args)
         if name == ToolName.RUN_SQL and prompts.is_answer(name, args):
             final_args = {k: v for k, v in args.items() if k != "final"}
             return submit(
-                ctx,
-                **final_args,
-                resubmit="run this version with final=true",
-                remind=not last_turn,
+                ctx, **final_args, resubmit="run this version with final=true"
             )
         if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
             args = {k: v for k, v in args.items() if k == "sql"}

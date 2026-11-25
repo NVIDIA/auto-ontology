@@ -188,29 +188,30 @@ and no other ids, names or metrics.
 total, a breakdown, distinct values or a top-N."""
 
 
-def submit_reminder(
+def query_reminder(
     question: str,
     evidence: str | None,
     sql: str,
     *,
     shorten_answer: bool = False,
-    resubmit: str = "submit this version",
+    answer_with: str = "submit it",
     value_anchors: list[dict[str, str]] | None = None,
 ) -> str:
     """The question, its evidence, its verified values and the output rules,
-    beside the model's final query.
+    beside a query the model just ran.
 
-    Sent instead of running the first final query: by then the rules are many
-    turns back, and a model that no longer applies them still reads what is
-    in front of it. The values come without the guidance the first message
-    gave them, which the model has already read once.
+    Appended to the first query result, so it costs no turn of its own: by
+    then the rules are many turns back, and a model that no longer applies
+    them still reads what is in front of it. The values come without the
+    guidance the first message gave them, which the model has already read
+    once.
     """
     evidence = (evidence or "").strip()
     found, absent = _anchor_lines(value_anchors)
     if absent:
         found.append(f"- Stored nowhere: {', '.join(sorted(set(absent)))}")
     sections = [
-        "Not run yet. Check your query against the question once more.",
+        "REMINDER. Before you answer, check your query against the question.",
         f"QUESTION\n{question.strip()}",
         f"EVIDENCE\n{evidence}" if evidence else "",
         (
@@ -221,8 +222,7 @@ def submit_reminder(
         ),
         SHORT_ANSWER_RULES if shorten_answer else _REMINDER_RULES,
         f"YOUR QUERY\n{sql}",
-        f"If it already does all of this, {resubmit} again unchanged and it will "
-        "run. Otherwise fix it first.",
+        f"When your final query does all of this, {answer_with}.",
     ]
     return "\n\n".join(section for section in sections if section)
 
