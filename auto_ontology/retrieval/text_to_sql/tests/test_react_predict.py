@@ -256,3 +256,33 @@ def test_a_prediction_ends_the_pipeline_without_formatting() -> None:
     list(pipeline.run_steps({"path_state": {}, "decision": ""}, steps))
 
     assert calls == ["react_sql_agent"]
+
+
+def test_provenance_reaches_the_final_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
+    from auto_ontology.retrieval.text_to_sql.react.loop import Submission
+
+    saved = "SELECT SUM(order_line__quantity) FROM order_lines WHERE order_line__quantity >= 20"
+    submitted = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20"
+
+    def episode(_llm, ctx, **_kwargs):
+        ctx.shown_analyses["a1"] = {"id": "a1", "name": "bulk_units", "sql": saved}
+        db = SimpleNamespace(
+            result=[{"sum": 3}], numeric_kinds=None, values_digest=None
+        )
+        return EpisodeResult(Submission(submitted, "Done.", "", db), "submitted", 1, [])
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    state = _state()
+    out = agent_module.ReactSQLAgent().execute(state)
+    assert out["decision"] == "valid_sql"
+    final = ResponseAgent().execute(
+        {**state, "messages": [], "path_state": out["path_state"]}
+    )["path_state"]["final_response"]
+
+    used = final["custom_analyses_used"]
+    assert [(e["id"], e["stage"]) for e in used] == [("a1", "reference")]
+    assert used[0]["fingerprint"]

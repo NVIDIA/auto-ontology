@@ -65,3 +65,22 @@ def test_one_of_two_analyses_can_be_executed_while_the_other_is_context() -> Non
     stages = {e["id"]: e["stage"] for e in custom_analyses_used(ctx, PHYSICAL)}
 
     assert stages == {"a1": "reference", "a2": "executed"}
+
+
+def test_sharing_a_table_alone_is_not_a_reference() -> None:
+    unrelated = "SELECT COUNT(*) FROM order_lines WHERE quantity < 5"
+
+    assert _stage(custom_analyses_used(_ctx(), unrelated)) == "retrieved"
+
+
+def test_two_different_ctes_with_the_same_name_are_not_a_reference() -> None:
+    saved = "WITH x AS (SELECT id FROM orders) SELECT COUNT(*) FROM x"
+    other = "WITH x AS (SELECT id FROM customers) SELECT id FROM x"
+
+    assert _stage(custom_analyses_used(_ctx(saved), other)) == "retrieved"
+
+
+def test_the_saved_sql_embedded_as_a_cte_counts_as_executed() -> None:
+    wrapped = f"WITH b AS ({SAVED}) SELECT * FROM b"
+
+    assert _stage(custom_analyses_used(_ctx(), wrapped)) == "executed"
