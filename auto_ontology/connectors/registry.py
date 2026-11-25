@@ -87,7 +87,9 @@ def _redact(connection_string: str) -> str:
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string
-    return connection_string.replace(parsed.password, "***", 1)
+    userinfo, hostinfo = parsed.netloc.rsplit("@", 1)
+    username = userinfo.split(":", 1)[0]
+    return parsed._replace(netloc=f"{username}:***@{hostinfo}").geturl()
 
 
 def _schema_filter(connection: dict) -> list[str] | None:
