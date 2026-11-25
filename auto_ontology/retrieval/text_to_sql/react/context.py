@@ -62,6 +62,10 @@ class ToolContext:
     because every query changes it. ``None`` when queries are free.
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
+
+    ``ask_user`` is for callers whose user can be asked, such as a benchmark's
+    simulated user: it takes the model's question and returns the user's reply.
+    The episode offers the ``ask_user`` tool only when it is set.
     """
 
     retriever: Any
@@ -91,6 +95,7 @@ class ToolContext:
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    ask_user: Callable[[str], str] | None = None
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:

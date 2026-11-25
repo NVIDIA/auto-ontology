@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from collections.abc import Callable
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -928,30 +929,19 @@ def test_retries_end_and_the_episode_gives_up(
     assert len(sleeps) == 2
 
 
-def _ask_tool(answers: list[str], asked: list[str]) -> loop.ExtraTool:
+def _asker(answers: list[str], asked: list[str]) -> Callable[[str], str]:
     def ask_user(question: str) -> str:
         asked.append(question)
         return answers.pop(0)
 
-    return loop.ExtraTool(
-        definition={
-            "type": "function",
-            "function": {
-                "name": "ask_user",
-                "description": "Ask the user a clarification question.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"question": {"type": "string"}},
-                    "required": ["question"],
-                },
-            },
-        },
-        run=ask_user,
-    )
+    return ask_user
 
 
-def test_an_extra_tool_is_offered_and_answers_the_model(ctx: ToolContext) -> None:
+def test_ask_user_is_offered_when_the_caller_can_ask_and_its_reply_reaches_the_model(
+    ctx: ToolContext,
+) -> None:
     asked: list[str] = []
+    ctx.ask_user = _asker(["The active ones."], asked)
     model = ScriptedModel(
         [
             _reply(call("ask_user", "1", question="Which customers count?")),
@@ -959,23 +949,41 @@ def test_an_extra_tool_is_offered_and_answers_the_model(ctx: ToolContext) -> Non
         ]
     )
 
-    result = loop.run_episode(
-        model, ctx, "q", extra_tools=[_ask_tool(["The active ones."], asked)]
-    )
+    result = loop.run_episode(model, ctx, "q")
 
     assert result.reason == "submitted"
     assert result.tool_calls == 2
     assert asked == ["Which customers count?"]
-    assert "ask_user" in model.bound_tool_names[0]
+    sql_tools = [t["function"]["name"] for t in prompts.tools_for(EpisodeMode.SQL)]
+    assert model.bound_tool_names[0] == [*sql_tools, "ask_user"]
     tool_results = [m.content for m in model.seen[1] if isinstance(m, ToolMessage)]
     assert tool_results == ["The active ones."]
 
 
-def test_the_last_turn_does_not_offer_extra_tools(
+def test_an_episode_with_no_one_to_ask_does_not_offer_ask_user(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers count?")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert "ask_user" not in model.bound_tool_names[0]
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith("Unknown tool 'ask_user'")
+    assert result.reason == "submitted"
+
+
+def test_the_last_turn_does_not_offer_ask_user(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
     asked: list[str] = []
+    ctx.ask_user = _asker(["Active.", "All."], asked)
     model = ScriptedModel(
         [
             _reply(call("ask_user", "1", question="Which customers?")),
@@ -983,9 +991,7 @@ def test_the_last_turn_does_not_offer_extra_tools(
         ]
     )
 
-    result = loop.run_episode(
-        model, ctx, "q", extra_tools=[_ask_tool(["Active.", "All."], asked)]
-    )
+    result = loop.run_episode(model, ctx, "q")
 
     assert model.bound_tool_names[-1] == ["submit"]
     assert asked == ["Which customers?"]
@@ -994,11 +1000,35 @@ def test_the_last_turn_does_not_offer_extra_tools(
     assert result.reason == "budget_exhausted"
 
 
-def test_a_failing_extra_tool_is_an_observation(ctx: ToolContext) -> None:
+def test_the_turns_after_the_queries_run_out_do_not_offer_ask_user(
+    ctx: ToolContext,
+) -> None:
+    _one_query_budget(ctx)
+    asked: list[str] = []
+    ctx.ask_user = _asker([], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("ask_user", "2", question="Which customers?")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert "ask_user" in model.bound_tool_names[0]
+    assert model.bound_tool_names[1] == ["submit"]
+    assert asked == []
+    assert result.reason == "submitted"
+
+
+def test_a_failing_ask_user_and_wrong_arguments_are_observations(
+    ctx: ToolContext,
+) -> None:
     def ask_user(question: str) -> str:
         raise ConnectionError("the user is away")
 
-    tool = loop.ExtraTool(definition=_ask_tool([], []).definition, run=ask_user)
+    ctx.ask_user = ask_user
     model = ScriptedModel(
         [
             _reply(call("ask_user", "1", question="Which customers?")),
@@ -1007,21 +1037,10 @@ def test_a_failing_extra_tool_is_an_observation(ctx: ToolContext) -> None:
         ]
     )
 
-    result = loop.run_episode(model, ctx, "q", extra_tools=[tool])
+    result = loop.run_episode(model, ctx, "q")
 
     observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
     assert observations[0] == "ask_user failed: the user is away"
     assert observations[1].startswith("Wrong arguments for ask_user")
     assert result.reason == "submitted"
-
-
-def test_an_extra_tool_cannot_take_the_name_of_the_episodes_own(
-    ctx: ToolContext,
-) -> None:
-    submit = loop.ExtraTool(
-        definition={"type": "function", "function": {"name": "submit"}},
-        run=lambda **_: "",
-    )
-
-    with pytest.raises(ValueError, match="submit"):
-        loop.run_episode(ScriptedModel([]), ctx, "q", extra_tools=[submit])
+    assert result.tool_calls == 3
