@@ -199,6 +199,32 @@ def test_definition_comes_back_with_its_sql_and_its_table(calls: dict) -> None:
     )
 
 
+def test_a_shown_analysis_is_recorded_but_an_attribute_is_not(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    analysis = {
+        "id": "an-bulk",
+        "label": "CustomAnalysis",
+        "name": "bulk_units",
+        "description": "Units on bulk lines",
+        "sql": "SELECT SUM(amount) FROM sales.orders WHERE discount > 0",
+        "relevant_tables": [{"id": "t-orders"}],
+    }
+    original = tool._get_candidates_information
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda r, q, *a, **k: (
+            [analysis, REVENUE] if r is SEMANTIC_STORE else original(r, q, *a, **k)
+        ),
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+
+    assert set(ctx.shown_analyses) == {"an-bulk"}
+    assert ctx.shown_analyses["an-bulk"]["sql"] == analysis["sql"]
+
+
 def test_second_search_joins_new_tables_to_ones_already_shown(calls: dict) -> None:
     ctx = _ctx()
     tool.retrieve(ctx, "how is revenue calculated")

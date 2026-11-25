@@ -728,6 +728,13 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if (block := _definition_block(hit)) is not None
     ]
     named += definitions
+    analysis_by_block = {
+        block: hit
+        for hit in hits
+        if hit.get("label") == Labels.CUSTOM_ANALYSIS
+        and hit.get("id")
+        and (block := _definition_block(hit)) is not None
+    }
     earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
@@ -757,6 +764,13 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     ctx.seen_tables.update(
         {str(t["id"]): t for t in new_tables if new_blocks[str(t["id"])] in result}
     )
+    for block, hit in analysis_by_block.items():
+        if block in result:
+            ctx.shown_analyses[str(hit["id"])] = {
+                "id": str(hit["id"]),
+                "name": hit.get("name") or hit.get("text") or "",
+                "sql": hit.get("sql") or "",
+            }
     for block, tables in named:
         if block in result or short_blocks.get(block, "\0") in result:
             for schema, name in tables:

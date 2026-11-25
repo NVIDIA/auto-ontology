@@ -20,6 +20,7 @@ from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.loop import run_episode
 from auto_ontology.retrieval.text_to_sql.react.mode import ToolName, episode_mode
+from auto_ontology.retrieval.text_to_sql.react.provenance import custom_analyses_used
 from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -107,12 +108,13 @@ class ReactSQLAgent(BaseAgent):
         can_run_queries = getattr(connector, "can_run_queries", None)
         if callable(can_run_queries):
             ctx.can_run_queries = can_run_queries
+        dialect = getattr(connector, "dialect", None)
         result = run_episode(
             state.get("reasoning_llm") or state["llm"],
             ctx,
             question=get_question_for_processing(state),
             evidence=state.get("evidence"),
-            dialect=getattr(connector, "dialect", None),
+            dialect=dialect,
             mode=episode_mode(state.get("prediction_override")),
             custom_prompts=state.get("custom_prompts"),
             sql_examples=state.get("sql_examples"),
@@ -153,7 +155,7 @@ class ReactSQLAgent(BaseAgent):
                 "response": submission.response,
                 "sql_code": "",
                 "sql_columns": [],
-                "custom_analyses_used": [],
+                "custom_analyses_used": custom_analyses_used(ctx, None, dialect),
                 "sql_response_from_db": None,
             }
             return {
@@ -174,6 +176,9 @@ class ReactSQLAgent(BaseAgent):
             response=submission.response or "Here is the result of the query.",
         )
         path_state["sql_response_from_db"] = submission.db_response.result
+        path_state["custom_analyses_used"] = custom_analyses_used(
+            ctx, submission.sql, dialect
+        )
         path_state.setdefault("candidates", [])
         if ctx.numeric_type_alignment:
             path_state["result_numeric_kinds"] = submission.db_response.numeric_kinds

@@ -49,6 +49,10 @@ class ToolContext:
     table on a join route or the other copy on a SIMILAR line is one the model
     is told to use, though its columns were never listed.
 
+    ``shown_analyses`` holds each saved custom analysis (``id``, ``name``, full
+    ``sql``) a ``retrieve`` result showed the model, keyed by id; it is what the
+    response's ``custom_analyses_used`` provenance is built from.
+
     ``information_answers`` lets ``submit`` take an information question's answer
     with no SQL; it stays off wherever a grader scores the SQL.
     ``information_retrieved`` records that ``retrieve`` showed the information
@@ -96,6 +100,7 @@ class ToolContext:
     prediction_refusal: str = ""
     pages: list[Any] = field(default_factory=list)
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
+    shown_analyses: dict[str, dict[str, str]] = field(default_factory=dict)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
 
