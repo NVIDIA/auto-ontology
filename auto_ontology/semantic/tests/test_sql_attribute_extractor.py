@@ -127,21 +127,55 @@ def test_filtered_proposals_are_dropped(
     assert _run() == []
 
 
-def test_where_literal_backed_by_sample_values_survives(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    _stub_llm(
-        monkeypatch,
-        [
-            _proposal(
-                "Shipped Margin",
-                "SELECT unitprice - unitcost AS x FROM sales.orderlines "
-                "WHERE status = 'shipped'",
-            )
-        ],
-    )
+_MARGIN = "SELECT unitprice - unitcost AS x FROM sales.orderlines WHERE "
 
-    assert _run() == ["Shipped Margin"]
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        "sales.orderlines.status = 'Shipped'",
+        "'Shipped' = status",
+        "status IN ('Open', 'Shipped') AND unitprice <> 12.5",
+        "unitprice = 10",
+        "unitcost > 0",
+    ],
+    ids=["qualified", "literal-first", "in-and-numeric", "numeric-eq", "range"],
+)
+def test_where_literal_backed_by_its_columns_samples_survives(
+    monkeypatch: MonkeyPatch, where: str
+) -> None:
+    _stub_llm(monkeypatch, [_proposal("Margin", _MARGIN + where)])
+
+    assert _run() == ["Margin"]
+
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        "status = 'shipped'",
+        "status = '10'",
+        "unitprice = '10'",
+        "unitcost = 5",
+        "status IN ('Open', 'Cancelled')",
+        "LOWER(status) = 'Shipped'",
+        "status LIKE 'Ship%'",
+    ],
+    ids=[
+        "case-mismatch",
+        "another-columns-sample",
+        "string-vs-numeric-sample",
+        "unsampled-column",
+        "one-in-value-unsampled",
+        "wrapped-column",
+        "untied-string-literal",
+    ],
+)
+def test_where_literal_not_in_its_columns_samples_is_dropped(
+    monkeypatch: MonkeyPatch, where: str
+) -> None:
+    _stub_llm(monkeypatch, [_proposal("Margin", _MARGIN + where)])
+
+    assert _run() == []
 
 
 def test_llm_failure_raises(monkeypatch: MonkeyPatch) -> None:
