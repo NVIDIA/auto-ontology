@@ -13,7 +13,7 @@ export const AppTopBar = ({ version }: { version?: string }) => {
 	const { items, rightSlot } = useBreadcrumbs();
 
 	return (
-		<header className="flex h-[52px] font-sf shrink-0 items-center justify-between border-b border-[#e9eaea] bg-white pl-3 pr-5 dark:border-[#2e2e33] dark:bg-[#1b1b1d]">
+		<header className="flex h-[52px] font-sf shrink-0 items-center justify-between border-b border-[#e9eaea] bg-white pl-3 pr-5 dark:border-[#2e2e33] dark:bg-[#18181b]">
 			<div className="flex min-w-0 items-center gap-3">
 				<div className="flex size-9 shrink-0 items-center justify-center">
 					{/* Plain <img>: a static, fixed-size logo that needs no optimization. */}
