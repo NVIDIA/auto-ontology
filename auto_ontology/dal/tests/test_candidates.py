@@ -128,6 +128,16 @@ def test_an_unknown_label_is_skipped_with_a_warning(world, caplog) -> None:
     assert "Nonsense" in caplog.text
 
 
+def test_every_accepted_label_resolves_to_something() -> None:
+    """An accepted label with no table is logged as missing and dropped."""
+    unresolved = [
+        label
+        for label in Labels.LIST_OF_ALL
+        if label not in c._NODE_TABLES and label not in c._EXPANDERS
+    ]
+    assert unresolved == []
+
+
 # --------------------------------------------------------------------------
 # Columns
 # --------------------------------------------------------------------------

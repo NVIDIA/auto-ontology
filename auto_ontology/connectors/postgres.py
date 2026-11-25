@@ -12,7 +12,7 @@ from typing import Optional
 
 import pandas as pd
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import tuple_row
 from psycopg_pool import ConnectionPool
 
 from auto_ontology.catalog.constants import TableTypes
@@ -22,12 +22,13 @@ from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 def _fetch_frame(
     conn: psycopg.Connection, sql: str, parameters: Optional[list]
 ) -> pd.DataFrame:
-    with conn.cursor(row_factory=dict_row) as cur:
+    with conn.cursor(row_factory=tuple_row) as cur:
         cur.execute(sql, parameters)
         if cur.description is None:
             return pd.DataFrame()
         rows = cur.fetchall()
-    return pd.DataFrame(rows)
+        columns = [column[0] for column in cur.description]
+    return pd.DataFrame(rows, columns=columns)
 
 
 class PostgresDatabase(SQLDatabase):

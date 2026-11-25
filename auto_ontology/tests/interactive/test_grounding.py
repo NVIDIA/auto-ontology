@@ -85,7 +85,11 @@ def _make_fake_t2s_main(fake_fn):
 
 def _make_fake_t2s_state():
     mod = types.ModuleType("auto_ontology.retrieval.text_to_sql.state")
-    # TextToSQLPayload is just a TypedDict — a plain dict suffices for tests
+    # Both names: the type is AgentRequest and TextToSQLPayload is kept as an
+    # alias, and a stand-in that carries only one of them turns a rename into
+    # an ImportError here rather than wherever the rename was incomplete.
+    # Either is a TypedDict, so a plain dict suffices for tests.
+    mod.AgentRequest = dict
     mod.TextToSQLPayload = dict
     return mod
 
