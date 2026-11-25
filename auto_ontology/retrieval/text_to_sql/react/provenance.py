@@ -46,6 +46,7 @@ import hashlib
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 
@@ -68,10 +69,19 @@ def _normalise(sql: str | None, dialect: str | None) -> str | None:
 
 
 def _parse(sql: str | None, dialect: str | None) -> list[exp.Expression]:
+    """*sql* as statements whose identifiers follow the dialect's case rules.
+
+    Unquoted names are folded the way the database folds them and a quoted name
+    keeps its case where the database does, so equal strings are the same name.
+    """
     if not sql:
         return []
     try:
-        return [e for e in sqlglot.parse(sql, read=dialect) if e is not None]
+        return [
+            normalize_identifiers(e, dialect)
+            for e in sqlglot.parse(sql, read=dialect)
+            if e is not None
+        ]
     except sqlglot.errors.SqlglotError:
         return []
 
@@ -90,16 +100,27 @@ def _enclosing_ctes(node: exp.Expression) -> list[exp.CTE]:
 def _cte_read_by(table: exp.Table) -> exp.CTE | None:
     """The CTE definition *table* names, or ``None`` for a physical table.
 
-    The nearest enclosing WITH that defines the name, so two CTEs that share a
-    name in different scopes stay two definitions.
+    The nearest enclosing WITH that defines the name and is visible from the
+    read, so two CTEs that share a name in different scopes stay two definitions.
+    A schema- or catalog-qualified name is always a physical table. In a
+    WITH that is not recursive, a CTE sees only the ones defined before it, so
+    ``WITH orders AS (SELECT ... FROM orders)`` reads the physical table.
     """
-    name = table.name.lower()
+    if table.args.get("db") or table.args.get("catalog"):
+        return None
+    name = table.name
     node = table.parent
     while node is not None:
         clause = node.args.get("with_") or node.args.get("with")
         if clause is not None:
-            for cte in clause.expressions:
-                if cte.alias_or_name.lower() == name:
+            definitions = list(clause.expressions)
+            inside = next(
+                (c for c in _enclosing_ctes(table) if c.parent is clause), None
+            )
+            if inside is not None and not clause.args.get("recursive"):
+                definitions = definitions[: definitions.index(inside)]
+            for cte in definitions:
+                if cte.alias_or_name == name:
                     return cte
         node = node.parent
     return None
@@ -136,7 +157,7 @@ def _tables(sql: str | None, dialect: str | None) -> set[str]:
     for statement in _parse(sql, dialect):
         live = _live_ctes(statement)
         names |= {
-            t.name.lower()
+            t.name
             for t in statement.find_all(exp.Table)
             if t.name and _cte_read_by(t) is None and _is_live(t, live)
         }
@@ -153,10 +174,10 @@ def _sources(select: exp.Expression) -> dict[str, str]:
         if table.name and table.find_ancestor(exp.Select) is select:
             # Once aliased, the table's own name is not a qualifier: another
             # table may carry it as its alias.
-            out[table.alias_or_name.lower()] = table.name.lower()
+            out[table.alias_or_name] = table.name
     for subquery in select.find_all(exp.Subquery):
         if subquery.alias and subquery.find_ancestor(exp.Select) is select:
-            out[subquery.alias.lower()] = subquery.alias.lower()
+            out[subquery.alias] = subquery.alias
     return out
 
 
@@ -168,7 +189,7 @@ def _owner(column: exp.Column) -> str | None:
     the nearest SELECT. A ``table__column`` prefix is not used: it names the
     concept (``order_line``), not necessarily the table (``order_lines``).
     """
-    qualifier = (column.table or "").lower()
+    qualifier = column.table or ""
     select = column.find_ancestor(exp.Select)
     if qualifier:
         while select is not None:

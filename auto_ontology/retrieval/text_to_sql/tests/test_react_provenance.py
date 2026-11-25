@@ -214,3 +214,47 @@ def test_an_alias_is_not_overwritten_by_another_tables_own_name() -> None:
     )
 
     assert _stage_of(saved, submitted) == "reference"
+
+
+def test_a_schema_qualified_name_is_a_table_not_the_cte() -> None:
+    saved = "SELECT SUM(quantity) AS total FROM order_lines"
+
+    assert _stage_of(saved, f"WITH b AS ({saved}) SELECT * FROM public.b") == (
+        "retrieved"
+    )
+    assert _stage_of(saved, f"WITH b AS ({saved}) SELECT * FROM b") == "executed"
+
+
+def test_a_cte_named_like_the_table_it_reads_reads_the_physical_table() -> None:
+    saved = "SELECT COUNT(*) FROM orders WHERE status = 'open'"
+    submitted = (
+        "WITH orders AS (SELECT SUM(amount) FROM orders WHERE status = 'open') "
+        "SELECT * FROM orders"
+    )
+
+    assert _stage_of(saved, submitted) == "reference"
+
+
+def test_a_cte_still_sees_the_ones_defined_before_it() -> None:
+    saved = "SELECT COUNT(*) FROM orders WHERE status = 'open'"
+    submitted = (
+        "WITH a AS (SELECT * FROM orders WHERE status = 'open'), "
+        "b AS (SELECT COUNT(*) FROM a) SELECT * FROM b"
+    )
+    recursive = (
+        "WITH RECURSIVE r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r WHERE n < 3) "
+        "SELECT * FROM r"
+    )
+
+    assert _stage_of(saved, submitted) == "reference"
+    assert _stage_of(saved, recursive) == "retrieved"
+
+
+def test_cte_names_follow_the_dialects_quoting_and_case_rules() -> None:
+    saved = "SELECT SUM(quantity) AS total FROM order_lines"
+    # PostgreSQL reads ``b``, not the quoted, case-sensitive "B".
+    quoted = f'WITH "B" AS ({saved}), b AS (SELECT 1 AS total) SELECT * FROM b'
+    folded = f"WITH B AS ({saved}) SELECT * FROM b"
+
+    assert _stage(custom_analyses_used(_ctx(saved), quoted, "postgres")) == "retrieved"
+    assert _stage(custom_analyses_used(_ctx(saved), folded, "postgres")) == "executed"
