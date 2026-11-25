@@ -346,6 +346,8 @@ def test_tables_in_another_database_do_not_use_up_the_limit(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tool.config, "max_tables_per_retrieve", lambda: 1)
+    # The injected physical table hits have no semantic coverage in this fixture.
+    monkeypatch.setattr(tool, "fetch_semantic_coverage", lambda *_: (set(), set()))
     monkeypatch.setattr(
         tool,
         "_get_candidates_information",
