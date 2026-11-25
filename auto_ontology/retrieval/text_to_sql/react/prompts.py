@@ -179,6 +179,42 @@ the only result and a NULL input would make it meaningless; if the question asks
 to include rows with missing data, use ORDER BY ... DESC NULLS LAST so NULLs \
 never come first."""
 
+_REMINDER_RULES = """\
+- Return exactly the outputs the question asks for, in the order it names them, \
+and no other ids, names or metrics.
+- Where the evidence names a column, a value or a formula, use exactly that.
+- Filter only on what the question or its evidence asks for.
+- Aggregate, GROUP BY, DISTINCT or LIMIT only when the question asks for a \
+total, a breakdown, distinct values or a top-N."""
+
+
+def submit_reminder(
+    question: str,
+    evidence: str | None,
+    sql: str,
+    *,
+    shorten_answer: bool = False,
+    resubmit: str = "submit this version",
+) -> str:
+    """The question, its evidence and the output rules, beside the model's final query.
+
+    Sent instead of running the first final query: by then the rules are many
+    turns back, and a model that no longer applies them still reads what is
+    in front of it.
+    """
+    evidence = (evidence or "").strip()
+    sections = [
+        "Not run yet. Check your query against the question once more.",
+        f"QUESTION\n{question.strip()}",
+        f"EVIDENCE\n{evidence}" if evidence else "",
+        SHORT_ANSWER_RULES if shorten_answer else _REMINDER_RULES,
+        f"YOUR QUERY\n{sql}",
+        f"If it already does all of this, {resubmit} again unchanged and it will "
+        "run. Otherwise fix it first.",
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
 _SQL_EXAMPLES_GUIDANCE = """\
 Solved question/SQL pairs from OTHER databases, chosen because their wording \
 resembles this question. They are precedent for how a request of this kind \

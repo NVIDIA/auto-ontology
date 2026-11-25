@@ -42,9 +42,12 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setattr(
         loop, "information", lambda _ctx, query, kinds=None: f"TERM {query}"
     )
-    return show_shop_tables(
+    context = show_shop_tables(
         ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
     )
+    # The submit reminder has tests of its own; here a first submission runs.
+    context.reminded = True
+    return context
 
 
 def _reply(*calls: dict) -> AIMessage:
@@ -926,3 +929,123 @@ def test_retries_end_and_the_episode_gives_up(
     assert result.reason == "model_error"
     assert len(model.seen) == 3
     assert len(sleeps) == 2
+
+
+@pytest.fixture
+def reminder(ctx: ToolContext) -> None:
+    ctx.reminded = False
+
+
+def test_the_first_submission_comes_back_beside_the_question(
+    ctx: ToolContext, reminder: None
+) -> None:
+    submit = call("submit", "1", sql=FINAL_SQL, response="x")
+    model = ScriptedModel([_reply(submit), _reply({**submit, "id": "2"})])
+
+    result = loop.run_episode(
+        model, ctx, "What is revenue?", evidence="revenue is amount - discount"
+    )
+
+    assert result.reason == "submitted"
+    assert result.tool_calls == 2
+    shown = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert shown.startswith("Not run yet.")
+    assert "QUESTION\nWhat is revenue?" in shown
+    assert "EVIDENCE\nrevenue is amount - discount" in shown
+    assert f"YOUR QUERY\n{FINAL_SQL}" in shown
+    assert prompts.SHORT_ANSWER_RULES not in shown
+
+
+def test_the_reminder_repeats_the_short_answer_rules_when_asked(
+    ctx: ToolContext, reminder: None
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q", shorten_answer=True)
+
+    shown = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert prompts.SHORT_ANSWER_RULES in shown
+
+
+def test_the_reminder_is_sent_once(ctx: ToolContext, reminder: None) -> None:
+    fixed = FINAL_SQL.replace("SUM(", "TOTAL(", 1)
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "2", sql=fixed, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.submission.sql == fixed
+
+
+def test_a_query_that_fails_the_checks_is_not_reminded(
+    ctx: ToolContext, reminder: None
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql="SELECT revenue FROM orders", response="x")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith("Not accepted.")
+    assert observations[1].startswith("Not run yet.")
+    assert result.tool_calls == 3
+
+
+def test_a_final_run_is_reminded_with_its_own_wording(
+    ctx: ToolContext, reminder: None, no_submit_tool: None
+) -> None:
+    final = call("run_sql", "1", sql=FINAL_SQL, final=True)
+    model = ScriptedModel([_reply(final), _reply({**final, "id": "2"})])
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    shown = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert "run this version with final=true again unchanged" in shown
+
+
+def test_the_last_turn_is_not_reminded(
+    ctx: ToolContext, reminder: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", "1", query="revenue")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+
+
+def test_a_draft_submitted_for_lack_of_budget_is_not_reminded(
+    ctx: ToolContext, reminder: None
+) -> None:
+    _one_query_budget(ctx)
+    model = ScriptedModel(
+        [_reply(call("run_sql", "1", sql=FINAL_SQL)), AIMessage(content="Stuck.")]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted_draft"
+
+
+def test_a_new_episode_reminds_its_first_submission() -> None:
+    assert ToolContext(retriever=None, connectors=[]).reminded is False

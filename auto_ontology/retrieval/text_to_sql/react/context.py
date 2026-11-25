@@ -62,6 +62,10 @@ class ToolContext:
     because every query changes it. ``None`` when queries are free.
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
+
+    ``evidence`` and ``shorten_answer`` are what the submit reminder repeats
+    beside the final query; ``reminded`` records that it was sent, since it is
+    sent once an episode.
     """
 
     retriever: Any
@@ -91,6 +95,9 @@ class ToolContext:
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    evidence: str = ""
+    shorten_answer: bool = False
+    reminded: bool = False
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:

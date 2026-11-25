@@ -85,12 +85,15 @@ def submit(
     response: str = "",
     assumptions: str = "",
     resubmit: str = "submit this version",
+    remind: bool = True,
 ) -> tuple[str, Submission | None]:
     """Check and run a final query; the submission when it ran cleanly.
 
     A failed submission is an observation, not the end of the episode: the
     model sees why and can fix it. When the caller's budget can no longer pay
     for a query, the query is accepted after the schema checks without running.
+    With *remind*, the episode's first query that passes the checks comes back
+    beside the question instead of running.
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -113,6 +116,16 @@ def submit(
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
+    if remind and not ctx.reminded:
+        ctx.reminded = True
+        reminder = prompts.submit_reminder(
+            ctx.question,
+            ctx.evidence,
+            sql,
+            shorten_answer=ctx.shorten_answer,
+            resubmit=resubmit,
+        )
+        return reminder, None
     if not _can_run_queries(ctx):
         # Running it would be refused, and a refusal is not a wrong query.
         unrun = QueryResponse(result=[], sliced=False)
@@ -171,7 +184,7 @@ def _submit_draft(
     """Submit the latest drafted query when the budget ended the episode."""
     if not draft:
         return None
-    observation, submission = submit(ctx, draft)
+    observation, submission = submit(ctx, draft, remind=False)
     trajectory.append({"role": "draft_submission", "content": observation})
     if submission is None:
         return None
@@ -184,7 +197,11 @@ def _with_cost_status(ctx: ToolContext, text: str) -> str:
 
 
 def _dispatch(
-    ctx: ToolContext, name: str, args: dict, offered: list[str]
+    ctx: ToolContext,
+    name: str,
+    args: dict,
+    offered: list[str],
+    last_turn: bool = False,
 ) -> tuple[str, Submission | Prediction | None]:
     handlers: dict[str, Callable[..., str]] = {
         ToolName.RETRIEVE: lambda query="", kinds=None, purpose="sql": _retrieve(
@@ -198,12 +215,16 @@ def _dispatch(
     try:
         if name not in offered:
             return f"Unknown tool {name!r}. Use {', '.join(offered)}.", None
+        # On the last turn a reminder would leave no turn to act on it.
         if name == ToolName.SUBMIT:
-            return submit(ctx, **args)
+            return submit(ctx, **args, remind=not last_turn)
         if name == ToolName.RUN_SQL and prompts.is_answer(name, args):
             final_args = {k: v for k, v in args.items() if k != "final"}
             return submit(
-                ctx, **final_args, resubmit="run this version with final=true"
+                ctx,
+                **final_args,
+                resubmit="run this version with final=true",
+                remind=not last_turn,
             )
         if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
             args = {k: v for k, v in args.items() if k == "sql"}
@@ -238,6 +259,9 @@ def run_episode(
     a ``predict`` episode ignores them.
     """
     writes_sql = mode != EpisodeMode.PREDICT
+    ctx.question = ctx.question or question
+    ctx.evidence = (evidence or "").strip()
+    ctx.shorten_answer = shorten_answer
     system_prompt = prompts.system_prompt_for(
         mode, dialect, information_answers=ctx.information_answers
     )
@@ -364,7 +388,7 @@ def run_episode(
                     answered_over_budget = True
                 made.add(key)
                 calls += 1
-                observation, answer = _dispatch(ctx, name, args, offered)
+                observation, answer = _dispatch(ctx, name, args, offered, last_turn)
             if answer is None:
                 observation = _with_cost_status(ctx, observation)
             messages.append(

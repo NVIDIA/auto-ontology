@@ -34,9 +34,11 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_RESULT_ROWS", "2")
     catalog = FakeCatalog(SHOP_CATALOG)
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
-    return show_shop_tables(
+    context = show_shop_tables(
         ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
     )
+    context.reminded = True
+    return context
 
 
 def test_a_result_too_long_to_show_is_saved_as_a_page(ctx: ToolContext) -> None:
