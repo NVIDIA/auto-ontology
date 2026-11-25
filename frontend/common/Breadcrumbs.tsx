@@ -47,9 +47,9 @@ const CRUMB_BASE = `flex min-w-0 ${CRUMB_MAX_WIDTH} items-center gap-1 rounded p
 const MASK_BASE = 'block shrink-0 bg-current [mask-position:center] [mask-repeat:no-repeat]';
 const ICON_CLASS: Record<CrumbIconName, string> = {
 	chat: 'size-6 [mask-image:url(/icons/comment.svg)]',
-	// The library draws Discovery in separate pieces, so this is the design's
-	// side menu version of it, on its 36px tile.
-	discovery: 'size-[30px] [mask-size:contain] [mask-image:url(/nav/discovery-default.svg)]',
+	// The library draws Discovery in separate pieces; the file puts them back
+	// together at the positions the design gives them.
+	discovery: 'size-6 [mask-image:url(/icons/discovery.svg)]',
 	glossary: 'size-6 [mask-image:url(/icons/glossary.svg)]',
 	analysis: 'size-6 [mask-image:url(/icons/analysis.svg)]',
 	analytics: 'size-4 [mask-image:url(/icons/analytics.svg)]',
