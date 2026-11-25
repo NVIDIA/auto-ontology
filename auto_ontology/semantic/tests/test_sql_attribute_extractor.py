@@ -144,8 +144,16 @@ def test_where_literal_backed_by_sample_values_survives(
     assert _run() == ["Shipped Margin"]
 
 
-def test_llm_failure_returns_nothing(monkeypatch: MonkeyPatch) -> None:
+def test_llm_failure_raises(monkeypatch: MonkeyPatch) -> None:
+    """A failed call is not reported as an empty proposal list."""
     monkeypatch.setattr(extractor, "get_llm_client", lambda **_k: object())
     monkeypatch.setattr(extractor, "invoke_with_structured_output", lambda *_a: None)
+
+    with pytest.raises(extractor.SqlAttributeExtractionFailed):
+        _run()
+
+
+def test_zero_proposals_is_not_a_failure(monkeypatch: MonkeyPatch) -> None:
+    _stub_llm(monkeypatch, [])
 
     assert _run() == []
