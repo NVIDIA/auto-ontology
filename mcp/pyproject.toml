@@ -6,7 +6,7 @@
 # The MCP server reaches Auto Ontology over HTTP like any other client, so it needs none
 # of the backend's database drivers or model tooling — installing
 # `auto-ontology-server` to run it would pull ~450 packages and over a gigabyte, and it
-# would inherit that project's git dependencies. These four deps install in
+# would inherit that project's git dependencies. These deps install in
 # seconds, which is what makes `uvx auto-ontology-mcp` practical on a laptop.
 
 [project]
@@ -17,6 +17,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
+    "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2; enforce for standalone HTTPX installs
     "fastmcp>=3.4.10,<4",
     "httpx>=0.28.1",
     "pydantic>=2",
@@ -51,7 +52,6 @@ dev = ["pytest>=8"]
 # so the published package's own version ranges stay as declared above.
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via mcp)
-    "certifi>=2026.10.18",  # GHSA-6q48-6c7w-9gw2 (via httpx)
     "fastmcp-slim>=3.4.10",  # GHSA-7xgj-8392-5q4r (via fastmcp)
     "mcp>=1.30.0",  # GHSA-qx49-fqc8-xw99 and four more (via fastmcp)
     "authlib>=1.9.1",  # GHSA-6v38-4h7w-rj9h, GHSA-8m4g-j4wp-wgcg and seven more (via fastmcp)
