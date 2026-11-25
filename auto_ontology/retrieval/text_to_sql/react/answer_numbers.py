@@ -244,19 +244,28 @@ def _stated(text: str) -> set[float]:
     return {n for c in _numbers(text or "") for n, _ in c.readings}
 
 
-def _sql_numbers(sql: str) -> set[float]:
+def _sql_numbers(
+    sql: str,
+    statement: exp.Expression | None = None,
+    dialect: str | None = None,
+) -> set[float]:
     """The numbers *sql* states, with their signs: -100 in ``balance < -100``.
 
-    ``LIMIT 100`` and ``qty - 100`` state 100, not -100. Numbers inside string
-    literals count unsigned, and SQL that does not parse falls back to every
-    number in its text, unsigned.
+    ``LIMIT 100`` and ``qty - 100`` state 100, not -100. *statement* is *sql*
+    as ``submit`` already parsed it; without it *sql* is parsed in *dialect*,
+    since ``TOP 10`` or backticks do not parse in the default one. Numbers
+    inside string literals count unsigned, and SQL that does not parse falls
+    back to every number in its text, unsigned.
     """
-    if not sql:
+    if statement is not None:
+        tree = statement
+    elif not sql:
         return set()
-    try:
-        tree = sqlglot.parse_one(sql)
-    except Exception:  # noqa: BLE001 — an unparsable query still names its numbers
-        return {float(n) for n in _SQL_NUMBER.findall(sql)}
+    else:
+        try:
+            tree = sqlglot.parse_one(sql, read=dialect or None)
+        except Exception:  # noqa: BLE001 — an unparsable query still names its numbers
+            return {float(n) for n in _SQL_NUMBER.findall(sql)}
     found: set[float] = set()
     for literal in tree.find_all(exp.Literal):
         if literal.is_string:
@@ -270,9 +279,15 @@ def _sql_numbers(sql: str) -> set[float]:
     return found
 
 
-def _checked(response: str, question: str, sql: str) -> list[_Cited]:
+def _checked(
+    response: str,
+    question: str,
+    sql: str,
+    statement: exp.Expression | None,
+    dialect: str | None,
+) -> list[_Cited]:
     """The cited numbers worth checking against the rows."""
-    stated = _stated(question) | _sql_numbers(sql)
+    stated = _stated(question) | _sql_numbers(sql, statement, dialect)
     return [
         c
         for c in _numbers(_prose(response))
@@ -288,18 +303,21 @@ def contradicted_numbers(
     rows: list[dict[str, Any]],
     question: str = "",
     sql: str = "",
+    statement: exp.Expression | None = None,
+    dialect: str | None = None,
 ) -> list[str]:
     """The numbers *response* cites, when none of them come from *rows*.
 
     Empty when the rows hold no numbers (an empty or all-NULL result included),
     when some checked number is supported, or when the response cites any of
     the rows' own values, even a small one such as 0. Otherwise the cited text
-    of each checked number, in order.
+    of each checked number, in order. *statement* and *dialect* are how *sql*
+    is read for the numbers it states (:func:`_sql_numbers`).
     """
     cells = _cell_values(rows)
     if not cells:
         return []
-    checked = _checked(response, question, sql)
+    checked = _checked(response, question, sql, statement, dialect)
     if not checked:
         return []
     support = cells + _derived_values(rows)
@@ -334,13 +352,19 @@ def render_rows(rows: list[dict[str, Any]], limit: int = _SHOWN_ROWS) -> str:
 
 
 def numbers_check(
-    ctx: ToolContext, sql: str, response: str, db_response: QueryResponse
+    ctx: ToolContext,
+    sql: str,
+    response: str,
+    db_response: QueryResponse,
+    statement: exp.Expression | None = None,
+    dialect: str | None = None,
 ) -> str | None:
     """Why ``submit`` sends this answer back, or None to accept it.
 
     Sends back at most once per episode, and never when the model could not
     answer again: on its last answer attempt, or when the next query, which
-    resubmitting runs, would be refused.
+    resubmitting runs, would be refused. *statement* is *sql* as ``submit``
+    parsed it in the connector's *dialect*.
     """
     if ctx.answer_numbers_checked or ctx.last_answer_attempt or not enabled():
         return None
@@ -351,7 +375,9 @@ def numbers_check(
     rows = rows_from_result(db_response.result)
     if len(rows) > _MAX_ROWS:
         return None
-    contradicted = contradicted_numbers(response, rows, ctx.question, sql)
+    contradicted = contradicted_numbers(
+        response, rows, ctx.question, sql, statement, dialect
+    )
     if not contradicted:
         return None
     ctx.answer_numbers_checked = True

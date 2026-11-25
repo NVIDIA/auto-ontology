@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import sqlglot
 
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import QueryResponse
 from auto_ontology.retrieval.text_to_sql.react.answer_numbers import (
@@ -260,6 +261,27 @@ def test_a_positive_sql_number_does_not_cover_its_negative(sql: str) -> None:
     rows = [{"id": 501, "balance": -250}]
 
     assert contradicted_numbers("There are -100 accounts.", rows, "", sql) == ["-100"]
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [
+        ("SELECT TOP 10 id, balance FROM accounts WHERE balance < -100", "tsql"),
+        ("SELECT `id`, `balance` FROM `accounts` WHERE `balance` < -100", "mysql"),
+    ],
+)
+def test_a_negative_number_keeps_its_sign_in_the_connector_dialect(
+    sql: str, dialect: str
+) -> None:
+    rows = [{"id": 501, "balance": -250}]
+    response = "Every account below -100 is listed."
+
+    # The default dialect cannot read either query, and the fallback has no sign.
+    assert contradicted_numbers(response, rows, "", sql) == ["-100"]
+    assert contradicted_numbers(response, rows, "", sql, dialect=dialect) == []
+    statement = sqlglot.parse_one(sql, read=dialect)
+    assert contradicted_numbers(response, rows, "", sql, statement) == []
+    assert numbers_check(_ctx(), sql, response, _ran(rows), statement) is None
 
 
 def test_unparsable_sql_still_names_its_numbers() -> None:

@@ -147,7 +147,15 @@ def submit(
     ):
         return rejection, None
     response = (response or "").strip()
-    if (sent_back := numbers_check(ctx, sql, response, db_response)) is not None:
+    sent_back = numbers_check(
+        ctx,
+        sql,
+        response,
+        db_response,
+        check.statement,
+        getattr(connector, "dialect", None),
+    )
+    if sent_back is not None:
         return sent_back, None
     submission = Submission(sql, response, assumptions, db_response)
     ctx.submitted_database = getattr(connector, "database_name", None)
