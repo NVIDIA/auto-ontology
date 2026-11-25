@@ -227,6 +227,7 @@ def compile_semantic_layer(
             commit_slot.skip_if_unused()
 
     count = 0
+    sql_attr_failures: dict[str, list[str]] = {}
 
     if embedder is not None:
         embedder.vdb.create_index()
@@ -246,6 +247,21 @@ def compile_semantic_layer(
                     result.attr_names,
                     result.sql_attr_names,
                 )
+                if result.sql_attr_failed_terms:
+                    sql_attr_failures[futures[future]["name"]] = (
+                        result.sql_attr_failed_terms
+                    )
+
+    if sql_attr_failures:
+        logger.error(
+            "SQL attribute extraction failed for %d table(s): %s. These tables "
+            "already have Terms, so recompiling will not retry them.",
+            len(sql_attr_failures),
+            "; ".join(
+                f"{table} ({', '.join(terms)})"
+                for table, terms in sorted(sql_attr_failures.items())
+            ),
+        )
 
     if is_cancelled():
         logger.info(

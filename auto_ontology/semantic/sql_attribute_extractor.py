@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 _MAX_PROMPT_COLUMNS = 40
 _MAX_PROMPT_SAMPLES = 5
 
+
+class SqlAttributeExtractionFailed(RuntimeError):
+    """The LLM call produced no result, as distinct from proposing zero metrics."""
+
+
 _SYSTEM = """\
 You are an analytics engineer building a semantic layer for a text-to-SQL system.
 
@@ -231,6 +236,9 @@ def extract_sql_attributes(
 
     *columns* must already exclude PII-tagged columns: their names,
     descriptions, and sample values all go into the prompt.
+
+    Raises :class:`SqlAttributeExtractionFailed` when the LLM returns nothing,
+    so callers can tell a failed call from an empty proposal list.
     """
     if len(columns) < 2:
         return []
@@ -257,10 +265,10 @@ def extract_sql_attributes(
         SqlAttributeExtractionResult,
     )
     if result is None:
-        logger.warning(
-            "LLM returned no SqlAttribute proposals for table %s", table_name
+        raise SqlAttributeExtractionFailed(
+            f"LLM returned no result for table {qualified_table}, "
+            f"term {term.get('name', '')!r}"
         )
-        return []
 
     accepted: list[SqlAttributeProposal] = []
     seen_expressions: set[str] = set()

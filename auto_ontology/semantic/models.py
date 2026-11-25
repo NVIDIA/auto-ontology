@@ -18,6 +18,7 @@ class ProcessTableResult:
     term_names: list[str] = field(default_factory=list)
     attr_names: list[str] = field(default_factory=list)
     sql_attr_names: list[str] = field(default_factory=list)
+    sql_attr_failed_terms: list[str] = field(default_factory=list)
 
 
 class TermColumnRef(BaseModel):

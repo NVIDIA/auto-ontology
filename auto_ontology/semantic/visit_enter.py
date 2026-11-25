@@ -1103,6 +1103,7 @@ def process_table(
     # The Term writes it serializes are complete, and
     # this is one LLM call per Term.
     result_sql_attr_names: list[str] = []
+    sql_attr_failed_terms: list[str] = []
     if extract_table_sql_attributes and database_name is not None and terms:
         if pii_columns is None:
             logger.warning(
@@ -1112,24 +1113,28 @@ def process_table(
         else:
             try:
                 with _step(table_name, "Extracting SQL attributes"):
-                    result_sql_attr_names = _extract_sql_attrs_for_terms(
-                        table,
-                        ctx,
-                        terms,
-                        attrs_by_term,
-                        database_name,
-                        pii_columns=pii_columns,
-                        profiling=columns_profiling_samples,
+                    result_sql_attr_names, sql_attr_failed_terms = (
+                        _extract_sql_attrs_for_terms(
+                            table,
+                            ctx,
+                            terms,
+                            attrs_by_term,
+                            database_name,
+                            pii_columns=pii_columns,
+                            profiling=columns_profiling_samples,
+                        )
                     )
             except Exception:
-                logger.warning(
+                logger.error(
                     "[%s] SqlAttribute extraction failed", table_name, exc_info=True
                 )
+                sql_attr_failed_terms = [t.get("name") for t in terms]
 
     return ProcessTableResult(
         term_names=result_term_names,
         attr_names=result_attr_names,
         sql_attr_names=result_sql_attr_names,
+        sql_attr_failed_terms=sql_attr_failed_terms,
     )
 
 
@@ -1221,12 +1226,15 @@ def _extract_sql_attrs_for_terms(
     *,
     pii_columns: set[str],
     profiling: dict[str, dict[str, Any]],
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Propose SqlAttributes for each Term with at least two mapped columns.
 
     PII-tagged columns are left out entirely: their names and values would
     otherwise reach the prompt. ``ctx`` was read before this run's profiling,
     so freshly sampled values from *profiling* take precedence.
+
+    Returns the created SqlAttribute names and the names of the Terms whose
+    extraction failed. One Term failing does not stop the others.
     """
     col_by_name: dict[str, dict[str, Any]] = {}
     for col in ctx.get("columns", []):
@@ -1238,6 +1246,7 @@ def _extract_sql_attrs_for_terms(
 
     schema_name = table.get("schema_name")
     names: list[str] = []
+    failed_terms: list[str] = []
 
     for term in terms:
         term_name = term.get("name")
@@ -1248,14 +1257,23 @@ def _extract_sql_attrs_for_terms(
         ]
         if len(filtered_cols) < 2:
             continue
-        names.extend(
-            _extract_sql_attributes_for_table(
-                table,
-                filtered_cols,
-                schema_name,
-                term.get("id"),
-                term_name,
-                database_name,
+        try:
+            names.extend(
+                _extract_sql_attributes_for_table(
+                    table,
+                    filtered_cols,
+                    schema_name,
+                    term.get("id"),
+                    term_name,
+                    database_name,
+                )
             )
-        )
-    return names
+        except Exception:
+            logger.error(
+                "[%s] SqlAttribute extraction failed for Term %r",
+                table.get("name"),
+                term_name,
+                exc_info=True,
+            )
+            failed_terms.append(term_name)
+    return names, failed_terms
