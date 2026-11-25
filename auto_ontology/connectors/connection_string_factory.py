@@ -36,6 +36,21 @@ def _enc(value: str) -> str:
     return quote(value, safe="")
 
 
+def _host_and_port(
+    host: str, configured_port: object, default_port: str
+) -> tuple[str, str]:
+    """Prefer the Port field, then an embedded host port, then the default."""
+    embedded_port = ""
+    hostname, separator, candidate = host.rpartition(":")
+    if (
+        separator
+        and candidate.isdigit()
+        and (host.count(":") == 1 or hostname.endswith("]"))
+    ):
+        host, embedded_port = hostname, candidate
+    return host, str(configured_port or "").strip() or embedded_port or default_port
+
+
 def _encode_private_key(pem: str) -> str:
     """Return URL-safe base64 for a PEM private key.
 
@@ -59,7 +74,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
-        port = str(connection.get("port") or "").strip() or DEFAULT_POSTGRES_PORT
+        host, port = _host_and_port(host, connection.get("port"), DEFAULT_POSTGRES_PORT)
         return (
             f"postgresql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
         )
@@ -69,7 +84,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
-        port = str(connection.get("port") or "").strip() or DEFAULT_MYSQL_PORT
+        host, port = _host_and_port(host, connection.get("port"), DEFAULT_MYSQL_PORT)
         return f"mysql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
 
     if conn_type == "snowflake":
@@ -124,7 +139,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         user = _require(connection, "user")
         password = _require(connection, "password")
         catalog = _require(connection, "database")
-        port = str(connection.get("port") or "").strip() or DEFAULT_KYUUBI_PORT
+        host, port = _host_and_port(host, connection.get("port"), DEFAULT_KYUUBI_PORT)
 
         # An SSA client mints a fresh token per hour, so the connector needs the
         # token endpoint alongside the credentials. Without ``ssa_url`` the
@@ -163,7 +178,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             host = host.split("://", 1)[1]
         user = _require(connection, "user")
         catalog = _require(connection, "database")
-        port = str(connection.get("port") or "").strip() or DEFAULT_TRINO_PORT
+        host, port = _host_and_port(host, connection.get("port"), DEFAULT_TRINO_PORT)
 
         # The password is optional: an unauthenticated cluster -- the usual shape
         # for a development Trino -- takes the username as a plain identity label
@@ -196,25 +211,9 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         if host.startswith(("https://", "http://")):
             scheme_from_host, host = host.split("://", 1)
 
-        # A pasted endpoint carries its port as well as its scheme, and the Port
-        # field is optional, so the two have to be reconciled here. Appending
-        # both yields ``host:8443:8123``, which is not a "wrong port" but an
-        # unparseable URL -- ``urlparse(...).port`` raises rather than returning
-        # anything the connector could fall back from.
-        port_from_host = ""
-        if host.count(":") == 1:
-            host, _, candidate = host.partition(":")
-            if candidate.isdigit():
-                port_from_host = candidate
-            else:
-                # Not a port after all; put it back rather than losing it.
-                host = f"{host}:{candidate}"
-
         database = _require(connection, "database")
-        port = (
-            str(connection.get("port") or "").strip()
-            or port_from_host
-            or DEFAULT_CLICKHOUSE_PORT
+        host, port = _host_and_port(
+            host, connection.get("port"), DEFAULT_CLICKHOUSE_PORT
         )
 
         # Both credentials are optional: a stock server runs as ``default`` with
@@ -248,7 +247,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
-        port = str(connection.get("port") or "").strip() or DEFAULT_HEAVYDB_PORT
+        host, port = _host_and_port(host, connection.get("port"), DEFAULT_HEAVYDB_PORT)
         protocol = (
             str(connection.get("protocol") or "").strip() or DEFAULT_HEAVYDB_PROTOCOL
         )
