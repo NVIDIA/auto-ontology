@@ -44,9 +44,11 @@ type CatalogNodePatch = Partial<Database> & Partial<Schema> & Partial<Table> & P
 
 const catalogTrail = (focusId: string | null, databases: Database[]): BreadcrumbItem[] => {
 	const resolved = resolveTreeNode(focusId, databases);
+	// The database is the first crumb, and wears the design's database icon.
 	const crumb = (label: string, ...ids: string[]): BreadcrumbItem => ({
 		label,
 		href: catalogPathFromFocusId(ids.join('|')),
+		database: ids.length === 1,
 	});
 
 	switch (resolved.type) {

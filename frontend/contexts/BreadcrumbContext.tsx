@@ -22,7 +22,7 @@ const SECTION_LABELS: Record<string, string> = {
 	'/terms': 'Business Glossary',
 	'/analysis': 'Analysis',
 	'/exploration': 'Exploration',
-	'/data': 'All Data',
+	'/data': 'Data',
 	'/analytics': 'Analytics',
 	'/settings': 'Settings',
 };
@@ -91,16 +91,10 @@ export const BreadcrumbProvider = ({ children }: { children: ReactNode }) => {
 		setTrailRaw((prev) => (trailKey(prev) === trailKey(next) ? prev : next));
 	}, []);
 
+	// The trail names the page you are on, and whatever you have zoomed into on
+	// it (a database, a term). Where you came from is not part of it.
 	if (pathname !== prevPath) {
-		const current = crumbsForPath(pathname);
-		const parent = prevPath == null ? null : sectionForPath(prevPath);
-		const first = current[0];
-		setRouteCrumbs(
-			first != null && parent != null && parent.href !== first.href
-				? [parent, ...current]
-				: current,
-		);
-
+		setRouteCrumbs(crumbsForPath(pathname));
 		setTrailRaw(EMPTY_TRAIL);
 		setPrevPath(pathname);
 	}

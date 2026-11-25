@@ -6,12 +6,14 @@
 
 import Link from 'next/link';
 import { Fragment } from 'react';
-import { Icon, IconName } from '@/common/icons';
+import { HeaderIcon } from '@/common/HeaderIcon';
 import { Text } from '@/common/Text';
 
 export type BreadcrumbItem = {
 	label: string;
 	href?: string;
+	/** Shows the database icon ahead of the label, as the design does for connectors. */
+	database?: boolean;
 };
 
 type BreadcrumbsProps = {
@@ -20,32 +22,54 @@ type BreadcrumbsProps = {
 
 const CRUMB_MAX_WIDTH = 'max-w-64';
 
+const CRUMB_BASE = `flex min-w-0 ${CRUMB_MAX_WIDTH} items-center gap-1 rounded py-1 pl-1 pr-2 text-sm leading-5`;
+
+// Three roles, as the design names them:
+// - primary: a crumb you can click, so it reads as the stronger text;
+// - secondary: the page you are on, quieter because there is nowhere to go;
+// - hover: a clickable crumb under the pointer, in the brand green. Its colors
+//   and its icon change together, with no fade, so the icon never leads.
+const CRUMB_PRIMARY = 'text-[#2b3036] dark:text-[#f0f0f3]';
+const CRUMB_SECONDARY = 'text-[#5a5e64] dark:text-[#b8b8c1]';
+const CRUMB_HOVER =
+	'hover:rounded-lg hover:bg-[#f1f8e5] hover:text-[#76b900] dark:hover:bg-[rgba(138,210,26,0.12)] dark:hover:text-[#8ad21a]';
+
 export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 	return (
-		<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
+		<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-0.5 pl-1 pr-5">
 			{items.map((item, i) => {
 				const isLast = i === items.length - 1;
+				const label = <Text text={item.label} />;
 
 				return (
 					<Fragment key={i}>
-						{i > 0 && (
-							<Icon
-								name={IconName.ChevronRight}
-								className="h-3.5 w-3.5 shrink-0 text-secondary dark:text-zinc-600"
-							/>
-						)}
+						{i > 0 && <HeaderIcon name="arrows" />}
 						{isLast || !item.href ? (
 							<span
-								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-heading dark:text-zinc-100`}
+								aria-current={isLast ? 'page' : undefined}
+								className={`${CRUMB_BASE} ${isLast ? CRUMB_SECONDARY : CRUMB_PRIMARY}`}
 							>
-								<Text text={item.label} />
+								{item.database ? (
+									<HeaderIcon name={isLast ? 'database-current' : 'database'} />
+								) : null}
+								{label}
 							</span>
 						) : (
 							<Link
 								href={item.href}
-								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-body transition-colors hover:text-heading dark:text-zinc-400 dark:hover:text-zinc-100`}
+								className={`group ${CRUMB_BASE} ${CRUMB_PRIMARY} ${CRUMB_HOVER}`}
 							>
-								<Text text={item.label} />
+								{item.database ? (
+									<>
+										<span className="group-hover:hidden">
+											<HeaderIcon name="database" />
+										</span>
+										<span className="hidden group-hover:block">
+											<HeaderIcon name="database-selected" />
+										</span>
+									</>
+								) : null}
+								{label}
 							</Link>
 						)}
 					</Fragment>

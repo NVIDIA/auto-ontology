@@ -22,7 +22,7 @@ const listItemSelected = 'bg-zinc-100 font-medium text-heading dark:bg-zinc-800 
 
 const themeClasses: Record<SelectButtonTheme, ThemeClasses> = {
 	[SelectButtonTheme.Avatar]: {
-		base: 'flex h-8 w-8 items-center justify-center rounded-full bg-[#76b900] text-xs font-semibold text-white transition-colors hover:bg-[#5e9400]',
+		base: 'flex size-7 items-center justify-center rounded-full bg-[#76b900] text-xs font-semibold text-white transition-colors hover:bg-[#5e9400]',
 	},
 	[SelectButtonTheme.ListItem]: {
 		base: `${listItemBase} items-center gap-2 rounded-md px-3 py-2`,
