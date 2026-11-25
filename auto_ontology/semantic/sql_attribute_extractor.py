@@ -240,6 +240,14 @@ def _uses_validfrom_to(expression: str) -> bool:
     return bool(_VALIDFROM_TO.search(expression))
 
 
+def _dedup_key(expression: str) -> str:
+    """Formatting- and case-insensitive key that keeps literals and quoted names."""
+    try:
+        return sqlglot.parse_one(expression).sql(normalize=True)
+    except sqlglot.errors.ParseError:
+        return " ".join(expression.split())
+
+
 def _rejection_reason(expression: str, columns: list[dict[str, Any]]) -> str | None:
     """Why a proposal must be dropped, or None when it passes every filter."""
     if not _where_literals_valid(expression, columns):
@@ -307,7 +315,7 @@ def extract_sql_attributes(
     accepted: list[SqlAttributeProposal] = []
     seen_expressions: set[str] = set()
     for proposal in result.metrics:
-        normalized = " ".join(proposal.expression.lower().split())
+        normalized = _dedup_key(proposal.expression)
         if normalized in seen_expressions:
             logger.debug("Dropping duplicate proposal %r", proposal.name)
             continue

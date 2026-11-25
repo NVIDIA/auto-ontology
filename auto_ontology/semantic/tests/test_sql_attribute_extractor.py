@@ -99,6 +99,42 @@ def test_duplicate_expressions_are_dropped(monkeypatch: MonkeyPatch) -> None:
     assert _run() == ["one"]
 
 
+def test_differently_formatted_duplicates_are_dropped(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _stub_llm(
+        monkeypatch,
+        [
+            _proposal("one", _MARGIN + "status = 'Open'"),
+            _proposal(
+                "two",
+                "select  unitprice-unitcost as X\nfrom sales.orderlines "
+                "where STATUS = 'Open'",
+            ),
+        ],
+    )
+
+    assert _run() == ["one"]
+
+
+def test_expressions_differing_only_in_a_literal_are_kept(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    columns = [
+        *COLUMNS[:2],
+        {"name": "status", "data_type": "text", "sample_values": ["Open", "OPEN"]},
+    ]
+    _stub_llm(
+        monkeypatch,
+        [
+            _proposal("one", _MARGIN + "status = 'Open'"),
+            _proposal("two", _MARGIN + "status = 'OPEN'"),
+        ],
+    )
+
+    assert _run(columns) == ["one", "two"]
+
+
 @pytest.mark.parametrize(
     "expression",
     [
