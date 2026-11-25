@@ -78,7 +78,7 @@ class ResponseAgent(BaseAgent):
             "response": formatted_response,
             "sql_code": sql_code,
             "sql_columns": sql_columns,
-            "custom_analyses_used": [],
+            "custom_analyses_used": path_state.get("custom_analyses_used", []),
             "sql_response_from_db": sql_response_from_db,
         }
 
