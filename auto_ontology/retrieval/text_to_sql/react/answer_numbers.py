@@ -41,6 +41,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import sqlglot
+from sqlglot import exp
+
 if TYPE_CHECKING:
     from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
         QueryResponse,
@@ -241,11 +244,35 @@ def _stated(text: str) -> set[float]:
     return {n for c in _numbers(text or "") for n, _ in c.readings}
 
 
+def _sql_numbers(sql: str) -> set[float]:
+    """The numbers *sql* states, with their signs: -100 in ``balance < -100``.
+
+    ``LIMIT 100`` and ``qty - 100`` state 100, not -100. Numbers inside string
+    literals count unsigned, and SQL that does not parse falls back to every
+    number in its text, unsigned.
+    """
+    if not sql:
+        return set()
+    try:
+        tree = sqlglot.parse_one(sql)
+    except Exception:  # noqa: BLE001 — an unparsable query still names its numbers
+        return {float(n) for n in _SQL_NUMBER.findall(sql)}
+    found: set[float] = set()
+    for literal in tree.find_all(exp.Literal):
+        if literal.is_string:
+            found |= {float(n) for n in _SQL_NUMBER.findall(literal.this)}
+            continue
+        try:
+            value = float(literal.this)
+        except ValueError:
+            continue
+        found.add(-value if isinstance(literal.parent, exp.Neg) else value)
+    return found
+
+
 def _checked(response: str, question: str, sql: str) -> list[_Cited]:
     """The cited numbers worth checking against the rows."""
-    # Either sign: the pattern cannot tell ``balance < -100`` from ``qty-100``.
-    in_sql = {float(n) for n in _SQL_NUMBER.findall(sql or "")}
-    stated = _stated(question) | in_sql | {-n for n in in_sql}
+    stated = _stated(question) | _sql_numbers(sql)
     return [
         c
         for c in _numbers(_prose(response))

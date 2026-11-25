@@ -259,11 +259,74 @@ def test_aggregate_filter_spares_only_that_aggregate(
     profiles: dict[str, KeyProfile],
 ) -> None:
     sql = (
-        "SELECT SUM(s.rate) FILTER (WHERE a.id > 2), SUM(s.rate) FROM suppliers s "
+        "SELECT SUM(s.rate) FILTER (WHERE a.id = 2), AVG(s.rate) FROM suppliers s "
         "JOIN asn a ON a.supplier_id = s.id"
     )
 
-    assert [f.aggregate for f in _fanouts(sql, profiles)] == ["SUM(s.rate)"]
+    assert [f.aggregate for f in _fanouts(sql, profiles)] == ["AVG(s.rate)"]
+
+
+CONDITIONED_OWNER_SUMS = [
+    "SELECT SUM(CASE WHEN a.qty > 0 THEN s.rate END) FROM suppliers s "
+    "JOIN asn a ON a.supplier_id = s.id",
+    "SELECT SUM(IIF(a.qty > 0, s.rate, 0)) FROM suppliers s "
+    "JOIN asn a ON a.supplier_id = s.id",
+    "SELECT SUM(s.rate) FILTER (WHERE a.qty > 0) FROM suppliers s "
+    "JOIN asn a ON a.supplier_id = s.id",
+    "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
+    "WHERE a.qty > 0",
+]
+
+
+@pytest.mark.parametrize("sql", CONDITIONED_OWNER_SUMS)
+def test_a_condition_that_keeps_every_detail_row_is_refused(
+    db: sqlite3.Connection, profiles: dict[str, KeyProfile], sql: str
+) -> None:
+    """Each sums every supplier's rate once per ASN: 620, not 60."""
+    assert [(f.detail, f.key) for f in _fanouts(sql, profiles)] == [
+        ("asn", "supplier_id")
+    ]
+    (total,) = db.execute(sql).fetchone()
+    assert total == sum(RATES[s] * c for s, c in ASNS_PER_SUPPLIER.items()) == 620
+    assert sum(RATES.values()) == 60
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        # Several rows of one supplier: ids 2 and 3 are both supplier 2's.
+        "a.id IN (2, 3)",
+        # Ranges and validity windows may overlap: not provably one row.
+        "a.id BETWEEN 2 AND 2",
+        "a.qty <= 3 AND a.id > 2",
+        # Equal to one value, but on a column that repeats.
+        "a.supplier_id = 3",
+        # A subquery that reads the row's own non-key column: one value per row.
+        "a.id = (SELECT MAX(a2.id) FROM asn a2 WHERE a2.qty = a.qty)",
+    ],
+)
+def test_a_condition_that_does_not_prove_one_row_keeps_the_report(
+    profiles: dict[str, KeyProfile], condition: str
+) -> None:
+    sql = (
+        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
+        f"WHERE {condition}"
+    )
+
+    assert [(f.detail, f.key) for f in _fanouts(sql, profiles)] == [
+        ("asn", "supplier_id")
+    ]
+
+
+def test_every_column_of_a_composite_key_beside_the_join_pins_one_row(
+    profiles: dict[str, KeyProfile],
+) -> None:
+    lines = KeyProfile(pk=("supplier_id", "qty"), repeats=frozenset({"supplier_id"}))
+    lookup = {**profiles, "asn": lines}
+    base = "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
+
+    assert _fanouts(base + "WHERE a.qty = 3", lookup) == []
+    assert [f.detail for f in _fanouts(base + "WHERE a.qty > 3", lookup)] == ["asn"]
 
 
 def test_grouping_by_a_cast_key_does_not_spare_it(
@@ -383,21 +446,15 @@ def test_owner_grain_and_pre_aggregation_pass_with_the_oracle_values(
         "JOIN asn a ON a.supplier_id = s.id GROUP BY a.id",
         "SELECT a.id, SUM(s.rate) FROM suppliers s "
         "JOIN asn a ON a.supplier_id = s.id GROUP BY 1",
-        # An equality filter may leave one detail row per owner.
+        # A unique column of the joined table set to one value: one row at most.
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
         "AND a.qty = 3",
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
-        "WHERE a.id IN (1, 2)",
+        "WHERE a.id IN (2)",
         "SELECT SUM(s.rate) FILTER (WHERE a.id = 2) FROM suppliers s "
         "JOIN asn a ON a.supplier_id = s.id",
-        # Any condition on the joined table may keep one row per key: a
-        # degenerate range, or a validity window.
-        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
-        "WHERE a.id BETWEEN 2 AND 2",
-        "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
-        "AND a.qty <= 3 AND a.id > 2",
-        "SELECT SUM(s.rate) FILTER (WHERE a.id > 2) FROM suppliers s "
-        "JOIN asn a ON a.supplier_id = s.id",
+        "SELECT SUM(CASE WHEN a.qty > 0 THEN s.rate END) FROM suppliers s "
+        "JOIN asn a ON a.supplier_id = s.id WHERE a.id = 2",
         # A correlated subquery that picks the latest row per owner.
         "SELECT SUM(s.rate) FROM suppliers s JOIN asn a ON a.supplier_id = s.id "
         "WHERE a.id = (SELECT MAX(a2.id) FROM asn a2 "

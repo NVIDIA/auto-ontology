@@ -16,13 +16,20 @@ It only reports what the catalog proves. "Repeats" means profiling saw a
 value twice in the column's sample (``distinct_ratio`` below 1.0) and the
 column is not a declared single-column key. Everything else leaves the query
 alone: a join column with no measured ratio, a join on more than one column,
-any condition on the joined table besides the join (it may pick one row
-per key),
+a joined table that a condition provably narrows to one row per join key,
 derived tables, ``COUNT(DISTINCT ...)``, ``COUNT(*)``, window aggregates, and
 a ``GROUP BY`` that holds a unique key of the joined table. An aggregate over
 a subquery or CTE that already aggregated the detail is not affected, because
 that inner SELECT is checked on its own and the outer one joins no detail
 rows.
+
+"Provably one row per join key" means a ``WHERE``, ``ON`` or aggregate
+``FILTER`` condition sets a unique column of the joined table, or every column
+of its key besides the join column, to one value: a literal, ``IN`` with one
+value, or a scalar subquery that reads the table only through its join column
+(``a.id = (SELECT MAX(a2.id) ... WHERE a2.supplier_id = a.supplier_id)``). Any
+other condition, such as ``a.qty > 0``, ``a.status = 'OPEN'``, ``IN (1, 2)`` or
+a validity window, can keep several rows per key, so the report stands.
 
 A false report costs the model a turn, not the answer: ``submit`` refuses a
 given SQL text once, and accepts it unchanged the second time, for the
@@ -77,6 +84,8 @@ class KeyProfile:
 
 # (table name, schema or None) -> the table's profile, None when unknown.
 ProfileLookup = Callable[[str, str | None], KeyProfile | None]
+# source -> column set to one value -> the source's own columns that value reads.
+_Fixed = dict[str, dict[str, frozenset[str]]]
 
 
 class _Columns(Protocol):
@@ -163,6 +172,7 @@ class _ScopeCheck:
         self.keys: dict[str, dict[str, str]] = {a: {} for a in self.sources}
         self.uncertain: set[str] = set()
         self.grouped: dict[str, set[str]] = {a: set() for a in self.sources}
+        self.fixed: _Fixed = {a: {} for a in self.sources}
 
     def fanouts(self) -> list[Fanout]:
         aggregates = [a for a in self.scope.find_all(*_MEASURES) if _counts_rows(a)]
@@ -175,17 +185,17 @@ class _ScopeCheck:
             measured = self._measured(aggregate)
             if not measured:
                 continue
-            # ``SUM(x) FILTER (WHERE a.id = 2)`` may keep one row of ``a``,
-            # so the tables its own filter names are not reported for it.
-            filtered: set[str] = set()
+            # ``SUM(x) FILTER (WHERE a.id = 2)`` keeps one row of ``a`` for
+            # this aggregate only.
+            filtered: _Fixed = {a: {} for a in self.sources}
             if isinstance(aggregate.parent, exp.Filter):
                 where = aggregate.parent.expression
                 for conjunct in _conjuncts(getattr(where, "this", where)):
-                    filtered |= self._may_pick_one_row(conjunct)
+                    self._read_fixed(conjunct, filtered)
             for alias, source in self.sources.items():
-                if alias in measured or alias in filtered:
+                if alias in measured:
                     continue
-                key = self._repeating_key(alias, source)
+                key = self._repeating_key(alias, source, filtered[alias])
                 if key:
                     found.append(
                         Fanout(
@@ -221,25 +231,18 @@ class _ScopeCheck:
         return name in {c.lower() for c in columns}
 
     def _measured(self, aggregate: exp.Expression) -> set[str] | None:
-        """The sources *aggregate*'s argument reads; None when any is unknown."""
-        columns = [c for c in aggregate.this.find_all(exp.Column) if self._local(c)]
+        """The sources *aggregate* adds up; None when any is unknown.
+
+        A column read only to pick a ``CASE`` or ``IF`` branch is not added up:
+        ``SUM(CASE WHEN a.qty > 0 THEN s.rate END)`` adds ``s`` rows, once per
+        ``a`` row. With no column in any branch the condition's are the ones.
+        """
+        local = [c for c in aggregate.this.find_all(exp.Column) if self._local(c)]
+        columns = [c for c in local if not _picks_branch(c, aggregate)] or local
         aliases = {self._alias_of(c) for c in columns}
         if not aliases or None in aliases:
             return None
         return aliases  # type: ignore[return-value]
-
-    def _referenced(self, node: exp.Expression) -> set[str]:
-        """Sources *node* touches, including from subqueries correlated to them."""
-        aliases = set()
-        for column in node.find_all(exp.Column):
-            if self._local(column):
-                alias = self._alias_of(column)
-            else:
-                qualifier = (column.table or "").lower()
-                alias = qualifier if qualifier in self.sources else None
-            if alias:
-                aliases.add(alias)
-        return aliases
 
     # -- joins -------------------------------------------------------------
 
@@ -284,18 +287,58 @@ class _ScopeCheck:
                     self.keys[a].setdefault(left.name.lower(), left.name)
                     self.keys[b].setdefault(right.name.lower(), right.name)
                     return
-        self.uncertain |= self._may_pick_one_row(conjunct)
+        self._read_fixed(conjunct, self.fixed)
 
-    def _may_pick_one_row(self, conjunct: exp.Expression) -> set[str]:
-        """Sources whose rows *conjunct* may narrow to one per key.
+    def _read_fixed(self, conjunct: exp.Expression, fixed: _Fixed) -> None:
+        """Record the column *conjunct* sets to one value, if it sets one.
 
-        Any condition on a source can: an equality (``currency = 'USD'``), a
-        degenerate range (``BETWEEN 2 AND 2``), a validity window
-        (``valid_from <= d AND valid_to > d``), or a subquery that keeps the
-        latest row. Telling these from filters that keep several rows needs
-        data the catalog does not have, so none of them is a finding.
+        ``fixed[source][column]`` is the source's own columns the value reads,
+        empty for a literal, so a correlated value is checked against the join
+        column once it is known.
         """
-        return self._referenced(conjunct)
+        if isinstance(conjunct, exp.EQ):
+            sides = [
+                (conjunct.this, conjunct.expression),
+                (conjunct.expression, conjunct.this),
+            ]
+        elif isinstance(conjunct, exp.In):
+            values = conjunct.expressions or []
+            if conjunct.args.get("query") or len(values) != 1:
+                return
+            sides = [(conjunct.this, values[0])]
+        else:
+            return
+        for side, value in sides:
+            column = _unparen(side)
+            if not isinstance(column, exp.Column) or not self._local(column):
+                continue
+            alias = self._alias_of(column)
+            if alias is None:
+                continue
+            reads = self._value_reads(_unparen(value), alias)
+            if reads is not None:
+                fixed[alias][column.name.lower()] = reads
+                return
+
+    def _value_reads(self, value: exp.Expression, alias: str) -> frozenset[str] | None:
+        """*alias*'s columns a single *value* reads; None when it is not one value.
+
+        A literal reads none. A scalar subquery reads the columns it names on
+        *alias* from outside; one that reuses the name *alias* inside is unclear.
+        """
+        if isinstance(value, exp.Subquery):
+            inner = {t.alias_or_name.lower() for t in value.find_all(exp.Table)}
+            inner |= {cte.alias_or_name.lower() for cte in value.find_all(exp.CTE)}
+            if alias in inner:
+                return None
+            return frozenset(
+                c.name.lower()
+                for c in value.find_all(exp.Column)
+                if (c.table or "").lower() == alias
+            )
+        if value.find(exp.Column, exp.Select):
+            return None
+        return frozenset()
 
     def _read_group_by(self) -> None:
         group = self.select.args.get("group")
@@ -322,8 +365,17 @@ class _ScopeCheck:
 
     # -- the finding -------------------------------------------------------
 
-    def _repeating_key(self, alias: str, source: _Source) -> str | None:
-        """The join column through which *alias* repeats the other rows, if proven."""
+    def _repeating_key(
+        self,
+        alias: str,
+        source: _Source,
+        filtered: dict[str, frozenset[str]] | None = None,
+    ) -> str | None:
+        """The join column through which *alias* repeats the other rows, if proven.
+
+        *filtered* is what the aggregate's own ``FILTER`` sets, beside the
+        conditions of the whole SELECT.
+        """
         keys = self.keys.get(alias) or {}
         if not source.physical or alias in self.uncertain or len(keys) != 1:
             return None
@@ -337,6 +389,14 @@ class _ScopeCheck:
         if grouped & profile.unique or (profile.pk and set(profile.pk) <= grouped):
             # One row of it per group: grouping by its key undoes the repeat.
             return None
+        fixed = {**self.fixed[alias], **(filtered or {})}
+        # The join column is one value per key, so a value read through it is.
+        pinned = {column for column, reads in fixed.items() if reads <= {key}}
+        if pinned & profile.unique or (
+            profile.pk and set(profile.pk) <= pinned | {key}
+        ):
+            # At most one of its rows per join key: nothing is repeated.
+            return None
         return written
 
 
@@ -346,6 +406,17 @@ def _counts_rows(aggregate: exp.Expression) -> bool:
         return False
     argument = aggregate.this
     return argument is not None and not isinstance(argument, (exp.Distinct, exp.Star))
+
+
+def _picks_branch(column: exp.Column, aggregate: exp.Expression) -> bool:
+    """Whether *column* only decides which ``CASE``/``IF`` branch *aggregate* adds."""
+    node: exp.Expression | None = column
+    while node is not None and node is not aggregate:
+        parent = node.parent
+        if isinstance(parent, (exp.If, exp.Case)) and node.arg_key == "this":
+            return True
+        node = parent
+    return False
 
 
 def _unparen(node: exp.Expression) -> exp.Expression:

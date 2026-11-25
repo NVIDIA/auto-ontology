@@ -249,6 +249,25 @@ def test_a_negative_sql_number_keeps_its_sign() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT id, balance FROM accounts LIMIT 100",
+        "SELECT id, balance - 100 AS balance FROM accounts",
+    ],
+)
+def test_a_positive_sql_number_does_not_cover_its_negative(sql: str) -> None:
+    rows = [{"id": 501, "balance": -250}]
+
+    assert contradicted_numbers("There are -100 accounts.", rows, "", sql) == ["-100"]
+
+
+def test_unparsable_sql_still_names_its_numbers() -> None:
+    sql = "SELECT TOP 5000 id FROM accounts WHERE ((("
+
+    assert contradicted_numbers("We list 5000 accounts.", [{"id": 501}], "", sql) == []
+
+
 def test_a_scaled_number_is_compared_at_its_scale() -> None:
     rows = [{"revenue": 1234567.89}]
 
