@@ -11,7 +11,8 @@ import state; the pipeline imports agents).
 
 from __future__ import annotations
 
-from typing import NotRequired, TypedDict
+from collections.abc import Mapping
+from typing import Any, NotRequired, TypedDict
 
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
@@ -20,8 +21,16 @@ from auto_ontology.utils.retriever import Retriever
 from auto_ontology.connectors.base import SQLDatabase
 
 
-class TextToSQLPayload(TypedDict):
-    """Payload for the text-to-SQL agent flow (data + semantic retrievers)."""
+class AgentRequest(TypedDict):
+    """One question for the agent, and which sources it may answer it from.
+
+    Named for what it is rather than for what it used to be. The agent began
+    as a text-to-SQL flow and grew two sources that write no SQL at all --
+    *information* answers from the catalog in words, *conversation* from this
+    database's past transcripts -- so a caller may switch *calculation* off
+    entirely and never reach a query. ``TextToSQLPayload`` is kept below as an
+    alias because the name is part of the published surface.
+    """
 
     question: str
     evidence: NotRequired[str]
@@ -29,16 +38,28 @@ class TextToSQLPayload(TypedDict):
     # the generated Postgres SQL to NUMERIC (see ``numeric_types``).
     numeric_type_alignment: NotRequired[bool]
     processing_question: NotRequired[str]
-    data_retriever: Retriever
-    semantic_retriever: NotRequired[Retriever]
     path_state: NotRequired[dict]
     connectors: NotRequired[list[SQLDatabase]]
     target_db: NotRequired[str]
     # True forces a KumoRFM prediction, False forbids one, None lets the agent
     # choose when KumoRFM is configured.
     prediction: NotRequired[bool | None]
-    # True for graders that score the SQL: every answer must be a query, even
-    # to an information question.
+    # The three things the agent may do, each the caller's to switch. At least
+    # one must be on.
+    #
+    # *calculation* is querying the data, and needs ``connectors``. *information*
+    # is answering in words from the catalog. *conversation* is answering in
+    # words from this database's past conversations; it defaults off because
+    # most databases have no conversation memory, and a source offered with
+    # nothing behind it is a distraction the model pays for on every question.
+    # The other two default on, which is what the agent has always done.
+    calculation: NotRequired[bool]
+    information: NotRequired[bool]
+    conversation: NotRequired[bool]
+    # The older spelling of ``calculation=True, information=False,
+    # conversation=False``: every answer must be a query, which is what a
+    # grader that scores the SQL text needs. Overrides all three rather than
+    # sitting beside them.
     calculation_only: NotRequired[bool]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
@@ -53,6 +74,14 @@ class TextToSQLPayload(TypedDict):
     shorten_answer: NotRequired[bool]
 
 
+#: The name this type was published under, kept working.
+#:
+#: Callers live outside this repository and a TypedDict is structural, so a
+#: rename that only moved the name would break their imports while their
+#: dicts stayed valid -- the least useful kind of breakage.
+TextToSQLPayload = AgentRequest
+
+
 class AgentState(TypedDict):
     """State object passed from node to node."""
 
@@ -65,9 +94,15 @@ class AgentState(TypedDict):
     decision: str
     connectors: list[SQLDatabase]
     path_state: dict
-    data_retriever: Retriever
-    semantic_retriever: Retriever
+    # Set by the entity-coverage pipeline, which is handed its stores. The
+    # react agent sets neither: its tools open the collection each one needs,
+    # at the point it is searched.
+    data_retriever: NotRequired[Retriever]
+    semantic_retriever: NotRequired[Retriever]
     prediction_override: NotRequired[bool | None]
+    calculation: NotRequired[bool]
+    information: NotRequired[bool]
+    conversation: NotRequired[bool]
     calculation_only: NotRequired[bool]
     # The payload's custom prompts and acronyms as one system-prompt section.
     custom_prompts: NotRequired[str]
@@ -111,9 +146,43 @@ def get_question_for_processing(state: AgentState) -> str:
     return normalized_question or get_standalone_question(state)
 
 
+#: What each of the three may do when the caller says nothing.
+#:
+#: The defaults differ because the history does. Querying the data and
+#: answering from the catalog have always been on, and turning either off would
+#: change what existing callers get; conversation search is new, and most
+#: databases have no conversation memory to search.
+SOURCE_DEFAULTS = {"calculation": True, "information": True, "conversation": False}
+
+
+def resolve_sources(state: Mapping[str, Any]) -> dict[str, bool]:
+    """Which of the three an episode may use, from a payload or an agent state.
+
+    One function for both, because the payload's keys are copied into the state
+    unchanged and two readings of the same three flags would eventually
+    disagree.
+
+    ``calculation_only`` is the older spelling of the first alone, and
+    overrides the three rather than sitting beside them: it is set by graders
+    that score the SQL text, and a grader that cannot read a prose answer
+    cannot read one the caller also asked for. Two spellings disagreeing is a
+    caller's mistake, and the safe reading is the one that still produces a
+    query.
+    """
+    if state.get("calculation_only"):
+        return {"calculation": True, "information": False, "conversation": False}
+    return {
+        name: bool(state.get(name, default))
+        for name, default in SOURCE_DEFAULTS.items()
+    }
+
+
 __all__ = [
+    "AgentRequest",
     "TextToSQLPayload",
     "AgentState",
+    "SOURCE_DEFAULTS",
+    "resolve_sources",
     "get_standalone_question",
     "get_question_for_processing",
 ]

@@ -190,7 +190,7 @@ def test_rows_are_rendered_with_nulls_and_a_cap() -> None:
 
 
 def _ctx(**kwargs: object) -> ToolContext:
-    return ToolContext(retriever=None, connectors=[], **kwargs)
+    return ToolContext(connectors=[], **kwargs)
 
 
 def _ran(rows: list[dict]) -> QueryResponse:

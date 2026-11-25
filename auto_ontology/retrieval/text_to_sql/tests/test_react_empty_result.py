@@ -36,7 +36,7 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     catalog = FakeCatalog(CATALOG)
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
     monkeypatch.setattr(empty_result, "catalog_for", lambda *_: catalog)
-    context = ToolContext(retriever=None, connectors=[SQLiteConnector(SCRIPT)])
+    context = ToolContext(connectors=[SQLiteConnector(SCRIPT)])
     for name in CATALOG:
         context.show_table(None, name)
     return context

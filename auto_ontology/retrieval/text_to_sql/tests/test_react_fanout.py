@@ -524,7 +524,7 @@ def test_failing_profile_lookup_finds_nothing(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(fanout, "key_profiles", lambda *_: broken)
     statement = sqlglot.parse_one(GROUPED_OWNER_SUM, read="sqlite")
 
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     assert fanout.safe_find_fanouts(statement, CATALOG, ctx, None) == []
 
 
@@ -541,7 +541,7 @@ def ctx(
         "key_profiles",
         lambda *_: lambda table, _schema: profiles.get(table.lower()),
     )
-    context = ToolContext(retriever=None, connectors=[SQLiteConnector(SCRIPT)])
+    context = ToolContext(connectors=[SQLiteConnector(SCRIPT)])
     for name in TABLES:
         context.show_table(None, name)
     return context
