@@ -57,15 +57,23 @@ _TEXT_PREFIXED_MODELS = ("nemotron-3.5-embed-1b-nvfp4",)
 _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _EMBED_API_KEY = resolve("EMBED", "API_KEY")
+
+
+def _optional_int_env(name: str) -> int | None:
+    """Read an int env var. Only unset or empty means None, so 0 reaches validation."""
+    raw = os.environ.get(name, "").strip()
+    return int(raw) if raw else None
+
+
 # Optional output size for models that take OpenAI's ``dimensions`` field.
 # The vector store's column is 2048 wide. The field only shortens, so it fits
 # a wider model (text-embedding-3-large, 3072) to the column; a narrower one
 # (text-embedding-3-small, 1536) cannot be widened. Unset sends nothing.
-_EMBED_DIMENSIONS = int(os.environ.get("EMBED_DIMENSIONS", "") or 0) or None
+_EMBED_DIMENSIONS = _optional_int_env("EMBED_DIMENSIONS")
 # Optional client-side cut for endpoints that ignore ``truncate`` (OpenAI's
 # reject an over-long input with a 400, and one such input fails its whole
 # batch). Characters, not tokens, so set it under the model's token limit.
-_EMBED_MAX_INPUT_CHARS = int(os.environ.get("EMBED_MAX_INPUT_CHARS", "") or 0) or None
+_EMBED_MAX_INPUT_CHARS = _optional_int_env("EMBED_MAX_INPUT_CHARS")
 
 # Per-request retries inside the client, for 408/409/429/5xx and dropped
 # connections. They back off for seconds; the chunk-level retry below is the

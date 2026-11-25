@@ -26,6 +26,7 @@ from auto_ontology.utils.embedding import (
     EmbedParams,
     _embed_frame,
     _is_fatal,
+    _optional_int_env,
     _embed_with_retry,
     batch_embed,
     embed_rows,
@@ -170,6 +171,22 @@ def test_a_size_below_one_is_rejected(field_name: str, value: int) -> None:
     """A negative cut slices from the end and drops short texts without a word."""
     with pytest.raises(ValueError, match=field_name):
         _params(**{field_name: value})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("", None), ("  ", None), ("0", 0), ("2048", 2048)]
+)
+def test_only_an_empty_env_value_is_unset(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: int | None
+) -> None:
+    """A 0 must reach EmbedParams validation, not be read as unset."""
+    monkeypatch.setenv("EMBED_TEST_SIZE", raw)
+    assert _optional_int_env("EMBED_TEST_SIZE") == expected
+
+
+def test_an_unset_env_value_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EMBED_TEST_SIZE", raising=False)
+    assert _optional_int_env("EMBED_TEST_SIZE") is None
 
 
 @pytest.mark.parametrize(
