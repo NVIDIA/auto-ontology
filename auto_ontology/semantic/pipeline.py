@@ -248,9 +248,10 @@ def compile_semantic_layer(
                     result.sql_attr_names,
                 )
                 if result.sql_attr_failed_terms:
-                    sql_attr_failures[futures[future]["name"]] = (
-                        result.sql_attr_failed_terms
-                    )
+                    table = futures[future]
+                    schema = table.get("schema_name")
+                    qualified = f"{schema}.{table['name']}" if schema else table["name"]
+                    sql_attr_failures[qualified] = result.sql_attr_failed_terms
 
     if sql_attr_failures:
         logger.error(

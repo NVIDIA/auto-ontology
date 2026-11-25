@@ -135,23 +135,28 @@ def test_sql_attribute_failures_are_summarised(
 ) -> None:
     """Tables that will not be retried are named once at the end of the run."""
     mock_fetch_tables.return_value = [
-        {"id": "t1", "name": "orders"},
-        {"id": "t2", "name": "customers"},
+        {"id": "t1", "name": "orders", "schema_name": "sales"},
+        {"id": "t2", "name": "orders", "schema_name": "archive"},
+        {"id": "t3", "name": "customers", "schema_name": "sales"},
     ]
     mock_fetch_ctx.return_value = {"columns": [{"name": "x"}], "fks": []}
+    failed = {"t1": ["Order"], "t2": ["Old Order"]}
     mock_process.side_effect = lambda table, _ctx, **_k: ProcessTableResult(
         term_names=["T"],
-        sql_attr_failed_terms=["Order"] if table["name"] == "orders" else [],
+        sql_attr_failed_terms=failed.get(table["id"], []),
     )
 
     with caplog.at_level(logging.ERROR, logger="auto_ontology.semantic.pipeline"):
         count = compile_semantic_layer("dbx")
 
-    assert count == 2
+    assert count == 3
     errors = [
         r.getMessage()
         for r in caplog.records
         if r.name == "auto_ontology.semantic.pipeline" and r.levelno == logging.ERROR
     ]
     assert len(errors) == 1
-    assert "failed for 1 table(s): orders (Order)" in errors[0]
+    assert (
+        "failed for 2 table(s): archive.orders (Old Order); sales.orders (Order)"
+        in errors[0]
+    )

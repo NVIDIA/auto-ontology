@@ -14,6 +14,7 @@ import json
 import logging
 import numbers
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import sqlglot
@@ -166,26 +167,46 @@ _SINGLE_COLUMN_ALIAS = re.compile(
 
 _WHERE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
+# Tokenizing (e.g. an unterminated string) fails separately from parsing.
+_SQL_ERRORS = (sqlglot.errors.ParseError, sqlglot.errors.TokenError)
 
-def _is_number(value: Any) -> bool:
-    return isinstance(value, numbers.Number) and not isinstance(value, bool)
 
-
-def _literal_in_samples(literal: exp.Literal, samples: list[Any]) -> bool:
-    """Exact match: strings by case-sensitive text, numbers by numeric value."""
-    if literal.is_string:
-        return any(isinstance(s, str) and s == literal.this for s in samples)
+def _as_decimal(value: Any) -> Decimal | None:
+    """A numeric sample as an exact Decimal; None for non-numbers and booleans."""
+    if not isinstance(value, numbers.Number) or isinstance(value, bool):
+        return None
     try:
-        value = float(literal.this)
-    except ValueError:
-        return False
-    return any(_is_number(s) and float(s) == value for s in samples)
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
+
+
+def _literal_value(node: exp.Expression) -> tuple[exp.Literal, str | Decimal] | None:
+    """A literal operand and its value, with a leading minus applied to numbers."""
+    negate = isinstance(node, exp.Neg)
+    literal = node.this if negate else node
+    if not isinstance(literal, exp.Literal) or (negate and literal.is_string):
+        return None
+    if literal.is_string:
+        return literal, literal.this
+    try:
+        number = Decimal(literal.this)
+    except InvalidOperation:
+        return None
+    return literal, -number if negate else number
+
+
+def _value_in_samples(value: str | Decimal, samples: list[Any]) -> bool:
+    """Exact match: strings by case-sensitive text, numbers by numeric value."""
+    if isinstance(value, str):
+        return any(isinstance(s, str) and s == value for s in samples)
+    return any(_as_decimal(s) == value for s in samples)
 
 
 def _compared_column(
     predicate: exp.Expression,
-) -> tuple[exp.Column, list[exp.Literal]] | None:
-    """The bare column and the literals an ``=``, ``<>`` or ``IN`` compares it with."""
+) -> tuple[exp.Column, list[exp.Expression]] | None:
+    """The bare column and the operands an ``=``, ``<>`` or ``IN`` compares it with."""
     if isinstance(predicate, exp.In):
         column, others = predicate.this, predicate.expressions
     elif isinstance(predicate.this, exp.Column):
@@ -194,37 +215,44 @@ def _compared_column(
         column, others = predicate.expression, [predicate.this]
     if not isinstance(column, exp.Column):
         return None
-    return column, [other for other in others if isinstance(other, exp.Literal)]
+    return column, others
 
 
 def _where_literals_valid(expression: str, columns: list[dict[str, Any]]) -> bool:
     """Every WHERE literal compared with a column must be one of *its* samples.
 
-    String literals that cannot be tied to a known column by ``=``, ``<>`` or
-    ``IN`` fail too: the prompt only allows filtering on sampled values.
+    Covers WHERE clauses in subqueries too. String literals that cannot be tied
+    to a known column by ``=``, ``<>`` or ``IN`` fail as well: the prompt only
+    allows filtering on sampled values.
     """
     try:
-        where = sqlglot.parse_one(expression).args.get("where")
-    except sqlglot.errors.ParseError:
+        wheres = list(sqlglot.parse_one(expression).find_all(exp.Where))
+    except _SQL_ERRORS:
         return not _WHERE.search(expression)
-    if where is None:
-        return True
 
     samples_by_column = {col["name"].lower(): _sample_list(col) for col in columns}
     checked: set[int] = set()
-    for predicate in where.find_all(exp.EQ, exp.NEQ, exp.In):
-        pair = _compared_column(predicate)
-        if pair is None:
-            continue
-        column, literals = pair
-        samples = samples_by_column.get(column.name.lower())
-        for literal in literals:
-            if not samples or not _literal_in_samples(literal, samples):
-                return False
-            checked.add(id(literal))
+    for where in wheres:
+        for predicate in where.find_all(exp.EQ, exp.NEQ, exp.In):
+            pair = _compared_column(predicate)
+            if pair is None:
+                continue
+            column, operands = pair
+            samples = samples_by_column.get(column.name.lower())
+            for operand in operands:
+                found = _literal_value(operand)
+                if found is None:
+                    continue
+                literal, value = found
+                if not samples or not _value_in_samples(value, samples):
+                    return False
+                checked.add(id(literal))
 
     return all(
-        id(lit) in checked for lit in where.find_all(exp.Literal) if lit.is_string
+        id(lit) in checked
+        for where in wheres
+        for lit in where.find_all(exp.Literal)
+        if lit.is_string
     )
 
 
@@ -244,7 +272,7 @@ def _dedup_key(expression: str) -> str:
     """Formatting- and case-insensitive key that keeps literals and quoted names."""
     try:
         return sqlglot.parse_one(expression).sql(normalize=True)
-    except sqlglot.errors.ParseError:
+    except _SQL_ERRORS:
         return " ".join(expression.split())
 
 

@@ -173,9 +173,19 @@ _MARGIN = "SELECT unitprice - unitcost AS x FROM sales.orderlines WHERE "
         "'Shipped' = status",
         "status IN ('Open', 'Shipped') AND unitprice <> 12.5",
         "unitprice = 10",
+        "unitprice = 10.0",
         "unitcost > 0",
+        "unitcost > -5",
     ],
-    ids=["qualified", "literal-first", "in-and-numeric", "numeric-eq", "range"],
+    ids=[
+        "qualified",
+        "literal-first",
+        "in-and-numeric",
+        "numeric-eq",
+        "numeric-eq-other-form",
+        "range",
+        "negative-range",
+    ],
 )
 def test_where_literal_backed_by_its_columns_samples_survives(
     monkeypatch: MonkeyPatch, where: str
@@ -195,6 +205,9 @@ def test_where_literal_backed_by_its_columns_samples_survives(
         "status IN ('Open', 'Cancelled')",
         "LOWER(status) = 'Shipped'",
         "status LIKE 'Ship%'",
+        "unitprice = -10",
+        "unitprice IN (10, -999)",
+        "unitprice = 10.000000000000001",
     ],
     ids=[
         "case-mismatch",
@@ -204,6 +217,9 @@ def test_where_literal_backed_by_its_columns_samples_survives(
         "one-in-value-unsampled",
         "wrapped-column",
         "untied-string-literal",
+        "negative-number",
+        "negative-in-value",
+        "float-precision",
     ],
 )
 def test_where_literal_not_in_its_columns_samples_is_dropped(
@@ -212,6 +228,64 @@ def test_where_literal_not_in_its_columns_samples_is_dropped(
     _stub_llm(monkeypatch, [_proposal("Margin", _MARGIN + where)])
 
     assert _run() == []
+
+
+def test_negative_sample_matches_negative_literal(monkeypatch: MonkeyPatch) -> None:
+    columns = [
+        {"name": "unitprice", "data_type": "numeric", "sample_values": [-1]},
+        COLUMNS[1],
+    ]
+    _stub_llm(monkeypatch, [_proposal("Margin", _MARGIN + "unitprice = -1")])
+
+    assert _run(columns) == ["Margin"]
+
+
+def test_large_integers_are_compared_exactly(monkeypatch: MonkeyPatch) -> None:
+    columns = [
+        {"name": "unitprice", "data_type": "bigint", "sample_values": [2**53]},
+        COLUMNS[1],
+    ]
+    _stub_llm(
+        monkeypatch,
+        [_proposal("Margin", _MARGIN + f"unitprice = {2**53 + 1}")],
+    )
+
+    assert _run(columns) == []
+
+
+@pytest.mark.parametrize(
+    ("where", "kept"),
+    [("status = 'Cancelled'", False), ("status = 'Shipped'", True)],
+    ids=["unsampled", "sampled"],
+)
+def test_where_in_a_subquery_is_validated(
+    monkeypatch: MonkeyPatch, where: str, kept: bool
+) -> None:
+    sql = (
+        "SELECT o.unitprice - o.unitcost AS x "
+        f"FROM (SELECT * FROM sales.orderlines WHERE {where}) AS o"
+    )
+    _stub_llm(monkeypatch, [_proposal("Margin", sql)])
+
+    assert _run() == (["Margin"] if kept else [])
+
+
+def test_untokenizable_proposal_does_not_drop_the_others(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    good = (
+        "SELECT sales.orderlines.unitprice - sales.orderlines.unitcost AS m "
+        "FROM sales.orderlines"
+    )
+    _stub_llm(
+        monkeypatch,
+        [
+            _proposal("broken", _MARGIN + "status = 'Shipped"),
+            _proposal("good", good),
+        ],
+    )
+
+    assert _run() == ["good"]
 
 
 def test_llm_failure_raises(monkeypatch: MonkeyPatch) -> None:
