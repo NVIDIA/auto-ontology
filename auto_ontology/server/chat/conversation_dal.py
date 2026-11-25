@@ -51,9 +51,7 @@ def _is_context_assistant(row: dict) -> bool:
     content = (row["content"] or "").strip()
     if content.startswith("```chart") or content.startswith("```chart-carousel"):
         return False
-    if content.startswith("Agent failed:") or content.startswith(
-        "Agent stream failed:"
-    ):
+    if content.startswith(("Agent failed", "Agent stream failed:")):
         return False
     return bool(content or row["sql_code"])
 

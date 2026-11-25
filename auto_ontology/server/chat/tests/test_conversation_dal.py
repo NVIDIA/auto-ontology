@@ -34,6 +34,12 @@ def test_history_excludes_results_charts_and_errors() -> None:
         _row("assistant", "```chart\n{}\n```"),
         _row("user", "Broken request"),
         _row("assistant", "Agent failed: unavailable"),
+        _row("user", "Request that failed mid-run"),
+        _row(
+            "assistant",
+            "Agent failed after react_sql_agent: 'valid_sql'",
+            sql_code="SELECT 1",
+        ),
     ]
 
     history = _rows_to_history(rows)
