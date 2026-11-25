@@ -31,14 +31,14 @@ export type SidePanelLayoutProps = {
 
 // The design system's side panel colors: page background and the divider the
 // panel draws against the page and under its header.
-const PANEL_BG = 'bg-white dark:bg-[#222226]';
+const PANEL_BG = 'bg-white dark:bg-[#18181b]';
 const DIVIDER_BORDER = 'border-[#e9eaea] dark:border-[#2e2e33]';
 
 // The drag bar's two states. Hovered — and held while dragging, so it does not
 // flicker when the pointer outruns the bar — it takes the system background and
 // its grips darken to the secondary text color.
 const DRAG_BAR_BG =
-	'bg-white hover:bg-[#f5f7f9] data-dragging:bg-[#f5f7f9] dark:bg-[#222226] dark:hover:bg-[#121214] dark:data-dragging:bg-[#121214]';
+	'bg-white hover:bg-[#f5f7f9] data-dragging:bg-[#f5f7f9] dark:bg-[#18181b] dark:hover:bg-[#121214] dark:data-dragging:bg-[#121214]';
 const GRIP =
 	'bg-[#d3d4d6] group-hover:bg-[#5a5e64] group-data-dragging:bg-[#5a5e64] dark:bg-[#3f3f46] dark:group-hover:bg-[#b8b8c1] dark:group-data-dragging:bg-[#b8b8c1]';
 

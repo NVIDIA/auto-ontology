@@ -429,7 +429,7 @@ export function DataWorkspaceView() {
 	if (loading && databases.length === 0) {
 		return (
 			<div className="flex h-full flex-1" role="status" aria-label="Loading databases">
-				<aside className="w-[248px] shrink-0 border-r border-[#e9eaea] bg-white px-5 pt-12 dark:border-[#2e2e33] dark:bg-[#222226]">
+				<aside className="w-[248px] shrink-0 border-r border-[#e9eaea] bg-white px-5 pt-12 dark:border-[#2e2e33] dark:bg-[#18181b]">
 					<SkeletonBlock className="mb-5 h-6 w-24" />
 					<SkeletonRows rows={8} />
 				</aside>
