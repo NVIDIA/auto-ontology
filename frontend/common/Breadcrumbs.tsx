@@ -46,7 +46,7 @@ const CRUMB_BASE = `flex min-w-0 ${CRUMB_MAX_WIDTH} items-center gap-1 rounded p
 // a 24px slot, so the box has the file's size and the slot centers it.
 const MASK_BASE = 'block shrink-0 bg-current [mask-position:center] [mask-repeat:no-repeat]';
 const ICON_CLASS: Record<CrumbIconName, string> = {
-	chat: 'size-6 [mask-image:url(/icons/comment.svg)]',
+	chat: 'size-6 [mask-image:url(/icons/chat.svg)]',
 	// The library draws Discovery in separate pieces; the file puts them back
 	// together at the positions the design gives them.
 	discovery: 'size-6 [mask-image:url(/icons/discovery.svg)]',
