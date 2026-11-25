@@ -38,7 +38,10 @@ def _sqlite_path_from_connection_string(connection_string: str) -> Path:
     """Resolve a ``sqlite:///`` URI or bare filesystem path to a ``.sqlite`` file."""
     if connection_string.startswith("sqlite:"):
         parsed = urlparse(connection_string)
-        path = unquote(parsed.path)
+        path = parsed.path
+        if connection_string.startswith("sqlite:///"):
+            path = path[1:]
+        path = unquote(path)
         if not path:
             raise ValueError(f"Invalid SQLite connection string: {connection_string!r}")
         return Path(path)
@@ -53,6 +56,7 @@ class SQLiteDatabase(SQLDatabase):
     connection_string:
         A SQLite URI or filesystem path, e.g.::
 
+            sqlite:///relative/path/to/db.sqlite
             sqlite:////absolute/path/to/db.sqlite
             /absolute/path/to/db.sqlite
     """
