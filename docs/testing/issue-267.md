@@ -31,10 +31,14 @@ parameters, and driver messages are excluded from the response.
 
 Validated locally against PostgreSQL 17 with the repository's Alembic migrations.
 The fix was refreshed against `main` at `a12fec75` on November 24, 2026.
-The full refreshed backend suite passed: **3,005 passed, 2 skipped** (live
+The full refreshed backend suite passed: **3,007 passed, 2 skipped** (live
 Databricks/MySQL tests). The **5 gateway tests** also passed. Ruff, frontend
 Prettier/ESLint, production frontend build, API schema generation, and Alembic
 schema-drift validation passed; no migration is needed.
+
+The [pinned dbt/Ossie reproduction](issue-267-ossie-reproduction.md) also
+verified real gateway authentication and includes a generated fixture with
+regressions for both replacement modes.
 
 The focused identity tests also cover consistent repeated declarations of shared
 attributes without reserving keys the writer skips, and exact-ID catalog

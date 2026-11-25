@@ -1,0 +1,93 @@
+{
+  "semantic_models": [
+    {
+      "name": "customers",
+      "node_relation": {
+        "alias": "customers",
+        "schema_name": "sales",
+        "database": "wide_world_importers",
+        "relation_name": "wide_world_importers.sales.customers"
+      },
+      "entities": [
+        {
+          "name": "customer",
+          "type": "primary",
+          "expr": "customer_id"
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "customer_name",
+          "type": "categorical",
+          "expr": "customer_name"
+        }
+      ],
+      "measures": []
+    },
+    {
+      "name": "orders",
+      "node_relation": {
+        "alias": "orders",
+        "schema_name": "sales",
+        "database": "wide_world_importers",
+        "relation_name": "wide_world_importers.sales.orders"
+      },
+      "entities": [
+        {
+          "name": "order",
+          "type": "primary",
+          "expr": "order_id"
+        },
+        {
+          "name": "customer",
+          "type": "foreign",
+          "expr": "customer_id"
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "order_date",
+          "type": "categorical",
+          "expr": "order_date"
+        }
+      ],
+      "measures": []
+    },
+    {
+      "name": "order_lines",
+      "node_relation": {
+        "alias": "order_lines",
+        "schema_name": "sales",
+        "database": "wide_world_importers",
+        "relation_name": "wide_world_importers.sales.order_lines"
+      },
+      "entities": [
+        {
+          "name": "order_line",
+          "type": "primary",
+          "expr": "order_line_id"
+        },
+        {
+          "name": "order",
+          "type": "foreign",
+          "expr": "order_id"
+        }
+      ],
+      "dimensions": [
+        {
+          "name": "quantity",
+          "type": "categorical",
+          "expr": "quantity"
+        },
+        {
+          "name": "unit_price",
+          "type": "categorical",
+          "expr": "unit_price"
+        }
+      ],
+      "measures": []
+    }
+  ],
+  "metrics": [],
+  "project_configuration": {}
+}

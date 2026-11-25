@@ -1474,3 +1474,133 @@ def test_gateway_child_keeps_existing_proxy_exclusions(lower: str, upper: str) -
     ):
         harness.main()
     run.assert_called_once()
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_dbt_generated_ossie_ids_conflict_and_recover_through_export(
+    replace: bool,
+) -> None:
+    import json
+    from pathlib import Path
+    import yaml
+    from ossie_nvidia_auto_ontology import convert_ossie_to_auto_ontology
+    from auto_ontology.server.model_interchange.schemas import ModelSemanticLayer
+
+    prefix = f"ossie267_{uuid.uuid4().hex[:8]}"
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "dev_tools/fixtures/model_import/wwi.ossie.yaml"
+    )
+    ossie = yaml.safe_load(fixture.read_text())
+    assert ossie["version"] == "0.2.0.dev0"
+    names = {
+        dataset["name"]: f"{prefix}_{dataset['name']}" for dataset in ossie["datasets"]
+    }
+    for dataset in ossie["datasets"]:
+        dataset["name"] = names[dataset["name"]]
+        dataset["source"] = dataset["source"].replace("wide_world_importers", prefix)
+        for field in dataset["fields"]:
+            field["name"] = f"{prefix}_{field['name']}"
+    for relationship in ossie["relationships"]:
+        relationship["from"] = names[relationship["from"]]
+        relationship["to"] = names[relationship["to"]]
+    ossie_text = yaml.safe_dump(ossie)
+    incoming = mi.AutoOntologyModelDocument.model_validate(
+        yaml.safe_load(convert_ossie_to_auto_ontology(ossie_text))
+    )
+    catalog = incoming.model_copy(deep=True)
+    catalog.semantic_layer = ModelSemanticLayer()
+    catalog = _reid(catalog, f"{prefix}-catalog")
+
+    def physical_paths(
+        document: mi.AutoOntologyModelDocument,
+    ) -> dict[tuple[str, ...], str]:
+        paths: dict[tuple[str, ...], str] = {}
+        for db in document.data_layer.databases:
+            db_name = db.schemas[0].database_name
+            paths[(db_name,)] = db.id
+            for schema in db.schemas:
+                paths[(db_name, schema.name)] = schema.id
+                for table in schema.tables:
+                    paths[(db_name, schema.name, table.name)] = table.id
+                    for column in table.columns:
+                        paths[(db_name, schema.name, table.name, column.name)] = (
+                            column.id
+                        )
+        return paths
+
+    def rebind(value: Any, mapping: dict[str, str], key: str = "") -> Any:
+        if isinstance(value, dict):
+            return {k: rebind(v, mapping, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [rebind(v, mapping, key) for v in value]
+        if isinstance(value, str) and (
+            key == "id" or key.endswith("_id") or key in ("represents", "sql_column_is")
+        ):
+            return mapping.get(value, value)
+        return value
+
+    def snapshot() -> dict[str, list[dict[str, Any]]]:
+        return {
+            table.name: sorted(
+                store().query_read(select(table)),
+                key=lambda row: json.dumps(row, sort_keys=True, default=str),
+            )
+            for table in s.METADATA.sorted_tables
+        }
+
+    try:
+        seeded = mi.apply_import_model(catalog, replace=False)
+        before = snapshot()
+        response = _http_client().post(
+            f"/api/model/import?replace={str(replace).lower()}&embed=false",
+            content=ossie_text,
+            headers={"Content-Type": "application/yaml"},
+        )
+        assert response.status_code == 409, response.text
+        conflicts = response.json()["detail"]["conflicts"]
+        assert response.json()["detail"]["code"] == "model_import_conflict"
+        assert len(conflicts) == 14  # Database, schema, three views, nine columns.
+        assert all(
+            conflict["kind"] == "natural_name_conflict" for conflict in conflicts
+        )
+        assert snapshot() == before
+        exported = _http_client().post(
+            "/api/model/export", json={"databases": seeded["database_ids"]}
+        )
+        assert exported.status_code == 200, exported.text
+        target = physical_paths(
+            mi.AutoOntologyModelDocument.model_validate(yaml.safe_load(exported.text))
+        )
+        proposed = physical_paths(incoming)
+        assert len(proposed) == 14
+        assert all(identity != target[path] for path, identity in proposed.items())
+        bound = mi.AutoOntologyModelDocument.model_validate(
+            rebind(
+                incoming.model_dump(),
+                {identity: target[path] for path, identity in proposed.items()},
+            )
+        )
+        recovered = _post_document(bound, replace=replace)
+        assert recovered.status_code == 200, recovered.text
+        created = recovered.json()["summary"]["created"]
+        assert {
+            key: created[key] for key in ("databases", "schemas", "tables", "columns")
+        } == {"databases": 0, "schemas": 0, "tables": 0, "columns": 0}
+        assert created["terms"] == 3
+        assert created["column_attributes"] == 9
+        after = snapshot()
+        for entity in (
+            "catalog_database",
+            "catalog_schema",
+            "catalog_table",
+            "catalog_column",
+        ):
+            assert after[entity] == before[entity]
+        repeated = _post_document(bound, replace=replace)
+        assert repeated.status_code == 200, repeated.text
+        assert all(
+            value == 0 for value in repeated.json()["summary"]["created"].values()
+        )
+    finally:
+        _cleanup(prefix)
