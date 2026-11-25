@@ -362,6 +362,43 @@ def test_a_join_leaving_the_scope_is_not_exported(world) -> None:
     assert world.customers in targets
 
 
+def test_export_rows_are_ordered_deterministically(world) -> None:
+    """Foreign keys, joins, and semantic FKs must export in a total order."""
+    extra_col = _add(
+        s.catalog_column,
+        table_id=world.orders,
+        name="alt_customer_id",
+        data_type="integer",
+        ordinal_position=3,
+        is_nullable=True,
+    )
+    _link(
+        s.column__foreign_key,
+        source_column_id=extra_col,
+        target_column_id=world.customer_id,
+    )
+    _link(
+        s.table__join,
+        source_table_id=world.customers,
+        target_table_id=world.orders,
+        join_columns=[{"source": "id", "target": "customer_id"}],
+    )
+    _link(
+        s.column__semantic_fk,
+        column_id=extra_col,
+        attribute_id=world.attribute,
+    )
+
+    rows = mi.fetch_export_rows([world.database])
+    fks = [(r["source_column_id"], r["target_column_id"]) for r in rows["foreign_keys"]]
+    joins = [(r["source_table_id"], r["target_table_id"]) for r in rows["joins"]]
+    sfks = [(r["column_id"], r["column_attribute_id"]) for r in rows["semantic_fks"]]
+
+    assert fks == sorted(fks)
+    assert joins == sorted(joins)
+    assert sfks == sorted(sfks)
+
+
 # --------------------------------------------------------------------------
 # The round trip
 # --------------------------------------------------------------------------
