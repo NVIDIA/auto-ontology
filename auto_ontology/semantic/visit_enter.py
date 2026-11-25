@@ -32,6 +32,7 @@ from auto_ontology.dal.datasources import (
     store_column_uniqueness,
 )
 from auto_ontology.dal.pii import pii_tagged_column_ids
+from auto_ontology.semantic.constants import SQL_ATTR_SOURCE_TABLE
 from auto_ontology.semantic.date_format import infer_date_format, is_date_type
 from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
@@ -49,9 +50,15 @@ from auto_ontology.semantic.fk_suggester import (
     suggest_potential_foreign_keys,
 )
 from auto_ontology.semantic.models import ColumnAttributeSpec, ProcessTableResult
+from auto_ontology.semantic.sql_attribute_extractor import extract_sql_attributes
 from auto_ontology.semantic.term_extractor import (
     apply_display_names_to_specs,
     extract_term,
+)
+from auto_ontology.server.sql_attributes.service import (
+    SqlAttributeExpressionConflict,
+    SqlAttributeNameConflict,
+    create_sql_attribute,
 )
 from auto_ontology.utils.sql_identifiers import quoted_identifier
 
@@ -880,6 +887,7 @@ def process_table(
     database_name: str | None = None,
     probe_distinct_values: bool = True,
     probe_key_values: bool = True,
+    extract_table_sql_attributes: bool = False,
     commit_slot: AbstractContextManager[None] | None = None,
 ) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes.
@@ -892,6 +900,10 @@ def process_table(
     ``probe_key_values`` is the inverse of ``PREVENT_SEMANTIC_FK_DB_QUERIES``:
     whether the suspected FK and PK columns get their ascending distinct values
     probed for semantic FK resolution.
+
+    ``extract_table_sql_attributes`` mirrors ``ENABLE_TABLE_SQL_ATTRIBUTES``:
+    whether each Term with at least two mapped columns gets LLM-proposed
+    derived-metric SqlAttributes (``source="table"``). Off by default.
 
     ``commit_slot`` lets the parallel pipeline impose canonical table ordering
     only on persistence. Direct callers fall back to the process-local lock.
@@ -1088,9 +1100,36 @@ def process_table(
             except Exception:
                 logger.warning("[%s] inline embed failed", table_name)
 
+    # The Term writes it serializes are complete, and
+    # this is one LLM call per Term.
+    result_sql_attr_names: list[str] = []
+    if extract_table_sql_attributes and database_name is not None and terms:
+        if pii_columns is None:
+            logger.warning(
+                "[%s] Skipping SQL attribute extraction — could not read PII tags",
+                table_name,
+            )
+        else:
+            try:
+                with _step(table_name, "Extracting SQL attributes"):
+                    result_sql_attr_names = _extract_sql_attrs_for_terms(
+                        table,
+                        ctx,
+                        terms,
+                        attrs_by_term,
+                        database_name,
+                        pii_columns=pii_columns,
+                        profiling=columns_profiling_samples,
+                    )
+            except Exception:
+                logger.warning(
+                    "[%s] SqlAttribute extraction failed", table_name, exc_info=True
+                )
+
     return ProcessTableResult(
         term_names=result_term_names,
         attr_names=result_attr_names,
+        sql_attr_names=result_sql_attr_names,
     )
 
 
@@ -1131,3 +1170,92 @@ def commit_terms(
                 datatype=spec.datatype,
             )
             result_attr_names.append(spec.display_name)
+
+
+def _extract_sql_attributes_for_table(
+    table: dict[str, Any],
+    columns: list[dict[str, Any]],
+    schema_name: str | None,
+    term_id: str,
+    term_name: str,
+    database_name: str,
+) -> list[str]:
+    """Run LLM extraction + persistence for one Term's columns.
+
+    Returns the names of the SqlAttributes created.
+    """
+    term = {"name": term_name, "description": table.get("description", "")}
+    proposals = extract_sql_attributes(table, columns, schema_name, term)
+    created_names: list[str] = []
+
+    for proposal in proposals:
+        try:
+            row = create_sql_attribute(
+                name=proposal.name,
+                description=proposal.description,
+                expression=proposal.expression,
+                term_id=term_id,
+                connector=database_name,
+                source=SQL_ATTR_SOURCE_TABLE,
+            )
+        except (SqlAttributeNameConflict, SqlAttributeExpressionConflict):
+            logger.debug("SqlAttribute %r already exists — skipping", proposal.name)
+            continue
+        except Exception:
+            logger.warning(
+                "  Failed to persist SqlAttribute %r", proposal.name, exc_info=True
+            )
+            continue
+        created_names.append(row["name"])
+        logger.info("  Created SqlAttribute %r", proposal.name)
+
+    return created_names
+
+
+def _extract_sql_attrs_for_terms(
+    table: dict[str, Any],
+    ctx: dict[str, Any],
+    terms: list,
+    attrs_by_term: dict[str, list[dict]],
+    database_name: str,
+    *,
+    pii_columns: set[str],
+    profiling: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Propose SqlAttributes for each Term with at least two mapped columns.
+
+    PII-tagged columns are left out entirely: their names and values would
+    otherwise reach the prompt. ``ctx`` was read before this run's profiling,
+    so freshly sampled values from *profiling* take precedence.
+    """
+    col_by_name: dict[str, dict[str, Any]] = {}
+    for col in ctx.get("columns", []):
+        name = col.get("name")
+        if not name or name in pii_columns:
+            continue
+        sampled = profiling.get(name, {}).get("sample_values")
+        col_by_name[name] = {**col, "sample_values": sampled} if sampled else col
+
+    schema_name = table.get("schema_name")
+    names: list[str] = []
+
+    for term in terms:
+        term_name = term.get("name")
+        filtered_cols = [
+            col_by_name[a["source_column"]]
+            for a in attrs_by_term.get(term_name, [])
+            if a.get("source_column") in col_by_name
+        ]
+        if len(filtered_cols) < 2:
+            continue
+        names.extend(
+            _extract_sql_attributes_for_table(
+                table,
+                filtered_cols,
+                schema_name,
+                term.get("id"),
+                term_name,
+                database_name,
+            )
+        )
+    return names
