@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Menu White / Observability 32px">
+<rect width="36" height="36" rx="8" fill="#DDEDBF"/>
+<g id="Union">
+<path d="M17 10C16.4477 10 16 10.4477 16 11V25C16 25.5523 16.4477 26 17 26H19C19.5523 26 20 25.5523 20 25V11C20 10.4477 19.5523 10 19 10H17ZM19 11H17V25H19V11Z" fill-rule="evenodd" clip-rule="evenodd" fill="#76B900"/>
+<path d="M11 16C10.4477 16 10 16.4477 10 17V25C10 25.5523 10.4477 26 11 26H13C13.5523 26 14 25.5523 14 25V17C14 16.4477 13.5523 16 13 16H11ZM13 17H11V25H13V17Z" fill-rule="evenodd" clip-rule="evenodd" fill="#76B900"/>
+<path d="M22 14C22 13.4477 22.4477 13 23 13H25C25.5523 13 26 13.4477 26 14V25C26 25.5523 25.5523 26 25 26H23C22.4477 26 22 25.5523 22 25V14ZM23 14H25V25H23V14Z" fill-rule="evenodd" clip-rule="evenodd" fill="#76B900"/>
+</g>
+</g>
+</svg>
