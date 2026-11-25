@@ -16,6 +16,7 @@ from auto_ontology.infra.feature_flags import (
     get_sql_query_timeout_seconds,
     is_distinct_value_probing_enabled,
     is_pii_detection_enabled,
+    is_table_sql_attribute_extraction_enabled,
     read_configuration_flag,
     read_configuration_int,
 )
@@ -199,3 +200,29 @@ def test_sql_query_timeout_defaults_to_30_seconds(
     """An instance running without the frontend never writes the row."""
     with _patched(monkeypatch, None):
         assert get_sql_query_timeout_seconds() == 30
+
+
+def test_table_sql_attributes_default_to_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ENABLE_TABLE_SQL_ATTRIBUTES", raising=False)
+    assert is_table_sql_attribute_extraction_enabled() is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("true", True),
+        (" TRUE ", True),
+        ("1", True),
+        ("yes", True),
+        ("false", False),
+        ("0", False),
+        ("", False),
+    ],
+)
+def test_table_sql_attributes_read_the_env_var(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: bool
+) -> None:
+    monkeypatch.setenv("ENABLE_TABLE_SQL_ATTRIBUTES", value)
+    assert is_table_sql_attribute_extraction_enabled() is expected
