@@ -48,7 +48,7 @@ EXTERNAL_ASSOCIATIONS = frozenset(
 )
 
 _BUG_TITLE = re.compile(r"^\s*(\[bug\]|bug\b|fix\b|fix\()", re.IGNORECASE)
-_UI_SOURCE = (".css", ".scss", ".tsx")
+_UI_SOURCE = (".css", ".tsx")
 _FRONTEND_MANIFESTS = (
     "package.json",
     "pnpm-lock.yaml",

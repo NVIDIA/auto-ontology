@@ -109,8 +109,19 @@ def test_frontend_style_pr_is_ui() -> None:
 
 
 def test_frontend_dependency_bump_is_not_ui() -> None:
-    files = ("frontend/package.json", "frontend/pnpm-lock.yaml")
+    # A stylesheet alongside the manifest keeps the manifest check load-bearing:
+    # without it this PR would qualify as UI.
+    files = (
+        "frontend/package.json",
+        "frontend/pnpm-lock.yaml",
+        "frontend/app/globals.css",
+    )
     assert labels_to_add(pr("Bump Next.js", files=files), AVAILABLE) == []
+
+
+def test_frontend_files_that_are_not_css_or_tsx_are_not_ui() -> None:
+    for path in ("frontend/theme.scss", "frontend/lib/format.ts"):
+        assert labels_to_add(pr(files=(path,)), AVAILABLE) == []
 
 
 def test_mixed_frontend_and_backend_is_not_ui() -> None:
