@@ -17,13 +17,17 @@ showed the model, each with the furthest stage that can be established:
     and only those of the answer count, not of a CTE nothing reads. Aggregates,
     joins and table overlap do not count, and a changed or opposite filter
     leaves the analysis at ``retrieved``; so does an analysis with no filter,
-    since nothing can then be compared. This is still a heuristic, not proof the model followed
-    the definition; the submitted SQL is generated, not the saved analysis.
+    since nothing can then be compared. This is still a heuristic, not proof
+    the model followed the definition; the submitted SQL is generated, not the
+    saved analysis.
 ``executed``
     The submitted SQL, which is what ran, is the analysis's SQL, or contains it
-    whole as a subquery or as a CTE the outer query reads (an unreferenced CTE
-    never ran): the same statement once parsed and normalised,
-    so whitespace, keyword case and a trailing semicolon do not matter. A
+    whole as a subquery or as a CTE the outer query reads, directly or through
+    another CTE that is read (an unreferenced CTE never ran): the same statement
+    once parsed and normalised, so whitespace, keyword case, a trailing
+    semicolon and the dialect's identifier case rules do not matter. CTE names
+    are resolved the way SQL scopes them: a schema-qualified name is a table,
+    and a CTE in a WITH that is not recursive sees only the ones before it. A
     repaired or reinterpreted query is never reported as executed. Saved SQL
     that uses semantic names cannot run as it is, so it tops out at
     ``reference``.
