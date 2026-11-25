@@ -196,7 +196,7 @@ export const SidePanelLayout = ({
 					</div>
 				) : (
 					<>
-						<div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden">
+						<div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 							<div
 								className={`flex h-8 shrink-0 items-center justify-end border-b pr-3 pl-4 ${DIVIDER_BORDER}`}
 							>

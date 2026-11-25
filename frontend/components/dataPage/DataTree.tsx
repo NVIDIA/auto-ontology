@@ -692,8 +692,10 @@ export function DataTree({
 	);
 
 	return (
+		// The 16px under the panel header is padding inside the scroll area, so
+		// rows scroll up to the header instead of being cut off above it.
 		<nav
-			className={`flex min-h-0 flex-1 flex-col gap-y-1 overflow-y-auto px-5 pb-4 ${className}`}
+			className={`flex min-h-0 flex-1 flex-col gap-y-1 overflow-y-auto px-5 pt-4 pb-4 ${className}`}
 			aria-label="Datasource tree"
 		>
 			<AllDataBlock
