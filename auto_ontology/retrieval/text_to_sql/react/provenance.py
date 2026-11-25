@@ -10,14 +10,17 @@ showed the model, each with the furthest stage that can be established:
 ``retrieved``
     The definition was put in front of the model. Nothing shows it was used.
 ``reference``
-    Retrieved, and the submitted SQL reads a table the analysis reads and also
-    repeats at least one of its predicates or aggregates (column names compared
-    without their ``table__`` semantic prefix). Table overlap alone is not
-    enough. This is still a heuristic, not proof the model followed the
-    definition; the submitted SQL is generated, not the saved analysis.
+    Retrieved, the submitted SQL reads a table the analysis reads, and it
+    keeps every WHERE/HAVING condition of the analysis (column names compared
+    without their ``table__`` semantic prefix). Aggregates, joins and table
+    overlap do not count, and a changed or opposite filter leaves the analysis
+    at ``retrieved``; so does an analysis with no filter, since nothing can
+    then be compared. This is still a heuristic, not proof the model followed
+    the definition; the submitted SQL is generated, not the saved analysis.
 ``executed``
     The submitted SQL, which is what ran, is the analysis's SQL, or contains it
-    whole as a CTE or subquery: the same statement once parsed and normalised,
+    whole as a subquery or as a CTE the outer query reads (an unreferenced CTE
+    never ran): the same statement once parsed and normalised,
     so whitespace, keyword case and a trailing semicolon do not matter. A
     repaired or reinterpreted query is never reported as executed. Saved SQL
     that uses semantic names cannot run as it is, so it tops out at
@@ -26,6 +29,13 @@ showed the model, each with the furthest stage that can be established:
 Each entry carries the analysis ``id`` and a ``fingerprint`` (SHA-256 of the
 normalised SQL) that identifies the exact definition the stage refers to. An
 empty list means no analysis was retrieved in this episode.
+
+Every ReAct outcome carries the list: a submitted query, an information
+answer, a prediction and an unanswered episode (the last two cannot go past
+``retrieved``). Only the standalone KumoRFM predictor, which never retrieves
+saved analyses, returns ``[]`` unconditionally, and there it means "not
+applicable". The stage is derived from the submitted SQL text, not from an
+execution record.
 """
 
 from __future__ import annotations
@@ -88,27 +98,49 @@ def _bare_columns(node: exp.Expression) -> exp.Expression:
     return node
 
 
-def _fragments(sql: str | None, dialect: str | None) -> set[str]:
-    """The comparisons and aggregates that make up the analysis's definition."""
+def _conjuncts(condition: exp.Expression) -> list[exp.Expression]:
+    if isinstance(condition, exp.Paren):
+        return _conjuncts(condition.this)
+    if isinstance(condition, exp.And):
+        return _conjuncts(condition.left) + _conjuncts(condition.right)
+    return [condition]
+
+
+def _filters(sql: str | None, dialect: str | None) -> set[str]:
+    """The WHERE/HAVING conditions of *sql*, one entry per AND-ed condition."""
     out: set[str] = set()
     for statement in _parse(sql, dialect):
-        for node in statement.find_all(exp.Predicate, exp.AggFunc):
-            out.add(_bare_columns(node).sql(dialect=dialect, normalize=True))
+        for clause in statement.find_all(exp.Where, exp.Having):
+            for part in _conjuncts(clause.this):
+                out.add(_bare_columns(part).sql(dialect=dialect, normalize=True))
     return out
+
+
+def _referenced(select: exp.Expression, root: exp.Expression) -> bool:
+    """Whether every CTE enclosing *select* is read somewhere in *root*."""
+    read = {t.name.lower() for t in root.find_all(exp.Table)}
+    node = select.parent
+    while node is not None:
+        if isinstance(node, exp.CTE) and node.alias_or_name.lower() not in read:
+            return False
+        node = node.parent
+    return True
 
 
 def _runs_whole(
     normalised: str | None, submitted_sql: str | None, dialect: str | None
 ) -> bool:
-    """Whether the submission is, or embeds as a CTE or subquery, the saved SQL."""
+    """Whether the submission is, or embeds as a read CTE or subquery, the saved SQL."""
     if normalised is None:
         return False
     statements = _parse(submitted_sql, dialect)
     if len(statements) != 1:
         return False
+    root = statements[0]
     return any(
         select.sql(dialect=dialect, normalize=True) == normalised
-        for select in statements[0].find_all(exp.Select, exp.SetOperation)
+        and _referenced(select, root)
+        for select in root.find_all(exp.Select, exp.SetOperation)
     )
 
 
@@ -125,7 +157,7 @@ def custom_analyses_used(
     submitted, in which case nothing can be past ``retrieved``.
     """
     submitted_tables = _tables(submitted_sql, dialect)
-    submitted_fragments = _fragments(submitted_sql, dialect)
+    submitted_filters = _filters(submitted_sql, dialect)
     entries: list[dict[str, str]] = []
     for analysis in ctx.shown_analyses.values():
         sql = analysis.get("sql") or ""
@@ -134,7 +166,8 @@ def custom_analyses_used(
         if _runs_whole(normalised, submitted_sql, dialect):
             stage = EXECUTED
         elif submitted_tables & _tables(sql, dialect) and (
-            submitted_fragments & _fragments(sql, dialect)
+            (saved_filters := _filters(sql, dialect))
+            and saved_filters <= submitted_filters
         ):
             stage = REFERENCE
         entries.append(

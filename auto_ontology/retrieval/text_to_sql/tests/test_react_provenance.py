@@ -84,3 +84,38 @@ def test_the_saved_sql_embedded_as_a_cte_counts_as_executed() -> None:
     wrapped = f"WITH b AS ({SAVED}) SELECT * FROM b"
 
     assert _stage(custom_analyses_used(_ctx(), wrapped)) == "executed"
+
+
+def test_a_shared_aggregate_with_a_different_filter_is_only_retrieved() -> None:
+    saved = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20"
+    for other in (
+        "SELECT SUM(quantity) FROM order_lines WHERE quantity < 20",
+        "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 5",
+        "SELECT SUM(quantity) FROM order_lines",
+    ):
+        assert _stage(custom_analyses_used(_ctx(saved), other)) == "retrieved"
+
+
+def test_an_opposite_equality_filter_is_only_retrieved() -> None:
+    saved = "SELECT COUNT(*) FROM orders WHERE status = 'open'"
+    other = "SELECT COUNT(*) FROM orders WHERE status = 'closed'"
+
+    assert _stage(custom_analyses_used(_ctx(saved), other)) == "retrieved"
+
+
+def test_the_kept_filter_with_extra_conditions_is_a_reference() -> None:
+    other = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20 AND id > 0"
+
+    assert _stage(custom_analyses_used(_ctx(), other)) == "reference"
+
+
+def test_an_unreferenced_cte_is_not_an_execution() -> None:
+    unused = f"WITH b AS ({SAVED}) SELECT 1"
+
+    assert _stage(custom_analyses_used(_ctx(), unused)) != "executed"
+
+
+def test_the_saved_sql_as_a_subquery_counts_as_executed() -> None:
+    wrapped = f"SELECT * FROM ({SAVED}) AS b"
+
+    assert _stage(custom_analyses_used(_ctx(), wrapped)) == "executed"

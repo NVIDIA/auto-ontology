@@ -286,3 +286,36 @@ def test_provenance_reaches_the_final_response(
     used = final["custom_analyses_used"]
     assert [(e["id"], e["stage"]) for e in used] == [("a1", "reference")]
     assert used[0]["fingerprint"]
+
+
+def test_a_prediction_and_an_unanswered_episode_report_retrieved_analyses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from auto_ontology.retrieval.text_to_sql.agents.sql_unconstructable import (
+        SQLUnconstructableAgent,
+    )
+
+    def episode(_llm, ctx, **_kwargs):
+        ctx.shown_analyses["a1"] = {"id": "a1", "name": "n", "sql": "SELECT 1"}
+        if ctx.question.startswith("predict"):
+            return EpisodeResult(
+                None, "predicted", 1, [], prediction=Prediction(PREDICTED)
+            )
+        return EpisodeResult(None, "budget_exhausted", 1, [])
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    predicted = agent_module.ReactSQLAgent().execute(
+        _state(prediction_override=True, initial_question="predict churn")
+    )
+    stages = [
+        e["stage"]
+        for e in predicted["path_state"]["final_response"]["custom_analyses_used"]
+    ]
+    assert stages == ["retrieved"]
+
+    unanswered = agent_module.ReactSQLAgent().execute(_state())
+    final = SQLUnconstructableAgent().execute(
+        {"messages": [], "path_state": unanswered["path_state"]}
+    )["path_state"]["final_response"]
+    assert [e["stage"] for e in final["custom_analyses_used"]] == ["retrieved"]

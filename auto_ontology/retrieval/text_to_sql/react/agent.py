@@ -133,6 +133,11 @@ class ReactSQLAgent(BaseAgent):
             response = result.prediction.response
             markdown = str(response.get("response") or "")
             path_state["formatted_response"] = markdown
+            # A prediction runs no SQL, so saved analyses stop at "retrieved".
+            response = {
+                **response,
+                "custom_analyses_used": custom_analyses_used(ctx, None, dialect),
+            }
             path_state["final_response"] = response
             return {
                 "decision": "predicted",
@@ -146,6 +151,9 @@ class ReactSQLAgent(BaseAgent):
             self.logger.info("ReAct episode ended without an answer: %s", result.reason)
             path_state["unconstructable_explanation"] = (
                 ctx.prediction_refusal or _UNANSWERED
+            )
+            path_state["custom_analyses_used"] = custom_analyses_used(
+                ctx, None, dialect
             )
             return {"decision": "unconstructable", "path_state": path_state}
 
