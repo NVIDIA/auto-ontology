@@ -320,7 +320,8 @@ body {
 
 .result-chart-tick,
 .result-chart-vallabel,
-.result-chart-catlabel {
+.result-chart-catlabel,
+.result-chart-unit {
 	fill: var(--result-chart-muted);
 	font-size: 10px;
 }
@@ -347,24 +348,6 @@ body {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
-}
-
-.result-chart-tool {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.375rem;
-	padding: 0.25rem 0.5rem;
-	border: 1px solid var(--result-chart-border);
-	border-radius: 0.375rem;
-	background: transparent;
-	color: var(--result-chart-muted);
-	font-size: 0.75rem;
-	line-height: 1;
-}
-
-.result-chart-tool:hover {
-	color: var(--result-chart-fg);
-	border-color: var(--result-chart-muted);
 }
 
 .result-chart-kpis {

@@ -78,3 +78,18 @@ def test_value_search_ambiguity(
     name: str, values: list | None, ambiguous: bool
 ) -> None:
     assert is_value_search_ambiguous(name, values) is ambiguous
+
+
+def test_adjacent_bigint_keys_are_distinct() -> None:
+    key = 2**53
+    for value in (key + 1, str(key + 1)):
+        assert containment([value], [key], limit=5) == 0.0
+        assert containment([value], [key], limit=1) is None
+    assert contains([str(key + 1)], [key + 1], limit=5)
+
+
+def test_int_and_float_keys_still_match_each_other() -> None:
+    """Exact int comparison must not stop 1 and 1.0 (or "1") from matching."""
+    assert containment([1.0, 2.0], [1, 2, 3], limit=5) == 1.0
+    assert containment([1, 2], [1.0, 2.0, 3.0], limit=5) == 1.0
+    assert containment(["1", "2.0"], [1, 2, 3], limit=5) == 1.0

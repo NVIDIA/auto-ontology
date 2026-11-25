@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # JSONB, not a blanket loosening.
 _MAX_EMBEDDED_SAMPLE_LEN = 30
 
+#: Opens the sample values in a ColumnAttribute's vector text. Searched for by
+#: ``auto_ontology.semantic.pii_values`` to find vectors still holding values.
+SAMPLE_VALUES_MARKER = "Sample values:"
+
 # Same idea, but for JSONB columns specifically: their sample_values entries
 # are visit_enter.py's formatted `key [e.g. 'value']` strings (brackets and
 # quotes included), which need more headroom than a bare value does — using
@@ -212,7 +216,7 @@ def _format_sample_values(raw: Any, data_type: str | None = None) -> str:
     values = stringify_sample_values(raw, max_len=max_len)
     if not values:
         return ""
-    return " Sample values: " + ", ".join(values) + "."
+    return f" {SAMPLE_VALUES_MARKER} " + ", ".join(values) + "."
 
 
 def _build_rows(

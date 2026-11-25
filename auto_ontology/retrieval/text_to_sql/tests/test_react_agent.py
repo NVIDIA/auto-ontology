@@ -94,6 +94,33 @@ def test_calculation_only_turns_information_answers_off(
     assert contexts[0].information_answers is False
 
 
+def test_examples_anchors_and_short_answers_reach_the_episode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def episode(*_a: object, **kwargs: object) -> EpisodeResult:
+        calls.append(kwargs)
+        return _episode(None, "budget_exhausted")
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+    examples = [{"question": "How many?", "sql": "SELECT COUNT(*) FROM t"}]
+    anchors = [{"phrase": "active", "tbl": "customers", "col": "status"}]
+
+    agent_module.ReactSQLAgent().execute(
+        {
+            **_state(),
+            "sql_examples": examples,
+            "value_anchors": anchors,
+            "shorten_answer": True,
+        }
+    )
+
+    assert calls[0]["sql_examples"] == examples
+    assert calls[0]["value_anchors"] == anchors
+    assert calls[0]["shorten_answer"] is True
+
+
 def test_no_answer_is_reported_as_unconstructable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

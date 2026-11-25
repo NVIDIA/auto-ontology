@@ -80,6 +80,34 @@ def test_search_check_and_submit(ctx: ToolContext) -> None:
     assert "ACTIVE" in tool_results[1]
 
 
+def test_cost_status_follows_the_question_and_each_tool_result(
+    ctx: ToolContext,
+) -> None:
+    left = iter([9, 8])
+    ctx.cost_status = lambda: f"BUDGET: {next(left)} coins left."
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][1].content.endswith("BUDGET: 9 coins left.")
+    tool_result = [m.content for m in model.seen[-1] if isinstance(m, ToolMessage)][0]
+    assert "ACTIVE" in tool_result
+    assert tool_result.endswith("BUDGET: 8 coins left.")
+
+
+def test_no_cost_status_leaves_messages_unchanged(ctx: ToolContext) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][1].content == prompts.user_message("q", None)
+
+
 def test_rejected_submission_lets_the_model_fix_it(ctx: ToolContext) -> None:
     model = ScriptedModel(
         [
@@ -233,6 +261,130 @@ def test_custom_prompts_reach_the_system_prompt(ctx: ToolContext) -> None:
     )
 
     assert model.seen[0][0].content.endswith("\n\nORGANIZATION INSTRUCTIONS\nUse USD.")
+
+
+_ANCHORS = [
+    {
+        "phrase": "active",
+        "tbl": "customers",
+        "col": "status",
+        "stored_value": "ACTIVE",
+        "n_rows": "2",
+    },
+    {"phrase": "gold tier", "kind": "absent"},
+]
+
+_EXAMPLES = [
+    {
+        "question": "How many churned users?",
+        "evidence": "churned means state = 'C'",
+        "sql": "SELECT COUNT(*)\n  FROM users WHERE state = 'C'",
+        "db": "telecom",
+    },
+    {"question": "No SQL here", "sql": "  "},
+]
+
+
+def test_value_anchors_and_sql_examples_follow_the_evidence(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(
+        model,
+        ctx,
+        "q",
+        evidence="revenue is amount - discount",
+        value_anchors=_ANCHORS,
+        sql_examples=_EXAMPLES,
+    )
+
+    user = model.seen[0][1].content
+    evidence_at = user.index("EVIDENCE\nrevenue is amount - discount")
+    anchors_at = user.index("VERIFIED DATABASE VALUES")
+    examples_at = user.index("REFERENCE QUERY PATTERNS")
+    assert evidence_at < anchors_at < examples_at
+    assert '- "active": customers."status" = \'ACTIVE\' — 2 rows' in user
+    assert 'stored NOWHERE in this database: "gold tier".' in user
+    assert "Never filter on a phrase listed as stored nowhere" in user
+    assert "1. [source database: telecom]" in user
+    assert "   Evidence: churned means state = 'C'" in user
+    assert "   SQL: SELECT COUNT(*) FROM users WHERE state = 'C'" in user
+    assert "No SQL here" not in user
+
+
+def test_without_anchors_or_examples_the_user_message_is_unchanged(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q", value_anchors=[], sql_examples=[])
+
+    assert model.seen[0][1].content == prompts.user_message("q", None)
+    assert model.seen[0][1].content == "QUESTION\nq\n"
+
+
+def test_row_counts_are_dropped_between_columns_of_one_table() -> None:
+    section = prompts.value_anchors_section(
+        [
+            {
+                "phrase": "San Jose",
+                "tbl": "schools",
+                "col": "City",
+                "stored_value": "San Jose",
+                "n_rows": "5",
+            },
+            {
+                "phrase": "San Jose",
+                "tbl": "schools",
+                "col": "MailCity",
+                "stored_value": "San Jose",
+                "n_rows": "9",
+                "description": "mailing city",
+                "kind": "contains",
+            },
+        ]
+    )
+
+    assert '- "San Jose": schools."City" = \'San Jose\'\n' in section
+    assert (
+        '- "San Jose": schools."MailCity" (mailing city) contains it inside '
+        "values such as 'San Jose'"
+    ) in section
+    assert "rows" not in section.split("Use these")[0]
+    assert "stored nowhere" not in section
+
+
+def test_short_answer_rules_reach_the_system_prompt(ctx: ToolContext) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+            _reply(call("submit", "1", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    loop.run_episode(model, ctx, "q", shorten_answer=True)
+    loop.run_episode(model, ctx, "q")
+
+    assert model.seen[0][0].content.endswith(f"\n\n{prompts.SHORT_ANSWER_RULES}")
+    assert "OUTPUT SHAPE" not in model.seen[1][0].content
+
+
+def test_a_prediction_episode_ignores_sql_shaping_inputs(ctx: ToolContext) -> None:
+    model = ScriptedModel([AIMessage(content="no tools")] * 3)
+
+    loop.run_episode(
+        model,
+        ctx,
+        "q",
+        mode=EpisodeMode.PREDICT,
+        value_anchors=_ANCHORS,
+        sql_examples=_EXAMPLES,
+        shorten_answer=True,
+    )
+
+    assert "OUTPUT SHAPE" not in model.seen[0][0].content
+    assert model.seen[0][1].content == "QUESTION\nq\n"
 
 
 @pytest.mark.parametrize("dialect", ["mysql", "sqlite", "oracle"])
@@ -627,6 +779,98 @@ def test_information_answers_need_the_submit_tool(
     assert observation == "Error: sql is empty."
     prompt = prompts.system_prompt_for(EpisodeMode.SQL, None, information_answers=True)
     assert "sql empty" not in prompt
+
+
+@pytest.mark.parametrize("dialect", [None, "postgresql", "mysql", "sqlite"])
+def test_column_order_rule_reaches_the_model(
+    ctx: ToolContext, dialect: str | None
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q", dialect=dialect)
+
+    assert "same order the question" in model.seen[0][0].content
+
+
+@pytest.mark.parametrize("dialect", [None, "postgresql", "mysql", "sqlite"])
+def test_requested_shape_rule_reaches_the_model(
+    ctx: ToolContext, dialect: str | None
+) -> None:
+    model = ScriptedModel([_reply(call("submit", "1", sql=FINAL_SQL, response="x"))])
+
+    loop.run_episode(model, ctx, "q", dialect=dialect)
+
+    system = model.seen[0][0].content
+    assert "Aggregate, GROUP BY or LIMIT only when the question" in system
+    assert "do not add a key or id to it" in system
+
+
+def _one_query_budget(ctx: ToolContext) -> None:
+    ctx.can_run_queries = lambda: ctx.sql_runs < 1
+
+
+def test_out_of_budget_offers_only_submit_and_accepts_without_running(
+    ctx: ToolContext,
+) -> None:
+    _one_query_budget(ctx)
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.submission.sql == FINAL_SQL
+    assert result.submission.db_response.result == []
+    assert ctx.submitted_database == ctx.connectors[0].database_name
+    assert model.bound_tool_names[1] == ["submit"]
+    assert model.seen[1][-1].content == prompts.NO_QUERIES_LEFT
+
+
+def test_out_of_budget_submission_still_has_to_pass_the_schema_checks(
+    ctx: ToolContext,
+) -> None:
+    ctx.can_run_queries = lambda: False
+    model = ScriptedModel(
+        [
+            _reply(call("submit", "1", sql="SELECT revenue FROM orders", response="x")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.submission.sql == FINAL_SQL
+    rejection = [t for t in result.trajectory if t["role"] == "tool"][0]["content"]
+    assert "Unknown column: revenue" in rejection
+
+
+def test_out_of_budget_episode_without_a_submission_submits_the_latest_draft(
+    ctx: ToolContext,
+) -> None:
+    _one_query_budget(ctx)
+    model = ScriptedModel(
+        [_reply(call("run_sql", "1", sql=FINAL_SQL)), AIMessage(content="Stuck.")]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted_draft"
+    assert result.submission.sql == FINAL_SQL
+
+
+def test_free_queries_keep_an_unsubmitted_episode_unanswered(ctx: ToolContext) -> None:
+    model = ScriptedModel(
+        [_reply(call("run_sql", "1", sql=FINAL_SQL)), AIMessage(content="Stuck.")]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "no_submission"
+    assert result.submission is None
 
 
 class InternalServerError(Exception):

@@ -45,6 +45,7 @@ from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,
     connector_for,
+    no_database_error,
     run_sql,
 )
 
@@ -88,7 +89,8 @@ def submit(
     """Check and run a final query; the submission when it ran cleanly.
 
     A failed submission is an observation, not the end of the episode: the
-    model sees why and can fix it.
+    model sees why and can fix it. When the caller's budget can no longer pay
+    for a query, the query is accepted after the schema checks without running.
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -105,12 +107,18 @@ def submit(
                 None,
             )
         return "Accepted.", Submission("", response, assumptions, None)
-    connector = connector_for(ctx)
+    connector = connector_for(ctx, sql)
     if connector is None:
-        return "Error: no database to run on. Retrieve the tables you need first.", None
+        return no_database_error(ctx, sql), None
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
+    if not _can_run_queries(ctx):
+        # Running it would be refused, and a refusal is not a wrong query.
+        unrun = QueryResponse(result=[], sliced=False)
+        submission = Submission(sql, (response or "").strip(), assumptions, unrun)
+        ctx.submitted_database = getattr(connector, "database_name", None)
+        return "Accepted without running it: no budget left for a query.", submission
     db_response = _run_sql(
         sql, connector, record_numeric_kinds=ctx.numeric_type_alignment
     )
@@ -125,6 +133,7 @@ def submit(
             f"instead:\n{db_response.sql_correction}"
         ), None
     submission = Submission(sql, (response or "").strip(), assumptions, db_response)
+    ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission
 
 
@@ -150,6 +159,28 @@ def _retrieve(
         ctx.information_retrieved = True
         return answer
     return retrieve(ctx, query, kinds)
+
+
+def _can_run_queries(ctx: ToolContext) -> bool:
+    return ctx.can_run_queries is None or ctx.can_run_queries()
+
+
+def _submit_draft(
+    ctx: ToolContext, draft: str | None, calls: int, trajectory: list[dict[str, Any]]
+) -> EpisodeResult | None:
+    """Submit the latest drafted query when the budget ended the episode."""
+    if not draft:
+        return None
+    observation, submission = submit(ctx, draft)
+    trajectory.append({"role": "draft_submission", "content": observation})
+    if submission is None:
+        return None
+    return EpisodeResult(submission, "submitted_draft", calls, trajectory)
+
+
+def _with_cost_status(ctx: ToolContext, text: str) -> str:
+    status = ctx.cost_status() if ctx.cost_status else None
+    return f"{text}\n\n{status}" if status else text
 
 
 def _dispatch(
@@ -194,13 +225,19 @@ def run_episode(
     dialect: str | None = None,
     mode: EpisodeMode = EpisodeMode.SQL,
     custom_prompts: str | None = None,
+    sql_examples: list[dict[str, str]] | None = None,
+    value_anchors: list[dict[str, str]] | None = None,
+    shorten_answer: bool = False,
 ) -> EpisodeResult:
     """Run the model with *mode*'s tools until it answers or the budget ends.
 
     ``sql`` answers with ``submit``, ``predict`` with ``predict``, and ``auto``
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
+    *sql_examples*, *value_anchors* and *shorten_answer* shape a SQL answer, so
+    a ``predict`` episode ignores them.
     """
+    writes_sql = mode != EpisodeMode.PREDICT
     system_prompt = prompts.system_prompt_for(
         mode, dialect, information_answers=ctx.information_answers
     )
@@ -208,14 +245,20 @@ def run_episode(
         system_prompt = f"{system_prompt}\n\n{custom_prompts}"
     # Dialect rules, e.g. for MySQL: do not CAST or ROUND computed values,
     # which changes the digits an exact grader compares.
-    dialect_rules = (
-        format_dialect_rules(dialect).strip() if mode != EpisodeMode.PREDICT else ""
-    )
+    dialect_rules = format_dialect_rules(dialect).strip() if writes_sql else ""
     if dialect_rules:
         system_prompt = f"{system_prompt}\n\n{dialect_rules}"
+    if shorten_answer and writes_sql:
+        system_prompt = f"{system_prompt}\n\n{prompts.SHORT_ANSWER_RULES}"
+    user_message = prompts.user_message(
+        question,
+        evidence,
+        value_anchors=value_anchors if writes_sql else None,
+        sql_examples=sql_examples if writes_sql else None,
+    )
     messages: list[BaseMessage] = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=prompts.user_message(question, evidence)),
+        HumanMessage(content=_with_cost_status(ctx, user_message)),
     ]
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
@@ -227,9 +270,25 @@ def run_episode(
     calls = 0
     nudges = 0
     made: set[str] = set()
+    draft: str | None = None
+    out_of_queries = False
 
     while True:
         last_turn = calls >= budget
+        if (
+            mode != EpisodeMode.PREDICT
+            and not out_of_queries
+            and not _can_run_queries(ctx)
+        ):
+            out_of_queries = True
+            no_queries_left = prompts.no_queries_left_for()
+            messages.append(HumanMessage(content=no_queries_left))
+            trajectory.append({"role": "human", "content": no_queries_left})
+            tools = prompts.tools_for(
+                mode, last_turn=True, information_answers=ctx.information_answers
+            )
+            offered = [t["function"]["name"] for t in tools]
+            bound = llm.bind_tools(tools)
         if last_turn:
             last_call = prompts.last_call_for(
                 mode, information_answers=ctx.information_answers
@@ -265,6 +324,10 @@ def run_episode(
         if not tool_calls:
             nudges += 1
             if last_turn or nudges > _MAX_CONSECUTIVE_NUDGES:
+                if out_of_queries:
+                    fallback = _submit_draft(ctx, draft, calls, trajectory)
+                    if fallback is not None:
+                        return fallback
                 return EpisodeResult(None, "no_submission", calls, trajectory)
             nudge = prompts.nudge_for(mode, information_answers=ctx.information_answers)
             messages.append(HumanMessage(content=nudge))
@@ -276,6 +339,11 @@ def run_episode(
         for call in tool_calls:
             name = call.get("name") or ""
             args = call.get("args") or {}
+            if (
+                name in (ToolName.RUN_SQL, ToolName.SUBMIT)
+                and (args.get("sql") or "").strip()
+            ):
+                draft = args["sql"]
             key = _call_key(name, args)
             answer: Submission | Prediction | None
             answers = prompts.is_answer(name, args)
@@ -297,6 +365,8 @@ def run_episode(
                 made.add(key)
                 calls += 1
                 observation, answer = _dispatch(ctx, name, args, offered)
+            if answer is None:
+                observation = _with_cost_status(ctx, observation)
             messages.append(
                 ToolMessage(content=observation, tool_call_id=call.get("id") or name)
             )
@@ -309,4 +379,8 @@ def run_episode(
                 )
 
         if last_turn:
+            if out_of_queries:
+                fallback = _submit_draft(ctx, draft, calls, trajectory)
+                if fallback is not None:
+                    return fallback
             return EpisodeResult(None, "budget_exhausted", calls, trajectory)

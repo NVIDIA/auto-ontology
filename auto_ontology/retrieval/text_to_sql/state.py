@@ -42,9 +42,15 @@ class TextToSQLPayload(TypedDict):
     calculation_only: NotRequired[bool]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
-    # Accepted from callers but not read by the ReAct agent.
+    # Solved question/SQL pairs from other databases, shown as query-shape
+    # precedent: ``question``, ``sql`` and optional ``evidence`` and ``db``.
     sql_examples: NotRequired[list[dict[str, str]]]
+    # Question phrases looked up in the target database: ``phrase``, ``tbl``,
+    # ``col``, ``stored_value``, and optional ``kind`` (value, contains or
+    # absent), ``n_rows`` and ``description``.
     value_anchors: NotRequired[list[dict[str, str]]]
+    # True for graders that compare result columns: adds strict output-shape rules.
+    shorten_answer: NotRequired[bool]
 
 
 class AgentState(TypedDict):
@@ -65,6 +71,9 @@ class AgentState(TypedDict):
     calculation_only: NotRequired[bool]
     # The payload's custom prompts and acronyms as one system-prompt section.
     custom_prompts: NotRequired[str]
+    sql_examples: NotRequired[list[dict[str, str]]]
+    value_anchors: NotRequired[list[dict[str, str]]]
+    shorten_answer: NotRequired[bool]
     # Read by the entity-coverage pipeline, which shares this state type.
     domain_rules: NotRequired[list[dict[str, str]]]
     # User-curated Glossary definitions (the ``acronyms`` table), kept apart from

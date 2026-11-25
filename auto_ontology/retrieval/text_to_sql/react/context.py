@@ -11,7 +11,7 @@ the same calls — which is what an RL environment needs from them.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,6 +40,9 @@ class ToolContext:
     ``pages`` holds the ``run_sql`` results too long to show, for ``grep`` to
     search; page *n* is ``pages[n - 1]``.
 
+    ``submitted_database`` is the database the accepted submission was written
+    for, whether it ran or was accepted unrun for lack of budget.
+
     ``shown_tables`` is every table a ``retrieve`` result named — in a table
     block, a JOIN route, a SIMILAR line or a definition's SQL — as lowercased
     ``(schema, name)``. It is wider than ``seen_tables`` on purpose: a bridge
@@ -53,6 +56,12 @@ class ToolContext:
     with no SQL; it stays off wherever a grader scores the SQL.
     ``information_retrieved`` records that ``retrieve`` showed the information
     view, which such an answer has to come from; a SQL-view search does not count.
+
+    ``cost_status`` is for callers that charge for queries: it returns what the
+    model has left to spend and what each action costs, read fresh each time
+    because every query changes it. ``None`` when queries are free.
+    ``can_run_queries`` comes with it: False once the next query would be
+    refused, so the episode can still submit instead of trying to run one.
     """
 
     retriever: Any
@@ -66,6 +75,7 @@ class ToolContext:
     prediction_llm: Any = None
     custom_prompts: str = ""
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
+    submitted_database: str | None = None
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
     join_paths: list[dict[str, Any]] = field(default_factory=list)
     anchor_column_ids: dict[str, str | None] = field(default_factory=dict)
@@ -79,6 +89,8 @@ class ToolContext:
     prediction_refusal: str = ""
     pages: list[Any] = field(default_factory=list)
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
+    cost_status: Callable[[], str | None] | None = None
+    can_run_queries: Callable[[], bool] | None = None
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
