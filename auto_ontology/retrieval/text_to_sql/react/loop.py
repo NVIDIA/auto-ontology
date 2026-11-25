@@ -36,6 +36,9 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
+from auto_ontology.retrieval.text_to_sql.react.empty_result import (
+    empty_result_rejection,
+)
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.information import information
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
@@ -91,6 +94,8 @@ def submit(
     A failed submission is an observation, not the end of the episode: the
     model sees why and can fix it. When the caller's budget can no longer pay
     for a query, the query is accepted after the schema checks without running.
+    The first 0-row result from a filtered query comes back with its filters
+    checked against the stored values (:mod:`.empty_result`).
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -132,6 +137,10 @@ def submit(
             f"Not accepted. The query only runs as rewritten here; {resubmit} "
             f"instead:\n{db_response.sql_correction}"
         ), None
+    if rejection := empty_result_rejection(
+        ctx, connector, check.statement, db_response, resubmit
+    ):
+        return rejection, None
     submission = Submission(sql, (response or "").strip(), assumptions, db_response)
     ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission

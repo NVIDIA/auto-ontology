@@ -62,6 +62,9 @@ class ToolContext:
     because every query changes it. ``None`` when queries are free.
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
+
+    ``empty_result_checked`` records that ``submit`` has held back one empty
+    result to check its filters; the next one is accepted.
     """
 
     retriever: Any
@@ -91,6 +94,7 @@ class ToolContext:
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    empty_result_checked: bool = False
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
