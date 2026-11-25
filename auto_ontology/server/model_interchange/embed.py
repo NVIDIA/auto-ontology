@@ -19,7 +19,7 @@ from auto_ontology.utils.embedding_rows import (
 
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 from auto_ontology.semantic.embed import _build_rows
-from auto_ontology.utils import get_embed_params
+from auto_ontology.utils import bedrock, get_embed_params
 from auto_ontology.utils.embedding import embed_rows
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
@@ -252,7 +252,10 @@ def _embed_and_ingest_rows(rows: list[dict[str, Any]], vdb: Any) -> int:
 
 def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:
     """Embed and ingest accumulated rows into both VDB collections (no reset)."""
-    if not resolve("EMBED", "API_KEY"):
+    # A bedrock/ model authenticates with the AWS credential chain, not a key.
+    if not resolve("EMBED", "API_KEY") and not bedrock.is_bedrock_model(
+        resolve("EMBED", "MODEL")
+    ):
         logger.warning(
             "EMBED API key not set — skipping VDB flush after model import",
         )

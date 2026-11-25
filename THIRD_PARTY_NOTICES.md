@@ -24,6 +24,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | --- | --- | --- | --- |
 | Alembic | >=1.19.1 | MIT | https://github.com/sqlalchemy/alembic |
 | apache-ossie-nvidia-auto-ontology | git (`nvidia`) | Apache-2.0 | https://github.com/apache/ossie-converters |
+| boto3 | >=1.44.3 | Apache-2.0 | https://github.com/boto/boto3 |
 | cryptography | >=50.0.1 | Apache-2.0 OR BSD-3-Clause | https://github.com/pyca/cryptography |
 | databricks-sql-connector (`databricks-sql-connector[pyarrow]`) | >=4.4.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
 | DuckDB | >=1.5.5 | MIT | https://github.com/duckdb/duckdb-python |
@@ -32,6 +33,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | hvac | >=2.4.0 | Apache-2.0 | https://github.com/hvac/hvac |
 | importlib-metadata | >=8.7.1 | Apache-2.0 | https://github.com/python/importlib_metadata |
 | kumo-relational-client (`kumo-relational-client[relational]`) | >=1.0.0,<2 | Apache-2.0 — see note below | https://github.com/NVIDIA/kumo-relational-client |
+| langchain-aws | >=1.9.3 | MIT | https://github.com/langchain-ai/langchain-aws |
 | langchain-core | >=1.6.1 | MIT | https://github.com/langchain-ai/langchain |
 | langchain-nvidia-ai-endpoints | >=1.4.3 | MIT | https://github.com/langchain-ai/langchain-nvidia |
 | langchain-openai | >=1.3.0,<1.3.5 | MIT | https://github.com/langchain-ai/langchain |

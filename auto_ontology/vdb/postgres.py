@@ -32,6 +32,10 @@ _LABEL_METADATA_COLUMN = "label"
 #: ``PGVectorStore``'s default, which ``_get_store`` does not override.
 _CONTENT_COLUMN = "content"
 
+# Width of the embedding column: what the NVIDIA embedding models emit.
+# Narrower embeddings (Bedrock's) are zero-padded to it before they are stored.
+DEFAULT_VECTOR_SIZE = 2048
+
 
 class _UnusableEmbeddings(Embeddings):
     """Placeholder used when no query-side embedder is supplied.
@@ -173,7 +177,7 @@ class PostgresVDB:
 
         self._engine: Optional[PGEngine] = None
         self._store: Optional[PGVectorStore] = None
-        self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
+        self.vector_size: Optional[int] = kwargs.get("vector_size", DEFAULT_VECTOR_SIZE)
         # Resetting the database embeddings prior to ingestion
         # In order to support without recreate:
         # 1. The ingestion should return which tables/columns were added/updated/deleted

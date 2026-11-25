@@ -15,7 +15,10 @@ the URL, and each built-in default uses a different one:
   ``{"query": {"text"}, "passages": [{"text"}], "truncate"}``, scored by
   ``rankings[].logit``.
 
-Any other URL is treated as a NIM base and gets ``/v1/ranking`` appended.
+Any other URL is treated as a NIM base and gets ``/v1/ranking`` appended. A
+``bedrock/`` model calls Amazon Bedrock's Rerank API instead, with the AWS
+credential chain, and uses neither the URL nor the key (see
+:mod:`auto_ontology.utils.bedrock`).
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from typing import Any
 
 import httpx
 
+from auto_ontology.utils import bedrock
 from auto_ontology.utils.model_config import resolve
 
 # Hosted NeMo reranking endpoint — no local GPU required. Override RERANK_ENDPOINT
@@ -111,13 +115,17 @@ def rerank_hits(
     """
     if not hits:
         return hits
-    scores = _scores(
-        query,
-        [str(hit.get(text_key) or "") for hit in hits],
-        url=_ranking_url(rerank_invoke_url),
-        model_name=model_name,
-        api_key=api_key,
-    )
+    documents = [str(hit.get(text_key) or "") for hit in hits]
+    if bedrock.is_bedrock_model(model_name):
+        scores = bedrock.rerank_scores(query, documents, model_name, timeout=_TIMEOUT_S)
+    else:
+        scores = _scores(
+            query,
+            documents,
+            url=_ranking_url(rerank_invoke_url),
+            model_name=model_name,
+            api_key=api_key,
+        )
     ranked = sorted(
         ({"_rerank_score": score, **hit} for hit, score in zip(hits, scores)),
         key=lambda hit: hit["_rerank_score"],
