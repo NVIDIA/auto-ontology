@@ -7,6 +7,8 @@ from typing import Any
 import httpx
 import openai
 import pytest
+from elastic_transport import ApiResponseMeta, HttpHeaders, NodeConfig
+from elasticsearch import ApiError
 
 from auto_ontology.utils import retriever as retriever_mod
 from auto_ontology.utils.embedding import EmbedParams
@@ -40,6 +42,8 @@ def test_classification(exc: Exception, transient: bool) -> None:
 
 
 class _Store:
+    embeds_server_side = False
+
     def retrieval(self, vectors: list, top_k: int, where: Any) -> list[list[dict]]:
         return [[{"text": "orders", "metadata": {"id": "t1"}, "_distance": 0.1}]]
 
@@ -94,5 +98,58 @@ def test_query_does_not_retry_a_client_error(
     retriever = _retriever(monkeypatch, outcomes)
 
     with pytest.raises(openai.AuthenticationError):
+        retriever.query("orders")
+    assert slept == []
+
+
+def _es_error(reason: str) -> ApiError:
+    meta = ApiResponseMeta(
+        status=400,
+        http_version="1.1",
+        headers=HttpHeaders(),
+        duration=0.0,
+        node=NodeConfig("http", "localhost", 9200),
+    )
+    return ApiError("status_exception", meta, {"error": {"reason": reason}})
+
+
+class _ServerSideStore:
+    """A store that embeds the query itself, failing as listed before it answers."""
+
+    embeds_server_side = True
+
+    def __init__(self, failures: list[Exception]) -> None:
+        self.failures = failures
+        self.queries: list[Any] = []
+
+    def retrieval(self, queries: list, top_k: int, where: Any) -> list[list[dict]]:
+        self.queries.append(queries)
+        if self.failures:
+            raise self.failures.pop(0)
+        return [[{"text": "orders", "metadata": {"id": "t1"}, "_distance": 0.1}]]
+
+
+def test_a_server_side_store_gets_the_text_and_its_endpoint_blips_are_retried(
+    monkeypatch: pytest.MonkeyPatch, slept: list[float]
+) -> None:
+    # A 5xx from the model endpoint reaches us as the cluster's 400.
+    blip = _es_error("inference entity id [x] status [502].")
+    store = _ServerSideStore([blip])
+    retriever = retriever_mod.Retriever(store, EmbedParams("m", "http://embed"))
+
+    hits = retriever.query("  orders ")
+
+    assert [hit["metadata"]["id"] for hit in hits] == ["t1"]
+    assert store.queries == [["orders"], ["orders"]]
+    assert len(slept) == 1
+
+
+def test_a_server_side_store_does_not_retry_a_bad_request(
+    monkeypatch: pytest.MonkeyPatch, slept: list[float]
+) -> None:
+    store = _ServerSideStore([_es_error("inference entity id [x] status [401].")])
+    retriever = retriever_mod.Retriever(store, EmbedParams("m", "http://embed"))
+
+    with pytest.raises(ApiError):
         retriever.query("orders")
     assert slept == []

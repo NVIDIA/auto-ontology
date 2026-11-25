@@ -156,7 +156,7 @@ databases, and people refine it. Semantic compilation starts once you turn it
 on in **Settings → Semantic Compilation**.
 
 - **Catalog ingest:** read tables, columns, keys, views, and query history; tag
-  PII if you turn on PII detection; embed tables and columns in pgvector.
+  PII if you turn on PII detection; embed tables and columns in the vector store.
 - **Per table:** profile values with SQL. A model finds foreign key candidates
   and junction tables, writes column descriptions, and names the terms.
 - **Across tables:** group copies of a schema into term families, and link
@@ -164,8 +164,8 @@ on in **Settings → Semantic Compilation**.
   the data confirms it. A model attaches foreign key columns left unlinked,
   suggests SQL attributes from query history and for bridge tables, and
   describes each column attribute.
-- **Output:** the ontology in Postgres with embeddings in pgvector, which you
-  can import or export as Ossie YAML.
+- **Output:** the ontology in Postgres with embeddings in the vector store
+  (pgvector or Elasticsearch), which you can import or export as Ossie YAML.
 - **Certify:** test the draft with real questions in Chat, or with
   `check_answerable` and `ask_question` over MCP. Refine terms, descriptions,
   and SQL attributes in the UI or through the API, and certify them once
@@ -422,7 +422,7 @@ NVIDIA NIM on [build.nvidia.com](https://build.nvidia.com):
 | --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `REASONING`     | `nvidia/nemotron-3.5-lightning-30b-a3b` | Runs the answering agent and `check_answerable`, builds the ontology, and detects PII                                    |
 | `NON_REASONING` | `nvidia/nemotron-3.5-lightning-30b-a3b` | Rewrites follow-up questions, plans charts, writes PQL for predictions, and runs the quick steps of interactive analysis |
-| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in pgvector, and matches each question to them                        |
+| `EMBED`         | `nvidia/nemotron-3.5-embed-1b`          | Indexes tables, columns, terms, and SQL attributes in the vector store, and matches each question to them                |
 | `RERANK`        | `nvidia/nemotron-3.5-rerank-8b`         | Picks the term that owns each bridge-table SQL attribute during compilation; not used to answer questions                |
 
 To use self-hosted NIM or any OpenAI-compatible endpoint, set

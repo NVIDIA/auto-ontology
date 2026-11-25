@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'win32'",
@@ -217,6 +217,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "databricks-sql-connector", extra = ["pyarrow"] },
     { name = "duckdb" },
+    { name = "elasticsearch" },
     { name = "fastapi" },
     { name = "google-cloud-bigquery" },
     { name = "httpx" },
@@ -274,6 +275,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=50.0.1" },
     { name = "databricks-sql-connector", extras = ["pyarrow"], specifier = ">=4.4.0" },
     { name = "duckdb", specifier = ">=1.5.5" },
+    { name = "elasticsearch", specifier = ">=9.5.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "google-cloud-bigquery", specifier = ">=3.30.0" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -581,6 +583,36 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3e/c5/41bef391fb8b23dbc133c9f2ba016e7a7a8124513d2cc1b430f1897d87e4/duckdb-1.5.5-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:078e6a60dd8eedde5832f45422ca5c4a6b8c837aeabd8a56ca0b7d933f588053", size = 21511060, upload-time = "2026-07-22T10:54:42.788Z" },
     { url = "https://files.pythonhosted.org/packages/07/9f/c44dfc1f924ac29b3252dc1b91393c01d009dbfe9f8ed33f10b986151bd1/duckdb-1.5.5-cp313-cp313-win_amd64.whl", hash = "sha256:6826504277dba513c0c5d71d828456c94d729c9d2482f94b2e289f90a9167e28", size = 13168028, upload-time = "2026-07-22T10:54:46.127Z" },
     { url = "https://files.pythonhosted.org/packages/ca/88/591384b2cd59abddd6f5dc175e60374f9abae6064429f0c4402854c10f44/duckdb-1.5.5-cp313-cp313-win_arm64.whl", hash = "sha256:baa9c5702002fabb559ded2a39008f9f421fcbc7237d388b8213eff1e08858de", size = 13989955, upload-time = "2026-07-22T10:54:49.262Z" },
+]
+
+[[package]]
+name = "elastic-transport"
+version = "9.4.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "sniffio" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/27/75/37f7fdabe5493dd26e37fed72dbf4069f6c95a92acba8050792b7ad9444d/elastic_transport-9.4.3.tar.gz", hash = "sha256:f38bf3e99cd6c572304350edffa69635be681e26f159fc686208122acd9616fa", size = 83852, upload-time = "2026-11-11T19:04:28.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/1a/012abee360e59bc0b375150984d96a8b1129a5a86811724fc8522782f73f/elastic_transport-9.4.3-py3-none-any.whl", hash = "sha256:a05ace35e1494a3175f906f03d67404b7202cf098a9a985fab93c89b0cfe9ea8", size = 68194, upload-time = "2026-11-11T19:04:26.869Z" },
+]
+
+[[package]]
+name = "elasticsearch"
+version = "9.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "elastic-transport" },
+    { name = "python-dateutil" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/b7/87bce7be89c822a63608e3c946a80d99fce1066ce9e9691bcb6b8ef57631/elasticsearch-9.5.1.tar.gz", hash = "sha256:98210cd96c256dd9936f58e1c762aba94da7db7d38d058bb0fbaf7e4b9567146", size = 930439, upload-time = "2026-09-09T20:17:03.842Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/6e/047d517a64249abd0a1b5b8c9f8244e3bf48c6916d5a68e9c76c52fc266d/elasticsearch-9.5.1-py3-none-any.whl", hash = "sha256:a980d8888ae70c03f0a1db6b2c5e3e39bf4e235abea737f522d2fd1d2d20bb99", size = 1018374, upload-time = "2026-09-09T20:17:00.18Z" },
 ]
 
 [[package]]
@@ -1122,12 +1154,12 @@ dependencies = [
     { name = "urllib3" },
 ]
 wheels = [
+    { path = "kumo_relational_engine-1.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
     { path = "kumo_relational_engine-1.0.0-cp312-cp312-macosx_11_0_arm64.whl" },
-    { path = "kumo_relational_engine-1.0.0-cp313-cp313-macosx_11_0_arm64.whl" },
     { path = "kumo_relational_engine-1.0.0-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl" },
     { path = "kumo_relational_engine-1.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
     { path = "kumo_relational_engine-1.0.0-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl" },
-    { path = "kumo_relational_engine-1.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
+    { path = "kumo_relational_engine-1.0.0-cp313-cp313-macosx_11_0_arm64.whl" },
 ]
 
 [[package]]

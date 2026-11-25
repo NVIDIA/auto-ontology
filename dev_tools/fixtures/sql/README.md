@@ -48,7 +48,7 @@ it has the shapes the code special-cases:
 Chinook exists to make the set **multi-database and multi-dialect**. Several
 behaviours are untestable with only one database: cross-database rejection in
 `find_join_path` (`auto_ontology/dal/attributes.py:404`), `delete_by_database` scoping,
-per-database pgvector collection resets, and zones spanning databases. It also
+per-database vector-store resets, and zones spanning databases. It also
 drives `auto_ontology/connectors/sqlite.py` and a second sqlglot dialect through the
 parsers, and carries a self-referencing FK (`Employee.ReportsTo`) that Pagila
 has nowhere.
