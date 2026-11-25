@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 import sqlglot
 from sqlglot import exp
@@ -573,36 +573,40 @@ def _tables_in_view(sql: str | None) -> set[tuple[str | None, str | None]]:
     }
 
 
-def _join_lines(
-    ctx: ToolContext, new_tables: list[dict]
-) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
-    """Join routes from each new table to every table already in view.
+class _JoinRoute(NamedTuple):
+    pair: frozenset[str]
+    line: str
+    hops: list[dict]
 
-    Each route comes with every table on it, bridges included.
-    """
-    lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
-    lookups = 0
+
+def _join_lines(
+    ctx: ToolContext, new_tables: list[dict], table_ids: list[str]
+) -> list[_JoinRoute]:
+    """Find routes involving a result table and another visible or new table."""
+    lines: list[_JoinRoute] = []
+    considered: set[frozenset[str]] = set()
     others = list(ctx.seen_tables.values()) + new_tables
-    for table in new_tables:
+    # A later search can retry a route clipped on the call that introduced its
+    # endpoints. It need only find one of those endpoints again.
+    revisit = [ctx.seen_tables[tid] for tid in table_ids if tid in ctx.seen_tables]
+    for table in new_tables + revisit:
         for other in others:
             pair = frozenset((str(table["id"]), str(other["id"])))
-            if len(pair) < 2 or pair in ctx.joined_pairs:
+            if len(pair) < 2 or pair in ctx.joined_pairs or pair in considered:
                 continue
-            if lookups >= _JOIN_PAIRS_PER_CALL:
+            if len(considered) >= _JOIN_PAIRS_PER_CALL:
                 return lines
-            lookups += 1
-            ctx.joined_pairs.add(pair)
+            considered.add(pair)
             anchor = _anchor_column_id(ctx, table)
             dest = _anchor_column_id(ctx, other)
-            if not anchor or not dest:
+            hops = find_join_path(anchor, dest) if anchor and dest else []
+            if not hops:
+                ctx.joined_pairs.add(pair)
                 continue
-            hops = find_join_path(anchor, dest)
-            if hops:
-                ctx.join_paths.append({"path": hops})
-                line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
-                    _hop_text(h) for h in hops
-                )
-                lines.append((line, _hop_tables(hops)))
+            line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
+                _hop_text(h) for h in hops
+            )
+            lines.append(_JoinRoute(pair, line, hops))
     return lines
 
 
@@ -757,7 +761,8 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             (certified if hit.get("certified") else definitions).append(entry)
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = list(certified)
     named += [(new_blocks[str(t["id"])], own(t)) for t in new_tables]
-    named += _join_lines(ctx, new_tables)
+    join_routes = _join_lines(ctx, new_tables, table_ids)
+    named += [(route.line, _hop_tables(route.hops)) for route in join_routes]
     if config.siblings_enabled():
         named += [
             (line, set().union(*(own(t) for t in tables)))
@@ -805,6 +810,10 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             if kept.get(new_blocks[str(t["id"])]) == new_blocks[str(t["id"])]
         }
     )
+    for route in join_routes:
+        if route.line in kept:
+            ctx.joined_pairs.add(route.pair)
+            ctx.join_paths.append({"path": route.hops})
     for block, hit in analysis_by_block.items():
         if kept.get(block) == block:
             ctx.shown_analyses[str(hit["id"])] = {

@@ -965,6 +965,47 @@ def test_a_certified_definition_comes_before_the_tables(
     assert text.index("ATTRIBUTE Revenue") < text.index("TABLE sales.orders")
 
 
+def test_a_clipped_join_route_can_be_retrieved_after_both_tables_were_shown(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    certified = {
+        **REVENUE,
+        "certified": True,
+        "relevant_tables": [{"id": "t-orders"}, {"id": "t-customers"}],
+    }
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda r, q, *a, **k: (
+            [certified if q == "revenue and customers" else CUSTOMER_TERM]
+            if r is SEMANTIC_STORE
+            else []
+        ),
+    )
+    ctx = _ctx()
+    kept = [
+        tool._definition_block(certified),
+        tool._table_block(ORDERS, set(), False),
+        tool._table_block(CUSTOMERS, set(), False),
+    ]
+    limit = sum(len(block or "") + 2 for block in kept) + len(tool._missed_line([], 1))
+    monkeypatch.setattr(tool.config, "max_observation_chars", lambda: limit)
+    first = tool.retrieve(ctx, "revenue and customers")
+
+    assert "[certified]" in first
+    assert set(ctx.seen_tables) == {"t-orders", "t-customers"}
+    assert not any(line.startswith("JOIN ") for line in first.splitlines())
+    assert not ctx.join_paths
+    assert len(calls["join"]) == 1
+
+    second = tool.retrieve(ctx, "customers")
+
+    assert any(line.startswith("JOIN ") for line in second.splitlines())
+    assert len(ctx.join_paths) == 1
+    assert not tool.retrieve(ctx, "customers").startswith("JOIN ")
+    assert len(calls["join"]) == 2
+
+
 def test_an_uncertified_definition_still_follows_the_tables(calls: dict) -> None:
     text = tool.retrieve(_ctx(), "how is revenue calculated")
 
