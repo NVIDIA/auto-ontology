@@ -9,11 +9,26 @@ import { Fragment } from 'react';
 import { HeaderIcon } from '@/common/HeaderIcon';
 import { Text } from '@/common/Text';
 
+/** Icons from the design system's icon library (AO-IL System), by name. */
+export type CrumbIconName =
+	| 'chat'
+	| 'discovery'
+	| 'glossary'
+	| 'analysis'
+	| 'analytics'
+	| 'exploration'
+	| 'data'
+	| 'settings'
+	| 'database'
+	| 'schema'
+	| 'table'
+	| 'column';
+
 export type BreadcrumbItem = {
 	label: string;
 	href?: string;
-	/** Shows the database icon ahead of the label, as the design does for connectors. */
-	database?: boolean;
+	/** Icon shown ahead of the label. */
+	icon?: CrumbIconName;
 };
 
 type BreadcrumbsProps = {
@@ -23,6 +38,36 @@ type BreadcrumbsProps = {
 const CRUMB_MAX_WIDTH = 'max-w-64';
 
 const CRUMB_BASE = `flex min-w-0 ${CRUMB_MAX_WIDTH} items-center gap-1 rounded py-1 pl-1 pr-2 text-sm leading-5`;
+
+// The icons are the design library's own files, painted through a mask in the
+// text color, so an icon takes the crumb's role colors (primary, secondary,
+// hover green) like its label does, from one file. Each class is spelled out in
+// full so Tailwind finds it. The library draws each icon at its own size inside
+// a 24px slot, so the box has the file's size and the slot centers it.
+const MASK_BASE = 'block shrink-0 bg-current [mask-position:center] [mask-repeat:no-repeat]';
+const ICON_CLASS: Record<CrumbIconName, string> = {
+	chat: 'size-6 [mask-image:url(/icons/comment.svg)]',
+	// The library draws Discovery in separate pieces, so this is the design's
+	// side menu version of it, on its 36px tile.
+	discovery: 'size-[30px] [mask-size:contain] [mask-image:url(/nav/discovery-default.svg)]',
+	glossary: 'size-6 [mask-image:url(/icons/glossary.svg)]',
+	analysis: 'size-6 [mask-image:url(/icons/analysis.svg)]',
+	analytics: 'size-4 [mask-image:url(/icons/analytics.svg)]',
+	exploration: 'size-[18px] [mask-image:url(/icons/exploration.svg)]',
+	data: 'size-6 [mask-image:url(/icons/data.svg)]',
+	settings: 'size-[18px] [mask-image:url(/icons/settings.svg)]',
+	database: 'h-[18px] w-[14px] [mask-image:url(/icons/database.svg)]',
+	schema: 'size-6 [mask-image:url(/icons/schema.svg)]',
+	table: 'size-6 [mask-image:url(/icons/table.svg)]',
+	column: 'size-6 [mask-image:url(/icons/column.svg)]',
+};
+
+const CrumbIcon = ({ icon }: { icon: CrumbIconName | undefined }) =>
+	icon == null ? null : (
+		<span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
+			<span className={`${MASK_BASE} ${ICON_CLASS[icon]}`} />
+		</span>
+	);
 
 // Three roles, as the design names them:
 // - primary: a crumb you can click, so it reads as the stronger text;
@@ -49,9 +94,7 @@ export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 								aria-current={isLast ? 'page' : undefined}
 								className={`${CRUMB_BASE} ${isLast ? CRUMB_SECONDARY : CRUMB_PRIMARY}`}
 							>
-								{item.database ? (
-									<HeaderIcon name={isLast ? 'database-current' : 'database'} />
-								) : null}
+								<CrumbIcon icon={item.icon} />
 								{label}
 							</span>
 						) : (
@@ -59,16 +102,7 @@ export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 								href={item.href}
 								className={`group ${CRUMB_BASE} ${CRUMB_PRIMARY} ${CRUMB_HOVER}`}
 							>
-								{item.database ? (
-									<>
-										<span className="group-hover:hidden">
-											<HeaderIcon name="database" />
-										</span>
-										<span className="hidden group-hover:block">
-											<HeaderIcon name="database-selected" />
-										</span>
-									</>
-								) : null}
+								<CrumbIcon icon={item.icon} />
 								{label}
 							</Link>
 						)}

@@ -14,7 +14,7 @@ import {
 	type ReactNode,
 } from 'react';
 import { usePathname } from 'next/navigation';
-import type { BreadcrumbItem } from '@/common/Breadcrumbs';
+import type { BreadcrumbItem, CrumbIconName } from '@/common/Breadcrumbs';
 
 const SECTION_LABELS: Record<string, string> = {
 	'/chat': 'Chat',
@@ -25,6 +25,18 @@ const SECTION_LABELS: Record<string, string> = {
 	'/data': 'Data',
 	'/analytics': 'Analytics',
 	'/settings': 'Settings',
+};
+
+// Each page's icon, from the design library, on its crumb.
+const SECTION_ICONS: Record<string, CrumbIconName> = {
+	'/chat': 'chat',
+	'/discovery': 'discovery',
+	'/terms': 'glossary',
+	'/analysis': 'analysis',
+	'/exploration': 'exploration',
+	'/data': 'data',
+	'/analytics': 'analytics',
+	'/settings': 'settings',
 };
 
 const SETTINGS_SECTION_LABELS: Record<string, string> = {
@@ -48,7 +60,7 @@ const sectionForPath = (path: string): BreadcrumbItem | null => {
 		(prefix) => path === prefix || path.startsWith(`${prefix}/`),
 	);
 	const label = href == null ? undefined : SECTION_LABELS[href];
-	return href != null && label != null ? { label, href } : null;
+	return href != null && label != null ? { label, href, icon: SECTION_ICONS[href] } : null;
 };
 
 const crumbsForPath = (path: string): BreadcrumbItem[] => {

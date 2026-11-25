@@ -8,13 +8,7 @@
  * matches the scheme, so the icon follows `prefers-color-scheme` like the
  * rest of the app without the files being edited.
  */
-export type HeaderIconName =
-	| 'arrows'
-	| 'search'
-	| 'search-hover'
-	| 'database'
-	| 'database-current'
-	| 'database-selected';
+export type HeaderIconName = 'arrows' | 'search' | 'search-hover';
 
 // Plain <img>: static, fixed-size icons that need no optimization.
 /* eslint-disable @next/next/no-img-element */
