@@ -59,11 +59,8 @@ def _normalise(sql: str | None, dialect: str | None) -> str | None:
     """*sql* as one canonical statement, or ``None`` if it is not exactly one."""
     if not sql or not sql.strip():
         return None
-    try:
-        statements = sqlglot.parse(sql, read=dialect)
-    except sqlglot.errors.SqlglotError:
-        return None
-    if len(statements) != 1 or statements[0] is None:
+    statements = _parse(sql, dialect)
+    if len(statements) != 1:
         return None
     return statements[0].sql(dialect=dialect, normalize=True)
 

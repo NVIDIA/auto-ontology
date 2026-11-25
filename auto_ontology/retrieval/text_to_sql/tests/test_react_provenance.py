@@ -258,3 +258,11 @@ def test_cte_names_follow_the_dialects_quoting_and_case_rules() -> None:
 
     assert _stage(custom_analyses_used(_ctx(saved), quoted, "postgres")) == "retrieved"
     assert _stage(custom_analyses_used(_ctx(saved), folded, "postgres")) == "executed"
+
+
+def test_the_saved_sql_and_the_submission_are_normalised_the_same_way() -> None:
+    # DuckDB folds quoted identifiers to lower case, which ``normalize=True``
+    # alone does not, so both sides must take the same route.
+    saved = 'SELECT SUM("Quantity") FROM "Order_Lines"'
+
+    assert _stage(custom_analyses_used(_ctx(saved), saved, "duckdb")) == "executed"
