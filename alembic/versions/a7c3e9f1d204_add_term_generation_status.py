@@ -40,12 +40,16 @@ def upgrade() -> None:
         ),
     )
     op.add_column("term", sa.Column("generation_note", sa.Text(), nullable=True))
-    # op.f: the name already follows METADATA's naming convention, which
-    # alembic/env.py applies, so it must not be prefixed a second time.
+    # Existing rows acquire 'generated' from the new column's constant
+    # default. Enforce the constraint for new writes without validating the
+    # whole table while this migration holds ACCESS EXCLUSIVE. An operator
+    # can validate later in a separate transaction.
+    # op.f marks the name as already following the metadata convention.
     op.create_check_constraint(
         op.f("ck_term_generation_status_value"),
         "term",
         "generation_status IN ('generated', 'fallback')",
+        postgresql_not_valid=True,
     )
 
 
