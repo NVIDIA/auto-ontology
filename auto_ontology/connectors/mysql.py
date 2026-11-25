@@ -131,7 +131,7 @@ class MySQLDatabase(SQLDatabase):
         """
         connection = mysql.connector.connect(**self._connect_kwargs)
         try:
-            cursor = connection.cursor(dictionary=True)
+            cursor = connection.cursor()
             started = time.monotonic()
             try:
                 if timeout_s is not None:

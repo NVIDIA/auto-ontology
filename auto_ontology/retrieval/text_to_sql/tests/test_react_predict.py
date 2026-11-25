@@ -58,7 +58,6 @@ def kumo_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 def _ctx(**kwargs: Any) -> ToolContext:
     return ToolContext(
-        retriever=None,
         connectors=[SimpleNamespace(database_name="shop", dialect="sqlite")],
         question="Which customers will churn next month?",
         **kwargs,
