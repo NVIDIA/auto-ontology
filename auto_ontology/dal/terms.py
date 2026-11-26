@@ -561,6 +561,34 @@ def fetch_fallback_term_names(table_ids: list[str]) -> list[str]:
     return sorted(row["name"] for row in rows)
 
 
+def fetch_fallback_term_names_for_database(database_name: str) -> list[str]:
+    """Names of every placeholder Term currently stored for one database."""
+    rows = store().query_read(
+        select(s.term.c.name)
+        .select_from(
+            s.term.join(s.table__term, s.table__term.c.term_id == s.term.c.id)
+            .join(
+                s.catalog_table,
+                s.catalog_table.c.id == s.table__term.c.table_id,
+            )
+            .join(
+                s.catalog_schema,
+                s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(
+            s.catalog_database.c.name == database_name,
+            s.term.c.generation_status == "fallback",
+        )
+        .distinct()
+    )
+    return sorted(row["name"] for row in rows)
+
+
 def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
     """``{term_name: [synonym, ...]}`` for the terms behind these attributes.
 

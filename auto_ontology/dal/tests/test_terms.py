@@ -599,6 +599,20 @@ def test_placeholder_names_are_read_from_the_stored_status(world: World) -> None
     assert t.fetch_fallback_term_names([]) == []
 
 
+def test_placeholder_names_are_read_for_the_whole_database(world: World) -> None:
+    world.table("orders")
+    world.table("customers")
+    t.upsert_table_term(
+        f"{world.prefix}-Orders", "x", world.tables["orders"], fallback_reason="y"
+    )
+    t.upsert_table_term(f"{world.prefix}-Customer", "real", world.tables["customers"])
+
+    assert t.fetch_fallback_term_names_for_database(world.prefix) == [
+        f"{world.prefix}-Orders"
+    ]
+    assert t.fetch_fallback_term_names_for_database("no-such-database") == []
+
+
 def test_generation_status_accepts_only_known_values(world: World) -> None:
     world.table("orders")
     term_id, _ = t.upsert_table_term(
