@@ -18,7 +18,7 @@ import { SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { Text } from '@/common/Text';
 import {
 	ColumnAttributesModal,
@@ -2142,7 +2142,7 @@ export const ExplorationView = () => {
 			<div className="pointer-events-none absolute left-4 right-4 top-4 z-20 flex items-start justify-between gap-4">
 				<div className="pointer-events-auto flex items-start gap-2">
 					<div className="relative w-72">
-						<SearchInput
+						<InputsSearch
 							value={search}
 							onChange={setSearch}
 							placeholder={
@@ -2155,7 +2155,7 @@ export const ExplorationView = () => {
 									? 'Search terms in exploration'
 									: 'Search data objects in exploration'
 							}
-							className="h-10 bg-white shadow-md dark:bg-zinc-900"
+							className="shadow-menu"
 						/>
 						{filteredNodes.length > 0 && (
 							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">

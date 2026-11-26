@@ -9224,6 +9224,18 @@
         "additionalProperties": true,
         "description": "One catalog database. ``schemas`` is always empty — the tree is lazy.",
         "properties": {
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
           "description": {
             "anyOf": [
               {
@@ -9234,6 +9246,17 @@
               }
             ],
             "title": "Description"
+          },
+          "dialect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dialect"
           },
           "id": {
             "title": "Id",
@@ -9271,6 +9294,18 @@
               }
             ],
             "title": "Owner Id"
+          },
+          "pulled": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pulled"
           },
           "schemas": {
             "items": {

@@ -14,7 +14,7 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { PopoverMenu } from '@/common/PopoverMenu';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
@@ -388,7 +388,7 @@ export const AnalysisView = () => {
 				error={items.length > 0 ? error : null}
 			>
 				{hasLoaded && (
-					<SearchInput
+					<InputsSearch
 						value={searchQuery}
 						onChange={setSearchQuery}
 						placeholder={`Search ${MODE_LABEL[mode]} Analyses…`}

@@ -14,6 +14,7 @@ import {
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
 import { searchObjectTypeFromHit } from '@/common/globalSearchMeta';
+import { HeaderIcon } from '@/common/HeaderIcon';
 import { Icon, IconName } from '@/common/icons';
 import { GlobalSearchResults, GlobalSearchResultsSkeleton } from '@/common/GlobalSearchResults';
 import {
@@ -23,7 +24,7 @@ import {
 	totalGlobalSearchCount,
 } from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import {
 	GLOBAL_SEARCH_ALL_TAB,
 	GLOBAL_SEARCH_LIST_LIMIT,
@@ -314,13 +315,13 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		>
 			<div className="flex shrink-0 items-center gap-2 p-2">
 				<div className="min-w-0 flex-1">
-					<SearchInput
+					<InputsSearch
 						value={query}
 						onChange={handleQueryChange}
 						placeholder="Search…"
 						aria-label="Search Auto Ontology"
 						autoFocus
-						className="h-9 w-full"
+						className="w-full"
 					/>
 				</div>
 			</div>
@@ -365,27 +366,36 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 export const GlobalSearch = () => {
 	const [open, setOpen] = useState(false);
 
+	// ⌘/ (Ctrl+/ elsewhere) opens the search from anywhere, as the label says.
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === '/' && (e.metaKey || e.ctrlKey)) {
+				e.preventDefault();
+				setOpen(true);
+			}
+		};
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, []);
+
 	return (
 		<>
 			<button
 				type="button"
 				onClick={() => setOpen(true)}
 				aria-label="Search Auto Ontology"
-				className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-3 text-sm text-blue-700 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/50"
+				aria-keyshortcuts="Meta+/ Control+/"
+				className="group inline-flex cursor-pointer items-center rounded-[28px] bg-[#f1f8ff] py-1.5 pl-3 pr-4 text-sm leading-3 text-[#3172c6] hover:text-[#0a95ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 dark:bg-[rgba(155,189,190,0.12)] dark:text-[#589bf2] dark:hover:text-[#80bfff]"
 			>
-				<svg
-					className="h-4 w-4 shrink-0"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					aria-hidden
-				>
-					<path
-						fillRule="evenodd"
-						d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z"
-						clipRule="evenodd"
-					/>
-				</svg>
-				Search Auto Ontology
+				<span className="flex items-center gap-1">
+					<span className="group-hover:hidden">
+						<HeaderIcon name="search" />
+					</span>
+					<span className="hidden group-hover:block">
+						<HeaderIcon name="search-hover" />
+					</span>
+					Search Auto Ontology (⌘/)
+				</span>
 			</button>
 			<GlobalSearchModal open={open} onClose={() => setOpen(false)} />
 		</>

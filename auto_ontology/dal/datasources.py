@@ -100,6 +100,9 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
             s.catalog_database.c.id,
             s.catalog_database.c.name,
             s.catalog_database.c.owner_id,
+            s.catalog_database.c.dialect,
+            s.catalog_database.c.created,
+            s.catalog_database.c.pulled,
             func.count(s.catalog_schema.c.id).label("schema_count"),
         )
         .select_from(
@@ -112,6 +115,9 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
             s.catalog_database.c.id,
             s.catalog_database.c.name,
             s.catalog_database.c.owner_id,
+            s.catalog_database.c.dialect,
+            s.catalog_database.c.created,
+            s.catalog_database.c.pulled,
         )
         .order_by(s.catalog_database.c.name)
     )
@@ -131,6 +137,9 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
             # Kept in the shape because callers read the key.
             "description": None,
             "owner_id": r["owner_id"],
+            "dialect": r["dialect"],
+            "created": r["created"],
+            "pulled": r["pulled"],
             "num_of_schemas": int(r["schema_count"]),
             "schemas": [],
         }
