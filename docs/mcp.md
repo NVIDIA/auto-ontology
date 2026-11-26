@@ -113,7 +113,7 @@ already-built image may not be. Checking first is worth it, because otherwise th
 failure surfaces as a client that cannot log in:
 
 ```sh
-curl -s -o /dev/null -w '%{http_code}\n' $AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server
+curl -s -o /dev/null -w '%{http_code}\n' $AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server/api/auth
 ```
 
 A `200` is what you want. Anything else means running the frontend from your
@@ -204,8 +204,16 @@ hand.
 ## Troubleshooting
 
 **A client cannot discover how to sign in** — check that
-`$AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server` returns JSON. A redirect to
-the login page instead means the deployment predates that route.
+`$AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server/api/auth` returns JSON whose
+`issuer` is `$AUTO_ONTOLOGY_API_URL/api/auth`. That is the authorization server this
+server advertises, and the address a client looks for its metadata at first. A 404
+or a redirect to the login page means the deployment predates that route.
+
+**"Authorization server issuer mismatch"** — the client compared the authorization
+server this server advertises with the `issuer` in the metadata it discovered, and
+they differed. This server advertises `$AUTO_ONTOLOGY_API_URL/api/auth`, Better Auth's
+issuer. A mismatch means the `issuer` is built from a different origin: check that
+`AUTO_ONTOLOGY_API_URL` and the web app's `APP_URL` are the same URL.
 
 **"Protected resource ... does not match expected ..."** — the server advertises
 the address it was bound to, and the client is reaching it under a different

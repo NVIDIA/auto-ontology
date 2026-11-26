@@ -40,10 +40,15 @@ from auto_ontology_mcp.config import Settings
 
 logger = get_logger(__name__)
 
+# Where the web app mounts Better Auth. Better Auth's issuer is the app's URL
+# plus this path, and it sends that value as `iss` on the authorization
+# response, so it is also the authorization server this MCP server advertises.
+AUTH_BASE_PATH = "/api/auth"
+
 # Better Auth 1.7's OAuth Provider validates a bearer at UserInfo without
 # requiring this resource server to hold client credentials. Auto Ontology adds the
 # issuing client and granted scope as private claims for FastMCP's AccessToken.
-USERINFO_PATH = "/api/auth/oauth2/userinfo"
+USERINFO_PATH = f"{AUTH_BASE_PATH}/oauth2/userinfo"
 CLIENT_ID_CLAIM = "urn:auto-ontology:oauth:client_id"
 SCOPE_CLAIM = "urn:auto-ontology:oauth:scope"
 
@@ -110,19 +115,27 @@ class AutoOntologyTokenVerifier(TokenVerifier):
         )
 
 
+def authorization_server_url(settings: Settings) -> str:
+    """Better Auth's issuer: the Auto Ontology URL plus :data:`AUTH_BASE_PATH`."""
+    return f"{settings.api_url}{AUTH_BASE_PATH}"
+
+
 def build_auto_ontology_auth(settings: Settings) -> RemoteAuthProvider:
     """Advertise Auto Ontology as the authorization server for this MCP server.
 
-    Publishing Auto Ontology's URL here is the whole handshake: a client that gets a 401
-    reads this server's protected-resource metadata, finds Auto Ontology, discovers Auto Ontology's
-    endpoints, registers itself, and sends the user to Auto Ontology's ordinary login
-    page — which already knows how to do SSO.
+    Publishing Auto Ontology's issuer here is the whole handshake: a client that gets a
+    401 reads this server's protected-resource metadata, finds Auto Ontology, discovers
+    Auto Ontology's endpoints, registers itself, and sends the user to Auto Ontology's
+    ordinary login page — which already knows how to do SSO.
     """
     return RemoteAuthProvider(
         token_verifier=AutoOntologyTokenVerifier(
             settings.api_url, timeout_s=settings.timeout_s
         ),
-        authorization_servers=[AnyHttpUrl(settings.api_url)],
+        # The issuer, not the app's origin: a client compares this value to the
+        # `issuer` in the metadata it then discovers, and Codex refuses to log in
+        # when they differ (#560). api_url stays the base for business API calls.
+        authorization_servers=[AnyHttpUrl(authorization_server_url(settings))],
         base_url=settings.public_url,
         resource_name="Auto Ontology",
     )
