@@ -35,7 +35,7 @@ const HandoffStatus = () => {
 	}, [error, target]);
 
 	if (error) {
-		return <p className="text-center text-sm text-red-500">{error}</p>;
+		return <p className="text-center text-sm text-error">{error}</p>;
 	}
 
 	return (
@@ -50,9 +50,7 @@ const HandoffPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-heading dark:text-zinc-100">
-					Auto Ontology
-				</span>
+				<span className="text-xl font-semibold text-heading">Auto Ontology</span>
 			</div>
 			<Suspense fallback={null}>
 				<HandoffStatus />

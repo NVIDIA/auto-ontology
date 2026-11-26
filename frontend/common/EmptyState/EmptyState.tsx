@@ -41,26 +41,26 @@ const variantStyles: Record<EmptyStateVariant, VariantStyle> = {
 		container:
 			'min-h-[40dvh] rounded-2xl border border-dashed border-zinc-300/90 bg-white/60 p-12 dark:border-zinc-600 dark:bg-zinc-950/40',
 		icon: 'h-8 w-8',
-		title: 'text-sm font-medium text-body dark:text-zinc-300',
-		description: 'text-xs text-secondary dark:text-zinc-400',
+		title: 'text-sm font-semibold text-body',
+		description: 'text-xs text-secondary',
 	},
 	[EmptyStateVariant.Borderless]: {
 		container: 'h-full flex-1 p-8',
 		icon: 'h-8 w-8',
-		title: 'text-sm font-medium text-body dark:text-zinc-300',
-		description: 'text-xs text-secondary dark:text-zinc-400',
+		title: 'text-sm font-semibold text-body',
+		description: 'text-xs text-secondary',
 	},
 	[EmptyStateVariant.Inline]: {
 		container: 'px-6 py-8',
 		icon: 'h-6 w-6',
-		title: 'text-xs font-medium text-secondary dark:text-zinc-400',
-		description: 'text-xs text-secondary dark:text-zinc-400',
+		title: 'text-xs font-semibold text-secondary',
+		description: 'text-xs text-secondary',
 	},
 	[EmptyStateVariant.Welcome]: {
 		container: 'h-full flex-1 px-4 py-10',
 		icon: 'h-8 w-8',
-		title: 'text-lg font-semibold text-heading dark:text-zinc-200',
-		description: 'text-sm text-secondary dark:text-zinc-400',
+		title: 'text-xl font-semibold text-heading',
+		description: 'text-sm text-secondary',
 	},
 };
 
@@ -93,16 +93,9 @@ export const EmptyState = ({
 				.join(' ')}
 		>
 			{illustration ??
-				(icon && (
-					<Icon
-						name={icon}
-						className={`${styles.icon} text-disabled dark:text-zinc-600`}
-					/>
-				))}
+				(icon && <Icon name={icon} className={`${styles.icon} text-disabled `} />)}
 			<p className={styles.title}>{title}</p>
-			{description && (
-				<p className={`max-w-sm leading-relaxed ${styles.description}`}>{description}</p>
-			)}
+			{description && <p className={`max-w-sm ${styles.description}`}>{description}</p>}
 			{action && (
 				<Button
 					theme={action.theme ?? ButtonTheme.Primary}

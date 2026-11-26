@@ -60,13 +60,13 @@ export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 									isExpanded ? 'w-full px-2' : 'w-9 justify-center'
 								} ${
 									isActive
-										? 'bg-[#76b900]/15 text-[#76b900]'
-										: 'text-body hover:bg-zinc-100 hover:text-heading dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
+										? 'bg-[#76b900]/15 text-action'
+										: 'text-body hover:bg-zinc-100 hover:text-heading dark:hover:bg-zinc-800'
 								}`}
 							>
 								<Icon name={item.icon} className="h-5 w-5 shrink-0" />
 								{isExpanded && (
-									<span className="truncate text-sm font-medium whitespace-nowrap">
+									<span className="truncate text-sm font-semibold whitespace-nowrap">
 										{item.label}
 									</span>
 								)}

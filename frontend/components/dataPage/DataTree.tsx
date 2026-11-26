@@ -146,8 +146,8 @@ export type DataTreeProps = {
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 cursor-pointer items-center gap-1 rounded-lg text-left text-sm no-underline transition-colors ${
 		selected
-			? 'bg-[#76b900]/15 font-medium text-heading shadow-sm ring-1 ring-[#76b900]/30 dark:text-zinc-100'
-			: 'text-heading hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70'
+			? 'bg-[#76b900]/15 font-semibold text-heading shadow-sm ring-1 ring-[#76b900]/30'
+			: 'text-heading hover:bg-zinc-100/90 dark:hover:bg-zinc-800/70'
 	}`;
 }
 
@@ -189,7 +189,7 @@ function Row({
 
 	const nodeIconEl = icon ? (
 		<span className="inline-flex shrink-0" title={title} aria-hidden>
-			<Icon name={icon} className="h-4 w-4 text-secondary dark:text-zinc-400" />
+			<Icon name={icon} className="h-4 w-4 text-secondary" />
 		</span>
 	) : null;
 
@@ -197,7 +197,7 @@ function Row({
 		<span
 			role="button"
 			tabIndex={0}
-			className="inline-flex w-4 shrink-0 cursor-pointer items-center justify-center rounded text-[10px] text-secondary hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80"
+			className="inline-flex w-4 shrink-0 cursor-pointer items-center justify-center rounded text-xs text-secondary hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80"
 			onClick={(e) => {
 				e.stopPropagation();
 				if (!hasChildren) return;

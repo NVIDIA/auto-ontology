@@ -65,7 +65,7 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 				>
 					−
 				</Button>
-				<span className="w-12 text-center text-xs text-body dark:text-zinc-300">
+				<span className="w-12 text-center text-xs text-body">
 					{Math.round(zoom * 100)}%
 				</span>
 				<Button

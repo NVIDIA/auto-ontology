@@ -32,7 +32,7 @@ import { RuleAuthor } from './RuleAuthor';
 const SEARCH_DEBOUNCE_MS = 1000;
 
 /** The radio the export form draws, which these are the only others of. */
-const RADIO_CLASSNAME = 'mt-0.5 h-4 w-4 border-zinc-300 text-[#76b900] focus:ring-[#76b900]/30';
+const RADIO_CLASSNAME = 'mt-0.5 h-4 w-4 border-zinc-300 text-action focus:ring-[#76b900]/30';
 
 // What a delete does about the labels the rule applied. Two answers, both
 // defensible, which is why it is asked rather than decided here: the labels are
@@ -211,9 +211,7 @@ export default function RulesSettingsPage() {
 				error={rules.length > 0 ? error : null}
 			>
 				<div className="w-full space-y-5">
-					<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
-						Rules
-					</h1>
+					<h1 className="text-base font-semibold text-heading">Rules</h1>
 
 					{/* A box for narrowing a list, so there is none until there is a
 					    list: the empty state is a page about making the first rule,
@@ -232,7 +230,7 @@ export default function RulesSettingsPage() {
 					) : null}
 
 					{!loading && error != null && rules.length === 0 ? (
-						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
 							{error}
 						</div>
 					) : null}
@@ -278,9 +276,9 @@ export default function RulesSettingsPage() {
 									<div className="flex items-center gap-2 px-4 py-3">
 										<Icon
 											name={IconName.Lightning}
-											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+											className="h-4 w-4 shrink-0 text-body"
 										/>
-										<span className="min-w-0 flex-1 truncate text-sm font-semibold text-heading dark:text-zinc-100">
+										<span className="min-w-0 flex-1 truncate text-sm font-semibold text-heading">
 											{rule.name}
 										</span>
 										<div className="relative w-[26px] shrink-0">
@@ -343,7 +341,7 @@ export default function RulesSettingsPage() {
 											/>
 										</div>
 									</div>
-									<div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200/90 px-4 py-2.5 text-xs text-secondary dark:border-zinc-700/90 dark:text-zinc-400">
+									<div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200/90 px-4 py-2.5 text-xs text-secondary dark:border-zinc-700/90">
 										<Icon
 											name={IconName.Users}
 											className="h-3.5 w-3.5 shrink-0"
@@ -352,7 +350,7 @@ export default function RulesSettingsPage() {
 										<RuleAuthor author={rule.created_by_user} />
 										<span className="ml-auto flex items-center gap-3">
 											<span>Last Modified</span>
-											<span className="text-body dark:text-zinc-300">
+											<span className="text-body">
 												{formatDate(rule.modified)}
 											</span>
 										</span>
@@ -381,12 +379,9 @@ export default function RulesSettingsPage() {
 				<div>
 					<label
 						htmlFor="rule-name"
-						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading dark:text-zinc-100"
+						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading"
 					>
-						<Icon
-							name={IconName.Lightning}
-							className="h-4 w-4 text-secondary dark:text-zinc-400"
-						/>
+						<Icon name={IconName.Lightning} className="h-4 w-4 text-secondary" />
 						Rule Name
 					</label>
 					<input
@@ -395,18 +390,18 @@ export default function RulesSettingsPage() {
 						value={name}
 						onChange={(event) => setName(event.target.value)}
 						placeholder="Type Rule Name"
-						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900"
 					/>
 					{/* The tags and the search are on the information card, and are not
 					    editable — worth saying inside the dialog that changes the one
 					    thing about a rule that is. */}
-					<p className="mt-1.5 text-xs text-secondary dark:text-zinc-400">
+					<p className="mt-1.5 text-xs text-secondary">
 						Renaming does not change what the rule matches or the tags it applies.
 					</p>
 				</div>
 
 				{renameError ? (
-					<div className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+					<div className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-error dark:border-red-900/50 dark:bg-red-950/40">
 						{renameError}
 					</div>
 				) : null}
@@ -432,7 +427,7 @@ export default function RulesSettingsPage() {
 						<>
 							<p>{`Are you sure you want to delete "${confirmDelete.name}"? This action cannot be undone.`}</p>
 							<fieldset className="mt-4">
-								<legend className="text-xs font-medium text-heading dark:text-zinc-200">
+								<legend className="text-xs font-semibold text-heading">
 									The tags this rule applied
 								</legend>
 								<div className="mt-2 space-y-2">
@@ -450,10 +445,10 @@ export default function RulesSettingsPage() {
 												className={RADIO_CLASSNAME}
 											/>
 											<span>
-												<span className="block text-sm font-medium text-heading dark:text-zinc-100">
+												<span className="block text-sm font-semibold text-heading">
 													{option.label}
 												</span>
-												<span className="block text-xs text-secondary dark:text-zinc-400">
+												<span className="block text-xs text-secondary">
 													{option.description}
 												</span>
 											</span>

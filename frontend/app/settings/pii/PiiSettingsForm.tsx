@@ -44,9 +44,7 @@ export const PiiSettingsForm = ({ initialEnabled }: { initialEnabled: boolean })
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-xl">
-				<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
-					PII Settings
-				</h1>
+				<h1 className="mb-1 text-xl font-semibold text-heading">PII Settings</h1>
 				<p className="mb-4 text-xs text-secondary">
 					When enabled, ingest classifies catalog columns and attaches the shared PII tag.
 					Turn it off to skip that step; existing tags are left in place.
@@ -54,9 +52,7 @@ export const PiiSettingsForm = ({ initialEnabled }: { initialEnabled: boolean })
 
 				<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 					<div className="flex flex-col pr-4">
-						<span className="text-sm font-medium text-heading dark:text-zinc-100">
-							PII Detection
-						</span>
+						<span className="text-sm font-semibold text-heading">PII Detection</span>
 						<span className="text-xs text-secondary">
 							{enabled
 								? 'On — ingest classifies columns and tags PII.'

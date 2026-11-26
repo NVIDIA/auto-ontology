@@ -31,19 +31,17 @@ export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 						{i > 0 && (
 							<Icon
 								name={IconName.ChevronRight}
-								className="h-3.5 w-3.5 shrink-0 text-secondary dark:text-zinc-600"
+								className="h-3.5 w-3.5 shrink-0 text-secondary dark:text-disabled"
 							/>
 						)}
 						{isLast || !item.href ? (
-							<span
-								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-heading dark:text-zinc-100`}
-							>
+							<span className={`min-w-0 ${CRUMB_MAX_WIDTH} text-heading `}>
 								<Text text={item.label} />
 							</span>
 						) : (
 							<Link
 								href={item.href}
-								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-body transition-colors hover:text-heading dark:text-zinc-400 dark:hover:text-zinc-100`}
+								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-body transition-colors hover:text-heading dark:text-secondary `}
 							>
 								<Text text={item.label} />
 							</Link>

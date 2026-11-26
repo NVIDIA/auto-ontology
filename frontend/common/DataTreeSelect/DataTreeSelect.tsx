@@ -13,7 +13,7 @@ import { getTableType } from '@/components/dataPage/get-table-type';
 import { Text } from '@/common/Text';
 
 const treeRowClassName =
-	'flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm text-heading hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70';
+	'flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm text-heading hover:bg-zinc-100/90 dark:hover:bg-zinc-800/70';
 
 export type DataTreeSelectProps = {
 	databases: Database[];
@@ -337,7 +337,7 @@ export const DataTreeSelect = ({
 				onClick={() => {
 					void onToggle();
 				}}
-				className="inline-flex w-4 shrink-0 cursor-pointer items-center justify-center rounded text-[10px] text-secondary hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80"
+				className="inline-flex w-4 shrink-0 cursor-pointer items-center justify-center rounded text-xs text-secondary hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80"
 				aria-label={isOpen ? 'Collapse' : 'Expand'}
 			>
 				{loadingIds[id] ? '…' : hasChildren ? (isOpen ? '▼' : '▶') : '·'}
@@ -357,10 +357,7 @@ export const DataTreeSelect = ({
 				}`}
 			/>
 			<span className="inline-flex shrink-0" title={catalogNodeInfo[node].title} aria-hidden>
-				<Icon
-					name={catalogNodeInfo[node].icon}
-					className="h-4 w-4 text-zinc-500 dark:text-zinc-400"
-				/>
+				<Icon name={catalogNodeInfo[node].icon} className="h-4 w-4 text-secondary" />
 			</span>
 			<Text text={label} />
 		</div>

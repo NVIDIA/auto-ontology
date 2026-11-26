@@ -61,9 +61,7 @@ export const ActiveTermCard = ({
 }: ActiveTermCardProps) => (
 	<section className="absolute right-4 top-20 bottom-28 z-20 flex w-[380px] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 		<header className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-			<p className="text-xs font-semibold text-body dark:text-zinc-300">
-				Showing info on this Semantic Object
-			</p>
+			<p className="text-xs font-semibold text-body">Showing info on this Semantic Object</p>
 			<Button
 				theme={ButtonTheme.IconNeutral}
 				size={Size.SMALL}
@@ -77,10 +75,7 @@ export const ActiveTermCard = ({
 		</header>
 		<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
 			<div className="flex items-start gap-2">
-				<Icon
-					name={IconName.Terms}
-					className="mt-0.5 h-5 w-5 shrink-0 text-body dark:text-zinc-300"
-				/>
+				<Icon name={IconName.Terms} className="mt-0.5 h-5 w-5 shrink-0 text-body" />
 				<div className="min-w-0 flex-1 space-y-1">
 					<Text as="h2" text={node.name} variant={TextVariant.Heading} />
 					{node.synonyms.length > 0 && (
@@ -106,7 +101,7 @@ export const ActiveTermCard = ({
 				<PropertyRow label="ID" value={node.id} monospace />
 			</div>
 			<div className="grid grid-cols-2 gap-2">
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					Related Terms: {node.relationshipCount}
 					<DetailLinkButton
 						count={node.relationshipCount}
@@ -114,7 +109,7 @@ export const ActiveTermCard = ({
 						label="View related Terms"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					Attribute Columns: {node.columnAttributesCount}
 					<DetailLinkButton
 						count={node.columnAttributesCount}
@@ -122,7 +117,7 @@ export const ActiveTermCard = ({
 						label="View Attribute Columns"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700">
 					SQL Attributes: {node.sqlAttributesCount}
 					<DetailLinkButton
 						count={node.sqlAttributesCount}

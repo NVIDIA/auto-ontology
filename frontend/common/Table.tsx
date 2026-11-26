@@ -21,7 +21,7 @@ const DEFAULT_CONTAINER =
 	'overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900';
 
 export const TABLE_THEAD_CLASSNAME =
-	'border-b border-zinc-200 bg-zinc-50 text-left text-xs font-semibold text-body dark:border-zinc-800 dark:bg-zinc-800/60 dark:text-zinc-400';
+	'border-b border-zinc-200 bg-zinc-50 text-left text-xs font-semibold text-body dark:border-zinc-800 dark:bg-zinc-800/60 dark:text-secondary';
 
 const DEFAULT_TBODY = 'divide-y divide-zinc-100 dark:divide-zinc-800';
 

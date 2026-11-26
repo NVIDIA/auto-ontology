@@ -61,9 +61,9 @@ const downloadBlob = (blob: Blob, filename: string) => {
 const createdCountEntries = (counts: ImportEntityCounts): [string, number][] =>
 	Object.entries(counts).filter(([, value]) => value > 0);
 
-const checkboxClassName = 'h-4 w-4 rounded border-zinc-300 text-[#76b900] focus:ring-[#76b900]/30';
+const checkboxClassName = 'h-4 w-4 rounded border-zinc-300 text-action focus:ring-[#76b900]/30';
 
-const radioClassName = 'mt-0.5 h-4 w-4 border-zinc-300 text-[#76b900] focus:ring-[#76b900]/30';
+const radioClassName = 'mt-0.5 h-4 w-4 border-zinc-300 text-action focus:ring-[#76b900]/30';
 
 const isYamlFile = (file: File): boolean => /\.ya?ml$/i.test(file.name);
 
@@ -208,23 +208,17 @@ export const ImportExportView = () => {
 
 	return (
 		<div className="mx-auto w-full max-w-2xl space-y-6">
-			<h1 className="text-lg font-semibold text-heading dark:text-zinc-100">
-				Import / Export
-			</h1>
+			<h1 className="text-xl font-semibold text-heading">Import / Export</h1>
 
 			<section className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-700">
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-					Export Model
-				</h2>
+				<h2 className="text-sm font-semibold text-heading">Export Model</h2>
 				<p className="mt-1 text-xs text-secondary">
 					Download the catalog and semantic layer for the selected databases as a YAML
 					file, or as a .zip when the Ossie ontology is included.
 				</p>
 
 				<fieldset className="mt-4">
-					<legend className="text-xs font-medium text-heading dark:text-zinc-200">
-						Format
-					</legend>
+					<legend className="text-xs font-semibold text-heading">Format</legend>
 					<div className="mt-2 grid gap-2 sm:grid-cols-2">
 						{FORMAT_OPTIONS.map(({ value, description }) => (
 							<label
@@ -240,7 +234,7 @@ export const ImportExportView = () => {
 									className={radioClassName}
 								/>
 								<span>
-									<span className="block text-sm font-medium text-heading dark:text-zinc-100">
+									<span className="block text-sm font-semibold text-heading">
 										{FORMAT_LABEL[value]}
 									</span>
 									<span className="block text-xs text-secondary">
@@ -255,7 +249,7 @@ export const ImportExportView = () => {
 				{exportFormat === ModelFormat.OSSIE ? (
 					<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 						<div className="flex flex-col">
-							<span className="text-sm font-medium text-heading dark:text-zinc-100">
+							<span className="text-sm font-semibold text-heading">
 								Include Ontology and Mapping
 							</span>
 							<span className="text-xs text-secondary">
@@ -276,7 +270,7 @@ export const ImportExportView = () => {
 						<SkeletonRows rows={3} />
 					</div>
 				) : databasesError ? (
-					<p className="mt-4 text-sm text-red-600 dark:text-red-400">{databasesError}</p>
+					<p className="mt-4 text-sm text-error">{databasesError}</p>
 				) : databases.length === 0 ? (
 					<p className="mt-4 text-sm text-secondary">No Databases Found.</p>
 				) : (
@@ -288,7 +282,7 @@ export const ImportExportView = () => {
 								onChange={toggleSelectAll}
 								className={checkboxClassName}
 							/>
-							<span className="text-sm font-medium text-heading dark:text-zinc-200">
+							<span className="text-sm font-semibold text-heading">
 								{allSelected ? 'Deselect all' : 'Select all'}
 							</span>
 						</label>
@@ -304,18 +298,14 @@ export const ImportExportView = () => {
 										onChange={() => toggleDatabase(db.id)}
 										className={checkboxClassName}
 									/>
-									<span className="text-sm text-heading dark:text-zinc-200">
-										{db.name}
-									</span>
+									<span className="text-sm text-heading">{db.name}</span>
 								</label>
 							))}
 						</div>
 					</div>
 				)}
 
-				{exportError ? (
-					<p className="mt-3 text-sm text-red-600 dark:text-red-400">{exportError}</p>
-				) : null}
+				{exportError ? <p className="mt-3 text-sm text-error">{exportError}</p> : null}
 
 				{exporting ? (
 					<ProgressBar
@@ -346,9 +336,7 @@ export const ImportExportView = () => {
 			</section>
 
 			<section className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-700">
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-					Import Model
-				</h2>
+				<h2 className="text-sm font-semibold text-heading">Import Model</h2>
 				<p className="mt-1 text-xs text-secondary">
 					Upload a native Auto Ontology or Apache Ossie model YAML file to write it into
 					the catalog and semantic layer. The format is detected from the file.
@@ -366,12 +354,12 @@ export const ImportExportView = () => {
 				/>
 
 				{importError && !confirmImportOpen ? (
-					<p className="mt-2 text-sm text-red-600 dark:text-red-400">{importError}</p>
+					<p className="mt-2 text-sm text-error">{importError}</p>
 				) : null}
 
 				<div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 					<div className="flex flex-col">
-						<span className="text-sm font-medium text-heading dark:text-zinc-100">
+						<span className="text-sm font-semibold text-heading">
 							Replace Existing Data
 						</span>
 						<span className="text-xs text-secondary">
@@ -388,7 +376,7 @@ export const ImportExportView = () => {
 
 				<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 					<div className="flex flex-col">
-						<span className="text-sm font-medium text-heading dark:text-zinc-100">
+						<span className="text-sm font-semibold text-heading">
 							Regenerate Embeddings
 						</span>
 						<span className="text-xs text-secondary">
@@ -403,10 +391,8 @@ export const ImportExportView = () => {
 				</div>
 
 				{importSummary ? (
-					<div className="mt-3 rounded-lg border border-[#76b900]/30 bg-[#76b900]/5 p-3 text-xs text-body dark:text-zinc-300">
-						<p className="font-medium text-heading dark:text-zinc-100">
-							Import Summary
-						</p>
+					<div className="mt-3 rounded-lg border border-[#76b900]/30 bg-[#76b900]/5 p-3 text-xs text-body">
+						<p className="font-semibold text-heading">Import Summary</p>
 						<ul className="mt-1.5 space-y-0.5">
 							<li>Read as {FORMAT_LABEL[importSummary.format]}</li>
 							{createdCountEntries(importSummary.created).map(([key, value]) => (

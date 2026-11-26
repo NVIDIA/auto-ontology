@@ -72,7 +72,7 @@ export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
 				<Label key={zone.id} label={zone.name} color={zone.color} muted={!zone.enabled} />
 			))
 		) : (
-			<span className="text-xs text-secondary dark:text-zinc-400">-</span>
+			<span className="text-xs text-secondary">-</span>
 		)}
 	</div>
 );
@@ -219,7 +219,7 @@ const DescriptionSuggestion = ({
 	return (
 		<div className="mt-3 rounded-lg border border-[#76b900]/40 bg-[#76b900]/[0.06] p-4 dark:border-[#76b900]/30 dark:bg-[#76b900]/10">
 			<div className="flex items-center justify-between gap-3">
-				<h3 className="text-xs font-semibold uppercase tracking-wide text-[#4d7a00] dark:text-[#a3d63a]">
+				<h3 className="text-xs font-semibold uppercase text-[#4d7a00] dark:text-[#a3d63a]">
 					Description Suggestion
 				</h3>
 				{suggestion != null && (
@@ -233,7 +233,7 @@ const DescriptionSuggestion = ({
 					</Button>
 				)}
 			</div>
-			<div className="mt-2 text-sm leading-relaxed text-body dark:text-zinc-300">
+			<div className="mt-2 text-sm text-body">
 				{loading ? (
 					<span className="flex items-center gap-2 italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">
 						<Spinner aria-label="Generating suggestion" className="h-3.5 w-3.5" />
@@ -286,9 +286,7 @@ const EditableTextCard = ({
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
 			<div className="flex items-start justify-between gap-3">
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-					{section.title}
-				</h2>
+				<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 				{certificationSlot}
 			</div>
 			<textarea
@@ -296,7 +294,7 @@ const EditableTextCard = ({
 				value={value}
 				onChange={handleChange}
 				rows={4}
-				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900"
 			/>
 			{section.suggestable === true && onSuggest != null && (
 				<DescriptionSuggestion onSuggest={onSuggest} onApply={handleApplySuggestion} />
@@ -344,9 +342,7 @@ const EditableTagListCard = ({
 
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 			<div className="mt-3">
 				<TagInput
 					value={tags}
@@ -356,7 +352,7 @@ const EditableTagListCard = ({
 					ariaLabel={section.title}
 				/>
 			</div>
-			<p className="mt-2 text-[11px] text-secondary dark:text-zinc-400">
+			<p className="mt-2 text-xs text-secondary">
 				{section.hint ??
 					'Press Enter or comma to add. Backspace to remove the last tag. Paste comma-separated values to add many at once.'}
 			</p>
@@ -382,9 +378,9 @@ const ReadOnlyTagList = ({
 			id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
 			className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
 		>
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">{title}</h2>
+			<h2 className="text-sm font-semibold text-heading">{title}</h2>
 			{nonEmptyValues.length === 0 ? (
-				<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+				<p className="mt-3 text-sm italic text-secondary">—</p>
 			) : (
 				<ul className="mt-3 flex flex-wrap gap-1.5">
 					{nonEmptyValues.map((v, i) => (
@@ -394,9 +390,7 @@ const ReadOnlyTagList = ({
 					))}
 				</ul>
 			)}
-			{hint ? (
-				<p className="mt-3 text-[11px] text-secondary dark:text-zinc-400">{hint}</p>
-			) : null}
+			{hint ? <p className="mt-3 text-xs text-secondary">{hint}</p> : null}
 		</div>
 	);
 };
@@ -439,7 +433,7 @@ const EditableEntityTagsCard = ({
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
 			<div className="flex items-center justify-between gap-3">
-				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+				<h2 className="text-sm font-semibold text-heading">
 					{section.title} ({tags.length})
 				</h2>
 				<PopoverMenu
@@ -449,7 +443,7 @@ const EditableEntityTagsCard = ({
 					}))}
 					header={
 						unassigned.length === 0 ? (
-							<p className="px-3 py-1.5 text-xs text-secondary dark:text-zinc-400">
+							<p className="px-3 py-1.5 text-xs text-secondary">
 								{section.options.length === 0
 									? 'No tags exist yet'
 									: 'Every tag is already applied'}
@@ -471,7 +465,7 @@ const EditableEntityTagsCard = ({
 				/>
 			</div>
 			{tags.length === 0 ? (
-				<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+				<p className="mt-3 text-sm italic text-secondary">—</p>
 			) : (
 				<ul className="mt-3 flex flex-wrap gap-2">
 					{tags.map((tag) => (
@@ -513,9 +507,7 @@ const OwnerSection = ({ section }: { section: ComposerOwnerSection }) => {
 	const owner = options.find((option) => option.id === section.ownerId);
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 			<div className="mt-3">
 				<OwnerLabel owner={owner} />
 			</div>
@@ -534,9 +526,7 @@ const EditableOwnerCard = ({
 	const [ownerId, setOwnerId] = useState(section.ownerId ?? '');
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 			<div className="mt-3">
 				<OwnersSelect
 					owners={options}
@@ -553,11 +543,11 @@ const EditableOwnerCard = ({
 
 const EntityTagsSection = ({ section }: { section: ComposerEntityTagsSection }) => (
 	<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-		<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+		<h2 className="text-sm font-semibold text-heading">
 			{section.title} ({section.tags.length})
 		</h2>
 		{section.tags.length === 0 ? (
-			<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+			<p className="mt-3 text-sm italic text-secondary">—</p>
 		) : (
 			<ul className="mt-3 flex flex-wrap gap-2">
 				{section.tags.map((tag) => (
@@ -575,11 +565,11 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+			<h2 className="text-sm font-semibold text-heading">
 				{section.title} ({displayedZones.length})
 			</h2>
 			{displayedZones.length === 0 ? (
-				<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+				<p className="mt-3 text-sm italic text-secondary">—</p>
 			) : (
 				<ul className="mt-3 flex flex-wrap gap-2">
 					{displayedZones.map((zone) => (
@@ -615,9 +605,7 @@ function renderComposerSection(
 					className="space-y-3 rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
 				>
 					<div className="flex items-start justify-between gap-3">
-						<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-							{section.title}
-						</h2>
+						<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 						{section.certification ? (
 							<CertificationBadge
 								status={fieldStatus(section.certification.certified)}
@@ -642,21 +630,17 @@ function renderComposerSection(
 		case ComposerSectionKind.INFO_GRID:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{section.title}
-					</h2>
+					<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 					<dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
 						{section.items.map((item) => (
 							<div
 								key={item.label}
 								className="rounded-lg border border-zinc-100/90 bg-zinc-50/80 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/60"
 							>
-								<dt className="text-[11px] font-semibold uppercase tracking-wide text-secondary">
+								<dt className="text-xs font-semibold uppercase text-secondary">
 									{item.label}
 								</dt>
-								<dd className="mt-1.5 text-sm text-heading dark:text-zinc-100">
-									{item.value}
-								</dd>
+								<dd className="mt-1.5 text-sm text-heading">{item.value}</dd>
 							</div>
 						))}
 					</dl>
@@ -667,16 +651,14 @@ function renderComposerSection(
 				section.rowIdKey != null && onDataTableRowClick != null && section.rowIdKey !== '';
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{section.title}
-					</h2>
+					<h2 className="text-sm font-semibold text-heading">{section.title}</h2>
 					<Table
 						className="mt-4"
 						containerClassName="overflow-x-auto rounded-md border border-zinc-200/90 dark:border-zinc-700"
 						layout={section.layout ?? 'auto'}
 						minWidthClass="min-w-[28rem]"
 						cellClassName="px-3 py-2"
-						bodyClassName="text-heading dark:text-zinc-200"
+						bodyClassName="text-heading"
 						rowClassName="border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
 						columns={section.columns.map((col) => {
 							const alignClass =
@@ -796,9 +778,7 @@ function renderComposerSection(
 					role="status"
 				>
 					<Spinner aria-label="Loading" />
-					<p className="text-sm font-medium text-secondary dark:text-zinc-400">
-						{section.message}
-					</p>
+					<p className="text-sm font-semibold text-secondary">{section.message}</p>
 				</div>
 			);
 		case ComposerSectionKind.ZONES_CHIPS:
@@ -810,11 +790,11 @@ function renderComposerSection(
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+					<h2 className="text-sm font-semibold text-heading">
 						{section.title} ({section.terms.length})
 					</h2>
 					{section.terms.length === 0 ? (
-						<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+						<p className="mt-3 text-sm italic text-secondary">—</p>
 					) : (
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.terms.map((term) => (
@@ -834,11 +814,11 @@ function renderComposerSection(
 		case ComposerSectionKind.ENTITY_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
-					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+					<h2 className="text-sm font-semibold text-heading">
 						{section.title} ({section.entities.length})
 					</h2>
 					{section.entities.length === 0 ? (
-						<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+						<p className="mt-3 text-sm italic text-secondary">—</p>
 					) : (
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.entities.map((entity) => (
@@ -886,7 +866,7 @@ function renderComposerSection(
 					{section.sql.trim() !== '' ? (
 						<SqlBlock sql={section.sql} />
 					) : (
-						<p className="mt-3 text-sm italic text-secondary dark:text-zinc-400">—</p>
+						<p className="mt-3 text-sm italic text-secondary">—</p>
 					)}
 				</div>
 			);
@@ -1073,18 +1053,18 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			return (
 				<div
 					ref={ref}
-					className="flex min-h-[50vh] w-full flex-col gap-6 rounded-lg border border-zinc-200 bg-white p-8 text-heading shadow-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+					className="flex min-h-[50vh] w-full flex-col gap-6 rounded-lg border border-zinc-200 bg-white p-8 text-heading shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
 				>
 					<div className="border-b border-zinc-200 pb-4 dark:border-zinc-700">
-						<p className="text-xs font-medium uppercase tracking-wide text-secondary">
+						<p className="text-xs font-semibold uppercase text-secondary">
 							PDF preview
 							{pdfPageName ? (
-								<span className="ml-2 font-normal normal-case text-body dark:text-zinc-400">
+								<span className="ml-2 font-normal normal-case text-body dark:text-secondary">
 									{pdfPageName}
 								</span>
 							) : null}
 						</p>
-						<div className="mt-2 flex flex-wrap gap-1 text-sm text-body dark:text-zinc-400">
+						<div className="mt-2 flex flex-wrap gap-1 text-sm text-body dark:text-secondary">
 							{breadcrumbs.map((b, i) => (
 								<span key={b.id ?? `${b.path}-${i}`}>
 									{i > 0 ? <span className="mx-1 text-secondary">/</span> : null}
@@ -1092,12 +1072,12 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								</span>
 							))}
 						</div>
-						<h1 className="mt-3 text-2xl font-semibold tracking-tight">{title}</h1>
+						<h1 className="mt-3 text-xl font-semibold">{title}</h1>
 					</div>
 					<ol className="list-decimal space-y-4 pl-5 text-sm">
 						{sections.map((s, i) => (
-							<li key={i} className="text-body dark:text-zinc-300">
-								<span className="font-medium">
+							<li key={i} className="text-body">
+								<span className="font-semibold">
 									{isComposerSection(s) ? composerSectionHeading(s) : 'Section'}
 								</span>
 							</li>
@@ -1193,10 +1173,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const titleBlock = (
 			<div className="flex min-w-0 flex-1 items-center gap-2">
 				{headerIcon ? (
-					<Icon
-						name={headerIcon}
-						className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
-					/>
+					<Icon name={headerIcon} className="h-6 w-6 shrink-0 text-body" />
 				) : null}
 				{isEditingActive && titleEditable ? (
 					<input
@@ -1208,7 +1185,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						onChange={(e) => {
 							pendingEditsRef.current.name = e.target.value;
 						}}
-						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xl font-semibold text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900"
 						aria-label="Name"
 					/>
 				) : (
@@ -1287,7 +1264,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 												key={i}
 												className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50"
 											>
-												<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+												<h2 className="text-sm font-semibold text-heading">
 													{typeof section === 'object' &&
 													section !== null &&
 													'title' in section &&
@@ -1296,7 +1273,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 														? (section as { title: string }).title
 														: 'Section'}
 												</h2>
-												<pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-100 p-2 text-xs text-body dark:bg-zinc-900 dark:text-zinc-300">
+												<pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-100 p-2 text-xs text-body dark:bg-zinc-900">
 													{JSON.stringify(section, null, 2)}
 												</pre>
 											</section>
@@ -1403,13 +1380,11 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								<p className="mb-2 text-xs font-semibold uppercase text-secondary">
 									Entity updates (preview)
 								</p>
-								<ul className="space-y-1 text-xs text-body dark:text-zinc-400">
+								<ul className="space-y-1 text-xs text-body dark:text-secondary">
 									{Object.entries(entityUpdatingProperties).map(([k, v]) => (
 										<li key={k}>
-											<span className="font-mono text-heading dark:text-zinc-200">
-												{k}
-											</span>
-											: {Array.isArray(v) ? v.join(', ') : v}
+											<span className="font-mono text-heading">{k}</span>:{' '}
+											{Array.isArray(v) ? v.join(', ') : v}
 										</li>
 									))}
 								</ul>

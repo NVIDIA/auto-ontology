@@ -38,9 +38,9 @@ type AnalysisItem = {
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900';
 
-const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-semibold text-heading';
 
 const MODE_LABEL: Record<AnalysisMode, string> = { sql: 'SQL', pql: 'PQL' };
 const SKELETON_CARD_HEIGHT = 184;
@@ -346,8 +346,8 @@ export const AnalysisView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.ChartBar} className="h-5 w-5 text-body dark:text-zinc-300" />
-				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
+				<Icon name={IconName.ChartBar} className="h-5 w-5 text-body" />
+				<h1 className="text-xl font-semibold text-heading">
 					{isPql ? 'PQL Analyses' : 'Custom Analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
@@ -411,10 +411,10 @@ export const AnalysisView = () => {
 
 				{!loading && error != null && items.length === 0 && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
-						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
+						<h2 className="text-xl font-semibold text-error">
 							Couldn&apos;t load {MODE_LABEL[mode]} analyses
 						</h2>
-						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-error/80 dark:border-red-900/40 dark:bg-red-950/40">
 							{error}
 						</pre>
 						{/* `reload`, not `loadMore`: a failed first page leaves
@@ -460,7 +460,7 @@ export const AnalysisView = () => {
 									<div className="flex min-w-0 flex-1 items-center gap-2">
 										<Icon
 											name={IconName.ChartBar}
-											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+											className="h-4 w-4 shrink-0 text-body"
 										/>
 										<Text
 											as="h2"
@@ -587,13 +587,13 @@ export const AnalysisView = () => {
 				</div>
 
 				{validationMessage != null && (
-					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60">
 						{validationMessage}
 					</p>
 				)}
 
 				{submitError != null && (
-					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
 						{submitError}
 					</p>
 				)}

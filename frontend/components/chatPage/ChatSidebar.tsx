@@ -85,7 +85,7 @@ function ConversationItem({
 								setEditing(false);
 							}
 						}}
-						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-black outline-none focus:border-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-[#76b900]"
+						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-heading outline-none focus:border-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:focus:border-[#76b900]"
 					/>
 				</form>
 			</li>
@@ -100,7 +100,7 @@ function ConversationItem({
 				onClick={onSelect}
 			>
 				<Text text={conv.title} />
-				<span className="mt-0.5 block text-[10px] text-secondary dark:text-zinc-400">
+				<span className="mt-0.5 block text-xs text-secondary">
 					{formatDate(conv.createdAt, '(DD.MM.YY)')}
 				</span>
 			</SelectButton>
@@ -208,10 +208,8 @@ export const ChatSidebar = ({
 			>
 				<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
 					<Link href="/" className="flex items-center gap-3">
-						<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-[#76b900]" />
-						<span className="text-sm font-semibold tracking-wide text-black dark:text-zinc-100">
-							Auto Ontology
-						</span>
+						<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-action" />
+						<span className="text-sm font-semibold text-heading">Auto Ontology</span>
 					</Link>
 				</div>
 
@@ -224,7 +222,7 @@ export const ChatSidebar = ({
 						iconPosition="left"
 						full
 					>
-						<span className="text-lg leading-none text-[#76b900]">+</span>
+						<span className="text-xl text-action">+</span>
 						New Chat
 					</Button>
 				</div>

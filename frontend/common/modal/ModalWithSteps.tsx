@@ -41,11 +41,11 @@ enum StepStatus {
 }
 
 const stepStatusClass: Record<StepStatus, string> = {
-	[StepStatus.DISABLED]: 'pointer-events-none text-secondary dark:text-zinc-600',
-	[StepStatus.ACTIVE]: 'pointer-events-none font-medium text-heading dark:text-zinc-100',
+	[StepStatus.DISABLED]: 'pointer-events-none text-secondary dark:text-disabled',
+	[StepStatus.ACTIVE]: 'pointer-events-none font-semibold text-heading',
 	[StepStatus.COMPLETED]:
-		'cursor-pointer text-body hover:rounded-lg hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-[#8fd100]',
-	[StepStatus.INACTIVE]: 'pointer-events-none text-secondary dark:text-zinc-500',
+		'cursor-pointer text-body hover:rounded-lg hover:bg-zinc-100 hover:text-action dark:text-secondary dark:hover:bg-zinc-800',
+	[StepStatus.INACTIVE]: 'pointer-events-none text-secondary',
 };
 
 const getStepStatus = (index: number, activeStep: number, disabledSteps: number[]): StepStatus => {
@@ -79,10 +79,8 @@ export const ModalWithSteps = ({
 		<Modal open={open} onClose={onClose} className={className}>
 			<div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex items-center gap-2">
-					<Icon name={titleIcon} className="h-5 w-5 text-body dark:text-zinc-300" />
-					<h3 className="text-sm font-semibold text-heading dark:text-zinc-100">
-						{title}
-					</h3>
+					<Icon name={titleIcon} className="h-5 w-5 text-body" />
+					<h3 className="text-sm font-semibold text-heading">{title}</h3>
 				</div>
 				<Button
 					onClick={onClose}
@@ -120,7 +118,7 @@ export const ModalWithSteps = ({
 							{index < steps.length - 1 && (
 								<Icon
 									name={IconName.ChevronRight}
-									className="h-3.5 w-3.5 shrink-0 text-disabled dark:text-zinc-600"
+									className="h-3.5 w-3.5 shrink-0 text-disabled"
 									aria-hidden
 								/>
 							)}
@@ -142,7 +140,7 @@ export const ModalWithSteps = ({
 
 			<div className="flex min-h-[60px] items-center gap-3 px-4 py-3">
 				{alert != null && (
-					<p className="min-w-0 flex-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+					<p className="min-w-0 flex-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
 						{alert}
 					</p>
 				)}

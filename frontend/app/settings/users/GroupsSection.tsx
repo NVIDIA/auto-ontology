@@ -34,9 +34,9 @@ const GROUP_COLORS: readonly ColorOption[] = [
 const DEFAULT_GROUP_COLOR = GROUP_COLORS[0].value;
 
 const inputClassName =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-heading outline-none focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-heading outline-none focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-700 dark:bg-zinc-900';
 
-const labelClassName = 'mb-1.5 block text-sm font-semibold text-heading dark:text-zinc-100';
+const labelClassName = 'mb-1.5 block text-sm font-semibold text-heading';
 
 type Draft = {
 	id: string | null;
@@ -223,7 +223,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 						title={group.color}
 					/>
 					<div className="min-w-0">
-						<div className="font-medium">{group.name}</div>
+						<div className="font-semibold">{group.name}</div>
 						{group.description ? (
 							<div className="truncate text-xs text-secondary">
 								{group.description}
@@ -298,9 +298,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 		<section className="mt-10">
 			<div className="mb-4 flex items-start justify-between gap-4">
 				<div>
-					<h2 className="text-lg font-semibold text-heading dark:text-zinc-100">
-						Groups
-					</h2>
+					<h2 className="text-xl font-semibold text-heading">Groups</h2>
 					<p className="mt-1 text-xs text-secondary">
 						A group has its own role. Members keep the role on their account.
 					</p>
@@ -316,7 +314,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 			</div>
 
 			{loadError ? (
-				<p className="mb-3 text-xs text-red-700 dark:text-red-300" role="alert">
+				<p className="mb-3 text-xs text-error" role="alert">
 					{loadError}
 				</p>
 			) : null}
@@ -349,7 +347,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 						<div>
 							<label htmlFor="group-name" className={labelClassName}>
 								Name
-								<span className="ml-2 font-normal text-secondary dark:text-zinc-500">
+								<span className="ml-2 font-normal text-secondary">
 									(Max. {MAX_GROUP_NAME_LENGTH})
 								</span>
 							</label>
@@ -427,7 +425,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 														checked={checked}
 														onChange={() => toggleMember(user.id)}
 													/>
-													<span className="min-w-0 truncate text-heading dark:text-zinc-100">
+													<span className="min-w-0 truncate text-heading">
 														{label}
 													</span>
 													{showEmail ? (
@@ -444,7 +442,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 						</div>
 						{submitError ? (
 							<div
-								className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+								className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-error dark:border-red-900/50 dark:bg-red-950/40"
 								role="alert"
 							>
 								{submitError}

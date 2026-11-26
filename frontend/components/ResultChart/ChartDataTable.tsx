@@ -44,9 +44,7 @@ export const ChartDataTable: FC<{ spec: ChartSpec; id?: string }> = ({ spec, id 
 
 	return (
 		<div className="mt-3" role="region" aria-label="Chart data" id={id}>
-			<div className="mb-1 text-xs font-medium text-secondary dark:text-zinc-400">
-				Query results
-			</div>
+			<div className="mb-1 text-xs font-semibold text-secondary">Query results</div>
 			<DynamicTable table={table} />
 		</div>
 	);
