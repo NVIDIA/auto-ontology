@@ -125,5 +125,17 @@ def test_stays_silent_when_nothing_is_proven_missing(sql: str) -> None:
     assert find_unresolved_columns(sql, "postgres", _schemas()) == []
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT amount AS total FROM orders WHERE total > 1",
+        "SELECT o.amount AS total FROM orders o JOIN customers c ON total = c.id",
+    ],
+    ids=["where-alias", "join-on-alias"],
+)
+def test_sqlite_allows_output_aliases_in_where_and_join_on(sql: str) -> None:
+    assert find_unresolved_columns(sql, "sqlite", _schemas()) == []
+
+
 def test_an_empty_catalog_verifies_nothing() -> None:
     assert find_unresolved_columns("SELECT missing FROM orders", "postgres", {}) == []

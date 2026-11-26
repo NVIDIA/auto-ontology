@@ -100,11 +100,22 @@ def _visible_sources(scope: Scope, catalog: _CatalogColumns) -> list[set[str] | 
     return visible
 
 
-def _is_output_alias_reference(column: exp.Column, query: exp.Select) -> bool:
+def _is_output_alias_reference(
+    column: exp.Column, query: exp.Select, dialect: str | None
+) -> bool:
     """Whether *column* occurs in a clause that may reference a SELECT alias."""
+    alias_clauses: tuple[type[exp.Expression], ...] = (
+        exp.Order,
+        exp.Group,
+        exp.Having,
+        exp.Qualify,
+    )
+    if dialect and dialect.lower() == "sqlite":
+        # SQLite extends standard alias visibility to WHERE and JOIN ... ON.
+        alias_clauses += (exp.Where, exp.Join)
     current = column.parent
     while current is not None and current is not query:
-        if isinstance(current, (exp.Order, exp.Group, exp.Having, exp.Qualify)):
+        if isinstance(current, alias_clauses):
             return True
         current = current.parent
     return False
@@ -157,7 +168,8 @@ def find_unresolved_columns(
                 reference = f"{table}.{name}"
             else:
                 if not bare_verifiable or (
-                    name in aliases and _is_output_alias_reference(column, query)
+                    name in aliases
+                    and _is_output_alias_reference(column, query, dialect)
                 ):
                     continue
                 if any(name in cols for cols in visible if cols is not None):
