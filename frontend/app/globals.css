@@ -19,6 +19,7 @@
 	--color-body: #4c5054;
 	--color-secondary: #85878a;
 	--color-disabled: #b3b4b7;
+	--color-divider: #e9eaea;
 
 	--animate-progress-indeterminate: progress-indeterminate 1.4s ease-in-out infinite;
 }
