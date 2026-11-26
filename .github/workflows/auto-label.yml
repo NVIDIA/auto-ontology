@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Auto label
+
+# Adds the labels that can be decided from data when an issue or PR is opened:
+# `external` (author outside the core team), `documentation`, `UI` and
+# `bug` (see dev_tools/auto_label.py for the exact rules). It only adds labels.
+#
+# Plain Python plus the preinstalled `gh`, no third-party action: the enterprise
+# action allowlist blocks most of them (see the note in ci-client.yml).
+#
+# SECURITY: this runs on `pull_request_target` so the token can write labels on
+# PRs from forks. That is safe only because the job checks out the BASE branch
+# (the default for this event) and never the PR's code, and passes only numbers
+# through the environment. Do not add a step that checks out
+# `github.event.pull_request.head`, or interpolates a title or body into `run:`.
+#
+# Only on `opened`, on purpose: the script re-adds any label it wants that is
+# missing, so running on `edited` or `synchronize` (every push) would undo a
+# maintainer who removed a label by hand. PRs into release/* branches are not
+# labeled: pull_request_target reads this file from the base branch.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: auto-label-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Add labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: python3 -m dev_tools.auto_label

@@ -16,6 +16,7 @@ Local development helpers: environment setup, database seeding, and ingest.
 | `local_ingest.py` | Ingests the local Postgres source into the pgvector store. |
 | `generate_backend_openapi.py` | Dumps the FastAPI OpenAPI specs to `docs/openapi/`. Run by `ci-openapi.yml`. |
 | `release_helm_chart.py` | Packages the chart and publishes it to the NGC Helm registry. Run by `release-helm.yml`. |
+| `auto_label.py` | The rules that add `external`, `documentation`, `UI` and `bug` labels to new issues and PRs. Run by `auto-label.yml`; `REPO=... NUMBER=... DRY_RUN=1 python3 -m dev_tools.auto_label` previews one. |
 | `_add_spdx_headers.py` | One-off OSRB helper; kept so the header insertion is reproducible. |
 | `fixtures/` | The test fixtures. **CI depends on these** — see below. |
 
