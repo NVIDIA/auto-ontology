@@ -13,10 +13,37 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
 from auto_ontology.connectors.sqlite import SQLiteDatabase
+
+
+@pytest.mark.parametrize("form", ["relative", "relative-encoded", "absolute", "bare"])
+def test_connection_url_opens_the_expected_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, form: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    relative = Path("data files") / "example db.sqlite"
+    relative.parent.mkdir()
+    with sqlite3.connect(relative) as conn:
+        conn.execute("CREATE TABLE example (value INTEGER)")
+        conn.execute("INSERT INTO example VALUES (42)")
+    if form == "absolute":
+        connection_string = f"sqlite:///{relative.resolve()}"
+    elif form == "bare":
+        connection_string = str(relative)
+    else:
+        path = quote(str(relative)) if form == "relative-encoded" else str(relative)
+        connection_string = f"sqlite:///{path}"
+
+    db = SQLiteDatabase(connection_string)
+    try:
+        assert db.execute("SELECT value FROM example")["value"].tolist() == [42]
+    finally:
+        db.close()
 
 
 def _connector(tmp_path, ddl: str):
