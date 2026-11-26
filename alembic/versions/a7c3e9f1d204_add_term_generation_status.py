@@ -7,7 +7,8 @@
 Records whether compilation's model produced a Term or a deterministic
 placeholder stood in for a failed model step (#533). Existing Terms are
 marked ``generated``: placeholders stored before this revision can't be told
-apart from real Terms, and the next compile of their table corrects them.
+apart from real Terms, so they remain ``generated`` until a future reprocessing
+workflow can identify and replace them.
 
 Revision ID: a7c3e9f1d204
 Revises: caee572fa81c
