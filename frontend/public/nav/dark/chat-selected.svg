@@ -1,0 +1,12 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Menu White / Chat 32px">
+<rect width="36" height="36" rx="8" fill="#8AD21A" fill-opacity="0.28"/>
+<mask id="stroke0_0_50" fill="white">
+<path d="M7.5 12C7.5 10.3431 8.84315 9 10.5 9H25.5C27.1569 9 28.5 10.3431 28.5 12V23C28.5 24.6569 27.1569 26 25.5 26H17.177C16.7681 26 16.4004 26.249 16.2486 26.6286L15.4285 28.6788C15.0932 29.517 13.9068 29.517 13.5715 28.6788L12.7514 26.6286C12.5996 26.249 12.2319 26 11.823 26H10.5C8.84315 26 7.5 24.6569 7.5 23V12Z"/>
+</mask>
+<path id="Rectangle 2811" d="M17.177 26H25.5C27.1569 26 28.5 24.6569 28.5 23V12C28.5 10.3431 27.1569 9 25.5 9H10.5C8.84315 9 7.5 10.3431 7.5 12V23C7.5 24.6569 8.84315 26 10.5 26H11.823C12.2319 26 12.5996 26.249 12.7514 26.6286L13.5715 28.6788C13.9068 29.517 15.0932 29.517 15.4285 28.6788L16.2486 26.6286C16.4004 26.249 16.7681 26 17.177 26Z" stroke-width="2" stroke="#8AD21A" mask="url(#stroke0_0_50)"/>
+<rect id="Rectangle 3306" x="12" y="14" width="12" height="1" rx="0.5" fill="#8AD21A"/>
+<rect id="Rectangle 3307" x="12" y="17" width="11" height="1" rx="0.5" fill="#8AD21A"/>
+<rect id="Rectangle 3308" x="12" y="20" width="7" height="1" rx="0.5" fill="#8AD21A"/>
+</g>
+</svg>
