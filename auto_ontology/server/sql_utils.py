@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from auto_ontology.catalog.parsers.unresolved_columns import find_unresolved_columns
 from auto_ontology.catalog.sql_parse import parse_query_single
 
 from auto_ontology.connectors import get_connectors
@@ -69,8 +70,9 @@ def validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
     """Parse ``sql`` against the catalog. Returns query_obj or raises.
 
     Raises :class:`SqlParseError` when the SQL can't be parsed
-    (sqlglot syntax / dialect error) or doesn't resolve to any
-    table known to the catalog.
+    (sqlglot syntax / dialect error), doesn't resolve to any
+    table known to the catalog, or names a column the catalog shows its
+    table does not have. The SQL is never executed.
     """
     try:
         query_obj = parse_query_single(sql=sql, dialects=dialects, schemas=schemas)
@@ -83,5 +85,12 @@ def validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
             "query, such as SELECT SUM(amount) FROM sales.orders; a bare "
             "expression names no table. If the table is new, ingest its schema "
             "first.",
+        )
+    unresolved = find_unresolved_columns(sql, query_obj.dialect_used, schemas)
+    if unresolved:
+        raise SqlParseError(
+            "SQL references columns the catalog does not have: "
+            f"{', '.join(unresolved)}. Use the column names of the tables it "
+            "reads; if the source schema changed, re-ingest it first.",
         )
     return query_obj

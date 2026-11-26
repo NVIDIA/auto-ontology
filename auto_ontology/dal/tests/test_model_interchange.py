@@ -209,6 +209,98 @@ def _document(world: World):
     )
 
 
+@pytest.mark.parametrize(
+    ("condition_column", "should_publish"),
+    [("customer_id", True), ("missing_customer_id", False)],
+    ids=["valid-control", "unresolved-column"],
+)
+def test_bound_import_does_not_publish_analysis_with_an_unresolved_column(
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    condition_column: str,
+    should_publish: bool,
+) -> None:
+    import yaml
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy.exc import ProgrammingError
+
+    from auto_ontology.connectors.postgres import PostgresDatabase
+    from auto_ontology.infra.postgres import get_postgres_connection_string
+    from auto_ontology.server import sql_utils
+    from auto_ontology.server.model_interchange.router import router
+    from auto_ontology.server.model_interchange.schemas import ModelCustomAnalysis
+
+    # The real Postgres source and the already-ingested catalog agree. Only the
+    # imported expression names a nonexistent column, not the catalog payload.
+    schema = f"import_680_{uuid.uuid4().hex}"
+    store().query_write(f"CREATE SCHEMA {schema}")
+    try:
+        store().query_write(
+            f"CREATE TABLE {schema}.orders (id integer, customer_id integer)"
+        )
+        store().query_write(f"INSERT INTO {schema}.orders VALUES (1, 9), (2, 20)")
+        store().query_write(
+            s.catalog_schema.update()
+            .where(s.catalog_schema.c.id == world.schema)
+            .values(name=schema)
+        )
+        sql = (
+            f"SELECT SUM(CASE WHEN {condition_column} >= 20 THEN customer_id END) "
+            f"AS bulk_units FROM {schema}.orders"
+        )
+        # These are fixed fixture queries. The importer itself must not execute
+        # user-provided SQL to determine whether it is valid.
+        if should_publish:
+            assert store().query_read(sql)[0]["bulk_units"] == 20
+        else:
+            with pytest.raises(ProgrammingError, match="does not exist"):
+                store().query_read(sql)
+
+        document = _document(world)
+        name = f"{world.prefix}-bulk-units"
+        document.semantic_layer.custom_analyses.append(
+            ModelCustomAnalysis(
+                id=f"{world.prefix}-analysis",
+                name=name,
+                sql=sql,
+                sql_column_is=[world.customer_ref],
+            )
+        )
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        with (
+            PostgresDatabase(get_postgres_connection_string()) as connector,
+            TestClient(app) as client,
+        ):
+            # This catalog fixture has its own logical name but shares the
+            # disposable PostgreSQL database with the metadata store.
+            monkeypatch.setattr(connector, "_database_name", world.prefix)
+            monkeypatch.setattr(sql_utils, "get_connectors", lambda: [connector])
+            assert sql_utils.get_dialects(world.prefix) == ["postgres"]
+            response = client.post(
+                "/api/model/import?replace=false&embed=false",
+                content=yaml.safe_dump(document.model_dump()),
+                headers={"Content-Type": "application/yaml"},
+            )
+        exported = [
+            analysis.sql
+            for analysis in _document(world).semantic_layer.custom_analyses
+            if analysis.name == name
+        ]
+        if should_publish:
+            assert response.status_code == 200
+            assert exported == [sql]
+        else:
+            assert response.status_code == 422
+            detail = response.json()["detail"]
+            assert name in detail
+            assert condition_column in detail
+            assert exported == [], f"HTTP {response.status_code} published {exported}"
+    finally:
+        store().query_write(f"DROP SCHEMA {schema} CASCADE")
+
+
 # --------------------------------------------------------------------------
 # Bug 3 — nullability
 # --------------------------------------------------------------------------

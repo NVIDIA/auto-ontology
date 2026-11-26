@@ -837,15 +837,15 @@ def test_build_catalog_embed_rows_match_tabular_shape() -> None:
 
 @patch("auto_ontology.dal.model_interchange.get_schemas")
 @patch("auto_ontology.dal.model_interchange.get_dialects")
-@patch("auto_ontology.dal.model_interchange.validate_sql")
+@patch("auto_ontology.dal.model_interchange.parse_query_single")
 def test_resolve_sql_column_ids_returns_parser_column_ids(
-    mock_validate: MagicMock,
+    mock_parse: MagicMock,
     mock_dialects: MagicMock,
     mock_schemas: MagicMock,
 ) -> None:
     mock_dialects.return_value = ["sqlite"]
     mock_schemas.return_value = {}
-    mock_validate.return_value.get_column_ids.return_value = ["col-1", "col-2"]
+    mock_parse.return_value.get_column_ids.return_value = ["col-1", "col-2"]
 
     assert resolve_sql_column_ids("SELECT id FROM orders", "retail") == [
         "col-1",

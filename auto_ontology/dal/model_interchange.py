@@ -67,7 +67,13 @@ from auto_ontology.server.model_interchange.schemas import (
     ModelTable,
     ModelTerm,
 )
-from auto_ontology.server.sql_utils import get_dialects, get_schemas, validate_sql
+from auto_ontology.catalog.sql_parse import parse_query_single
+from auto_ontology.server.sql_utils import (
+    SqlParseError,
+    get_dialects,
+    get_schemas,
+    validate_sql,
+)
 from auto_ontology.utils.sample_values import dump_sample_values, parse_sample_values
 
 logger = logging.getLogger(__name__)
@@ -717,9 +723,11 @@ def _column_ids_from_sql(
     sql: str, dialects: list[str], schemas: dict[str, Any]
 ) -> list[str]:
     try:
-        query_obj = validate_sql(sql, dialects, schemas)
+        query_obj = parse_query_single(sql=sql, dialects=dialects, schemas=schemas)
     except Exception:
         logger.debug("Could not resolve sql_column_is for SQL snippet", exc_info=True)
+        return []
+    if query_obj is None:
         return []
     return [str(col_id) for col_id in query_obj.get_column_ids() if col_id]
 
@@ -1591,7 +1599,10 @@ def _persist_sql_object(
     the zone checks afterwards.
     """
     dialects, schemas = _cached_dialects_and_schemas(schema_cache, database_name)
-    query_obj = validate_sql(sql, dialects, schemas)
+    try:
+        query_obj = validate_sql(sql, dialects, schemas)
+    except SqlParseError as exc:
+        raise ModelImportValidationError(f"{node_label} {name!r}: {exc}") from exc
     props: dict[str, Any] = {"name": name, "description": description}
     if extra_props:
         props.update(extra_props)
