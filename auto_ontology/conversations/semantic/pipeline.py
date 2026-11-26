@@ -164,7 +164,7 @@ def populate_conversation_graph(
     relate: bool = True,
     reset_vectors: bool = False,
     window_chars: int = WINDOW_CHARS,
-    verify: bool = False,
+    verify: bool | None = None,
     subject_agent: bool = False,
 ) -> GraphResult:
     """Extract, relate, store and embed one transcript's graph.
@@ -185,7 +185,12 @@ def populate_conversation_graph(
     user-assistant turn. The default packs several turns together, which on a
     BEAM transcript came out as one to four of them -- the turns are long.
 
-    *verify* reads the extracted graph back against the turns it came from, and
+    *verify* defaults to the ``conversation_verify_enabled`` feature flag, and
+    an explicit ``True`` or ``False`` overrides it. That way an instance can
+    turn the check on without a code change, while a caller measuring a graph
+    pins what it wants and is unaffected by a row someone else toggled.
+
+    It reads the extracted graph back against the turns it came from, and
     **changes the graph that is written**. Edges whose own turns contradict
     them are dropped, and merely uncited ones are reported and kept: a wrong
     edge asserts something the transcript does not say, while an uncited one is
@@ -206,6 +211,12 @@ def populate_conversation_graph(
     not need them.
     """
     started = time.monotonic()
+    if verify is None:
+        from auto_ontology.infra.feature_flags import is_conversation_verify_enabled
+
+        verify = is_conversation_verify_enabled()
+        logger.info("Verification is %s by configuration.", "on" if verify else "off")
+
     turns = fetch_turns(database_name, spans=[(conversation_id, 0, 10**9)])
     if not turns:
         raise ValueError(

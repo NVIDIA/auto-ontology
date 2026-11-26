@@ -35,6 +35,12 @@ DISTINCT_VALUE_PROBING_ENABLED_KEY = "distinct_value_probing_enabled"
 # until an admin turns the toggle on.
 PII_DETECTION_ENABLED_KEY = "pii_detection_enabled"
 
+# Whether conversation graph building checks its edges back against the turns
+# they came from. Opt-in, like the two above: it is extra model calls on every
+# build, and an instance that has never chosen pays for nothing it did not ask
+# for.
+CONVERSATION_VERIFY_ENABLED_KEY = "conversation_verify_enabled"
+
 # Written by the SQL Query Timeout field on Settings > Agent Settings: how long
 # a statement the text-to-SQL agent issues may run before it is cancelled. An
 # instance without the frontend never writes the row and gets the default.
@@ -129,6 +135,28 @@ def is_pii_detection_enabled() -> bool:
     without a restart.
     """
     return read_configuration_flag(PII_DETECTION_ENABLED_KEY, default=False)
+
+
+def is_conversation_verify_enabled() -> bool:
+    """Whether building a conversation graph checks its edges against its turns.
+
+    The one pass that reads an *edge* back against the text it was extracted
+    from -- every other pass compares nodes -- and the only one that can catch
+    a relation the transcript does not state. It is cheap relative to the
+    build, roughly ten calls for a hundred turns, because an edge carries the
+    turns it came from and so is checked against a few hundred characters
+    rather than the transcript.
+
+    Opt-in nonetheless, because it does not only report: edges their own turns
+    contradict are dropped before the write. An instance that has not chosen
+    gets the graph its extractor produced, which is what every build predating
+    this toggle produced.
+
+    Read per build, so a change applies to the next one without a restart.
+    Callers that pin ``verify`` explicitly bypass this entirely -- a measured
+    rebuild must not change behaviour because a row changed.
+    """
+    return read_configuration_flag(CONVERSATION_VERIFY_ENABLED_KEY, default=False)
 
 
 def read_configuration_int(
