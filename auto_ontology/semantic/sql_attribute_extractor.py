@@ -29,6 +29,7 @@ from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
 )
+from auto_ontology.utils.sql_equivalence import SQL_ERRORS, sql_equivalence_key
 
 logger = logging.getLogger(__name__)
 
@@ -167,9 +168,6 @@ _SINGLE_COLUMN_ALIAS = re.compile(
 
 _WHERE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
-# Tokenizing (e.g. an unterminated string) fails separately from parsing.
-_SQL_ERRORS = (sqlglot.errors.ParseError, sqlglot.errors.TokenError)
-
 
 def _as_decimal(value: Any) -> Decimal | None:
     """A numeric sample as an exact Decimal; None for non-numbers and booleans."""
@@ -227,7 +225,7 @@ def _where_literals_valid(expression: str, columns: list[dict[str, Any]]) -> boo
     """
     try:
         wheres = list(sqlglot.parse_one(expression).find_all(exp.Where))
-    except _SQL_ERRORS:
+    except SQL_ERRORS:
         return not _WHERE.search(expression)
 
     samples_by_column = {col["name"].lower(): _sample_list(col) for col in columns}
@@ -266,14 +264,6 @@ def _uses_year_month_divisor(expression: str) -> bool:
 
 def _uses_validfrom_to(expression: str) -> bool:
     return bool(_VALIDFROM_TO.search(expression))
-
-
-def _dedup_key(expression: str) -> str:
-    """Formatting- and case-insensitive key that keeps literals and quoted names."""
-    try:
-        return sqlglot.parse_one(expression).sql(normalize=True)
-    except _SQL_ERRORS:
-        return " ".join(expression.split())
 
 
 def _rejection_reason(expression: str, columns: list[dict[str, Any]]) -> str | None:
@@ -343,7 +333,7 @@ def extract_sql_attributes(
     accepted: list[SqlAttributeProposal] = []
     seen_expressions: set[str] = set()
     for proposal in result.metrics:
-        normalized = _dedup_key(proposal.expression)
+        normalized = sql_equivalence_key(proposal.expression)
         if normalized in seen_expressions:
             logger.debug("Dropping duplicate proposal %r", proposal.name)
             continue

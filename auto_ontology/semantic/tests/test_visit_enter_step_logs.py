@@ -238,11 +238,11 @@ def test_one_term_failing_does_not_stop_the_others(
     monkeypatch: MonkeyPatch,
 ) -> None:
     def _extract(
-        _table: Any, _cols: Any, _schema: Any, _id: Any, term_name: str, _db: Any
+        _table: Any, _cols: Any, _schema: Any, term: dict[str, Any], _db: Any
     ) -> list[str]:
-        if term_name == "Order":
+        if term["name"] == "Order":
             raise RuntimeError("LLM down")
-        return [f"{term_name} Margin"]
+        return [f"{term['name']} Margin"]
 
     monkeypatch.setattr(visit_enter, "_extract_sql_attributes_for_table", _extract)
     ctx = {"columns": [{"name": "price"}, {"name": "cost"}], "fks": []}
@@ -280,3 +280,53 @@ def test_sql_attribute_failures_are_reported_on_the_result(
 
     assert result.term_names == ["Order"]
     assert result.sql_attr_failed_terms == ["Order"]
+
+
+def test_sql_attribute_extraction_is_skipped_without_a_connector(
+    _stubbed: None, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
+    """Persisting validates against the connector, so no LLM call is made."""
+    calls: list[Any] = []
+    monkeypatch.setattr(visit_enter, "_resolve_connector", lambda _db: None)
+    monkeypatch.setattr(
+        visit_enter, "_extract_sql_attrs_for_terms", lambda *a, **k: calls.append(a)
+    )
+
+    with caplog.at_level(logging.INFO, logger="auto_ontology.semantic.visit_enter"):
+        result = visit_enter.process_table(
+            TABLE,
+            CTX,
+            domain_summary=None,
+            database_name="mydb",
+            extract_table_sql_attributes=True,
+        )
+
+    assert calls == []
+    assert result.sql_attr_failed_terms == []
+    messages = [record.getMessage() for record in caplog.records]
+    assert (
+        "[orders] Skipping SQL attribute extraction — no live connector for 'mydb'"
+        in messages
+    )
+
+
+def test_the_terms_own_description_reaches_the_prompt(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def _extract(_table: Any, _cols: Any, _schema: Any, term: Any) -> list[Any]:
+        seen.append(term)
+        return []
+
+    monkeypatch.setattr(visit_enter, "extract_sql_attributes", _extract)
+
+    visit_enter._extract_sql_attributes_for_table(
+        {**TABLE, "description": "Raw order rows"},
+        [{"name": "price"}, {"name": "cost"}],
+        "public",
+        {"id": "t1", "name": "Order", "description": "A customer order"},
+        "mydb",
+    )
+
+    assert seen == [{"name": "Order", "description": "A customer order"}]

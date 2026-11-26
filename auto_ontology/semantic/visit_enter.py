@@ -1110,6 +1110,13 @@ def process_table(
                 "[%s] Skipping SQL attribute extraction — could not read PII tags",
                 table_name,
             )
+        elif connector is None:
+            # Persisting validates the SQL against this connector's catalog.
+            logger.warning(
+                "[%s] Skipping SQL attribute extraction — no live connector for %r",
+                table_name,
+                database_name,
+            )
         else:
             try:
                 with _step(table_name, "Extracting SQL attributes"):
@@ -1181,16 +1188,20 @@ def _extract_sql_attributes_for_table(
     table: dict[str, Any],
     columns: list[dict[str, Any]],
     schema_name: str | None,
-    term_id: str,
-    term_name: str,
+    term: dict[str, Any],
     database_name: str,
 ) -> list[str]:
-    """Run LLM extraction + persistence for one Term's columns.
+    """Run LLM extraction + persistence for one persisted Term's columns.
 
     Returns the names of the SqlAttributes created.
     """
-    term = {"name": term_name, "description": table.get("description", "")}
-    proposals = extract_sql_attributes(table, columns, schema_name, term)
+    term_id = term.get("id")
+    proposals = extract_sql_attributes(
+        table,
+        columns,
+        schema_name,
+        {"name": term.get("name"), "description": term.get("description") or ""},
+    )
     created_names: list[str] = []
 
     for proposal in proposals:
@@ -1260,12 +1271,7 @@ def _extract_sql_attrs_for_terms(
         try:
             names.extend(
                 _extract_sql_attributes_for_table(
-                    table,
-                    filtered_cols,
-                    schema_name,
-                    term.get("id"),
-                    term_name,
-                    database_name,
+                    table, filtered_cols, schema_name, term, database_name
                 )
             )
         except Exception:
