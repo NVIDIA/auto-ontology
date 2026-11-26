@@ -248,11 +248,11 @@ def _delete_semantic_vectors(database_name: str | None) -> int:
     next embed pass overwrites, whereas a row whose vector is gone is a hit
     retrieval can no longer explain.
     """
-    semantic_vdb = get_semantic_vdb()
-    if database_name is None:
-        semantic_deleted = semantic_vdb.delete_all()
-    else:
-        semantic_deleted = len(semantic_vdb.delete_by_database(database_name))
+    with get_semantic_vdb() as semantic_vdb:
+        if database_name is None:
+            semantic_deleted = semantic_vdb.delete_all()
+        else:
+            semantic_deleted = len(semantic_vdb.delete_by_database(database_name))
 
     logger.info(
         "delete_semantic_layer: removed %d semantic pgvector rows for database %s",
@@ -375,18 +375,22 @@ def _delete_data_vectors(database_name: str | None) -> int:
     cascade off ``catalog_database``, but vectors are not foreign keys and
     nothing removes them implicitly -- a collection left out here would keep
     answering searches for rows that are gone.
+
+    Each store is opened and closed in turn, so its pool is returned before
+    the next one connects (#553).
     """
     data_deleted = 0
-    for vdb in (
-        get_data_vdb(),
-        get_conversation_vdb(),
-        get_conversation_semantic_vdb(),
-        get_one_hop_path_vdb(),
+    for factory in (
+        get_data_vdb,
+        get_conversation_vdb,
+        get_conversation_semantic_vdb,
+        get_one_hop_path_vdb,
     ):
-        if database_name is None:
-            data_deleted += vdb.delete_all()
-        else:
-            data_deleted += len(vdb.delete_by_database(database_name))
+        with factory() as vdb:
+            if database_name is None:
+                data_deleted += vdb.delete_all()
+            else:
+                data_deleted += len(vdb.delete_by_database(database_name))
 
     logger.info(
         "delete_data_layer: removed %d data pgvector rows for database %s",

@@ -196,14 +196,14 @@ def validate_sql_attribute(
 
 
 def _reembed_sql_attribute(attr_id: str, database_name: str | None) -> None:
-    vdb = get_semantic_vdb()
-    vdb.delete_by_id(attr_id)
-    _embed_sql_attribute(
-        embed_params=get_embed_params(),
-        vdb=vdb,
-        attr_id=attr_id,
-        database_name=database_name,
-    )
+    with get_semantic_vdb() as vdb:
+        vdb.delete_by_id(attr_id)
+        _embed_sql_attribute(
+            embed_params=get_embed_params(),
+            vdb=vdb,
+            attr_id=attr_id,
+            database_name=database_name,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -284,13 +284,13 @@ def create_sql_attribute(
     row["term_id"] = term_id
     row["database_name"] = database_name
 
-    vdb = get_semantic_vdb()
-    _embed_sql_attribute(
-        embed_params=get_embed_params(),
-        vdb=vdb,
-        attr_id=row["id"],
-        database_name=database_name,
-    )
+    with get_semantic_vdb() as vdb:
+        _embed_sql_attribute(
+            embed_params=get_embed_params(),
+            vdb=vdb,
+            attr_id=row["id"],
+            database_name=database_name,
+        )
 
     return row
 
@@ -468,6 +468,7 @@ def delete_sql_attribute(attr_id: str) -> dict[str, Any] | None:
         return None
 
     delete_sql_attribute_node(attr_id)
-    get_semantic_vdb().delete_by_id(attr_id)
+    with get_semantic_vdb() as vdb:
+        vdb.delete_by_id(attr_id)
 
     return {"id": attr_id}

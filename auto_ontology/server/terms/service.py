@@ -159,23 +159,26 @@ def update_column_attribute(
 
     embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
     if embedder is not None:
-        embedder.vdb.delete_by_id(attr_id)
-        attr = {
-            "id": row["id"],
-            "name": row["name"],
-            "column_description": row.get("column_description"),
-            "family_prefix": row.get("family_prefix"),
-            "term_name": row.get("term_name"),
-            "source_column": row.get("source_column"),
-            "sample_values": row.get("sample_values"),
-            "is_unique": row.get("is_unique"),
-            "table_id": row.get("table_id"),
-            "table_name": row.get("table_name"),
-            "schema_name": row.get("schema_name"),
-        }
-        # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
-        term_ctx = {"synonyms": row.get("term_synonyms") or []}
-        embedder.embed_term(term_ctx, [attr])
+        try:
+            embedder.vdb.delete_by_id(attr_id)
+            attr = {
+                "id": row["id"],
+                "name": row["name"],
+                "column_description": row.get("column_description"),
+                "family_prefix": row.get("family_prefix"),
+                "term_name": row.get("term_name"),
+                "source_column": row.get("source_column"),
+                "sample_values": row.get("sample_values"),
+                "is_unique": row.get("is_unique"),
+                "table_id": row.get("table_id"),
+                "table_name": row.get("table_name"),
+                "schema_name": row.get("schema_name"),
+            }
+            # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
+            term_ctx = {"synonyms": row.get("term_synonyms") or []}
+            embedder.embed_term(term_ctx, [attr])
+        finally:
+            embedder.close()
 
     return row
 
@@ -192,27 +195,30 @@ def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> N
     if embedder is None:
         return
 
-    vdb = embedder.vdb
-    vdb.delete_by_id(term_id)
-    if refresh_dependent_attrs:
-        for attr in column_attrs:
-            attr_id = attr.get("id")
-            if attr_id:
+    try:
+        vdb = embedder.vdb
+        vdb.delete_by_id(term_id)
+        if refresh_dependent_attrs:
+            for attr in column_attrs:
+                attr_id = attr.get("id")
+                if attr_id:
+                    vdb.delete_by_id(attr_id)
+
+        embedder.embed_term(term, column_attrs if refresh_dependent_attrs else [])
+
+        if refresh_dependent_attrs:
+            embed_params = get_embed_params()
+            sql_attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(term_id)
+            for sql_attr in sql_attrs:
+                attr_id = sql_attr.get("id")
+                if not attr_id:
+                    continue
                 vdb.delete_by_id(attr_id)
-
-    embedder.embed_term(term, column_attrs if refresh_dependent_attrs else [])
-
-    if refresh_dependent_attrs:
-        embed_params = get_embed_params()
-        sql_attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(term_id)
-        for sql_attr in sql_attrs:
-            attr_id = sql_attr.get("id")
-            if not attr_id:
-                continue
-            vdb.delete_by_id(attr_id)
-            embed_docs_into_vdb(
-                sql_attr_dal.fetch_sql_attribute_docs(attr_id),
-                embed_params,
-                vdb,
-                term.get("database_name"),
-            )
+                embed_docs_into_vdb(
+                    sql_attr_dal.fetch_sql_attribute_docs(attr_id),
+                    embed_params,
+                    vdb,
+                    term.get("database_name"),
+                )
+    finally:
+        embedder.close()

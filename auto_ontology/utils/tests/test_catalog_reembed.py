@@ -35,6 +35,7 @@ _COLUMNS = pd.DataFrame(
 
 def test_a_column_alone_is_refreshed_through_its_table() -> None:
     vdb = MagicMock()
+    vdb.__enter__.return_value = vdb
     with (
         patch(f"{_MODULE}.fetch_parent_table_id_for_column", return_value="t1"),
         patch(
@@ -52,3 +53,6 @@ def test_a_column_alone_is_refreshed_through_its_table() -> None:
     vdb.delete_by_id.assert_called_once_with("c2")
     (written,) = write.call_args.args[1:]
     assert [row["metadata"]["id"] for row in written] == ["c2"]
+    # Closed after the write: one store per table would otherwise keep its
+    # pool's connections open for the rest of a build (#553).
+    vdb.__exit__.assert_called_once()

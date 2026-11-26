@@ -265,18 +265,14 @@ def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:
 
     result: dict[str, Any] = {"skipped": False}
     if buffer.data_rows:
-        result["data_rows"] = _embed_and_ingest_rows(
-            buffer.data_rows,
-            get_data_vdb(),
-        )
+        with get_data_vdb() as vdb:
+            result["data_rows"] = _embed_and_ingest_rows(buffer.data_rows, vdb)
     else:
         result["data_rows"] = 0
 
     if buffer.semantic_rows:
-        result["semantic_rows"] = _embed_and_ingest_rows(
-            buffer.semantic_rows,
-            get_semantic_vdb(),
-        )
+        with get_semantic_vdb() as vdb:
+            result["semantic_rows"] = _embed_and_ingest_rows(buffer.semantic_rows, vdb)
     else:
         result["semantic_rows"] = 0
 
