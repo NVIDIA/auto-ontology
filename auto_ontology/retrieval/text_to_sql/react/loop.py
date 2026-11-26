@@ -34,9 +34,12 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
     _run_sql,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
-from auto_ontology.retrieval.text_to_sql.react import config, prompts
+from auto_ontology.retrieval.text_to_sql.react import config, fanout, prompts
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.conversation import conversation
+from auto_ontology.retrieval.text_to_sql.react.empty_result import (
+    empty_result_rejection,
+)
 from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.information import information
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
@@ -46,6 +49,7 @@ from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     check_query,
     connector_for,
+    join_fanouts,
     no_database_error,
     run_sql,
 )
@@ -103,6 +107,8 @@ def submit(
     A failed submission is an observation, not the end of the episode: the
     model sees why and can fix it. When the caller's budget can no longer pay
     for a query, the query is accepted after the schema checks without running.
+    The first 0-row result from a filtered query comes back with its filters
+    checked against the stored values (:mod:`.empty_result`).
     """
     sql = (sql or "").strip().rstrip(";")
     if not sql:
@@ -130,6 +136,9 @@ def submit(
     check = check_query(ctx, connector, sql)
     if check.problems:
         return "Not accepted. Fix these first:\n- " + "\n- ".join(check.problems), None
+    fanouts = join_fanouts(ctx, connector, check.statement)
+    if refusal := fanout.submit_refusal(ctx, fanouts, sql, resubmit):
+        return refusal, None
     if not _can_run_queries(ctx):
         # Running it would be refused, and a refusal is not a wrong query.
         unrun = QueryResponse(result=[], sliced=False)
@@ -149,7 +158,12 @@ def submit(
             f"Not accepted. The query only runs as rewritten here; {resubmit} "
             f"instead:\n{db_response.sql_correction}"
         ), None
-    submission = Submission(sql, (response or "").strip(), assumptions, db_response)
+    if rejection := empty_result_rejection(
+        ctx, connector, check.statement, db_response, resubmit
+    ):
+        return rejection, None
+    response = (response or "").strip()
+    submission = Submission(sql, response, assumptions, db_response)
     ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission
 
@@ -218,6 +232,8 @@ def _submit_draft(
     """Submit the latest drafted query when the budget ended the episode."""
     if not draft:
         return None
+    # The model gets no turn to resend a draft that is sent back.
+    ctx.last_answer_attempt = True
     observation, submission = submit(ctx, draft)
     trajectory.append({"role": "draft_submission", "content": observation})
     if submission is None:
@@ -441,6 +457,7 @@ def run_episode(
             else:
                 if calls >= budget:
                     answered_over_budget = True
+                ctx.last_answer_attempt = calls >= budget
                 made.add(key)
                 calls += 1
                 observation, answer = _dispatch(ctx, name, args, offered)

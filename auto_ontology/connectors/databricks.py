@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from contextlib import contextmanager
@@ -297,7 +298,7 @@ class DatabricksDatabase(SQLDatabase):
         return self._shared_connection
 
     @contextmanager
-    def _connect(self, timeout_s: int | None = None) -> Iterator[Connection]:
+    def _connect(self, timeout_s: float | None = None) -> Iterator[Connection]:
         # Inside reuse_connection, statements share that connection and must not close
         # it. A per-statement cap needs its own session, so it opens one regardless.
         if self._shared_connection is not None and timeout_s is None:
@@ -310,7 +311,9 @@ class DatabricksDatabase(SQLDatabase):
             # returns an error, so a runaway query cannot pin the caller.
             # It bounds execution only — connect and warehouse scheduling
             # happen outside it.
-            kwargs["session_configuration"] = {"statement_timeout": int(timeout_s)}
+            kwargs["session_configuration"] = {
+                "statement_timeout": max(1, math.ceil(timeout_s))
+            }
         connection = sql.connect(**kwargs)
         try:
             yield connection
@@ -426,7 +429,7 @@ class DatabricksDatabase(SQLDatabase):
         sql_text: str,
         parameters: Optional[list] = None,
         *,
-        timeout_s: int | None = None,
+        timeout_s: float | None = None,
     ) -> pd.DataFrame:
         """Run *sql_text* on its own connection, optionally capped at *timeout_s*.
 

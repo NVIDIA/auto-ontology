@@ -46,7 +46,8 @@ class SQLiteConnector:
         self._conn.executescript(script)
         self.executed: list[str] = []
 
-    def execute(self, sql: str) -> pd.DataFrame:
+    def execute(self, sql: str, timeout_s: float | None = None) -> pd.DataFrame:
+        del timeout_s
         self.executed.append(sql)
         return pd.read_sql_query(sql, self._conn)
 

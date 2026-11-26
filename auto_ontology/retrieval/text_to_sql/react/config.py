@@ -132,6 +132,26 @@ def submit_tool_enabled() -> bool:
     return value in _TRUTHY or not value
 
 
+def fanout_check_enabled() -> bool:
+    """Whether fanout profiling, refusals and advisory notes are enabled.
+
+    Off by default; ``TEXT_TO_SQL_REACT_FANOUT_CHECK=true`` turns all three on
+    so deployments can opt in or measure an evaluation arm.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_FANOUT_CHECK", "").strip().lower()
+    return value in _TRUTHY
+
+
+def empty_result_check_enabled() -> bool:
+    """Whether empty-result filter probes and their retry are enabled.
+
+    Off by default; ``TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK=true`` turns on
+    probing and may consume another model turn.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK", "").strip().lower()
+    return value in _TRUTHY
+
+
 def grep_enabled() -> bool:
     """Whether a ``run_sql`` result too long to show is kept for ``grep``.
 

@@ -1682,3 +1682,34 @@ def find_table_key_columns(
         dict.fromkeys(r["name"].lower() for r in unique_rows if r["name"])
     )
     return {"pk": pk_cols, "unique": unique_cols}
+
+
+def fetch_table_key_profile(table_id: str) -> dict[str, Any] | None:
+    """Declared key and profiled uniqueness of one catalog table, by id.
+
+    ``{"pk": [...], "columns": {name: (is_unique, distinct_ratio)}}``, names
+    lowercased, or ``None`` when no table has *table_id*. Unlike
+    :func:`find_table_key_columns` it keeps the columns that are *not* unique:
+    a ``distinct_ratio`` below 1.0 means profiling saw a value repeat, which
+    is what proves a join on that column can match several rows.
+    """
+    rows = store().query_read(
+        select(s.catalog_table.c.pk).where(s.catalog_table.c.id == table_id)
+    )
+    if not rows:
+        return None
+    column_rows = store().query_read(
+        select(
+            s.catalog_column.c.name,
+            s.catalog_column.c.is_unique,
+            s.catalog_column.c.distinct_ratio,
+        ).where(s.catalog_column.c.table_id == table_id)
+    )
+    return {
+        "pk": [str(c).lower() for c in (rows[0]["pk"] or [])],
+        "columns": {
+            r["name"].lower(): (r["is_unique"], r["distinct_ratio"])
+            for r in column_rows
+            if r["name"]
+        },
+    }

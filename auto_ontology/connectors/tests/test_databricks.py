@@ -873,6 +873,26 @@ def test_a_statement_timeout_still_gets_its_own_session(
     assert kwargs_seen[1]["session_configuration"] == {"statement_timeout": 30}
 
 
+def test_a_subsecond_statement_timeout_does_not_disable_the_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    kwargs_seen: list[dict[str, Any]] = []
+
+    class FakeConnection:
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "auto_ontology.connectors.databricks.sql.connect",
+        lambda **kwargs: kwargs_seen.append(kwargs) or FakeConnection(),
+    )
+
+    with DatabricksDatabase(_connection_string())._connect(timeout_s=0.4):
+        pass
+
+    assert kwargs_seen[0]["session_configuration"] == {"statement_timeout": 1}
+
+
 def test_qualify_prepends_the_bound_catalog() -> None:
     # Unity Catalog is three-level and ``database_name`` is the catalog here,
     # so the two-level base default would drop it.
