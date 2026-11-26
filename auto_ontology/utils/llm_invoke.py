@@ -47,6 +47,19 @@ class StrictLLMOutputModel(BaseModel):
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 
+# The lowest max_tokens any call gets. Callers size their caps (300 to 8,192) for
+# the answer, but a reasoning model such as Nemotron 3.5 Lightning spends most of
+# a reply thinking: a reply cut off at the cap never reaches its JSON, parses to
+# None, and at temperature 0 every retry is cut off the same way. 0 turns the
+# floor off. Caps above the floor are left alone.
+LLM_MAX_TOKENS_FLOOR = int(os.environ.get("LLM_MAX_TOKENS_FLOOR", "16000"))
+
+
+def max_tokens_with_floor(max_tokens: int) -> int:
+    """*max_tokens*, raised to ``LLM_MAX_TOKENS_FLOOR`` when that is higher."""
+    return max(max_tokens, LLM_MAX_TOKENS_FLOOR)
+
+
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
 # to live at this call site, defaulting to 6, to stop semantic compilation's
 # nested fan-out (tables x terms) from saturating the endpoint's per-worker
@@ -249,6 +262,9 @@ def _build_client(
         base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        # ChatNVIDIA's client passes its own timeout (default 60 s) on every
+        # request, which takes precedence over _TimeoutSession's default below.
+        timeout=LLM_INVOKE_TIMEOUT_S,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
@@ -275,7 +291,7 @@ def get_llm_client(
         api_key=_API_KEY,
         base_url=_BASE_URL,
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens_with_floor(max_tokens),
     )
 
 
@@ -304,7 +320,7 @@ def get_non_reasoning_llm_client(
         api_key=_NON_REASONING_API_KEY,
         base_url=_NON_REASONING_BASE_URL,
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens_with_floor(max_tokens),
     )
     _remember_non_reasoning(client)
     return client
@@ -477,6 +493,70 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     return {}
 
 
+def _innermost_client(llm: object) -> object:
+    """The chat model under any ``.bind()`` wrappers of *llm*."""
+    current = llm
+    for _ in range(_MAX_BINDING_DEPTH):
+        bound = getattr(current, "bound", None)
+        if bound is None or isinstance(bound, (str, bytes, int, float, bool)):
+            break
+        current = bound
+    return current
+
+
+def _structured_output_runnable(
+    llm: BaseChatModel, schema: Type[T], structured_kwargs: dict
+):
+    """*llm* set up to return *schema*.
+
+    For ``ChatNVIDIA`` and a Pydantic schema, sends only the OpenAI
+    ``response_format`` request, which is what ``ChatNVIDIA`` itself tries first
+    on NVIDIA's API catalog, parsed the same way. Its ``with_structured_output``
+    instead:
+
+    - lists the endpoint's models first (``GET {base_url}/models``), which fails
+      behind OpenAI-compatible proxies that don't serve that path, such as NeMo
+      Gym's model servers;
+    - tries up to three request formats and raises only the last error
+      (langchain-ai/langchain-nvidia#412). On NVIDIA's API catalog that error is
+      "[400] unknown field guided_json" whatever went wrong first, so a 429 or
+      a timeout isn't retried;
+    - everywhere else, sends both ``guided_json`` forms first. Some
+      OpenAI-compatible gateways accept them and ignore them, so each call pays
+      for two generations that fail to parse.
+    """
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+    if not (
+        isinstance(_innermost_client(llm), ChatNVIDIA)
+        and isinstance(schema, type)
+        and issubclass(schema, BaseModel)
+    ):
+        return llm.with_structured_output(schema, **structured_kwargs)
+
+    from langchain_core.exceptions import OutputParserException
+    from langchain_core.output_parsers import PydanticOutputParser
+
+    class _ForgivingPydanticOutputParser(PydanticOutputParser):
+        # As ChatNVIDIA's own parser: output that doesn't match the schema
+        # parses to None, which the caller retries.
+        def parse_result(self, result, *, partial: bool = False):
+            try:
+                return super().parse_result(result, partial=partial)
+            except OutputParserException:
+                return None
+
+    json_schema = schema.model_json_schema()
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": schema.__name__, "schema": json_schema, "strict": True},
+    }
+    return llm.bind(
+        response_format=response_format,
+        ls_structured_output_format={"schema": json_schema},
+    ) | _ForgivingPydanticOutputParser(pydantic_object=schema)
+
+
 def _invoke_text_once(llm: BaseChatModel, prompt: str) -> str:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
@@ -601,7 +681,7 @@ def safe_invoke_with_structured_output(
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            model_llm = llm.with_structured_output(schema, **structured_kwargs)
+            model_llm = _structured_output_runnable(llm, schema, structured_kwargs)
             with _inflight_guard():
                 result = model_llm.invoke(_system_messages_first(llm, current_messages))
         except _requests.exceptions.ReadTimeout:
@@ -670,19 +750,30 @@ def safe_invoke_with_structured_output(
             raise
 
         if result is None:
-            logger.warning(
-                "LLM returned None for %s on attempt %d/%d — retrying.",
-                schema_name,
-                attempt + 1,
-                RETRY_MAX_ATTEMPTS,
-            )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
+                logger.warning(
+                    "LLM returned None for %s on attempt %d/%d — retrying.",
+                    schema_name,
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                )
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 time.sleep(wait)
             continue
         if isinstance(result, schema):
             return result
         return schema.model_validate(result)
+
+    # Every attempt parsed to None. Callers fall back to an empty result, so say
+    # so here: otherwise a lost result leaves no trace above warning level.
+    logger.error(
+        "LLM returned None for %s on all %d attempts; giving up. A reply cut off "
+        "at max_tokens (finish_reason=length) or one that doesn't match the schema "
+        "parses to None.",
+        schema_name,
+        RETRY_MAX_ATTEMPTS,
+    )
+    return None
 
 
 def invoke_with_structured_output(

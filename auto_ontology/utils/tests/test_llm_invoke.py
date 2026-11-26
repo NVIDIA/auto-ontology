@@ -497,3 +497,202 @@ def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -
     monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
 
     assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
+
+
+def test_chatnvidia_client_gets_the_configured_timeout(monkeypatch: Any) -> None:
+    # ChatNVIDIA sends its own timeout (default 60 s) with every request, so
+    # LLM_INVOKE_TIMEOUT_S only takes effect if it is passed to the client.
+    monkeypatch.setattr(llm_invoke, "LLM_INVOKE_TIMEOUT_S", 321)
+
+    client = llm_invoke._build_client(
+        model="nvidia/some-model",
+        api_key="nvapi-test",
+        base_url="http://localhost:9/v1",
+        temperature=0.0,
+        max_tokens=16,
+    )
+
+    assert client._client.timeout == 321
+
+
+def _capture_build_client(monkeypatch: Any) -> list[int]:
+    seen: list[int] = []
+
+    def build(**kwargs: Any) -> object:
+        seen.append(kwargs["max_tokens"])
+        return object()
+
+    monkeypatch.setattr(llm_invoke, "_API_KEY", "nvapi-test")
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "nvapi-test")
+    monkeypatch.setattr(llm_invoke, "_build_client", build)
+    return seen
+
+
+def test_client_getters_raise_low_caps_to_the_floor(monkeypatch: Any) -> None:
+    seen = _capture_build_client(monkeypatch)
+    monkeypatch.setattr(llm_invoke, "LLM_MAX_TOKENS_FLOOR", 16000)
+
+    llm_invoke.get_llm_client(max_tokens=300)
+    llm_invoke.get_non_reasoning_llm_client(max_tokens=4096)
+    llm_invoke.get_llm_client(max_tokens=20000)
+
+    assert seen == [16000, 16000, 20000]
+
+
+def test_a_zero_floor_leaves_caps_alone(monkeypatch: Any) -> None:
+    seen = _capture_build_client(monkeypatch)
+    monkeypatch.setattr(llm_invoke, "LLM_MAX_TOKENS_FLOOR", 0)
+
+    llm_invoke.get_llm_client(max_tokens=300)
+    llm_invoke.get_non_reasoning_llm_client()
+
+    assert seen == [300, 8192]
+
+
+def test_bound_caps_use_the_same_floor(monkeypatch: Any) -> None:
+    monkeypatch.setattr(llm_invoke, "LLM_MAX_TOKENS_FLOOR", 16000)
+
+    assert llm_invoke.max_tokens_with_floor(1024) == 16000
+    assert llm_invoke.max_tokens_with_floor(32000) == 32000
+
+
+class _Keys(BaseModel):
+    primary_key: list[str]
+
+
+class _FakeResponse:
+    def __init__(self, content: str) -> None:
+        self._body = {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    def json(self) -> dict:
+        return self._body
+
+
+def _nvidia_client_with_fake_transport(
+    monkeypatch: Any, replies: list[Any]
+) -> tuple[Any, list[dict]]:
+    """A real ChatNVIDIA whose HTTP layer returns *replies* in order and records payloads.
+
+    Listing the endpoint's models fails the test: proxies such as NeMo Gym's model
+    servers don't serve that path.
+    """
+    client = llm_invoke._build_client(
+        model="nvidia/some-model",
+        api_key="nvapi-test",
+        base_url="http://localhost:9/v1",
+        temperature=0.0,
+        max_tokens=16,
+    )
+    payloads: list[dict] = []
+
+    def get_req(_self: Any, payload: dict = {}, extra_headers: dict = {}) -> Any:  # noqa: B006
+        payloads.append(payload)
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return _FakeResponse(reply)
+
+    def no_listing(_self: Any) -> Any:
+        raise AssertionError("listed the endpoint's models")
+
+    client_type = type(client._client)
+    monkeypatch.setattr(client_type, "get_req", get_req)
+    monkeypatch.setattr(client_type, "available_models", property(no_listing))
+    return client, payloads
+
+
+@pytest.mark.parametrize("bind", [False, True])
+def test_chatnvidia_structured_call_sends_one_response_format_request(
+    monkeypatch: Any, bind: bool
+) -> None:
+    client, payloads = _nvidia_client_with_fake_transport(
+        monkeypatch, ['{"primary_key": ["order_id"]}']
+    )
+    llm = client.bind(max_tokens=32) if bind else client
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        llm, [HumanMessage(content="keys?")], _Keys
+    )
+
+    assert result == _Keys(primary_key=["order_id"])
+    assert len(payloads) == 1
+    assert payloads[0]["response_format"]["type"] == "json_schema"
+    assert payloads[0]["response_format"]["json_schema"]["name"] == "_Keys"
+    assert "guided_json" not in payloads[0]
+    assert "nvext" not in payloads[0]
+
+
+def test_a_rate_limit_on_a_chatnvidia_structured_call_is_retried(
+    monkeypatch: Any,
+) -> None:
+    client, payloads = _nvidia_client_with_fake_transport(
+        monkeypatch,
+        [Exception("[429] Too Many Requests"), '{"primary_key": ["id"]}'],
+    )
+    monkeypatch.setattr(llm_invoke.time, "sleep", lambda _seconds: None)
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        client, [HumanMessage(content="keys?")], _Keys
+    )
+
+    assert result == _Keys(primary_key=["id"])
+    assert len(payloads) == 2
+
+
+def test_other_clients_still_use_with_structured_output() -> None:
+    calls: list[tuple[Any, dict]] = []
+
+    class _Other:
+        def with_structured_output(self, schema: Any, **kwargs: Any) -> str:
+            calls.append((schema, kwargs))
+            return "structured"
+
+    assert (
+        llm_invoke._structured_output_runnable(_Other(), _Keys, {"method": "x"})
+        == "structured"
+    )
+    assert calls == [(_Keys, {"method": "x"})]
+
+
+class _NoneSchema(BaseModel):
+    answer: str
+
+
+def test_all_none_attempts_are_logged_as_an_error(
+    monkeypatch: Any, caplog: Any
+) -> None:
+    class _AlwaysNone:
+        model_name = "nvidia/some-model"
+
+        def with_structured_output(self, _schema: Any, **_kwargs: Any) -> Any:
+            class _Runnable:
+                def invoke(self, _messages: Any) -> None:
+                    return None
+
+            return _Runnable()
+
+    monkeypatch.setattr(llm_invoke.time, "sleep", lambda _seconds: None)
+    caplog.set_level("WARNING", logger=llm_invoke.logger.name)
+
+    result = llm_invoke.safe_invoke_with_structured_output(
+        _AlwaysNone(), [HumanMessage(content="q")], _NoneSchema
+    )
+
+    assert result is None
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(warnings) == llm_invoke.RETRY_MAX_ATTEMPTS - 1
+    assert all("retrying" in r.getMessage() for r in warnings)
+    assert len(errors) == 1
+    assert "_NoneSchema" in errors[0].getMessage()
