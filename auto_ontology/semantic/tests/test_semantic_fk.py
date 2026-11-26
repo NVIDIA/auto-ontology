@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
+from auto_ontology.connectors.sqlite import SQLiteDatabase
 from auto_ontology.semantic import semantic_fk
 from auto_ontology.semantic.embed import _build_rows
 from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
@@ -161,6 +165,65 @@ def test_self_reference_needs_the_llms_pick_to_be_confirmed() -> None:
         )
         == "own-key"
     )
+
+
+@pytest.mark.parametrize("matched_parents", [10, 9], ids=["confirmed", "rejected"])
+def test_department_self_reference_outside_stored_key_range(
+    tmp_path: Path, matched_parents: int
+) -> None:
+    # The lowest 20 keys are children. Parent codes are all outside that sample,
+    # and repeating an orphan must not count against distinct-value containment.
+    path = tmp_path / "hierarchy.sqlite"
+    lowest = list(range(10001, 10021))
+    parents = list(range(50001, 50012))
+    child_parents = parents + [parents[-1]] * (len(lowest) - len(parents))
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(
+            "CREATE TABLE dept (dept_cd INTEGER PRIMARY KEY, parent_dept_cd INTEGER)"
+        )
+        db.executemany("INSERT INTO dept VALUES (?, ?)", zip(lowest, child_parents))
+        db.executemany(
+            "INSERT INTO dept VALUES (?, NULL)",
+            [(code,) for code in parents[:matched_parents]],
+        )
+
+    column = _fk_column(parents, name="parent_dept_cd")
+    column.update(table_name="dept", schema_name="main")
+    key = _key_row(
+        "dept-key", "table-1", lowest, table_name="dept", column_name="dept_cd"
+    )
+    key["schema_name"] = "main"
+    hit = _hit(
+        "dept-key",
+        "table-1",
+        table_name="dept",
+        schema_name="main",
+        source_column="dept_cd",
+    )
+    merge = MagicMock(return_value=True)
+    with (
+        SQLiteDatabase(str(path)) as connector,
+        patch.multiple(
+            semantic_fk,
+            find_unlinked_fk_columns=MagicMock(return_value=[column]),
+            _build_retriever=MagicMock(return_value=_retriever(hit)),
+            _llm_pick_hit=MagicMock(return_value="dept-key"),
+            is_semantic_fk_db_query_prevented=MagicMock(return_value=False),
+            _resolve_connector=MagicMock(return_value=connector),
+            fetch_value_key_candidates=MagicMock(return_value=[key]),
+            fetch_table_families=MagicMock(return_value={}),
+            merge_semantic_fk=merge,
+        ),
+    ):
+        created = semantic_fk._resolve_semantic_fks("hierarchy")
+
+    # Both cases return rows from a join, but only 10/11 meets 90% containment.
+    if matched_parents == 10:
+        assert created == 1
+        merge.assert_called_once_with("source-column", "dept-key")
+    else:
+        assert created == 0
+        merge.assert_not_called()
 
 
 @patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="picked")
