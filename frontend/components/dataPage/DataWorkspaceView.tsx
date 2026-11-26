@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BackPanelLayout } from '@/common/BackPanelLayout';
+import { SidePanelLayout } from '@/common/SidePanelLayout';
 import type { NodePatch } from '@/api/types';
 import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 import { EmptyState } from '@/common/EmptyState';
@@ -429,7 +429,7 @@ export function DataWorkspaceView() {
 	if (loading && databases.length === 0) {
 		return (
 			<div className="flex h-full flex-1" role="status" aria-label="Loading databases">
-				<aside className="w-72 border-r border-zinc-200 p-4 dark:border-zinc-800">
+				<aside className="w-[248px] shrink-0 border-r border-[#e9eaea] bg-white px-5 pt-12 dark:border-[#2e2e33] dark:bg-[#18181b]">
 					<SkeletonBlock className="mb-5 h-6 w-24" />
 					<SkeletonRows rows={8} />
 				</aside>
@@ -452,10 +452,12 @@ export function DataWorkspaceView() {
 	}
 
 	return (
-		<BackPanelLayout
+		<SidePanelLayout
 			panelAriaLabel="Datasource tree"
 			expandAriaLabel="Expand explorer"
 			collapseAriaLabel="Collapse explorer"
+			expandedWidthClass="w-[248px]"
+			resizable
 			panel={
 				<DataTree
 					key="data-catalog-tree"
@@ -493,6 +495,6 @@ export function DataWorkspaceView() {
 				variant={ToastVariant.Error}
 				onClose={() => setCertError(null)}
 			/>
-		</BackPanelLayout>
+		</SidePanelLayout>
 	);
 }

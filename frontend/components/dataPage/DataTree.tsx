@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
@@ -16,7 +16,6 @@ import { getTableType } from '@/components/dataPage/get-table-type';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
 import { Text } from '@/common/Text';
-import { TextVariant } from '@/enums/text';
 import {
 	catalogStructureFingerprint,
 	mergeColumnsIntoTable,
@@ -143,12 +142,86 @@ export type DataTreeProps = {
 	onTreeDataUpdated?: (databases: Database[]) => void;
 };
 
-function rowClassName(selected: boolean) {
-	return `flex min-h-9 cursor-pointer items-center gap-1 rounded-lg text-left text-sm no-underline transition-colors ${
-		selected
-			? 'bg-[#76b900]/15 font-medium text-heading shadow-sm ring-1 ring-[#76b900]/30 dark:text-zinc-100'
-			: 'text-heading hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70'
-	}`;
+// Each tree level steps 16px in from its parent, as the design system draws it.
+const INDENT_PX = 16;
+
+// A row is the expand arrow plus a pill holding the node's icon and name. The
+// two are separate targets with their own hover: the arrow only expands and
+// collapses, the pill opens the node. The pill carries the state: default,
+// hover (light green) and selected (deeper green), with the icon and the name
+// turning green together.
+const ROW_CLASS = 'flex h-8 w-full min-w-0 items-center gap-1 py-0.5 text-sm leading-5';
+const PILL_BASE =
+	'flex min-w-0 cursor-pointer items-center rounded-lg text-left no-underline focus-visible:outline-2 focus-visible:outline-[#76b900]';
+const PILL_DEFAULT =
+	'text-[#2b3036] hover:bg-[#f1f8e5] hover:text-[#76b900] dark:text-[#f0f0f3] dark:hover:bg-[rgba(138,210,26,0.12)] dark:hover:text-[#8ad21a]';
+const PILL_SELECTED =
+	'bg-[#ddedbf] text-[#76b900] dark:bg-[rgba(138,210,26,0.28)] dark:text-[#8ad21a]';
+const ARROW_CLASS =
+	'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-[#2b3036] hover:bg-[#f1f8e5] hover:text-[#76b900] focus-visible:outline-2 focus-visible:outline-[#76b900] dark:text-[#f0f0f3] dark:hover:bg-[rgba(138,210,26,0.12)] dark:hover:text-[#8ad21a]';
+
+function pillClassName(selected: boolean) {
+	return `${PILL_BASE} ${selected ? PILL_SELECTED : PILL_DEFAULT}`;
+}
+
+// The design library's icons, painted through a mask in the text color so they
+// follow the pill's state. Spelled out in full so Tailwind finds each class.
+const MASK_BASE = 'block size-6 shrink-0 bg-current [mask-position:center] [mask-repeat:no-repeat]';
+const TREE_ICON_MASK: Partial<Record<IconName, string>> = {
+	[IconName.Database]: '[mask-image:url(/side-panel/database.svg)]',
+	[IconName.Schema]: '[mask-image:url(/side-panel/schema.svg)]',
+	[IconName.Table]: '[mask-image:url(/side-panel/table.svg)]',
+	[IconName.Column]: '[mask-image:url(/side-panel/column.svg)]',
+};
+
+function TreeIcon({ icon, title }: { icon: IconName; title?: string }) {
+	const mask = TREE_ICON_MASK[icon];
+	// Views and materialized views have no design library icon yet, so they
+	// keep the app's own, centered in the same 24px slot.
+	return mask ? (
+		<span className={`${MASK_BASE} ${mask}`} title={title} aria-hidden />
+	) : (
+		<span
+			className="flex size-6 shrink-0 items-center justify-center"
+			title={title}
+			aria-hidden
+		>
+			<Icon name={icon} className="size-4" />
+		</span>
+	);
+}
+
+/** Placeholder for a branch whose children are still being read. */
+function TreeSkeletonRow({ depth }: { depth: number }) {
+	return (
+		<div
+			role="status"
+			aria-label="Loading"
+			className="flex h-8 items-center gap-1 py-0.5"
+			style={{ paddingLeft: depth * INDENT_PX }}
+		>
+			<span className="size-6 shrink-0" aria-hidden />
+			<span className="flex w-44 min-w-0 animate-pulse items-center gap-1 py-1 pr-1 pl-px">
+				{/* eslint-disable @next/next/no-img-element -- static design placeholder, one file per color scheme */}
+				<img
+					src="/side-panel/skeleton-dot-light.svg"
+					alt=""
+					width={22}
+					height={22}
+					className="block size-[22px] shrink-0 dark:hidden"
+				/>
+				<img
+					src="/side-panel/skeleton-dot-dark.svg"
+					alt=""
+					width={22}
+					height={22}
+					className="hidden size-[22px] shrink-0 dark:block"
+				/>
+				{/* eslint-enable @next/next/no-img-element */}
+				<span className="h-4 min-w-0 flex-1 rounded-xl bg-[#e9eaea] dark:bg-[#2e2e33]" />
+			</span>
+		</div>
+	);
 }
 
 function Row({
@@ -162,14 +235,12 @@ function Row({
 	title,
 	selected,
 	href,
-	onClick,
-	onActivateBranch,
-	onChevronFocusSync,
+	onActivate,
 }: {
 	depth: number;
 	/** Only meaningful when `hasChildren` — leaf rows can omit it. */
 	open?: boolean;
-	/** Only called when `hasChildren` — leaf rows can omit it. */
+	/** Expands or collapses the branch; called by the arrow only. */
 	onToggle?: () => void;
 	hasChildren: boolean;
 	loading?: boolean;
@@ -177,79 +248,65 @@ function Row({
 	icon?: IconName;
 	title?: string;
 	selected: boolean;
+	/** Leaf rows: where the pill links to. */
 	href?: string;
-	onClick?: () => void;
-	/** Branch rows: toggle expand/collapse and move `focus` onto this node. */
-	onActivateBranch?: () => void;
-	/** After chevron toggles expand/collapse, sync `focus` to this node (same as row select). */
-	onChevronFocusSync?: () => void;
+	/** Branch rows: opens the node when its pill is clicked. */
+	onActivate?: () => void;
 }) {
-	const pad = 12 + depth * 12;
-	const style = { paddingLeft: pad, paddingRight: 12 };
+	// The indent is a runtime value per depth, so it cannot be a class.
+	const style = { paddingLeft: depth * INDENT_PX };
 
-	const nodeIconEl = icon ? (
-		<span className="inline-flex shrink-0" title={title} aria-hidden>
-			<Icon name={icon} className="h-4 w-4 text-secondary dark:text-zinc-400" />
-		</span>
-	) : null;
-
-	const chevron = (
-		<span
-			role="button"
-			tabIndex={0}
-			className="inline-flex w-4 shrink-0 cursor-pointer items-center justify-center rounded text-[10px] text-secondary hover:bg-zinc-200/80 dark:hover:bg-zinc-700/80"
-			onClick={(e) => {
-				e.stopPropagation();
-				if (!hasChildren) return;
-				onToggle?.();
-				onChevronFocusSync?.();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					e.stopPropagation();
-					if (!hasChildren) return;
-					onToggle?.();
-					onChevronFocusSync?.();
-				}
-			}}
+	// Leaves keep an empty arrow slot so their icons line up under a sibling
+	// branch's icon, as in the design.
+	const arrow = hasChildren ? (
+		<button
+			type="button"
+			aria-expanded={open}
+			aria-label={open ? `Collapse ${name}` : `Expand ${name}`}
+			aria-busy={loading || undefined}
+			className={ARROW_CLASS}
+			onClick={() => onToggle?.()}
 		>
-			{loading ? '…' : hasChildren ? (open ? '▼' : '▶') : '·'}
-		</span>
+			<span
+				aria-hidden
+				className={`${MASK_BASE} ${open ? '[mask-image:url(/side-panel/arrow-down.svg)]' : '[mask-image:url(/side-panel/arrow-right.svg)]'}`}
+			/>
+		</button>
+	) : (
+		<span className="size-6 shrink-0" aria-hidden />
 	);
 
-	const nameEl = <Text text={name} variant={TextVariant.Strong} fill />;
-
-	const inner = (
+	// A pill with an icon hugs it on the left; one without pads evenly.
+	const pillClass = `${pillClassName(selected)} ${icon ? 'gap-1 py-1 pr-2 pl-1' : 'px-2 py-1.5'}`;
+	const pillContent = (
 		<>
-			{chevron}
-			{nodeIconEl}
-			{nameEl}
+			{icon ? <TreeIcon icon={icon} title={title} /> : null}
+			<Text text={name} />
 		</>
 	);
 
-	if (href && !hasChildren) {
-		return (
-			<Link href={href} prefetch={false} className={rowClassName(selected)} style={style}>
-				{inner}
-			</Link>
-		);
-	}
-
 	return (
-		<div
-			className={rowClassName(selected)}
-			style={style}
-			onClick={() => {
-				if (onActivateBranch) {
-					onActivateBranch();
-				} else if (hasChildren) {
-					onToggle?.();
-				}
-				onClick?.();
-			}}
-		>
-			{inner}
+		<div className={ROW_CLASS} style={style}>
+			{arrow}
+			{href && !hasChildren ? (
+				<Link
+					href={href}
+					prefetch={false}
+					aria-current={selected ? 'page' : undefined}
+					className={pillClass}
+				>
+					{pillContent}
+				</Link>
+			) : (
+				<button
+					type="button"
+					aria-current={selected ? 'page' : undefined}
+					className={pillClass}
+					onClick={() => onActivate?.()}
+				>
+					{pillContent}
+				</button>
+			)}
 		</div>
 	);
 }
@@ -308,8 +365,10 @@ function TableBlock({
 	const syncTableFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(tableFocusPath, pathBase), { scroll: false });
 	}, [router, pathBase, tableFocusPath]);
+	// Opening a node from its label also reveals its children; only the arrow
+	// collapses a branch.
 	const activateTable = useCallback(() => {
-		setOpen((o) => !o);
+		setOpen(true);
 		syncTableFocus();
 	}, [setOpen, syncTableFocus]);
 
@@ -338,9 +397,9 @@ function TableBlock({
 				title={tableInfo.title}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
-				onActivateBranch={hasChildren ? activateTable : undefined}
-				onChevronFocusSync={hasChildren ? syncTableFocus : undefined}
+				onActivate={activateTable}
 			/>
+			{loading ? <TreeSkeletonRow depth={depth + 1} /> : null}
 			{open && table.columns.length > 0
 				? table.columns.map((col) => (
 						<ColumnBlock
@@ -384,8 +443,10 @@ function SchemaBlock({
 	const syncSchemaFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(schemaFocusPath, pathBase), { scroll: false });
 	}, [router, pathBase, schemaFocusPath]);
+	// Opening a node from its label also reveals its children; only the arrow
+	// collapses a branch.
 	const activateSchemaBranch = useCallback(() => {
-		setOpen((o) => !o);
+		setOpen(true);
 		syncSchemaFocus();
 	}, [setOpen, syncSchemaFocus]);
 
@@ -420,9 +481,9 @@ function SchemaBlock({
 				title={catalogNodeInfo[DataModels.SCHEMA].title}
 				selected={selectedId === schemaFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(schemaFocusPath, pathBase)}
-				onActivateBranch={hasChildren ? activateSchemaBranch : undefined}
-				onChevronFocusSync={hasChildren ? syncSchemaFocus : undefined}
+				onActivate={activateSchemaBranch}
 			/>
+			{loadingTables ? <TreeSkeletonRow depth={depth + 1} /> : null}
 			{open && hasChildren
 				? schema.tables.map((t) => {
 						const tableFocusPath = `${schemaFocusPath}|${t.id}`;
@@ -445,6 +506,7 @@ function SchemaBlock({
 }
 
 function DatabaseBlock({
+	depth,
 	database,
 	selectedId,
 	pathBase,
@@ -452,6 +514,7 @@ function DatabaseBlock({
 	onLoadSchemas,
 	onLoadTables,
 }: {
+	depth: number;
 	database: Database;
 	selectedId?: string;
 	pathBase: string;
@@ -467,8 +530,10 @@ function DatabaseBlock({
 	const syncDatabaseFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(database.id, pathBase), { scroll: false });
 	}, [router, pathBase, database.id]);
+	// Opening a node from its label also reveals its children; only the arrow
+	// collapses a branch.
 	const activateDatabaseBranch = useCallback(() => {
-		setOpen((o) => !o);
+		setOpen(true);
 		syncDatabaseFocus();
 	}, [setOpen, syncDatabaseFocus]);
 
@@ -493,7 +558,7 @@ function DatabaseBlock({
 	return (
 		<div className="flex flex-col gap-y-1">
 			<Row
-				depth={0}
+				depth={depth}
 				open={open}
 				onToggle={() => setOpen((o) => !o)}
 				hasChildren={hasChildren}
@@ -502,15 +567,14 @@ function DatabaseBlock({
 				icon={catalogNodeInfo[DataModels.DB].icon}
 				title={catalogNodeInfo[DataModels.DB].title}
 				selected={selectedId === database.id}
-				href={undefined}
-				onActivateBranch={activateDatabaseBranch}
-				onChevronFocusSync={hasChildren ? syncDatabaseFocus : undefined}
+				onActivate={activateDatabaseBranch}
 			/>
+			{loadingSchemas ? <TreeSkeletonRow depth={depth + 1} /> : null}
 			{open && hasChildren
 				? database.schemas.map((s) => (
 						<SchemaBlock
 							key={s.id}
-							depth={1}
+							depth={depth + 1}
 							databaseId={database.id}
 							schema={s}
 							selectedId={selectedId}
@@ -520,6 +584,49 @@ function DatabaseBlock({
 						/>
 					))
 				: null}
+		</div>
+	);
+}
+
+// Open-state key for the root; no catalog id can collide with it.
+const ALL_DATA_NODE_ID = '__all_data__';
+
+/**
+ * The tree's root: the page that lists every data connector, so each database
+ * hangs one level under it. Its label opens that page; its arrow folds the
+ * whole catalog away.
+ */
+function AllDataBlock({
+	selectedId,
+	pathBase,
+	hasDatabases,
+	children,
+}: {
+	selectedId?: string;
+	pathBase: string;
+	hasDatabases: boolean;
+	children: ReactNode;
+}) {
+	const router = useRouter();
+	// Every catalog node is below the root, so any focus keeps it open.
+	const [open, setOpen] = useOpenBranch(ALL_DATA_NODE_ID, selectedId != null, selectedId, true);
+	const activate = useCallback(() => {
+		setOpen(true);
+		router.replace(pathBase, { scroll: false });
+	}, [router, pathBase, setOpen]);
+
+	return (
+		<div className="flex flex-col gap-y-1">
+			<Row
+				depth={0}
+				open={open}
+				onToggle={() => setOpen((o) => !o)}
+				hasChildren={hasDatabases}
+				name="All Data"
+				selected={selectedId == null}
+				onActivate={activate}
+			/>
+			{open ? children : null}
 		</div>
 	);
 }
@@ -585,21 +692,30 @@ export function DataTree({
 	);
 
 	return (
+		// The 16px under the panel header is padding inside the scroll area, so
+		// rows scroll up to the header instead of being cut off above it.
 		<nav
-			className={`flex min-h-0 flex-1 flex-col gap-y-1 overflow-y-auto px-3 py-2 sm:px-4 ${className}`}
+			className={`flex min-h-0 flex-1 flex-col gap-y-1 overflow-y-auto px-5 pt-4 pb-4 ${className}`}
 			aria-label="Datasource tree"
 		>
-			{databases.map((database) => (
-				<DatabaseBlock
-					key={database.id}
-					database={database}
-					selectedId={selectedId}
-					pathBase={pathBase}
-					onLoadColumns={loadTableColumns}
-					onLoadSchemas={loadSchemasForDatabase}
-					onLoadTables={loadTablesForSchema}
-				/>
-			))}
+			<AllDataBlock
+				selectedId={selectedId}
+				pathBase={pathBase}
+				hasDatabases={databases.length > 0}
+			>
+				{databases.map((database) => (
+					<DatabaseBlock
+						key={database.id}
+						depth={1}
+						database={database}
+						selectedId={selectedId}
+						pathBase={pathBase}
+						onLoadColumns={loadTableColumns}
+						onLoadSchemas={loadSchemasForDatabase}
+						onLoadTables={loadTablesForSchema}
+					/>
+				))}
+			</AllDataBlock>
 		</nav>
 	);
 }

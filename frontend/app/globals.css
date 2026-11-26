@@ -20,6 +20,12 @@
 	--color-secondary: #85878a;
 	--color-disabled: #b3b4b7;
 
+	/*
+	 * The design system's typeface (SF Pro). It cannot be bundled, so it is the
+	 * system font: SF Pro on Apple devices, the platform UI font elsewhere.
+	 */
+	--font-sf: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', system-ui, sans-serif;
+
 	--animate-progress-indeterminate: progress-indeterminate 1.4s ease-in-out infinite;
 }
 
