@@ -252,7 +252,18 @@ def _delete_semantic_vectors(database_name: str | None) -> int:
     if database_name is None:
         semantic_deleted = semantic_vdb.delete_all()
     else:
-        semantic_deleted = len(semantic_vdb.delete_by_database(database_name))
+        # Spare the vectors of rows the scoped delete left standing: a Term
+        # shared with another database survives, and dropping its only vector
+        # here left it unsearchable, since recompiling skips a table that
+        # still has its Term (#499).
+        surviving = _surviving_semantic_ids(
+            semantic_vdb.metadata_ids_for_database(database_name)
+        )
+        semantic_deleted = len(
+            semantic_vdb.delete_by_database_keeping(database_name, surviving)
+            if surviving
+            else semantic_vdb.delete_by_database(database_name)
+        )
 
     logger.info(
         "delete_semantic_layer: removed %d semantic pgvector rows for database %s",
@@ -260,6 +271,31 @@ def _delete_semantic_vectors(database_name: str | None) -> int:
         database_name or "<all>",
     )
     return semantic_deleted
+
+
+#: Semantic tables whose rows the semantic collection embeds.
+_EMBEDDED_SEMANTIC_TABLES = (
+    s.term,
+    s.column_attribute,
+    s.sql_attribute,
+    s.custom_analysis,
+    s.pql_analysis,
+)
+
+
+def _surviving_semantic_ids(candidate_ids: list[str]) -> set[str]:
+    """Which of *candidate_ids* still have a semantic row."""
+    surviving: set[str] = set()
+    for start in range(0, len(candidate_ids), 1000):
+        chunk = candidate_ids[start : start + 1000]
+        for table in _EMBEDDED_SEMANTIC_TABLES:
+            surviving.update(
+                row["id"]
+                for row in store().query_read(
+                    select(table.c.id).where(table.c.id.in_(chunk))
+                )
+            )
+    return surviving
 
 
 def _delete_orphaned_statements(candidate_ids: list[str] | None = None) -> int:

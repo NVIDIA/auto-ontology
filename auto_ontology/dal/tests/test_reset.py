@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable, Collection
 from contextlib import contextmanager
 
 import pytest
@@ -80,6 +81,19 @@ class _StubVdb:
     def __init__(self) -> None:
         self.deleted_all = 0
         self.deleted_databases: list[str] = []
+        # Metadata ids the stub holds vectors for; each test sets its own.
+        self.vector_ids: list[str] = []
+        self.kept: list[set[str]] = []
+
+    def metadata_ids_for_database(self, database_name: str) -> list[str]:
+        return list(self.vector_ids)
+
+    def delete_by_database_keeping(
+        self, database_name: str, keep_ids: Collection[str]
+    ) -> list[str]:
+        self.deleted_databases.append(database_name)
+        self.kept.append(set(keep_ids))
+        return [i for i in self.vector_ids if i not in keep_ids]
 
     def delete_all(self) -> int:
         self.deleted_all += 1
@@ -243,6 +257,38 @@ def test_a_term_shared_with_another_database_survives(world) -> None:
     assert _exists(s.term, shared), "a shared Term must not be deleted"
     assert not _exists(s.term, own)
     assert _exists(s.catalog_column, warehouse.column)
+
+
+def test_a_shared_terms_vector_survives_the_scoped_reset(
+    world: tuple[str, Callable[[str], Database]], stub_vdbs: dict[str, _StubVdb]
+) -> None:
+    """#499: the shared Term survives, so its vector must too. Deleting every
+    vector the database tagged left the Term unsearchable, and recompiling
+    never restored it because its table still had a Term."""
+    _, make = world
+    shop, warehouse = make("shop"), make("warehouse")
+    shared = shop.term("Product")
+    _link(s.table__term, table_id=warehouse.table, term_id=shared)
+    own = shop.term("Order")
+    stub_vdbs["semantic"].vector_ids = [shared, own]
+
+    r.delete_semantic_layer(shop.name)
+
+    assert stub_vdbs["semantic"].kept == [{shared}]
+
+
+def test_with_nothing_shared_every_vector_of_the_database_goes(
+    world: tuple[str, Callable[[str], Database]], stub_vdbs: dict[str, _StubVdb]
+) -> None:
+    _, make = world
+    shop = make("shop")
+    own = shop.term("Order")
+    stub_vdbs["semantic"].vector_ids = [own]
+
+    r.delete_semantic_layer(shop.name)
+
+    assert stub_vdbs["semantic"].kept == []
+    assert stub_vdbs["semantic"].deleted_databases == [shop.name]
 
 
 def test_an_analysis_spanning_two_databases_survives(world) -> None:

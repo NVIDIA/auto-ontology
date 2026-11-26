@@ -18,7 +18,7 @@ import os
 import threading
 import time
 import uuid
-from typing import Any, Iterable, Optional
+from typing import Any, Collection, Iterable, Optional
 
 import psycopg
 from psycopg import sql
@@ -457,6 +457,55 @@ class PostgresVDB:
 
         store.delete(filter=filter)
         return ids
+
+    def metadata_ids_for_database(self, database_name: str) -> list[str]:
+        """The metadata ``id`` of every row tagged with *database_name*.
+
+        These are the ids of the rows the vectors embed (a Term's, an
+        attribute's), not the store's own ``langchain_id``.
+        """
+        if not self._table_exists():
+            return []
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        "SELECT DISTINCT langchain_metadata ->> 'id' FROM {table} "
+                        "WHERE {column} = %s"
+                    ).format(
+                        table=sql.Identifier(self.schema_name, self.collection_name),
+                        column=sql.Identifier(_DATABASE_METADATA_COLUMN),
+                    ),
+                    (database_name,),
+                )
+                return [row[0] for row in cur.fetchall() if row[0] is not None]
+
+    def delete_by_database_keeping(
+        self, database_name: str, keep_ids: Collection[str]
+    ) -> list[str]:
+        """Delete *database_name*'s rows except those embedding a kept id.
+
+        :meth:`delete_by_database` takes every row the database tagged, which is
+        wrong for a scoped semantic reset: a Term shared with another database
+        survives that reset, and its vector must survive with it. Returns the
+        metadata ids whose rows were deleted.
+        """
+        if not self._table_exists():
+            return []
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        "DELETE FROM {table} WHERE {column} = %s "
+                        "AND NOT (COALESCE(langchain_metadata ->> 'id', '') = ANY(%s)) "
+                        "RETURNING langchain_metadata ->> 'id'"
+                    ).format(
+                        table=sql.Identifier(self.schema_name, self.collection_name),
+                        column=sql.Identifier(_DATABASE_METADATA_COLUMN),
+                    ),
+                    (database_name, list(keep_ids)),
+                )
+                return [row[0] for row in cur.fetchall()]
 
     def delete_all(self) -> int:
         """Delete every row in the collection.
