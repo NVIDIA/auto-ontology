@@ -10,6 +10,50 @@ import pytest
 from auto_ontology.connectors.connection_string_factory import build_connection_string
 from auto_ontology.connectors.snowflake import _parse_connection_string
 
+
+@pytest.mark.parametrize(
+    "connector, default_port",
+    [
+        ("postgres", 5432),
+        ("postgresql", 5432),
+        ("mysql", 3306),
+        ("kyuubi", 10000),
+        ("trino", 8080),
+        ("heavydb", 6274),
+        ("clickhouse", 8123),
+    ],
+)
+@pytest.mark.parametrize(
+    "host, explicit_port, expected_port",
+    [
+        ("db.example.com:12345", None, 12345),
+        ("db.example.com:12345", "23456", 23456),
+        ("db.example.com", None, None),
+        ("db.example.com", 23456, 23456),
+        ("[::1]:12345", None, 12345),
+        ("[::1]:12345", "23456", 23456),
+    ],
+)
+def test_host_port_precedence(
+    connector: str,
+    default_port: int,
+    host: str,
+    explicit_port: str | int | None,
+    expected_port: int | None,
+) -> None:
+    connection = {
+        "type": connector,
+        "host": host,
+        "port": explicit_port,
+        "user": "test-user",
+        "password": "test-password",
+        "database": "test-db",
+    }
+    parsed = urlparse(build_connection_string(connection))
+    assert parsed.hostname == ("::1" if host.startswith("[") else "db.example.com")
+    assert parsed.port == (expected_port or default_port)
+
+
 PEM = (
     "-----BEGIN PRIVATE KEY-----\n"
     "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzk4OcbXcT\n"
