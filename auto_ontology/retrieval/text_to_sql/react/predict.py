@@ -22,6 +22,7 @@ from auto_ontology.dal.datasources import fetch_table_by_name
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
+from auto_ontology.utils.retriever import get_semantic_objects_retriever
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def predict(ctx: ToolContext) -> tuple[str, Prediction | None]:
     )
     from auto_ontology.retrieval.kumo.rag import fetch_pql_examples
 
-    examples = fetch_pql_examples(ctx.retriever, ctx.question)
+    examples = fetch_pql_examples(get_semantic_objects_retriever(), ctx.question)
     tables = _with_example_tables(list(ctx.seen_tables.values()), examples)
     connector = connector_for(ctx)
     try:

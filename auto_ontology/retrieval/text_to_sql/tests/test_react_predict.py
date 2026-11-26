@@ -58,7 +58,6 @@ def kumo_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 def _ctx(**kwargs: Any) -> ToolContext:
     return ToolContext(
-        retriever=None,
         connectors=[SimpleNamespace(database_name="shop", dialect="sqlite")],
         question="Which customers will churn next month?",
         **kwargs,
@@ -257,3 +256,66 @@ def test_a_prediction_ends_the_pipeline_without_formatting() -> None:
     list(pipeline.run_steps({"path_state": {}, "decision": ""}, steps))
 
     assert calls == ["react_sql_agent"]
+
+
+def test_provenance_reaches_the_final_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
+    from auto_ontology.retrieval.text_to_sql.react.loop import Submission
+
+    saved = "SELECT SUM(order_line__quantity) FROM order_lines WHERE order_line__quantity >= 20"
+    submitted = "SELECT SUM(quantity) FROM order_lines WHERE quantity >= 20"
+
+    def episode(_llm: Any, ctx: ToolContext, **_kwargs: Any) -> EpisodeResult:
+        ctx.shown_analyses["a1"] = {"id": "a1", "name": "bulk_units", "sql": saved}
+        db = SimpleNamespace(
+            result=[{"sum": 3}], numeric_kinds=None, values_digest=None
+        )
+        return EpisodeResult(Submission(submitted, "Done.", "", db), "submitted", 1, [])
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    state = _state()
+    out = agent_module.ReactSQLAgent().execute(state)
+    assert out["decision"] == "valid_sql"
+    final = ResponseAgent().execute(
+        {**state, "messages": [], "path_state": out["path_state"]}
+    )["path_state"]["final_response"]
+
+    used = final["custom_analyses_used"]
+    assert [(e["id"], e["stage"]) for e in used] == [("a1", "reference")]
+    assert used[0]["fingerprint"]
+
+
+def test_a_prediction_and_an_unanswered_episode_report_retrieved_analyses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from auto_ontology.retrieval.text_to_sql.agents.sql_unconstructable import (
+        SQLUnconstructableAgent,
+    )
+
+    def episode(_llm: Any, ctx: ToolContext, **_kwargs: Any) -> EpisodeResult:
+        ctx.shown_analyses["a1"] = {"id": "a1", "name": "n", "sql": "SELECT 1"}
+        if ctx.question.startswith("predict"):
+            return EpisodeResult(
+                None, "predicted", 1, [], prediction=Prediction(PREDICTED)
+            )
+        return EpisodeResult(None, "budget_exhausted", 1, [])
+
+    monkeypatch.setattr(agent_module, "run_episode", episode)
+
+    predicted = agent_module.ReactSQLAgent().execute(
+        _state(prediction_override=True, initial_question="predict churn")
+    )
+    stages = [
+        e["stage"]
+        for e in predicted["path_state"]["final_response"]["custom_analyses_used"]
+    ]
+    assert stages == ["retrieved"]
+
+    unanswered = agent_module.ReactSQLAgent().execute(_state())
+    final = SQLUnconstructableAgent().execute(
+        {"messages": [], "path_state": unanswered["path_state"]}
+    )["path_state"]["final_response"]
+    assert [e["stage"] for e in final["custom_analyses_used"]] == ["retrieved"]

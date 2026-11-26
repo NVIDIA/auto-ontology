@@ -389,6 +389,26 @@ def test_find_by_expression_ignores_case_and_whitespace(world) -> None:
     assert hit == {"id": attr, "name": f"{world.prefix}-revenue"}
 
 
+def test_find_by_expression_keeps_string_literal_case(world) -> None:
+    """``'Open'`` and ``'OPEN'`` can select different rows."""
+    world.term("Revenue")
+    world.attribute(
+        "open",
+        "Revenue",
+        sql="SELECT 1",
+        expression="SELECT amount FROM p WHERE status = 'Open'",
+    )
+
+    assert (
+        sa.find_attr_by_expression(
+            term_id=world.terms["Revenue"],
+            expression="SELECT amount FROM p WHERE status = 'OPEN'",
+            exclude_id=None,
+        )
+        is None
+    )
+
+
 def test_find_by_expression_is_scoped_to_the_term(world) -> None:
     """Two terms may legitimately define the same SQL."""
     world.term("Revenue")

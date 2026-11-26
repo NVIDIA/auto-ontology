@@ -2,7 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ReAct agent's ``retrieve`` tool: free-text search over the ontology.
+"""Free-text search of the catalog, for ``retrieve``'s two schema purposes.
+
+The catalog is the database as described: its tables and columns, and the
+Terms and ColumnAttributes laid over them. ``purpose="sql"`` is answered from
+here directly and ``purpose="information"`` through :mod:`information`, which
+renders these same hits as prose. The third purpose, ``conversation``, is not
+the catalog and lives in :mod:`conversation`.
 
 The fixed pipeline searches once, on entities an LLM extracted from the
 question, and then filters the hits with more LLM calls. This tool takes the
@@ -61,6 +67,10 @@ from auto_ontology.retrieval.data_access.candidates import _get_candidates_infor
 from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.siblings import sibling_lines
+from auto_ontology.utils.retriever import (
+    get_data_objects_retriever,
+    get_semantic_objects_retriever,
+)
 from auto_ontology.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
@@ -135,7 +145,7 @@ def _identifier_words(query: str) -> list[str]:
 def _meaning_hits(ctx: ToolContext, query: str, labels: list[str]) -> list[dict]:
     return list(
         _get_candidates_information(
-            ctx.retriever,
+            get_semantic_objects_retriever(),
             query,
             list_of_semantic=labels,
             database_name=ctx.database_name,
@@ -153,11 +163,11 @@ def _uncovered_physical_hits(
     the semantic search alone could never land on them.
     """
     physical = [_PHYSICAL_LABELS[lb] for lb in labels if lb in _PHYSICAL_LABELS]
-    if not physical or ctx.data_retriever is None:
+    if not physical:
         return []
     hits = list(
         _get_candidates_information(
-            ctx.data_retriever,
+            get_data_objects_retriever(),
             query,
             list_of_semantic=physical,
             database_name=ctx.database_name,
@@ -579,8 +589,13 @@ def _cap(
     names: dict[str, str] | None = None,
     also_found: list[str] | None = None,
     quiet: set[str] | None = None,
-) -> str:
+) -> tuple[str, dict[str, str]]:
     """Join *blocks* in order within the observation limit, dropping repeats.
+
+    Returns the text and, for each block that made it in, what was written for it:
+    the block itself, or its *shorter* form. Callers use this, not a substring
+    search of the text, to tell what was shown: a name in the last line can repeat
+    a dropped block's first line.
 
     A block that does not fit is replaced by its entry in *shorter* when that
     fits, and skipped otherwise rather than ending the result, so the short
@@ -628,7 +643,8 @@ def _cap(
         used -= len(shown) + 2
         miss(block)
     note = _truncate_note(_missed_line(missed, unnamed), limit)
-    return "\n\n".join([shown for shown, _ in out] + ([note] if note else []))
+    text = "\n\n".join([shown for shown, _ in out] + ([note] if note else []))
+    return text, {block: shown for shown, block in out}
 
 
 def _truncate_note(note: str, limit: int) -> str:
@@ -718,6 +734,13 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         if (block := _definition_block(hit)) is not None
     ]
     named += definitions
+    analysis_by_block = {
+        block: hit
+        for hit in hits
+        if hit.get("label") == Labels.CUSTOM_ANALYSIS
+        and hit.get("id")
+        and (block := _definition_block(hit)) is not None
+    }
     earlier = [(_table_block(t, matched[str(t["id"])], True), t) for t in revisited]
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
@@ -735,7 +758,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         )
         for t in new_tables
     }
-    result = _cap(
+    result, kept = _cap(
         [block for block, _ in named],
         short_blocks,
         block_names,
@@ -745,10 +768,21 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     # Only a table shown in full counts as seen; one the limit cut or shortened
     # must come back in full when a later search finds it again.
     ctx.seen_tables.update(
-        {str(t["id"]): t for t in new_tables if new_blocks[str(t["id"])] in result}
+        {
+            str(t["id"]): t
+            for t in new_tables
+            if kept.get(new_blocks[str(t["id"])]) == new_blocks[str(t["id"])]
+        }
     )
+    for block, hit in analysis_by_block.items():
+        if kept.get(block) == block:
+            ctx.shown_analyses[str(hit["id"])] = {
+                "id": str(hit["id"]),
+                "name": hit.get("name") or hit.get("text") or "",
+                "sql": hit.get("sql") or "",
+            }
     for block, tables in named:
-        if block in result or short_blocks.get(block, "\0") in result:
+        if block in kept:
             for schema, name in tables:
                 ctx.show_table(schema, name)
     return result

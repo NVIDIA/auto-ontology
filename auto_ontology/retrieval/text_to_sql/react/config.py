@@ -48,13 +48,39 @@ def max_sql_runs() -> int:
     return _int_env("TEXT_TO_SQL_REACT_MAX_SQL_RUNS", 10)
 
 
+#: Spelled once because the conversation ceiling has to ask whether the
+#: general one was set before it can decide to stand aside for it.
+_OBSERVATION_CAP = "TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS"
+_CONVERSATION_CAP = "TEXT_TO_SQL_REACT_MAX_CONVERSATION_OBSERVATION_CHARS"
+
+
 def max_observation_chars() -> int:
     """Ceiling on one tool result as it goes back into the conversation.
 
     A 10,000-column table cannot be shown, and a result that overflows the
     context window loses the question outright rather than answering it badly.
     """
-    return _int_env("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", 8000)
+    return _int_env(_OBSERVATION_CAP, 8000)
+
+
+def max_conversation_observation_chars() -> int:
+    """Ceiling on one conversation search, which needs more room than a table.
+
+    A catalog hit is a table's name and its columns; a transcript hit is a
+    question and an answer, often with a pasted code block, and averages some
+    4,700 characters. Three of them pass the general ceiling on their own, so
+    one number for both was always going to be wrong for one of them. Measured
+    on BEAM: the general default answers 0.828 and 24,000 answers 0.868.
+
+    A caller that set the general ceiling meant it -- a smaller context window
+    is the usual reason -- so that setting still decides. This one applies
+    only when nothing was said.
+    """
+    if os.environ.get(_CONVERSATION_CAP, "").strip():
+        return _int_env(_CONVERSATION_CAP, 24000)
+    if os.environ.get(_OBSERVATION_CAP, "").strip():
+        return max_observation_chars()
+    return 24000
 
 
 def max_result_rows() -> int:
@@ -104,6 +130,26 @@ def submit_tool_enabled() -> bool:
     """
     value = os.environ.get("TEXT_TO_SQL_REACT_SUBMIT_TOOL", "").strip().lower()
     return value in _TRUTHY or not value
+
+
+def fanout_check_enabled() -> bool:
+    """Whether fanout profiling, refusals and advisory notes are enabled.
+
+    Off by default; ``TEXT_TO_SQL_REACT_FANOUT_CHECK=true`` turns all three on
+    so deployments can opt in or measure an evaluation arm.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_FANOUT_CHECK", "").strip().lower()
+    return value in _TRUTHY
+
+
+def empty_result_check_enabled() -> bool:
+    """Whether empty-result filter probes and their retry are enabled.
+
+    Off by default; ``TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK=true`` turns on
+    probing and may consume another model turn.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK", "").strip().lower()
+    return value in _TRUTHY
 
 
 def grep_enabled() -> bool:

@@ -120,6 +120,21 @@ def is_semantic_fk_db_query_prevented() -> bool:
     return value.strip().lower() in {"true", "1", "yes"}
 
 
+#: An environment variable rather than a ``configurations`` row, like
+#: :data:`PREVENT_SEMANTIC_FK_DB_QUERIES_ENV`: it is a deploy-time choice.
+TABLE_SQL_ATTRIBUTES_ENABLED_ENV = "ENABLE_TABLE_SQL_ATTRIBUTES"
+
+
+def is_table_sql_attribute_extraction_enabled() -> bool:
+    """Whether compilation proposes SqlAttributes from each term's columns.
+
+    These are LLM-derived row-level metrics (``source="table"``), one LLM call
+    per term with at least two mapped columns. Opt-in: unset means off.
+    """
+    value = os.environ.get(TABLE_SQL_ATTRIBUTES_ENABLED_ENV, "")
+    return value.strip().lower() in {"true", "1", "yes"}
+
+
 def is_pii_detection_enabled() -> bool:
     """Whether ingest may classify catalog columns and attach the ``PII`` tag.
 
