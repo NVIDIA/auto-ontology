@@ -271,7 +271,7 @@ const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) =>
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900';
 
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-semibold text-heading';
 
@@ -1490,7 +1490,7 @@ export const TermsView = () => {
 					)}
 
 					{sqlEditError != null && (
-						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
+						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-error-bg dark:bg-error-bg">
 							{sqlEditError}
 						</p>
 					)}
@@ -1662,7 +1662,7 @@ export const TermsView = () => {
 					)}
 
 					{sqlAttrSubmitError != null && (
-						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
+						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-error-bg dark:bg-error-bg">
 							{sqlAttrSubmitError}
 						</p>
 					)}
@@ -1701,11 +1701,11 @@ export const TermsView = () => {
 				{loading && <TermsLoadingSkeleton />}
 
 				{!loading && error != null && terms.length === 0 && (
-					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
+					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-error-bg dark:bg-zinc-950/80 dark:shadow-none">
 						<h2 className="text-xl font-semibold text-error">
 							Couldn&apos;t load terms
 						</h2>
-						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-error/80 dark:border-red-900/40 dark:bg-red-950/40">
+						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-error/80 dark:border-error-bg dark:bg-error-bg">
 							{error}
 						</pre>
 						{/* `reload`, not `loadMore`: a failed first page leaves

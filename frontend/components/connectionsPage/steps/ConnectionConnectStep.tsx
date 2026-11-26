@@ -67,7 +67,7 @@ export const ConnectionConnectStep = ({
 					}: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
 						onFieldChange(field.key, target.value);
 					const inputClassName =
-						'rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-heading outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900';
+						'rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-heading outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900';
 
 					// Boolean fields render as a checkbox; the modal stores every
 					// value as a string, so 'true'/'' is the on/off representation.
@@ -82,7 +82,7 @@ export const ConnectionConnectStep = ({
 											onFieldChange(field.key, target.checked ? 'true' : '')
 										}
 										data-testid={`connection-field-${field.key}`}
-										className="h-4 w-4 rounded border-zinc-300 accent-[#76b900] dark:border-zinc-600"
+										className="h-4 w-4 rounded border-zinc-300 accent-[#76b900] dark:border-zinc-700"
 									/>
 									{field.label}
 								</span>
@@ -202,9 +202,7 @@ export const ConnectionConnectStep = ({
 					</Button>
 				)}
 				{testSuccessMessage != null && (
-					<p className="text-sm text-[#5e9400] dark:text-[#8fd100]">
-						{testSuccessMessage}
-					</p>
+					<p className="text-sm text-[#5e9400] dark:text-action">{testSuccessMessage}</p>
 				)}
 			</div>
 		</div>

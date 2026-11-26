@@ -104,7 +104,7 @@ export const ConnectionInfoCard = ({
 								onSsoFederationChange(connection.database_name, target.checked)
 							}
 							data-testid={`sso-federation-${connection.database_name}`}
-							className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 accent-[#76b900] disabled:cursor-default dark:border-zinc-600"
+							className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 accent-[#76b900] disabled:cursor-default dark:border-zinc-700"
 						/>
 						<span className="min-w-0">
 							<span className="block text-xs font-semibold text-heading">

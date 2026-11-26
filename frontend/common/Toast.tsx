@@ -26,8 +26,8 @@ type ToastProps = {
 
 const iconColorClass: Record<ToastVariant, string> = {
 	[ToastVariant.Error]: 'text-error',
-	[ToastVariant.Success]: 'text-emerald-600 dark:text-emerald-400',
-	[ToastVariant.Info]: 'text-sky-600 dark:text-sky-400',
+	[ToastVariant.Success]: 'text-emerald-600 dark:text-success',
+	[ToastVariant.Info]: 'text-sky-600 dark:text-link',
 	[ToastVariant.Loading]: 'text-action',
 };
 

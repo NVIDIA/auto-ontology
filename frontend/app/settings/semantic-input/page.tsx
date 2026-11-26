@@ -56,7 +56,7 @@ const PromptEditor = ({
 						onChange={(e) => setValue(e.target.value)}
 						rows={3}
 						placeholder="Enter Your Custom Prompt Prefix…"
-						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:placeholder:text-disabled"
+						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-disabled"
 					/>
 					<div className="flex justify-end gap-2">
 						<Button
@@ -300,7 +300,7 @@ const AcronymsSection = () => {
 						icon: IconName.ChatBubble,
 						onClick: openAddModal,
 					}}
-					className="mt-4 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+					className="mt-4 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-700 dark:bg-zinc-900/30"
 				/>
 			)}
 
@@ -319,7 +319,7 @@ const AcronymsSection = () => {
 						value={name}
 						onChange={(e) => setName(e.target.value)}
 						placeholder="Name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30'}`}
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-error dark:focus:border-error dark:focus:ring-error/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:focus:border-action dark:focus:ring-action/30'}`}
 					/>
 					{nameExists && (
 						<p className="mt-1 text-xs text-error">
@@ -339,7 +339,7 @@ const AcronymsSection = () => {
 						onChange={(e) => setDescription(e.target.value)}
 						placeholder="Add Short Description"
 						rows={4}
-						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30"
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-action dark:focus:ring-action/30"
 					/>
 				</div>
 			</ModalCreateNewItem>
@@ -504,7 +504,7 @@ export default function SemanticInputSettingsPage() {
 	return (
 		<>
 			{error ? (
-				<div className="shrink-0 border-b border-red-200/90 bg-red-50 px-7 py-3 text-sm text-error sm:px-10 dark:border-red-900/50 dark:bg-red-950/40">
+				<div className="shrink-0 border-b border-red-200/90 bg-red-50 px-7 py-3 text-sm text-error sm:px-10 dark:border-error-bg dark:bg-error-bg">
 					{error}
 				</div>
 			) : null}

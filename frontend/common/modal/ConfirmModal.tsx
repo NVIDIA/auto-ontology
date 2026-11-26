@@ -64,7 +64,7 @@ export const ConfirmModal = ({
 			<div className="space-y-4 p-6">
 				<div className="wrap-anywhere text-sm text-body">{message}</div>
 				{error != null && (
-					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
+					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-error-bg dark:bg-error-bg">
 						{error}
 					</p>
 				)}

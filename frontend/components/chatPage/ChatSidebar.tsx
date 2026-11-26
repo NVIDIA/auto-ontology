@@ -85,7 +85,7 @@ function ConversationItem({
 								setEditing(false);
 							}
 						}}
-						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-heading outline-none focus:border-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:focus:border-[#76b900]"
+						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-heading outline-none focus:border-[#76b900] dark:border-zinc-700 dark:bg-zinc-800 dark:focus:border-action"
 					/>
 				</form>
 			</li>
@@ -178,7 +178,7 @@ export const ChatSidebar = ({
 	return (
 		<>
 			{/* Mobile toggle */}
-			<div className="fixed top-3 left-3 z-30 overflow-hidden rounded-lg bg-white shadow-md dark:bg-zinc-800 dark:shadow-zinc-900/50 lg:hidden">
+			<div className="fixed top-3 left-3 z-30 overflow-hidden rounded-lg bg-white shadow-md dark:bg-zinc-800 dark:shadow-shadow-key lg:hidden">
 				<Button
 					theme={ButtonTheme.IconNeutral}
 					size={Size.LARGE}

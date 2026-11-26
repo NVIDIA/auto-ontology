@@ -140,7 +140,7 @@ export const ModalWithSteps = ({
 
 			<div className="flex min-h-[60px] items-center gap-3 px-4 py-3">
 				{alert != null && (
-					<p className="min-w-0 flex-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
+					<p className="min-w-0 flex-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-error dark:border-error-bg dark:bg-error-bg">
 						{alert}
 					</p>
 				)}

@@ -106,7 +106,7 @@ export default function AgentSettingsPage() {
 								void handleToggle();
 							}}
 							className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-								visualization ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-600'
+								visualization ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-700'
 							}`}
 						>
 							<span
@@ -152,7 +152,7 @@ export default function AgentSettingsPage() {
 								disabled={savingTimeout}
 								aria-invalid={!draftValid}
 								onChange={(e) => setTimeoutDraft(e.target.value)}
-								className="h-9 w-24 rounded-md border border-zinc-300 bg-white px-3 text-sm text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-disabled aria-[invalid=true]:border-red-500 dark:border-zinc-600 dark:bg-zinc-900 dark:disabled:bg-zinc-800/50"
+								className="h-9 w-24 rounded-md border border-zinc-300 bg-white px-3 text-sm text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-disabled aria-[invalid=true]:border-red-500 dark:border-zinc-700 dark:bg-zinc-900 dark:disabled:bg-zinc-800/50"
 							/>
 							<Button
 								theme={ButtonTheme.Primary}

@@ -442,7 +442,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 						</div>
 						{submitError ? (
 							<div
-								className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-error dark:border-red-900/50 dark:bg-red-950/40"
+								className="rounded-lg border border-red-200/90 bg-red-50 px-3 py-2 text-xs text-error dark:border-error-bg dark:bg-error-bg"
 								role="alert"
 							>
 								{submitError}
