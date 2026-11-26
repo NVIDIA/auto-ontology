@@ -390,3 +390,54 @@ def test_read_only_reads_and_does_not_leak_onto_the_pool(
     rows = pagila.execute("SELECT count(*) AS n FROM actor", read_only=True)
     assert int(rows.n.iloc[0]) > 0
     assert pagila.execute("SHOW transaction_read_only").iloc[0, 0] == "off"
+
+
+# ----------------------------------------------------------------------------
+# Query history. ``pg_stat_activity`` covers the whole server, so the test
+# needs a second database next to the one the connector is bound to.
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_databases() -> Iterator[tuple[str, str]]:
+    """Two empty scratch databases on the fixture server."""
+    if not os.environ.get("POSTGRES_USER"):
+        pytest.skip("POSTGRES_* not set")
+    suffix = uuid.uuid4().hex[:8]
+    names = (f"history_here_{suffix}", f"history_elsewhere_{suffix}")
+    maintenance = os.environ.get("POSTGRES_DATABASE", "postgres")
+    try:
+        admin = psycopg.connect(_admin_dsn(maintenance), autocommit=True)
+    except Exception as exc:  # noqa: BLE001 — any failure means "no fixture DB"
+        pytest.skip(f"postgres not reachable: {exc}")
+    with admin:
+        try:
+            for name in names:
+                admin.execute(f'CREATE DATABASE "{name}"')
+            yield names
+        finally:
+            for name in names:
+                admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+def test_query_history_leaves_out_other_databases(
+    two_databases: tuple[str, str],
+) -> None:
+    """An idle session keeps its last statement in ``pg_stat_activity``, where
+    a connection to any database on the server can read it. Only the statements
+    that ran in the bound database are that database's history."""
+    here, elsewhere = two_databases
+    connector = create_connector(_admin_dsn(here))
+    try:
+        with (
+            psycopg.connect(_admin_dsn(here), autocommit=True) as same_database,
+            psycopg.connect(_admin_dsn(elsewhere), autocommit=True) as other_database,
+        ):
+            same_database.execute("SELECT 'ran here'")
+            other_database.execute("SELECT 'ran elsewhere'")
+            history = connector.get_queries().query_text.tolist()
+    finally:
+        connector.close()
+
+    assert "SELECT 'ran here'" in history
+    assert "SELECT 'ran elsewhere'" not in history

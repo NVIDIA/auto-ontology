@@ -235,8 +235,9 @@ class PostgresDatabase(SQLDatabase):
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent queries from ``pg_stat_activity``.
 
-        Uses ``state_change`` as ``end_time`` and filters to the last ``hours``
-        hours. Excludes the current backend and rows with no recorded query.
+        Uses ``state_change`` as ``end_time`` and filters to this database and
+        the last ``hours`` hours. Excludes the current backend and rows with no
+        recorded query.
         """
         try:
             # Todo: Add filter of exclude information schema and pg_catalog tables
@@ -247,6 +248,7 @@ class PostgresDatabase(SQLDatabase):
                     query        AS query_text
                 FROM pg_stat_activity
                 WHERE pid != pg_backend_pid()
+                  AND datname = current_database()
                   AND query IS NOT NULL
                   AND query <> ''
                   AND state_change >= now() - make_interval(hours => %s)
