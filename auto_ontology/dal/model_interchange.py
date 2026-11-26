@@ -335,6 +335,8 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
             "id": row["id"],
             "name": row["name"],
             "description": row["description"] or "",
+            "generation_status": row["generation_status"],
+            "generation_note": row["generation_note"],
             "represents": represents.get(row["id"], []),
             "columns_attributes": attributes.get(row["id"], []),
         }
