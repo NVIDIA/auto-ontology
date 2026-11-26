@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_CONSECUTIVE_NUDGES = 2
 _TRAJECTORY_TEXT_CHARS = 2000
+_REPEATED_CALL = "You already made this exact call; its result is above."
 
 
 @dataclass
@@ -246,6 +247,14 @@ def _with_cost_status(ctx: ToolContext, text: str) -> str:
     return f"{text}\n\n{status}" if status else text
 
 
+def _ask_user(ctx: ToolContext, question: str) -> str:
+    if question in ctx.answered_questions:
+        return _REPEATED_CALL
+    reply = ctx.ask_user(question)
+    ctx.answered_questions.add(question)
+    return reply
+
+
 def _dispatch(
     ctx: ToolContext, name: str, args: dict, offered: list[str]
 ) -> tuple[str, Submission | Prediction | None]:
@@ -265,6 +274,7 @@ def _dispatch(
         ToolName.GREP: lambda page=0, pattern="", offset=0: grep(
             ctx, page, pattern, offset
         ),
+        ToolName.ASK_USER: lambda question: _ask_user(ctx, question),
     }
     try:
         if name not in offered:
@@ -306,7 +316,11 @@ def run_episode(
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
     *sql_examples*, *value_anchors* and *shorten_answer* shape a SQL answer, so
-    a ``predict`` episode ignores them.
+    a ``predict`` episode ignores them. When *ctx* has ``ask_user`` and
+    :func:`config.ask_user_enabled` is on, a ``sql`` episode offers the
+    ``ask_user`` tool beside its own, except on the turns for the answer alone
+    (the last one, and those after the queries run out); each call of it
+    counts against the budget like any other.
     """
     # A predict episode ends with a prediction; a no-calculation episode
     # cannot write a query at all. Neither wants the dialect rules, the
@@ -341,11 +355,13 @@ def run_episode(
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
     ]
+    can_ask = ctx.ask_user is not None and config.ask_user_enabled()
     tools = prompts.tools_for(
         mode,
         calculation_answers=ctx.calculation_answers,
         information_answers=ctx.information_answers,
         conversation_answers=ctx.conversation_answers,
+        ask_user=can_ask,
     )
     offered = [t["function"]["name"] for t in tools]
     bound = llm.bind_tools(tools)
@@ -369,6 +385,7 @@ def run_episode(
                 calculation_answers=ctx.calculation_answers,
                 information_answers=ctx.information_answers,
                 conversation_answers=ctx.conversation_answers,
+                ask_user=can_ask,
             )
             offered = [t["function"]["name"] for t in tools]
             bound = llm.bind_tools(tools)
@@ -387,6 +404,7 @@ def run_episode(
                 calculation_answers=ctx.calculation_answers,
                 information_answers=ctx.information_answers,
                 conversation_answers=ctx.conversation_answers,
+                ask_user=can_ask,
             )
             offered = [t["function"]["name"] for t in tools]
             bound = llm.bind_tools(tools)
@@ -446,14 +464,13 @@ def run_episode(
                 # Past the budget a reply gets one answer attempt; each attempt
                 # can run SQL, so further ones in the same reply are refused.
                 observation, answer = (prompts.out_of_calls_for(mode), None)
-            elif key in made and not answers:
+            elif key in made and not answers and name != ToolName.ASK_USER:
                 # Counted though not run: otherwise a model that repeats one
                 # call never reaches the budget and the episode never ends.
+                # ask_user refuses its own repeats, and only once answered: a
+                # call that failed to reach the user must be able to retry.
                 calls += 1
-                observation, answer = (
-                    "You already made this exact call; its result is above.",
-                    None,
-                )
+                observation, answer = (_REPEATED_CALL, None)
             else:
                 if calls >= budget:
                     answered_over_budget = True

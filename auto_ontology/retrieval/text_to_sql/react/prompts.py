@@ -542,6 +542,27 @@ GREP_TOOL = {
     },
 }
 
+ASK_USER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": ToolName.ASK_USER,
+        "description": (
+            "Ask the user a clarification question about their request, when it "
+            "is ambiguous and you need more information. Returns their reply."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "One question for the user.",
+                }
+            },
+            "required": ["question"],
+        },
+    },
+}
+
 
 FINAL_RUN_SQL_TOOL = {
     "type": "function",
@@ -686,8 +707,29 @@ def tools_for(
     calculation_answers: bool = True,
     information_answers: bool = False,
     conversation_answers: bool = False,
+    ask_user: bool = False,
 ) -> list[dict]:
-    """The tools offered in *mode*; on the last turn, only the ones that answer."""
+    """The tools offered in *mode*; on the last turn, only the ones that answer.
+
+    *ask_user* adds ``ask_user``, which never answers, so the last turn does
+    not offer it. Only a ``sql`` episode offers it: ``predict`` builds its
+    input from the question alone, so a reply would not reach the prediction.
+    """
+    tools = _mode_tools(
+        mode, last_turn, calculation_answers, information_answers, conversation_answers
+    )
+    if ask_user and mode == EpisodeMode.SQL and not last_turn:
+        return [*tools, ASK_USER_TOOL]
+    return tools
+
+
+def _mode_tools(
+    mode: EpisodeMode,
+    last_turn: bool,
+    calculation_answers: bool,
+    information_answers: bool,
+    conversation_answers: bool,
+) -> list[dict]:
     if mode == EpisodeMode.PREDICT:
         return [PREDICT_TOOL] if last_turn else [RETRIEVE_TOOL, PREDICT_TOOL]
     if config.submit_tool_enabled():

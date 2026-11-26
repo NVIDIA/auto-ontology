@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from collections.abc import Callable
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -1118,3 +1119,209 @@ def test_a_conversation_only_episode_answers_without_a_warehouse(
     assert result.submission is not None
     assert result.submission.sql == ""
     assert result.submission.response == "The cap was raised to 4,800."
+
+
+def _asker(answers: list[str], asked: list[str]) -> Callable[[str], str]:
+    def ask_user(question: str) -> str:
+        asked.append(question)
+        return answers.pop(0)
+
+    return ask_user
+
+
+@pytest.fixture
+def ask_user_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_ASK_USER", "true")
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_ask_user_is_offered_when_the_caller_can_ask_and_its_reply_reaches_the_model(
+    ctx: ToolContext,
+) -> None:
+    asked: list[str] = []
+    ctx.ask_user = _asker(["The active ones."], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers count?")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert result.reason == "submitted"
+    assert result.tool_calls == 2
+    assert asked == ["Which customers count?"]
+    sql_tools = [t["function"]["name"] for t in prompts.tools_for(EpisodeMode.SQL)]
+    assert model.bound_tool_names[0] == [*sql_tools, "ask_user"]
+    tool_results = [m.content for m in model.seen[1] if isinstance(m, ToolMessage)]
+    assert tool_results == ["The active ones."]
+
+
+def test_an_episode_with_no_one_to_ask_does_not_offer_ask_user(
+    ctx: ToolContext,
+) -> None:
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers count?")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert "ask_user" not in model.bound_tool_names[0]
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith("Unknown tool 'ask_user'")
+    assert result.reason == "submitted"
+
+
+def test_ask_user_is_not_offered_when_the_flag_is_off(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_ASK_USER", raising=False)
+    asked: list[str] = []
+    ctx.ask_user = _asker(["The active ones."], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers count?")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert "ask_user" not in model.bound_tool_names[0]
+    assert asked == []
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith("Unknown tool 'ask_user'")
+    assert result.reason == "submitted"
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_the_last_turn_does_not_offer_ask_user(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
+    asked: list[str] = []
+    ctx.ask_user = _asker(["Active.", "All."], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers?")),
+            _reply(call("ask_user", "2", question="And which orders?")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert model.bound_tool_names[-1] == ["submit"]
+    assert asked == ["Which customers?"]
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[1] == prompts.out_of_calls_for(EpisodeMode.SQL)
+    assert result.reason == "budget_exhausted"
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_the_turns_after_the_queries_run_out_do_not_offer_ask_user(
+    ctx: ToolContext,
+) -> None:
+    _one_query_budget(ctx)
+    asked: list[str] = []
+    ctx.ask_user = _asker([], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("run_sql", "1", sql="SELECT DISTINCT status FROM customers")),
+            _reply(call("ask_user", "2", question="Which customers?")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert "ask_user" in model.bound_tool_names[0]
+    assert model.bound_tool_names[1] == ["submit"]
+    assert asked == []
+    assert result.reason == "submitted"
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_a_failing_ask_user_and_wrong_arguments_are_observations(
+    ctx: ToolContext,
+) -> None:
+    def ask_user(question: str) -> str:
+        raise ConnectionError("the user is away")
+
+    ctx.ask_user = ask_user
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers?")),
+            _reply(call("ask_user", "2", wrong="argument")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0] == "ask_user failed: the user is away"
+    assert observations[1].startswith("Wrong arguments for ask_user")
+    assert result.reason == "submitted"
+    assert result.tool_calls == 3
+
+
+@pytest.mark.parametrize("mode", [EpisodeMode.PREDICT, EpisodeMode.AUTO])
+def test_ask_user_is_offered_only_in_a_sql_episode(mode: EpisodeMode) -> None:
+    # predict builds its input from the question alone, so a reply would not
+    # reach the prediction.
+    sql_tools = prompts.tools_for(EpisodeMode.SQL, ask_user=True)
+    tools = prompts.tools_for(mode, ask_user=True)
+
+    assert sql_tools[-1]["function"]["name"] == "ask_user"
+    assert "ask_user" not in [t["function"]["name"] for t in tools]
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_a_question_whose_call_failed_can_be_asked_again(ctx: ToolContext) -> None:
+    asked: list[str] = []
+
+    def ask_user(question: str) -> str:
+        asked.append(question)
+        if len(asked) == 1:
+            raise ConnectionError("the user is away")
+        return "The active ones."
+
+    ctx.ask_user = ask_user
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers?")),
+            _reply(call("ask_user", "2", question="Which customers?")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[:2] == ["ask_user failed: the user is away", "The active ones."]
+    assert asked == ["Which customers?", "Which customers?"]
+    assert result.tool_calls == 3
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_a_question_the_user_answered_is_not_asked_again(ctx: ToolContext) -> None:
+    asked: list[str] = []
+    ctx.ask_user = _asker(["The active ones.", "All of them."], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers?")),
+            _reply(call("ask_user", "2", question="Which customers?")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[1].startswith("You already made this exact call")
+    assert asked == ["Which customers?"]
+    assert result.tool_calls == 3

@@ -18,6 +18,7 @@ class ToolName(StrEnum):
     SUBMIT = "submit"
     PREDICT = "predict"
     GREP = "grep"
+    ASK_USER = "ask_user"
 
 
 ANSWERING_TOOLS = frozenset({ToolName.SUBMIT, ToolName.PREDICT})
