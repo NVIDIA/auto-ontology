@@ -277,7 +277,13 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
         .distinct()
     )
     terms = store().query_read(
-        select(s.term.c.id, s.term.c.name, s.term.c.description)
+        select(
+            s.term.c.id,
+            s.term.c.name,
+            s.term.c.description,
+            s.term.c.generation_status,
+            s.term.c.generation_note,
+        )
         .where(s.term.c.id.in_(in_scope), s.term.c.source == SEMANTIC_SOURCE)
         .order_by(s.term.c.name)
     )
@@ -329,6 +335,8 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
             "id": row["id"],
             "name": row["name"],
             "description": row["description"] or "",
+            "generation_status": row["generation_status"],
+            "generation_note": row["generation_note"],
             "represents": represents.get(row["id"], []),
             "columns_attributes": attributes.get(row["id"], []),
         }
@@ -506,6 +514,8 @@ def assemble_export_document(
             id=str(row["id"]),
             name=row.get("name") or "",
             description=row.get("description") or "",
+            generation_status=row.get("generation_status") or "generated",
+            generation_note=row.get("generation_note"),
             represents=_scoped_ids(row.get("represents") or [], table_ids),
             columns_attributes=[
                 ModelColumnAttribute(
@@ -1339,6 +1349,8 @@ def _import_terms(
                     "name": term.name,
                     "description": term.description,
                     "source": SEMANTIC_SOURCE,
+                    "generation_status": term.generation_status,
+                    "generation_note": term.generation_note,
                 },
             )
             for term in terms

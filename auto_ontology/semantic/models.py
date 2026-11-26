@@ -94,6 +94,9 @@ class TableTermsResult(BaseModel):
     """Sanitized Terms and column assignments for a single physical table."""
 
     terms: list[TermProposal] = Field(...)
+    # Why these Terms are a deterministic placeholder rather than the model's
+    # proposal; ``None`` when the model produced them.
+    fallback_reason: str | None = None
 
 
 class SeedSelectionResult(BaseModel):

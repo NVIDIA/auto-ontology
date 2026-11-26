@@ -49,7 +49,9 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     )
     monkeypatch.setattr(visit_enter, "column_attribute_specs", lambda *_a, **_k: [spec])
     monkeypatch.setattr(
-        visit_enter, "extract_term", lambda *_a, **_k: SimpleNamespace(terms=[term])
+        visit_enter,
+        "extract_term",
+        lambda *_a, **_k: SimpleNamespace(terms=[term], fallback_reason=None),
     )
     monkeypatch.setattr(visit_enter, "apply_display_names_to_specs", lambda *_a: None)
     monkeypatch.setattr(

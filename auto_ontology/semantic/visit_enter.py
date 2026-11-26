@@ -1041,6 +1041,7 @@ def process_table(
     with _step(table_name, f"Generating terms ({len(specs)} columns)"):
         term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
+    fallback_reason = term_result.fallback_reason
     spec_by_column = {spec.source_column: spec for spec in specs}
     persisted_terms = terms_with_assignments(term_result, spec_by_column)
 
@@ -1067,14 +1068,16 @@ def process_table(
                 table_id,
                 result_term_names,
                 result_attr_names,
+                fallback_reason=fallback_reason,
             )
 
         logger.info(
-            "[%s] → Terms %s (%d attrs, %d suspected FKs)",
+            "[%s] → Terms %s (%d attrs, %d suspected FKs)%s",
             table_name,
             result_term_names,
             len(result_attr_names),
             len(all_fk_names),
+            (f" — placeholder: {fallback_reason}" if fallback_reason else ""),
         )
 
         # Fetch persisted terms — used for embedding.
@@ -1144,8 +1147,13 @@ def commit_terms(
     table_id: str,
     result_term_names: list[str],
     result_attr_names: list[str],
+    fallback_reason: str | None = None,
 ) -> None:
-    """Write table-private Terms and their ColumnAttributes to the store."""
+    """Write table-private Terms and their ColumnAttributes to the store.
+
+    *fallback_reason* stores the Terms as placeholders; see
+    :func:`auto_ontology.dal.terms.upsert_table_term`.
+    """
     for term, assignments in persisted_terms:
         proposed_name = term.name
         persisted = upsert_table_term(
@@ -1153,6 +1161,7 @@ def commit_terms(
             term.description,
             table_id,
             synonyms=term.synonyms,
+            fallback_reason=fallback_reason,
         )
         if persisted is None:
             continue

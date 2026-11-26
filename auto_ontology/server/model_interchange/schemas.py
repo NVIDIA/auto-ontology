@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -108,6 +108,8 @@ class ModelTerm(BaseModel):
     id: str
     name: str = ""
     description: str = ""
+    generation_status: Literal["generated", "fallback"] = "generated"
+    generation_note: str | None = None
     represents: list[str] = Field(default_factory=list)
     columns_attributes: list[ModelColumnAttribute] = Field(default_factory=list)
 

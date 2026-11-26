@@ -115,3 +115,63 @@ def test_sanitize_assigns_orphan_specs_to_primary_term() -> None:
 )
 def test_llm_labels_are_accepted_in_any_script(label: str, expected: str) -> None:
     assert term_extractor._normalize_label(label, fallback="Fallback") == expected
+
+
+# --------------------------------------------------------------------------
+# Placeholder Terms say they are placeholders (#533)
+# --------------------------------------------------------------------------
+
+
+def _specs() -> list[ColumnAttributeSpec]:
+    return [
+        ColumnAttributeSpec(source_column="adufuturehorizon", name="adufuturehorizon"),
+        ColumnAttributeSpec(source_column="ddlotsize", name="ddlotsize"),
+    ]
+
+
+def test_a_failed_model_call_yields_a_placeholder_that_says_why(monkeypatch) -> None:
+    monkeypatch.setattr(term_extractor, "get_llm_client", lambda **_: object())
+    monkeypatch.setattr(
+        term_extractor, "invoke_with_structured_output", lambda *a, **k: None
+    )
+
+    result = term_extractor.extract_term({"name": "ibp_location_product"}, {}, _specs())
+
+    assert [term.name for term in result.terms] == ["Ibp Location Product"]
+    assert result.fallback_reason == "the model returned no structured result"
+
+
+def test_a_proposal_with_no_terms_yields_a_placeholder() -> None:
+    """A proposed Term with a bad name is renamed after the table, not dropped,
+    so only an empty proposal reaches this fallback."""
+    raw = RawTableTermsResult(terms=[])
+
+    result = _sanitize_result(raw, table={"name": "orders"}, specs=_specs())
+
+    assert result.fallback_reason == "no proposed Term survived validation"
+
+
+def test_no_candidate_columns_yields_a_placeholder() -> None:
+    result = term_extractor.extract_term({"name": "orders"}, {}, [])
+
+    assert result.fallback_reason == "no candidate columns"
+
+
+def test_a_real_proposal_is_not_marked_as_a_placeholder() -> None:
+    raw = RawTableTermsResult(
+        terms=[
+            RawTermProposal(
+                name="Location Product",
+                description="A product stocked at a location",
+                attributes=[
+                    TermColumnRef(source_column="ddlotsize", display_name="Lot Size")
+                ],
+            )
+        ]
+    )
+
+    result = _sanitize_result(
+        raw, table={"name": "ibp_location_product"}, specs=_specs()
+    )
+
+    assert result.fallback_reason is None

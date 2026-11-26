@@ -596,9 +596,56 @@ def test_process_table_writes_term_and_attributes(
 
     process_table(table, ctx, domain_summary=None)
 
-    mock_upsert_term.assert_called_once_with("Order", "Order entity", "t1", synonyms=[])
+    mock_upsert_term.assert_called_once_with(
+        "Order", "Order entity", "t1", synonyms=[], fallback_reason=None
+    )
     assert (
         mock_merge_col_attr.call_args.kwargs["term_name"] == "Order (db.public.orders)"
+    )
+
+
+@patch("auto_ontology.semantic.visit_enter.merge_column_attribute")
+@patch("auto_ontology.semantic.visit_enter.upsert_table_term")
+@patch("auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("auto_ontology.semantic.visit_enter.extract_term")
+def test_process_table_stores_a_placeholder_term_with_its_reason(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_upsert_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+) -> None:
+    """#533: a placeholder from term extraction is stored with its reason."""
+    from auto_ontology.semantic.models import (
+        PotentialFkResult,
+        TableTermsResult,
+        TermAttributeAssignment,
+        TermProposal,
+    )
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(
+        terms=[
+            TermProposal(
+                name="Orders",
+                description="Business entity represented by table orders",
+                attributes=[
+                    TermAttributeAssignment(
+                        source_column="amount", display_name="amount"
+                    )
+                ],
+            )
+        ],
+        fallback_reason="the model returned no structured result",
+    )
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+    mock_upsert_term.return_value = ("term-id", "Orders")
+
+    process_table(table, ctx, domain_summary=None)
+
+    assert (
+        mock_upsert_term.call_args.kwargs["fallback_reason"]
+        == "the model returned no structured result"
     )
 
 

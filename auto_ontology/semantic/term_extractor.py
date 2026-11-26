@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import unicodedata
 from typing import Any
 
@@ -26,6 +27,8 @@ from auto_ontology.semantic.models import (
     TermAttributeAssignment,
     TermProposal,
 )
+
+logger = logging.getLogger(__name__)
 
 _INVALID = {"unnamed", "unknown", "none", ""}
 
@@ -126,7 +129,18 @@ def apply_display_names_to_specs(
 def _fallback_result(
     table: dict[str, Any],
     specs: list[ColumnAttributeSpec],
+    reason: str,
 ) -> TableTermsResult:
+    """One Term named after the table, holding every candidate column.
+
+    A placeholder, not meaning: the result carries *reason* so the Term is
+    stored as a fallback rather than passed off as the model's proposal.
+    """
+    logger.warning(
+        "Term extraction for table %s fell back to a placeholder Term: %s",
+        table["name"],
+        reason,
+    )
     name = to_term_name(table["name"])
     attributes = [
         TermAttributeAssignment(
@@ -142,7 +156,8 @@ def _fallback_result(
                 description=f"Business entity represented by table {table['name']}",
                 attributes=attributes,
             )
-        ]
+        ],
+        fallback_reason=reason,
     )
     apply_display_names_to_specs(result, specs)
     return result
@@ -198,7 +213,7 @@ def _sanitize_result(
         )
 
     if not sanitized_terms:
-        return _fallback_result(table, specs)
+        return _fallback_result(table, specs, "no proposed Term survived validation")
 
     # Any unassigned columns fall back to the first Term.
     primary = sanitized_terms[0]
@@ -243,7 +258,7 @@ def extract_term(
 ) -> TableTermsResult:
     """Propose one or more Terms and assign candidate column attributes to each."""
     if not specs:
-        return _fallback_result(table, specs)
+        return _fallback_result(table, specs, "no candidate columns")
 
     description = table.get("description") or ""
 
@@ -267,7 +282,7 @@ def extract_term(
         RawTableTermsResult,
     )
     if result is None:
-        return _fallback_result(table, specs)
+        return _fallback_result(table, specs, "the model returned no structured result")
 
     table_result = _sanitize_result(result, table=table, specs=specs)
 

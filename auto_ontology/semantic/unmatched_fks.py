@@ -157,6 +157,7 @@ def _attach_to_new_term(
 ) -> int:
     term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
+    fallback_reason = term_result.fallback_reason
     spec_by_column = {spec.source_column: spec for spec in specs}
     term_names: list[str] = []
     attr_names: list[str] = []
@@ -166,12 +167,14 @@ def _attach_to_new_term(
         table["id"],
         term_names,
         attr_names,
+        fallback_reason=fallback_reason,
     )
     logger.info(
-        "[%s] had no Term; unmatched FK column(s) %s → Terms %s",
+        "[%s] had no Term; unmatched FK column(s) %s → Terms %s%s",
         table["name"],
         sorted(spec_by_column),
         term_names,
+        (f" — placeholder: {fallback_reason}" if fallback_reason else ""),
     )
     return len(attr_names)
 

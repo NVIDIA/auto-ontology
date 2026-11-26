@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""add term generation status
+
+Records whether compilation's model produced a Term or a deterministic
+placeholder stood in for a failed model step (#533). Existing Terms are
+marked ``generated``: placeholders stored before this revision can't be told
+apart from real Terms, so they remain ``generated`` until a future reprocessing
+workflow can identify and replace them.
+
+Revision ID: a7c3e9f1d204
+Revises: caee572fa81c
+Create Date: 2026-11-19 10:00:00.000000
+
+"""
+
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = "a7c3e9f1d204"
+down_revision: Union[str, Sequence[str], None] = "caee572fa81c"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    op.add_column(
+        "term",
+        sa.Column(
+            "generation_status",
+            sa.Text(),
+            server_default=sa.text("'generated'"),
+            nullable=False,
+        ),
+    )
+    op.add_column("term", sa.Column("generation_note", sa.Text(), nullable=True))
+    # Existing rows acquire 'generated' from the new column's constant
+    # default. Enforce the constraint for new writes without validating the
+    # whole table while this migration holds ACCESS EXCLUSIVE. An operator
+    # can validate later in a separate transaction.
+    # op.f marks the name as already following the metadata convention.
+    op.create_check_constraint(
+        op.f("ck_term_generation_status_value"),
+        "term",
+        "generation_status IN ('generated', 'fallback')",
+        postgresql_not_valid=True,
+    )
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    op.drop_constraint(op.f("ck_term_generation_status_value"), "term", type_="check")
+    op.drop_column("term", "generation_note")
+    op.drop_column("term", "generation_status")

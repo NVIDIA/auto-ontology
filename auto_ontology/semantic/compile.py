@@ -10,6 +10,7 @@ import logging
 import os
 import time
 
+from auto_ontology.dal.terms import fetch_fallback_term_names_for_database
 from auto_ontology.semantic.attribute_descriptions import describe_column_attributes
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from auto_ontology.semantic.cancellation import is_cancelled
@@ -31,6 +32,26 @@ logger = logging.getLogger(__name__)
 # the shared invoke call site where it also throttled callers that already
 # limit their own concurrency.
 SEMANTIC_LLM_MAX_INFLIGHT = int(os.environ.get("SEMANTIC_LLM_MAX_INFLIGHT", "6"))
+_FALLBACK_TERM_LOG_LIMIT = 20
+
+
+def _report_fallback_terms(database_name: str) -> None:
+    """Name stored placeholders after every stage that can create a Term."""
+    try:
+        fallback_terms = fetch_fallback_term_names_for_database(database_name)
+    except Exception:
+        # A summary, never a reason to fail the compilation it describes.
+        logger.warning("Could not count placeholder Terms", exc_info=True)
+        return
+    if fallback_terms:
+        displayed_terms = fallback_terms[:_FALLBACK_TERM_LOG_LIMIT]
+        remaining = len(fallback_terms) - len(displayed_terms)
+        logger.warning(
+            "%d placeholder Term(s) stored where a model step failed: %s%s",
+            len(fallback_terms),
+            displayed_terms,
+            f" and {remaining} more" if remaining else "",
+        )
 
 
 def run_semantic_compilation(
@@ -79,6 +100,7 @@ def _run_semantic_compilation(
     # just written to be usable. A cancelled pass skips straight to the summary
     # rather than spending minutes on work nobody is waiting for.
     if is_cancelled():
+        _report_fallback_terms(database_name)
         logger.info(
             "Semantic compilation cancelled (database=%r) — skipping the term "
             "family, FK, unmatched-FK, SqlAttribute, bridge-table and "
@@ -91,45 +113,52 @@ def _run_semantic_compilation(
         )
         return count
 
-    logger.info("=" * 60)
-    logger.info("Resolving term families…")
-    logger.info("=" * 60)
-    family_count = resolve_term_families(database_name, embedder)
-    logger.info("Term families found: %d", family_count)
+    try:
+        logger.info("=" * 60)
+        logger.info("Resolving term families…")
+        logger.info("=" * 60)
+        family_count = resolve_term_families(database_name, embedder)
+        logger.info("Term families found: %d", family_count)
 
-    logger.info("=" * 60)
-    logger.info("Resolving semantic FK edges…")
-    logger.info("=" * 60)
-    fk_count = resolve_semantic_fks(database_name)
-    logger.info("Semantic FK edges created: %d", fk_count)
+        logger.info("=" * 60)
+        logger.info("Resolving semantic FK edges…")
+        logger.info("=" * 60)
+        fk_count = resolve_semantic_fks(database_name)
+        logger.info("Semantic FK edges created: %d", fk_count)
 
-    logger.info("=" * 60)
-    logger.info("Attaching unmatched FK columns…")
-    logger.info("=" * 60)
-    unmatched_count = attach_unmatched_fk_columns(
-        database_name, embedder, domain_summary=summary
-    )
-    logger.info("Unmatched FK columns attached: %d", unmatched_count)
+        logger.info("=" * 60)
+        logger.info("Attaching unmatched FK columns…")
+        logger.info("=" * 60)
+        unmatched_count = attach_unmatched_fk_columns(
+            database_name, embedder, domain_summary=summary
+        )
+        logger.info("Unmatched FK columns attached: %d", unmatched_count)
 
-    from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
+        from auto_ontology.semantic.sql_attribute_suggester import (
+            suggest_sql_attributes,
+        )
 
-    logger.info("=" * 60)
-    logger.info("Suggesting SqlAttributes from query history…")
-    logger.info("=" * 60)
-    attr_count = suggest_sql_attributes(database_name)
-    logger.info("New SqlAttribute nodes written: %d", attr_count)
+        logger.info("=" * 60)
+        logger.info("Suggesting SqlAttributes from query history…")
+        logger.info("=" * 60)
+        attr_count = suggest_sql_attributes(database_name)
+        logger.info("New SqlAttribute nodes written: %d", attr_count)
 
-    logger.info("=" * 60)
-    logger.info("Building bridge tables sql attributes")
-    logger.info("=" * 60)
-    bridge_table_count = build_bridge_tables_sql_attributes(database_name)
-    logger.info("Bridge tables built: %d", bridge_table_count)
+        logger.info("=" * 60)
+        logger.info("Building bridge tables sql attributes")
+        logger.info("=" * 60)
+        bridge_table_count = build_bridge_tables_sql_attributes(database_name)
+        logger.info("Bridge tables built: %d", bridge_table_count)
 
-    logger.info("=" * 60)
-    logger.info("Describing ColumnAttributes…")
-    logger.info("=" * 60)
-    described_count = describe_column_attributes(database_name)
-    logger.info("ColumnAttributes described: %d", described_count)
+        logger.info("=" * 60)
+        logger.info("Describing ColumnAttributes…")
+        logger.info("=" * 60)
+        described_count = describe_column_attributes(database_name)
+        logger.info("ColumnAttributes described: %d", described_count)
+    finally:
+        # unmatched-FK can create a fallback Term after the table-by-table pass.
+        # Read the database at the end of the complete Term-producing sequence.
+        _report_fallback_terms(database_name)
 
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
