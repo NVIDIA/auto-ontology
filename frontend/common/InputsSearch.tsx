@@ -22,8 +22,8 @@ export type InputsSearchProps = {
  * on hover or while typing, and a Close X (light-green tile with a green X on
  * hover) once there is something to clear.
  * Colours are the AO-IL Theme Light / Dark values. The design has no focus
- * state, so keyboard focus is shown with the Grey 300 - Strong token (#d3d4d6,
- * dark #3f3f46) as a border plus a 1px ring.
+ * state, so keyboard focus is shown with the Text/Primary token (#2b3036,
+ * dark #f0f0f3) as a border plus a 1px ring.
  */
 export const InputsSearch = ({
 	value,
@@ -35,7 +35,7 @@ export const InputsSearch = ({
 	'aria-label': ariaLabel,
 }: InputsSearchProps) => (
 	<div
-		className={`group flex h-9 items-center justify-between rounded-lg border border-[#e9eaea] bg-white px-1.5 transition-colors focus-within:border-[#d3d4d6] focus-within:ring-1 focus-within:ring-[#d3d4d6] dark:border-[#2e2e33] dark:bg-[#18181b] dark:focus-within:border-[#3f3f46] dark:focus-within:ring-[#3f3f46] ${className}`}
+		className={`group flex h-9 items-center justify-between rounded-lg border border-[#e9eaea] bg-white px-1.5 transition-colors focus-within:border-[#2b3036] focus-within:ring-1 focus-within:ring-[#2b3036] dark:border-[#2e2e33] dark:bg-[#18181b] dark:focus-within:border-[#f0f0f3] dark:focus-within:ring-[#f0f0f3] ${className}`}
 	>
 		<div className="flex min-w-0 flex-1 items-center gap-1">
 			<Icon
