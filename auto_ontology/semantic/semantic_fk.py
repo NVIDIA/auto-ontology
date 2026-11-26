@@ -43,6 +43,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+import pandas as pd
 from sqlglot import exp
 
 from auto_ontology.connectors import get_connectors
@@ -661,6 +662,11 @@ def _confirm_by_values(
 ) -> str | None:
     """The first hit — the LLM's pick, then by distance — whose values hold *col*'s.
 
+    The stored values are each column's lowest few, so against a large key
+    they can miss an FK that sits elsewhere in the key's range, or catch only
+    its orphans. The LLM's pick alone is then measured in the warehouse
+    (:func:`_warehouse_containment`); the other hits stay on stored values.
+
     A hit on *col*'s own table is tried only as the LLM's pick, and so is every
     hit when *col*'s values are ones any surrogate key holds
     (:func:`is_value_search_ambiguous`) — ``votes.VoteTypeId`` in ``1..16``
@@ -676,7 +682,7 @@ def _confirm_by_values(
     for attribute_id in ordered:
         if contains(
             fk_values, keys.values(attribute_id), limit=KEY_DISTINCT_VALUES_LIMIT
-        ):
+        ) or (attribute_id == selected and _held_in_warehouse(keys, col, selected)):
             if attribute_id != selected:
                 logger.info(
                     "resolve_semantic_fks [values]: %s.%s confirmed by values on "
@@ -748,6 +754,111 @@ def _match_by_values_only(
             len(candidates),
         )
     return selected
+
+
+# Distinct FK values the warehouse containment probe compares.
+_PROBE_FK_VALUES = 1000
+
+
+def _held_in_warehouse(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) -> bool:
+    """Whether the key holds at least :data:`MIN_CONTAINMENT` of *col*'s values."""
+    share = _warehouse_containment(keys, col, attribute_id)
+    return share is not None and share >= MIN_CONTAINMENT
+
+
+def _warehouse_containment(
+    keys: _KeyIndex, col: dict[str, Any], attribute_id: str
+) -> float | None:
+    """Share of *col*'s distinct values the key holds, measured in the warehouse.
+
+    Up to :data:`_PROBE_FK_VALUES` distinct FK values are looked up in the
+    key column. Retried with both sides cast to text when the plain
+    comparison fails, as :func:`_join_returns_rows` does. ``None`` when the
+    probe cannot run or finds no FK values.
+    """
+    target = keys.target(attribute_id)
+    if target is None:
+        return None
+    label = (
+        f"{col.get('table_name')}.{col.get('name')} -> "
+        f"{target['table_name']}.{target['column_name']}"
+    )
+    for as_text in (False, True):
+        sql = _containment_probe_sql(keys.connector, col, target, as_text=as_text)
+        try:
+            df = execute_capped(keys.connector, sql)
+        except Exception as exc:
+            logger.info(
+                "resolve_semantic_fks [values]: containment probe %s failed%s (%s)",
+                label,
+                " as text" if as_text else "",
+                type(exc).__name__,
+            )
+            continue
+        share = _probe_share(df)
+        logger.info(
+            "resolve_semantic_fks [values]: %s holds %s of the probed FK values",
+            label,
+            "none" if share is None else f"{share:.0%}",
+        )
+        return share
+    return None
+
+
+def _probe_share(df: Any) -> float | None:
+    """``held / total`` from the probe's single row, or ``None``.
+
+    Only a real frame counts: a test double answers ``iloc`` with something
+    ``int()`` turns into 1, which would read as complete containment.
+    """
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return None
+    try:
+        total, held = int(df.iloc[0, 0]), int(df.iloc[0, 1])
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+        return None
+    return held / total if total > 0 else None
+
+
+def _containment_probe_sql(
+    connector: SQLDatabase,
+    col: dict[str, Any],
+    target: dict[str, Any],
+    *,
+    as_text: bool,
+) -> str:
+    """Count distinct FK values, and how many of them the key column holds."""
+    dialect = getattr(connector, "dialect", None) or None
+    fk_column = exp.to_identifier(str(col["name"]), quoted=True)
+    key_column = exp.to_identifier(str(target["column_name"]), quoted=True)
+    fk_value: exp.Expression = exp.Column(
+        this=exp.to_identifier("v"), table=exp.to_identifier("f")
+    )
+    key_value: exp.Expression = exp.Column(
+        this=exp.to_identifier("v"), table=exp.to_identifier("k")
+    )
+    if as_text:
+        fk_value, key_value = exp.cast(fk_value, "TEXT"), exp.cast(key_value, "TEXT")
+
+    def render(node: exp.Expression) -> str:
+        try:
+            return node.sql(dialect=dialect)
+        except ValueError:
+            return node.sql()
+
+    fk_sql, key_sql = render(fk_column), render(key_column)
+    source = connector.qualify(col.get("schema_name"), col["table_name"])
+    target_table = connector.qualify(target.get("schema_name"), target["table_name"])
+    return (
+        # Each FK value counts once: a key with several values equal to one FK
+        # value (an implicit numeric cast of '100' and '0100') joins it twice.
+        f"SELECT COUNT(DISTINCT f.v) AS total, "
+        f"COUNT(DISTINCT CASE WHEN k.v IS NOT NULL THEN f.v END) AS held FROM "
+        f"(SELECT DISTINCT {fk_sql} AS v FROM {source} WHERE {fk_sql} IS NOT NULL "
+        f"LIMIT {_PROBE_FK_VALUES}) f "
+        f"LEFT JOIN (SELECT DISTINCT {key_sql} AS v FROM {target_table}) k "
+        f"ON {render(exp.EQ(this=fk_value, expression=key_value))}"
+    )
 
 
 def _join_returns_rows(keys: _KeyIndex, col: dict[str, Any], attribute_id: str) -> bool:
