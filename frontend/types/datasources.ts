@@ -60,4 +60,10 @@ export type Database = {
 	description?: string;
 	/** A user id or a group id. Null when the database is unassigned. */
 	owner_id?: string | null;
+	/** The connector kind, e.g. `snowflake`, when one was recorded. */
+	dialect?: string | null;
+	/** ISO timestamp the database was added to the catalog. */
+	created?: string | null;
+	/** ISO timestamp of the last catalog pull. Null when never pulled. */
+	pulled?: string | null;
 };

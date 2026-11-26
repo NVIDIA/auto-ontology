@@ -24,7 +24,7 @@ import {
 	totalGlobalSearchCount,
 } from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import {
 	GLOBAL_SEARCH_ALL_TAB,
 	GLOBAL_SEARCH_LIST_LIMIT,
@@ -315,13 +315,13 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		>
 			<div className="flex shrink-0 items-center gap-2 p-2">
 				<div className="min-w-0 flex-1">
-					<SearchInput
+					<InputsSearch
 						value={query}
 						onChange={handleQueryChange}
 						placeholder="Search…"
 						aria-label="Search Auto Ontology"
 						autoFocus
-						className="h-9 w-full"
+						className="w-full"
 					/>
 				</div>
 			</div>

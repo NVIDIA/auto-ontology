@@ -17,7 +17,7 @@ import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { termsApi } from '@/api/terms';
@@ -1706,7 +1706,7 @@ export const TermsView = () => {
 				error={terms.length > 0 ? error : null}
 			>
 				{hasLoadedTerms && (
-					<SearchInput
+					<InputsSearch
 						value={searchQuery}
 						onChange={setSearchQuery}
 						placeholder="Search Terms…"

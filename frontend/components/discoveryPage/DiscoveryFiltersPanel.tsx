@@ -15,7 +15,7 @@ import {
 } from '@/common/globalSearchMeta';
 import { Icon, IconName } from '@/common/icons';
 import { Popover } from '@/common/Popover';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { Toggle } from '@/common/Toggle';
 import { DEFAULT_DISCOVERY_FILTERS } from '@/constants/discovery';
 import { UNTAGGED_TAG_FILTER } from '@/constants/search';
@@ -339,12 +339,12 @@ const TagsFilter = ({
 						</Button>
 					</div>
 					<div className="px-1 pb-1">
-						<SearchInput
+						<InputsSearch
 							value={search}
 							onChange={setSearch}
 							placeholder="Search tags…"
 							aria-label="Search tags"
-							className="h-8 w-full"
+							className="w-full"
 						/>
 					</div>
 					<div className="max-h-56 overflow-y-auto [scrollbar-gutter:stable]">

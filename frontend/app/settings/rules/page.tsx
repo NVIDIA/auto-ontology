@@ -16,7 +16,7 @@ import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { SkeletonRows } from '@/common/Skeleton';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
@@ -222,7 +222,7 @@ export default function RulesSettingsPage() {
 					    is empty *because* of the box, and taking it away would leave
 					    no way to clear the query and get the rules back. */}
 					{hasLoaded && (rules.length > 0 || debouncedQuery !== '') ? (
-						<SearchInput
+						<InputsSearch
 							value={query}
 							onChange={setQuery}
 							placeholder="Search Rules…"

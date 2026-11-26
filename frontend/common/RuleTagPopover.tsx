@@ -13,7 +13,7 @@ import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { Label } from '@/common/Label';
 import { Popover } from '@/common/Popover';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { SkeletonBlock } from '@/common/Skeleton';
 import { MAX_TAG_NAME_LENGTH } from '@/constants/tags';
 import { ButtonTheme, Size } from '@/enums/button';
@@ -247,12 +247,12 @@ const RuleTagForm = ({
 					) : null}
 
 					<div className="space-y-3">
-						<SearchInput
+						<InputsSearch
 							value={search}
 							onChange={setSearch}
 							placeholder="Select or Search to Add a Tag…"
 							aria-label="Search tags"
-							className="h-9 w-full"
+							className="w-full"
 						/>
 						{/* Fixed rather than fitted: the panel hangs off its trigger, so a
 						    box that resizes when the tags arrive — or when a search

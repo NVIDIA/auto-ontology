@@ -25,7 +25,7 @@ import {
 } from '@/common/GlobalSearchTabs';
 import { Icon, IconName } from '@/common/icons';
 import { RuleTagPopover } from '@/common/RuleTagPopover';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { DEFAULT_DISCOVERY_FILTERS } from '@/constants/discovery';
 import {
 	GLOBAL_SEARCH_ALL_TAB,
@@ -404,16 +404,13 @@ export const DiscoveryView = ({ initialQuery = '', handoverId = '' }: DiscoveryV
 							}}
 							className="flex shrink-0 items-center gap-2 border-b border-zinc-200 px-6 py-3 dark:border-zinc-800"
 						>
-							<SearchInput
+							<InputsSearch
 								value={query}
 								onChange={setQuery}
 								placeholder="Search…"
 								aria-label="Search Auto Ontology"
 								autoFocus
-								// `h-9` is `Size.REGULAR`'s height: the field's own
-								// padding would make it 2px taller than the buttons
-								// standing next to it.
-								className="h-9 min-w-0 flex-1"
+								className="min-w-0 flex-1"
 							/>
 							<Button type="submit" disabled={!canSearch}>
 								Apply

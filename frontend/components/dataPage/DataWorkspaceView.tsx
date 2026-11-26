@@ -19,6 +19,7 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import { TagItemType } from '@/enums/tags';
 import { ToastVariant } from '@/enums/toast';
 import { DataTree } from './DataTree';
+import { DataConnectorCards } from './DataConnectorCards';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { Toast } from '@/common/Toast';
@@ -472,25 +473,29 @@ export function DataWorkspaceView() {
 			}
 		>
 			<main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-				<SinglePageView
-					dataId={workspaceDataId}
-					treeFocusId={treeFocusId}
-					treeDataEpoch={treeDataEpoch}
-					getSinglePage={getSinglePage}
-					onPatchEdits={handleSave}
-					onDataTableRowClick={handleDataTableRowClick}
-					onCertificationChange={handleCertificationChange}
-					onDataTableCertificationChange={handleChildCertificationChange}
-					canCertifyDataTableRow={(_sectionId, _rowId, ownerId) =>
-						canEditEntity({
-							user: catalogActor,
-							permission: { catalog: ['edit'] },
-							ownerId,
-							owners,
-						})
-					}
-					hideEditToolbar={!canEditFocusedCatalog}
-				/>
+				{treeFocusId == null ? (
+					<DataConnectorCards databases={treeDatabases} owners={owners} />
+				) : (
+					<SinglePageView
+						dataId={workspaceDataId}
+						treeFocusId={treeFocusId}
+						treeDataEpoch={treeDataEpoch}
+						getSinglePage={getSinglePage}
+						onPatchEdits={handleSave}
+						onDataTableRowClick={handleDataTableRowClick}
+						onCertificationChange={handleCertificationChange}
+						onDataTableCertificationChange={handleChildCertificationChange}
+						canCertifyDataTableRow={(_sectionId, _rowId, ownerId) =>
+							canEditEntity({
+								user: catalogActor,
+								permission: { catalog: ['edit'] },
+								ownerId,
+								owners,
+							})
+						}
+						hideEditToolbar={!canEditFocusedCatalog}
+					/>
+				)}
 			</main>
 			<Toast
 				open={certError != null}

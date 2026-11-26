@@ -26,6 +26,13 @@
 	 */
 	--font-sf: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', system-ui, sans-serif;
 
+	/*
+	 * Design-system "Shadow - Menus" (0 2px 6px), used for raised surfaces such
+	 * as menus and hovered cards. The colour is --effect-shadow-menu, which has
+	 * a dark-mode value below.
+	 */
+	--shadow-menu: 0 2px 6px 0 var(--effect-shadow-menu);
+
 	--animate-progress-indeterminate: progress-indeterminate 1.4s ease-in-out infinite;
 }
 
@@ -52,9 +59,14 @@
 	}
 }
 
+:root {
+	--effect-shadow-menu: rgb(80 80 80 / 0.25);
+}
+
 @media (prefers-color-scheme: dark) {
 	:root {
 		--color-foreground: #fafafa;
+		--effect-shadow-menu: rgb(0 0 0 / 0.4);
 	}
 }
 

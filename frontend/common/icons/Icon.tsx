@@ -42,6 +42,12 @@ import CodeBracketSvg from './svg/code-bracket.svg';
 import LightningSvg from './svg/lightning.svg';
 import DiscoverySvg from './svg/discovery.svg';
 import FilterSvg from './svg/filter.svg';
+import SnowflakeSvg from './svg/snowflake.svg';
+import ViewCardSvg from './svg/view-card.svg';
+import ViewListSvg from './svg/view-list.svg';
+import ExcelSvg from './svg/excel.svg';
+import SearchSvg from './svg/search.svg';
+import CloseXSvg from './svg/close-x.svg';
 
 export enum IconName {
 	Close = 'close',
@@ -82,6 +88,12 @@ export enum IconName {
 	Lightning = 'lightning',
 	Discovery = 'discovery',
 	Filter = 'filter',
+	Snowflake = 'snowflake',
+	ViewCard = 'view-card',
+	ViewList = 'view-list',
+	Excel = 'excel',
+	Search = 'search',
+	CloseX = 'close-x',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -123,6 +135,12 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Lightning]: LightningSvg,
 	[IconName.Discovery]: DiscoverySvg,
 	[IconName.Filter]: FilterSvg,
+	[IconName.Snowflake]: SnowflakeSvg,
+	[IconName.ViewCard]: ViewCardSvg,
+	[IconName.ViewList]: ViewListSvg,
+	[IconName.Excel]: ExcelSvg,
+	[IconName.Search]: SearchSvg,
+	[IconName.CloseX]: CloseXSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

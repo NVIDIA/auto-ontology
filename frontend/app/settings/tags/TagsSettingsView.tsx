@@ -17,7 +17,7 @@ import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
-import { SearchInput } from '@/common/SearchInput';
+import { InputsSearch } from '@/common/InputsSearch';
 import { SkeletonRows } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { Text } from '@/common/Text';
@@ -379,7 +379,7 @@ const TagsList = () => {
 					    is empty *because* of the box, and taking it away would leave
 					    no way to clear the query and get the tags back. */}
 					{hasLoaded && (tags.length > 0 || searching) ? (
-						<SearchInput
+						<InputsSearch
 							value={query}
 							onChange={setQuery}
 							placeholder="Search Tags…"
