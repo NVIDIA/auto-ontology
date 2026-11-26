@@ -47,6 +47,7 @@ from sqlglot import exp
 from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from auto_ontology.dal.datasources import fetch_table_key_profile
+from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 
 logger = logging.getLogger(__name__)
@@ -484,6 +485,8 @@ def safe_find_fanouts(
     The check only advises against a query that already passed the others, so
     an error in it must not keep the query from running.
     """
+    if not config.fanout_check_enabled():
+        return []
     try:
         return find_fanouts(statement, catalog, key_profiles(ctx, database_name))
     except Exception:  # noqa: BLE001
@@ -506,7 +509,12 @@ def submit_refusal(
     *resubmit* says how to send the same query again, as in ``submit``. On the
     last answer attempt there is no turn to send it again in, so it is accepted.
     """
-    if not fanouts or ctx.last_answer_attempt or sql in ctx.fanout_refused:
+    if (
+        not config.fanout_check_enabled()
+        or not fanouts
+        or ctx.last_answer_attempt
+        or sql in ctx.fanout_refused
+    ):
         return None
     ctx.fanout_refused.add(sql)
     return (
@@ -518,7 +526,7 @@ def submit_refusal(
 
 def run_sql_hint(fanouts: list[Fanout], limit: int) -> str:
     """A note of at most *limit* chars for ``run_sql``'s result; it only warns."""
-    if not fanouts or limit < 2:
+    if not config.fanout_check_enabled() or not fanouts or limit < 2:
         return ""
     hint = (
         f"\n\nNote: a join repeats the rows an aggregate adds up:\n- {_listed(fanouts)}"

@@ -70,6 +70,19 @@ def test_an_empty_filtered_result_is_held_back_once_then_accepted(
     assert second == "Accepted."
 
 
+def test_disabling_empty_result_check_accepts_and_does_not_probe(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK", "false")
+
+    observation, submission = loop.submit(ctx, TYPE_MISMATCH)
+
+    assert observation == "Accepted."
+    assert submission is not None
+    assert len(_executed(ctx)) == 1
+    assert not ctx.empty_result_checked
+
+
 def test_a_literal_of_the_wrong_type_shows_the_stored_values(ctx: ToolContext) -> None:
     observation, submission = loop.submit(ctx, TYPE_MISMATCH)
 

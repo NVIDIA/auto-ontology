@@ -593,6 +593,29 @@ def test_run_sql_runs_and_adds_a_note(ctx: ToolContext) -> None:
     assert loop.submit(ctx, GROUPED_OWNER_SUM, "x")[1] is None
 
 
+def test_disabling_fanout_skips_profiling_and_both_guard_outputs(
+    ctx: ToolContext,
+    profiles: dict[str, KeyProfile],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    findings = _fanouts(GROUPED_OWNER_SUM, profiles)
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_FANOUT_CHECK", "false")
+
+    def unexpected_lookup(*_args: object) -> None:
+        pytest.fail("disabled fanout must not load key profiles")
+
+    monkeypatch.setattr(fanout, "key_profiles", unexpected_lookup)
+    assert "Note:" not in run_sql_module.run_sql(ctx, GROUPED_OWNER_SUM)
+    observation, submission = loop.submit(ctx, GROUPED_OWNER_SUM, "x")
+    assert observation == "Accepted."
+    assert submission is not None
+
+    # Keep the public output helpers quiet even with precomputed findings.
+    assert fanout.run_sql_hint(findings, 1000) == ""
+    assert fanout.submit_refusal(ctx, findings, GROUPED_OWNER_SUM) is None
+    assert not ctx.fanout_refused
+
+
 def test_run_sql_note_fits_the_observation_limit(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -37,6 +37,7 @@ from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.infra.feature_flags import get_sql_query_timeout_seconds
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import QueryResponse
 from auto_ontology.retrieval.text_to_sql.db_probe import ProbeExecutor
+from auto_ontology.retrieval.text_to_sql.react import config
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
     CatalogNames,
@@ -86,7 +87,7 @@ def empty_result_rejection(
     ``None`` on the last answer attempt, for a result with rows, a query without
     WHERE or HAVING, and a query this already rejected once.
     """
-    if ctx.last_answer_attempt:
+    if not config.empty_result_check_enabled() or ctx.last_answer_attempt:
         return None
     if (
         statement is None
