@@ -104,7 +104,7 @@ const ConnectorList = ({ databases, owners }: { databases: Database[]; owners: O
 	// "AO-IL Table Cells": 36px, 20px side padding, a 1px divider underneath.
 	const cell = 'h-9 px-5 py-1.5';
 	return (
-		<div className="overflow-hidden rounded-lg border border-[#e9eaea] bg-white dark:border-[#2e2e33] dark:bg-[#18181b]">
+		<div className="overflow-x-auto rounded-lg border border-[#e9eaea] bg-white dark:border-[#2e2e33] dark:bg-[#18181b]">
 			<table className="w-full border-collapse text-sm">
 				<thead>
 					<tr>

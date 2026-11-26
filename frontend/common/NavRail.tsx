@@ -54,7 +54,7 @@ const TILE_CLIP = 'block w-9 shrink-0';
 // pieces fill just that gap, outside the tile's curve, with the row's color
 // (`--row`; `--r` is the tile's corner radius, which differs per state).
 const NOTCH =
-	'pointer-events-none absolute hidden size-[var(--r)] [left:calc(var(--r)*-1)] group-hover/rail:block';
+	'pointer-events-none absolute hidden size-[var(--r)] [left:calc(var(--r)*-1)] group-hover/rail:block group-has-[:focus-visible]/rail:block';
 const NOTCH_TOP =
 	'top-0 [background:radial-gradient(circle_at_0_100%,transparent_var(--r),var(--row)_var(--r))]';
 const NOTCH_BOTTOM =
@@ -73,7 +73,7 @@ const ChatHoverIcon = ({ theme }: { theme: Theme }) => {
 
 	return (
 		<span
-			className={`${TILE} hidden rounded group-hover:block group-hover/rail:rounded-r-none ${
+			className={`${TILE} hidden rounded group-hover:block group-hover/rail:rounded-r-none group-has-[:focus-visible]/rail:rounded-r-none ${
 				dark ? 'bg-[rgba(138,210,26,0.12)]' : 'bg-[#f1f8e5]'
 			}`}
 		>
@@ -168,8 +168,8 @@ export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 			: '[--r:4px] [--row:transparent] text-[#2b3036] group-hover:[--row:#f1f8e5] group-hover:bg-[#f1f8e5] group-hover:text-[#76b900] dark:text-[#f0f0f3] dark:group-hover:[--row:rgba(138,210,26,0.12)] dark:group-hover:bg-[rgba(138,210,26,0.12)] dark:group-hover:text-[#8ad21a]';
 
 		const fallbackIconColor = isActive
-			? 'rounded-lg group-hover/rail:rounded-r-none bg-[#ddedbf] text-[#76b900] dark:bg-[rgba(138,210,26,0.28)] dark:text-[#8ad21a]'
-			: 'rounded group-hover/rail:rounded-r-none text-[#2b3036] group-hover:bg-[#f1f8e5] group-hover:text-[#76b900] dark:text-[#f0f0f3] dark:group-hover:bg-[rgba(138,210,26,0.12)] dark:group-hover:text-[#8ad21a]';
+			? 'rounded-lg group-hover/rail:rounded-r-none group-has-[:focus-visible]/rail:rounded-r-none bg-[#ddedbf] text-[#76b900] dark:bg-[rgba(138,210,26,0.28)] dark:text-[#8ad21a]'
+			: 'rounded group-hover/rail:rounded-r-none group-has-[:focus-visible]/rail:rounded-r-none text-[#2b3036] group-hover:bg-[#f1f8e5] group-hover:text-[#76b900] dark:text-[#f0f0f3] dark:group-hover:bg-[rgba(138,210,26,0.12)] dark:group-hover:text-[#8ad21a]';
 
 		return (
 			<Link
@@ -201,7 +201,7 @@ export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 
 	return (
 		<nav className="relative h-full w-[60px] shrink-0 border-r border-[#e9eaea] bg-white font-sf dark:border-[#2e2e33] dark:bg-[#18181b]">
-			<div className="group/rail absolute inset-y-0 left-0 flex w-full flex-col gap-3 overflow-hidden bg-white px-3 py-4 hover:z-30 hover:w-[148px] hover:shadow-[0_2px_6px_rgba(80,80,80,0.25)] dark:bg-[#18181b] dark:hover:shadow-[0_2px_6px_rgba(0,0,0,0.4)]">
+			<div className="group/rail absolute inset-y-0 left-0 flex w-full flex-col gap-3 overflow-hidden bg-white px-3 py-4 hover:z-30 hover:w-[148px] hover:shadow-[0_2px_6px_rgba(80,80,80,0.25)] has-[:focus-visible]:z-30 has-[:focus-visible]:w-[148px] has-[:focus-visible]:shadow-[0_2px_6px_rgba(80,80,80,0.25)] dark:bg-[#18181b] dark:hover:shadow-[0_2px_6px_rgba(0,0,0,0.4)] dark:has-[:focus-visible]:shadow-[0_2px_6px_rgba(0,0,0,0.4)]">
 				{visibleItems.map(renderItem)}
 			</div>
 		</nav>

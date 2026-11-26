@@ -6,6 +6,7 @@
 
 import {
 	useCallback,
+	useEffect,
 	useRef,
 	useState,
 	type KeyboardEvent,
@@ -178,6 +179,15 @@ export const SidePanelLayout = ({
 	// Null until the user drags, so the panel keeps its class width until then.
 	const [width, setWidth] = useState<number | null>(null);
 	const asideRef = useRef<HTMLElement>(null);
+	// The panel's rendered width, for the separator before anything has been dragged.
+	const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+	useEffect(() => {
+		const aside = asideRef.current;
+		if (aside == null || !resizable || collapsed) return undefined;
+		const observer = new ResizeObserver(() => setMeasuredWidth(aside.offsetWidth));
+		observer.observe(aside);
+		return () => observer.disconnect();
+	}, [resizable, collapsed]);
 	const getStartWidth = useCallback(() => asideRef.current?.offsetWidth ?? minWidth, [minWidth]);
 
 	const expandedWidth = width == null ? expandedWidthClass : '';
@@ -215,7 +225,7 @@ export const SidePanelLayout = ({
 						</div>
 						{resizable ? (
 							<DragBar
-								width={width}
+								width={width ?? measuredWidth}
 								minWidth={minWidth}
 								maxWidth={maxWidth}
 								onResize={setWidth}

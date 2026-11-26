@@ -465,6 +465,8 @@ function SchemaBlock({
 		})();
 		return () => {
 			cancelled = true;
+			// A collapse mid-fetch skips the `finally` above, so clear the flag here.
+			setLoadingTables(false);
 		};
 	}, [open, schemaLoadRef, schema.tables_count, schema.tables.length, onLoadTables]);
 
@@ -483,7 +485,7 @@ function SchemaBlock({
 				href={hasChildren ? undefined : catalogPathFromFocusId(schemaFocusPath, pathBase)}
 				onActivate={activateSchemaBranch}
 			/>
-			{loadingTables ? <TreeSkeletonRow depth={depth + 1} /> : null}
+			{open && loadingTables ? <TreeSkeletonRow depth={depth + 1} /> : null}
 			{open && hasChildren
 				? schema.tables.map((t) => {
 						const tableFocusPath = `${schemaFocusPath}|${t.id}`;
@@ -552,6 +554,7 @@ function DatabaseBlock({
 		})();
 		return () => {
 			cancelled = true;
+			setLoadingSchemas(false);
 		};
 	}, [open, database.id, database.schemas.length, onLoadSchemas]);
 
@@ -569,7 +572,7 @@ function DatabaseBlock({
 				selected={selectedId === database.id}
 				onActivate={activateDatabaseBranch}
 			/>
-			{loadingSchemas ? <TreeSkeletonRow depth={depth + 1} /> : null}
+			{open && loadingSchemas ? <TreeSkeletonRow depth={depth + 1} /> : null}
 			{open && hasChildren
 				? database.schemas.map((s) => (
 						<SchemaBlock
