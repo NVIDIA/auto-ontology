@@ -76,3 +76,23 @@ def test_a_failed_fallback_count_does_not_fail_reporting(
         semantic_compile._report_fallback_terms("dbx")
 
     assert "Could not count placeholder Terms" in caplog.text
+
+
+def test_fallback_report_limits_the_names_on_one_log_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fallback_terms = [f"Term {index:02d}" for index in range(25)]
+    with (
+        patch.object(
+            semantic_compile,
+            "fetch_fallback_term_names_for_database",
+            return_value=fallback_terms,
+        ),
+        caplog.at_level("WARNING", logger="auto_ontology.semantic.compile"),
+    ):
+        semantic_compile._report_fallback_terms("dbx")
+
+    assert "25 placeholder Term(s)" in caplog.text
+    assert "Term 19" in caplog.text
+    assert "and 5 more" in caplog.text
+    assert "Term 20" not in caplog.text

@@ -568,6 +568,20 @@ def test_a_person_certifying_the_description_clears_the_placeholder(
     assert _generation(term_id) == ("generated", None)
 
 
+def test_not_certifying_the_description_keeps_the_placeholder(world: World) -> None:
+    world.table("orders")
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Orders",
+        "placeholder",
+        world.tables["orders"],
+        fallback_reason="x",
+    )
+
+    t.update_term(term_id, description_certified=False, touch=True)
+
+    assert _generation(term_id) == ("fallback", "x")
+
+
 def test_compilation_updates_and_name_edits_keep_the_placeholder(world: World) -> None:
     """Only a person replacing the description replaces the placeholder: an
     update from compilation (no ``touch``) or a name-only edit leaves it."""

@@ -1041,7 +1041,7 @@ def process_table(
     with _step(table_name, f"Generating terms ({len(specs)} columns)"):
         term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
-    fallback_reason = getattr(term_result, "fallback_reason", None)
+    fallback_reason = term_result.fallback_reason
     spec_by_column = {spec.source_column: spec for spec in specs}
     persisted_terms = terms_with_assignments(term_result, spec_by_column)
 
@@ -1132,7 +1132,6 @@ def process_table(
     return ProcessTableResult(
         term_names=result_term_names,
         attr_names=result_attr_names,
-        fallback_terms=(list(result_term_names) if fallback_reason else []),
         sql_attr_names=result_sql_attr_names,
     )
 

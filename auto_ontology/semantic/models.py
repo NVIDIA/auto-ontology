@@ -17,8 +17,6 @@ class ProcessTableResult:
 
     term_names: list[str] = field(default_factory=list)
     attr_names: list[str] = field(default_factory=list)
-    # Terms stored from the deterministic fallback, not from the model.
-    fallback_terms: list[str] = field(default_factory=list)
     sql_attr_names: list[str] = field(default_factory=list)
 
 

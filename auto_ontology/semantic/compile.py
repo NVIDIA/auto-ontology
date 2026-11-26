@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # the shared invoke call site where it also throttled callers that already
 # limit their own concurrency.
 SEMANTIC_LLM_MAX_INFLIGHT = int(os.environ.get("SEMANTIC_LLM_MAX_INFLIGHT", "6"))
+_FALLBACK_TERM_LOG_LIMIT = 20
 
 
 def _report_fallback_terms(database_name: str) -> None:
@@ -43,10 +44,13 @@ def _report_fallback_terms(database_name: str) -> None:
         logger.warning("Could not count placeholder Terms", exc_info=True)
         return
     if fallback_terms:
+        displayed_terms = fallback_terms[:_FALLBACK_TERM_LOG_LIMIT]
+        remaining = len(fallback_terms) - len(displayed_terms)
         logger.warning(
-            "%d placeholder Term(s) stored where a model step failed: %s",
+            "%d placeholder Term(s) stored where a model step failed: %s%s",
             len(fallback_terms),
-            fallback_terms,
+            displayed_terms,
+            f" and {remaining} more" if remaining else "",
         )
 
 

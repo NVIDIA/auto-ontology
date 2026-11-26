@@ -157,7 +157,7 @@ def _attach_to_new_term(
 ) -> int:
     term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
     apply_display_names_to_specs(term_result, specs)
-    fallback_reason = getattr(term_result, "fallback_reason", None)
+    fallback_reason = term_result.fallback_reason
     spec_by_column = {spec.source_column: spec for spec in specs}
     term_names: list[str] = []
     attr_names: list[str] = []
