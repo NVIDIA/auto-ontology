@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import yaml
+from sqlalchemy.exc import IntegrityError
 from ossie_nvidia_auto_ontology import (
     AutoOntologyConversionError,
     convert_auto_ontology_to_ossie,
@@ -240,11 +241,18 @@ def import_model(
         payload = yaml.safe_load(convert_ossie_to_auto_ontology(yaml_text))
     document = AutoOntologyModelDocument.model_validate(payload)
     embed_buffer = ImportEmbedBuffer() if embed else None
-    summary = dal.apply_import_model(
-        document,
-        replace=replace,
-        embed_buffer=embed_buffer,
-    )
+    try:
+        summary = dal.apply_import_model(
+            document,
+            replace=replace,
+            embed_buffer=embed_buffer,
+        )
+    except IntegrityError as exc:
+        # The DAL transaction has rolled back. Do not expose SQL/parameters or
+        # driver messages, which can include connection details and user data.
+        raise dal.ModelImportConflictError(
+            [{"kind": "integrity_conflict", "existing_ids": []}]
+        ) from exc
     summary["format"] = source_format.value
     if embed and embed_buffer is not None:
         summary["embeddings"] = flush_import_embeddings(embed_buffer)

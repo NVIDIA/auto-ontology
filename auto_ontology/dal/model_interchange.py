@@ -17,17 +17,19 @@ behind rather than a catalog with half its semantics on top.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from sqlalchemy import func, literal, select, update
+from sqlalchemy import Table, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.catalog.constants import Props
 from auto_ontology.catalog.model import CatalogNode
 from auto_ontology.catalog.store.queries import add_query
 from auto_ontology.dal import schema as s
+from auto_ontology.dal import session
 from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
@@ -98,6 +100,31 @@ class UnknownDatabaseIdsError(ModelInterchangeError):
 
 class ModelImportValidationError(ModelInterchangeError):
     """Raised when an import payload references ids outside the export scope."""
+
+
+class ModelImportConflictError(ModelInterchangeError):
+    """An import cannot unambiguously bind its identities to the live model."""
+
+    def __init__(self, conflicts: list[dict[str, Any]]) -> None:
+        self.conflicts = conflicts
+        super().__init__("Model import conflicts with existing model identities")
+
+    def detail(self) -> dict[str, Any]:
+        return {
+            "code": "model_import_conflict",
+            "conflicts": self.conflicts,
+            "resolution": (
+                "Export the target catalog with /api/model/export and bind the "
+                "document and all its references to the exported IDs before retrying. "
+                "For duplicate declarations of new objects, assign distinct IDs "
+                "and object paths to distinct objects and update their references, "
+                "or remove the duplicate declaration. For ambiguous_id where a live ID "
+                "also belongs to another object as imported_id, export-and-bind "
+                "cannot resolve the ambiguity. Have the catalog administrator "
+                "remove or change the conflicting imported_id on the other object, "
+                "or remove that duplicate object, before retrying."
+            ),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -773,6 +800,277 @@ def make_cached_sql_column_resolver() -> Callable[[str, str | None], list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _preflight_import(document: AutoOntologyModelDocument, *, replace: bool) -> None:
+    """Check every imported entity before writes, including planned replacements.
+
+    Natural-name matches are diagnostic bindings only: they let us report
+    descendant conflicts together, but never implicitly adopt an existing row.
+    Opaque placeholders keep new parents separate from every live identity.
+    """
+    conflicts: list[dict[str, Any]] = []
+    seen_ids: dict[str, tuple[str, tuple[Any, ...]]] = {}
+    bindings: dict[str, Any] = {}
+    claimed_live_ids: set[tuple[str, str]] = set()
+
+    def check(
+        table: Table,
+        nodes: list[tuple[str, dict[str, Any], list[str]]],
+        keys: tuple[str, ...],
+        *,
+        catalog: bool = False,
+        deleted: set[str] | None = None,
+    ) -> None:
+        if not nodes:
+            return
+        ids = [identity for identity, _, _ in nodes]
+        names = [props["name"] for _, props, _ in nodes]
+        rows = store().query_read(
+            select(
+                *(table.c[key] for key in dict.fromkeys(("id", "imported_id", *keys)))
+            ).where(
+                table.c.id.in_(ids)
+                | table.c.imported_id.in_(ids)
+                | table.c.name.in_(names)
+            )
+        )
+        by_id: dict[str, dict[str, dict[str, Any]]] = {}
+        by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for row in rows:
+            if deleted and row["id"] in deleted:
+                continue
+            for identity in (row["id"], row["imported_id"]):
+                if identity is not None:
+                    by_id.setdefault(identity, {})[row["id"]] = row
+            by_key.setdefault(tuple(row[key] for key in keys), []).append(row)
+
+        proposed_keys: dict[tuple[Any, ...], str] = {}
+        for identity, props, path in nodes:
+            key = tuple(props[k] for k in keys)
+            identities = list(by_id.get(identity, {}).values())
+            # All current import writers skip properties on matched rows.
+            # Check the retained key, not a name edit this writer never applies.
+            effective_key = (
+                tuple(identities[0][k] for k in keys) if len(identities) == 1 else key
+            )
+            same_key = by_key.get(effective_key, [])
+            if table is s.catalog_database and not path and identities:
+                same_key = []  # No database name was supplied to compare.
+            # #581 preserves every declared column of a shared attribute.
+            # Repetition is valid when the attribute itself has one definition;
+            # only its column binding may differ between declarations.
+            definition = tuple(
+                props.get(k) for k in ("name", "description", "term_name", "source")
+            )
+            shared_declaration = table is s.column_attribute and seen_ids.get(
+                identity
+            ) == (table.name, definition)
+            kind = None
+            if identity in seen_ids and not shared_declaration:
+                kind = "duplicate_payload_id"
+            elif len(identities) > 1:
+                kind = "ambiguous_id"
+            elif (
+                identities
+                and (table.name, identities[0]["id"]) in claimed_live_ids
+                and not shared_declaration
+            ):
+                kind = "duplicate_payload_path"
+            elif (
+                catalog
+                and identities
+                and any(identities[0][k] != props[k] for k in keys if k != "name")
+            ):
+                kind = "identity_path_mismatch"
+            elif not shared_declaration and effective_key in proposed_keys:
+                kind = "duplicate_payload_path"
+            elif not shared_declaration and any(
+                row["id"] not in {r["id"] for r in identities} for row in same_key
+            ):
+                kind = "natural_name_conflict"
+            if kind:
+                conflicts.append(
+                    {
+                        "kind": kind,
+                        "entity_type": table.name,
+                        "proposed_id": identity,
+                        "path": path or [props["name"]],
+                        "existing_ids": sorted(
+                            {row["id"] for row in identities + same_key}
+                        ),
+                    }
+                )
+            seen_ids[identity] = (table.name, definition)
+            if len(identities) == 1:
+                claimed_live_ids.add((table.name, identities[0]["id"]))
+            if not shared_declaration:
+                proposed_keys[effective_key] = identity
+            candidates = identities or same_key
+            bindings[identity] = (
+                candidates[0]["id"] if len(candidates) == 1 else object()
+            )
+
+    databases = document.data_layer.databases
+    db_nodes = [
+        (
+            db.id,
+            {
+                "name": (db.schemas[0].database_name or db.schemas[0].name or db.id)
+                if db.schemas
+                else db.id
+            },
+            [(db.schemas[0].database_name or db.schemas[0].name or db.id)]
+            if db.schemas
+            else [],
+        )
+        for db in databases
+    ]
+    check(s.catalog_database, db_nodes, ("name",), catalog=True)
+    schema_nodes = [
+        (
+            schema.id,
+            {"name": schema.name, "database_id": bindings[db.id]},
+            [props["name"], schema.name],
+        )
+        for db, (_, props, _) in zip(databases, db_nodes)
+        for schema in db.schemas
+    ]
+    check(s.catalog_schema, schema_nodes, ("database_id", "name"), catalog=True)
+    schema_paths = {identity: path for identity, _, path in schema_nodes}
+    table_nodes = [
+        (
+            table.id,
+            {"name": table.name, "schema_id": bindings[schema.id]},
+            schema_paths[schema.id] + [table.name],
+        )
+        for db in databases
+        for schema in db.schemas
+        for table in schema.tables
+    ]
+    check(s.catalog_table, table_nodes, ("schema_id", "name"), catalog=True)
+    table_paths = {identity: path for identity, _, path in table_nodes}
+    column_nodes = [
+        (
+            column.id,
+            {"name": column.name, "table_id": bindings[table.id]},
+            table_paths[table.id] + [column.name],
+        )
+        for db in databases
+        for schema in db.schemas
+        for table in schema.tables
+        for column in table.columns
+    ]
+    check(s.catalog_column, column_nodes, ("table_id", "name"), catalog=True)
+
+    deleted: dict[str, set[str]] = {}
+    if replace:
+        live_db_ids = [
+            bindings[db.id] for db in databases if isinstance(bindings[db.id], str)
+        ]
+        for table, predicate in _scoped_semantic_deletions(document, live_db_ids):
+            deleted[table.name] = {
+                row["id"]
+                for row in store().query_read(select(table.c.id).where(predicate))
+            }
+    terms = document.semantic_layer.terms
+    check(
+        s.term,
+        [
+            (term.id, {"name": term.name, "source": SEMANTIC_SOURCE}, [term.name])
+            for term in terms
+        ],
+        ("name", "source"),
+        deleted=deleted.get(s.term.name),
+    )
+    column_props = {identity: props for identity, props, _ in column_nodes}
+    check(
+        s.column_attribute,
+        [
+            (
+                attr.id,
+                {
+                    "name": attr.name,
+                    "description": attr.description,
+                    "source": SEMANTIC_SOURCE,
+                    "term_name": term.name,
+                    "source_column": column_props.get(attr.column_id, {}).get(
+                        "name", ""
+                    ),
+                    "table_id": column_props.get(attr.column_id, {}).get(
+                        "table_id", ""
+                    ),
+                },
+                [term.name, attr.name],
+            )
+            for term in terms
+            for attr in term.columns_attributes
+        ],
+        ("name", "source_column", "term_name", "table_id", "source"),
+        deleted=deleted.get(s.column_attribute.name),
+    )
+    check(
+        s.sql_attribute,
+        [
+            (attr.id, {"name": attr.name}, [key, attr.name])
+            for key in _YAML_SOURCE_KEYS
+            for attr in getattr(document.semantic_layer.sql_attributes, key)
+        ],
+        ("name",),
+        deleted=deleted.get(s.sql_attribute.name),
+    )
+    check(
+        s.custom_analysis,
+        [
+            (analysis.id, {"name": analysis.name}, [analysis.name])
+            for analysis in document.semantic_layer.custom_analyses
+        ],
+        ("name",),
+        deleted=deleted.get(s.custom_analysis.name),
+    )
+    if conflicts:
+        raise ModelImportConflictError(conflicts)
+
+
+# Each import resolves the eight entity kinds in a fixed order. Disjoint
+# bucket ranges per table and sorted buckets within each batch preserve that
+# lock order, while bounding the total advisory-lock namespace to 8 * 64 entries.
+_IMPORT_LOCK_BUCKETS = 64
+_IMPORT_LOCK_NAMESPACE = 0x414F494D  # AOIM: Auto-Ontology import identities.
+_IMPORT_LOCK_TABLES = (
+    s.catalog_database,
+    s.catalog_schema,
+    s.catalog_table,
+    s.catalog_column,
+    s.term,
+    s.column_attribute,
+    s.sql_attribute,
+    s.custom_analysis,
+)
+
+
+def _lock_import_identities(table: Table, identities: list[str]) -> None:
+    """Serialize absent-ID resolution with bounded transaction-scoped locks."""
+    if not identities or session.get_engine().dialect.name != "postgresql":
+        return
+    table_offset = _IMPORT_LOCK_TABLES.index(table) * _IMPORT_LOCK_BUCKETS
+    buckets = sorted(
+        {
+            table_offset
+            + int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8], "big")
+            % _IMPORT_LOCK_BUCKETS
+            for identity in identities
+        }
+    )
+    # Bucket collisions intentionally serialize unrelated IDs. No catalog
+    # uniqueness constraint is added; identical source IDs always share a lock,
+    # regardless of parent, and catalog size cannot grow the lock namespace.
+    store().query_read(
+        "SELECT pg_advisory_xact_lock(:namespace, bucket) FROM "
+        "(SELECT unnest(CAST(:buckets AS integer[])) AS bucket "
+        "ORDER BY bucket) AS import_locks",
+        {"namespace": _IMPORT_LOCK_NAMESPACE, "buckets": buckets},
+    )
+
+
 def _resolve_entities_batch(
     table,
     items: list[tuple[str, dict[str, Any]]],
@@ -784,8 +1082,8 @@ def _resolve_entities_batch(
     A row found this way has its ``imported_id`` stamped if it had none, so the
     *next* import matches it the fast way.
 
-    Three statements regardless of batch size — one ``INSERT ... RETURNING``
-    rather than a create per row.
+    One batched lock read followed by resolution, stamping and
+    ``INSERT ... RETURNING``; no per-row insert or lock round trips.
     """
     if not items:
         return {}
@@ -797,19 +1095,75 @@ def _resolve_entities_batch(
         deduped.setdefault(imported_id, create_props)
     imported_ids = list(deduped)
 
-    existing: dict[str, str] = {}
-    for row in store().query_read(
-        select(table.c.id, table.c.imported_id).where(
-            table.c.imported_id.in_(imported_ids) | table.c.id.in_(imported_ids)
-        )
-    ):
-        # A row can match by either column. Its own id wins only when nothing
-        # already claimed that payload id by imported_id, so a row explicitly
-        # stamped by a previous import is never shadowed by an id collision.
-        if row["imported_id"] in deduped:
-            existing[row["imported_id"]] = row["id"]
-        elif row["id"] in deduped:
-            existing.setdefault(row["id"], row["id"])
+    _lock_import_identities(table, imported_ids)
+
+    parent_key = {
+        s.catalog_schema: "database_id",
+        s.catalog_table: "schema_id",
+        s.catalog_column: "table_id",
+    }.get(table)
+    fields = [table.c.id, table.c.imported_id]
+    if parent_key:
+        fields.append(table.c[parent_key])
+    statement = select(*fields).where(
+        table.c.imported_id.in_(imported_ids) | table.c.id.in_(imported_ids)
+    )
+    if parent_key:
+        # Keep a validated parent stable until the import transaction commits.
+        statement = statement.order_by(table.c.id).with_for_update()
+    matches: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in store().query_read(statement):
+        for identity in (row["imported_id"], row["id"]):
+            if identity in deduped:
+                matches.setdefault(identity, {})[row["id"]] = row
+
+    conflicts = [
+        {
+            "kind": "ambiguous_id",
+            "entity_type": table.name,
+            "proposed_id": identity,
+            "existing_ids": sorted(live_ids),
+            "path": [deduped[identity].get("name", "")],
+        }
+        for identity, live_ids in matches.items()
+        if len(live_ids) > 1
+    ]
+    claims: dict[str, list[str]] = {}
+    for identity, rows in matches.items():
+        for live_id in rows:
+            claims.setdefault(live_id, []).append(identity)
+    for live_id, identities in claims.items():
+        if len(identities) > 1:
+            conflicts.extend(
+                {
+                    "kind": "duplicate_payload_path",
+                    "entity_type": table.name,
+                    "proposed_id": identity,
+                    "existing_ids": [live_id],
+                    "path": [deduped[identity].get("name", "")],
+                }
+                for identity in identities
+            )
+    if parent_key:
+        for identity, rows in matches.items():
+            if len(rows) != 1:
+                continue
+            row = next(iter(rows.values()))
+            if row[parent_key] != deduped[identity][parent_key]:
+                conflicts.append(
+                    {
+                        "kind": "identity_path_mismatch",
+                        "entity_type": table.name,
+                        "proposed_id": identity,
+                        "existing_ids": [row["id"]],
+                        "path": [deduped[identity].get("name", "")],
+                    }
+                )
+    if conflicts:
+        raise ModelImportConflictError(conflicts)
+    existing = {
+        identity: next(iter(live_ids)) for identity, live_ids in matches.items()
+    }
 
     result: dict[str, tuple[str, bool]] = {}
     to_create: list[tuple[str, dict[str, Any]]] = []
@@ -977,6 +1331,7 @@ def apply_import_model(
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
 
     with write_transaction():
+        _preflight_import(document, replace=replace)
         live_db_ids = _import_catalog(
             document, id_map, created, skipped, embed_buffer, column_meta
         )
@@ -1220,11 +1575,11 @@ def _import_joins(document: AutoOntologyModelDocument, id_map: dict[str, str]) -
     )
 
 
-def _delete_scoped_semantics_not_in_payload(
+def _scoped_semantic_deletions(
     document: AutoOntologyModelDocument,
     live_db_ids: list[str],
-) -> None:
-    """Drop in-scope semantics the payload does not mention.
+) -> list[tuple[Table, Any]]:
+    """Plan deletion of in-scope semantics the payload does not mention.
 
     Keep sets are matched against ``imported_id`` **or** the live id, so an
     entity created by an earlier import and unchanged since is recognised
@@ -1234,6 +1589,13 @@ def _delete_scoped_semantics_not_in_payload(
     imported databases — the same all-or-nothing rule the reads use. A term
     shared with a database outside this import is that database's too.
     """
+    deletions: list[tuple[Table, Any]] = []
+
+    def omitted(table: Table, keep: list[str]) -> Any:
+        return table.c.id.notin_(keep or [""]) & (
+            table.c.imported_id.is_(None) | table.c.imported_id.notin_(keep or [""])
+        )
+
     keep_terms = [term.id for term in document.semantic_layer.terms]
     keep_attrs = [
         attr.id
@@ -1282,11 +1644,8 @@ def _delete_scoped_semantics_not_in_payload(
             .where(s.sql_query__table.c.table_id.in_(scoped_tables))
             .distinct()
         )
-        store().query_write(
-            owner_table.delete().where(
-                owner_table.c.id.in_(in_scope),
-                _payload_identity(owner_table).notin_(keep or [""]),
-            )
+        deletions.append(
+            (owner_table, owner_table.c.id.in_(in_scope) & omitted(owner_table, keep))
         )
 
     attribute_in_scope = (
@@ -1294,10 +1653,11 @@ def _delete_scoped_semantics_not_in_payload(
         .where(s.column_attribute.c.table_id.in_(scoped_tables))
         .distinct()
     )
-    store().query_write(
-        s.column_attribute.delete().where(
-            s.column_attribute.c.id.in_(attribute_in_scope),
-            _payload_identity(s.column_attribute).notin_(keep_attrs or [""]),
+    deletions.append(
+        (
+            s.column_attribute,
+            s.column_attribute.c.id.in_(attribute_in_scope)
+            & omitted(s.column_attribute, keep_attrs),
         )
     )
 
@@ -1312,14 +1672,25 @@ def _delete_scoped_semantics_not_in_payload(
         .where(s.table__term.c.table_id.in_(scoped_tables))
         .distinct()
     )
-    store().query_write(
-        s.term.delete().where(
-            s.term.c.id.in_(inside),
-            s.term.c.id.notin_(outside),
-            s.term.c.source == SEMANTIC_SOURCE,
-            _payload_identity(s.term).notin_(keep_terms or [""]),
+    deletions.append(
+        (
+            s.term,
+            s.term.c.id.in_(inside)
+            & s.term.c.id.notin_(outside)
+            & (s.term.c.source == SEMANTIC_SOURCE)
+            & omitted(s.term, keep_terms),
         )
     )
+    return deletions
+
+
+def _delete_scoped_semantics_not_in_payload(
+    document: AutoOntologyModelDocument,
+    live_db_ids: list[str],
+) -> None:
+    """Apply the same replacement plan that preflight checked, in one transaction."""
+    for table, predicate in _scoped_semantic_deletions(document, live_db_ids):
+        store().query_write(table.delete().where(predicate))
 
 
 def _import_terms(

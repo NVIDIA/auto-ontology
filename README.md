@@ -224,6 +224,14 @@ which Auto Ontology uses to import and export model definitions as Ossie YAML.
 Use **Settings → Import / Export**, or `POST /api/model/import` and
 `POST /api/model/export`.
 
+If an import returns HTTP 409 with `detail.code: model_import_conflict`, inspect
+`detail.conflicts` for the proposed IDs, existing IDs, and object paths. Export
+the target catalog and use its IDs for the matching objects, updating all
+references in the incoming document as well. Same-name catalog objects are never
+implicitly merged. Catalog and semantic identity conflicts are checked before
+writes; integrity conflicts encountered during the import roll back the entire
+transaction. See the [local acceptance checks](docs/testing/issue-267.md).
+
 The services behind both stages, and how clients reach them:
 
 ```mermaid

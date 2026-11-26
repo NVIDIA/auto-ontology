@@ -22,6 +22,11 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+    from httpx import Response
 
 import pytest
 
@@ -644,9 +649,8 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
     `term` is `UNIQUE(name, source)`, so importing a document whose term shares
     a name with an existing one raises rather than creating a duplicate.
 
-    Left to surface: the constraint describes a genuine ambiguity between two
-    terms, and swallowing it would leave a duplicate no read can choose
-    between.
+    Preflight reports the conflict before database mutation, rather than
+    exposing the constraint violation to the HTTP caller.
     """
     document = _reid(_document(world), f"{world.prefix}-copy")
     document.data_layer.databases[0].schemas[0].database_name = f"{world.prefix}-copy"
@@ -654,7 +658,949 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
     document.semantic_layer.terms[0].name = f"{world.prefix}-Order"
 
     try:
-        with pytest.raises(Exception, match="uq_term_name_source|already exists"):
+        with pytest.raises(mi.ModelImportConflictError) as error:
             mi.apply_import_model(document, replace=False)
+        assert error.value.conflicts[0]["entity_type"] == "term"
     finally:
         _cleanup(f"{world.prefix}-copy")
+
+
+@pytest.mark.parametrize("replace", [True, False])
+def test_foreign_ids_on_existing_paths_report_all_conflicts(
+    world: World, replace: bool
+) -> None:
+    """A different deployment's IDs must not cause a partial import or a raw DB error."""
+    before = mi.fetch_export_rows([world.database])
+    document = _reid(_document(world), f"{world.prefix}-foreign")
+    with pytest.raises(mi.ModelImportConflictError) as error:
+        mi.apply_import_model(document, replace=replace)
+    assert (
+        len(error.value.conflicts) == 7
+    )  # Database, schema, two tables, three columns.
+    assert {c["kind"] for c in error.value.conflicts} == {"natural_name_conflict"}
+    assert mi.fetch_export_rows([world.database]) == before
+
+
+def _http_client() -> TestClient:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from auto_ontology.server.model_interchange.router import router
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    return TestClient(app)
+
+
+def _post_document(
+    document: mi.AutoOntologyModelDocument, *, replace: bool = False
+) -> Response:
+    import yaml
+
+    return _http_client().post(
+        f"/api/model/import?embed=false&replace={str(replace).lower()}",
+        content=yaml.safe_dump(document.model_dump()),
+        headers={"Content-Type": "application/yaml"},
+    )
+
+
+def test_http_reports_catalog_and_all_semantic_conflicts_before_writes(
+    world: World,
+) -> None:
+    from unittest.mock import patch
+    from auto_ontology.dal.session import StoreConn
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    document = _document(world)
+    document.semantic_layer.terms[0].id = "foreign-term"
+    document.semantic_layer.terms[0].columns_attributes[0].id = "foreign-attribute"
+    sql_id = _add(s.sql_attribute, name=f"{world.prefix}-sql")
+    ca_id = _add(s.custom_analysis, name=f"{world.prefix}-analysis")
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id="foreign-sql", name=f"{world.prefix}-sql", term_id="foreign-term"
+        )
+    )
+    document.semantic_layer.custom_analyses.append(
+        ModelCustomAnalysis(id="foreign-analysis", name=f"{world.prefix}-analysis")
+    )
+    # Catalog and semantic errors must be reported together.
+    document.data_layer.databases[0].schemas[0].tables[0].id = "foreign-table"
+    before = mi.fetch_export_rows([world.database])
+    with patch.object(StoreConn, "query_write", autospec=True) as writes:
+        response = _post_document(document)
+    assert response.status_code == 409
+    writes.assert_not_called()
+    conflicts = response.json()["detail"]["conflicts"]
+    assert {c["entity_type"] for c in conflicts} == {
+        "catalog_table",
+        "term",
+        "column_attribute",
+        "sql_attribute",
+        "custom_analysis",
+    }
+    assert {sql_id, ca_id, world.term, world.attribute} <= {
+        identity for conflict in conflicts for identity in conflict["existing_ids"]
+    }
+    assert mi.fetch_export_rows([world.database]) == before
+
+
+def test_http_export_and_bind_recovers_from_foreign_physical_ids(world: World) -> None:
+    import yaml
+    from auto_ontology.server.model_interchange.schemas import ModelColumn
+
+    def rewrite(value: Any, mapping: dict[str, str], key: str = "") -> Any:
+        if isinstance(value, dict):
+            return {k: rewrite(v, mapping, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [rewrite(v, mapping, key) for v in value]
+        if isinstance(value, str) and (
+            key == "id" or key.endswith("_id") or key in ("represents", "sql_column_is")
+        ):
+            return mapping.get(value, value)
+        return value
+
+    def identities(
+        document: mi.AutoOntologyModelDocument,
+    ) -> dict[tuple[str, ...], str]:
+        paths: dict[tuple[str, ...], str] = {}
+        for db in document.data_layer.databases:
+            name = db.schemas[0].database_name
+            paths[("database", name)] = db.id
+            for schema in db.schemas:
+                paths[("schema", name, schema.name)] = schema.id
+                for table in schema.tables:
+                    paths[("table", name, schema.name, table.name)] = table.id
+                    for column in table.columns:
+                        paths[
+                            ("column", name, schema.name, table.name, column.name)
+                        ] = column.id
+        for term in document.semantic_layer.terms:
+            paths[("term", term.name)] = term.id
+            for attr in term.columns_attributes:
+                paths[("attribute", term.name, attr.name)] = attr.id
+        return paths
+
+    source = _document(world)
+    foreign_ids = {
+        identity: f"foreign-{identity}" for identity in identities(source).values()
+    }
+    rejected = mi.AutoOntologyModelDocument.model_validate(
+        rewrite(source.model_dump(), foreign_ids)
+    )
+    orders = next(
+        t
+        for t in rejected.data_layer.databases[0].schemas[0].tables
+        if t.name == "orders"
+    )
+    new_column_id = f"{world.prefix}-new-column"
+    orders.columns.append(
+        ModelColumn(
+            id=new_column_id, name="new_evidence", description="Keep this new field"
+        )
+    )
+    response = _post_document(rejected)
+    assert response.status_code == 409
+    exported = _http_client().post(
+        "/api/model/export", json={"databases": [world.database]}
+    )
+    assert exported.status_code == 200
+    target = identities(
+        mi.AutoOntologyModelDocument.model_validate(yaml.safe_load(exported.text))
+    )
+    mapping = {
+        identity: target[path]
+        for path, identity in identities(rejected).items()
+        if path in target
+    }
+    rebound = mi.AutoOntologyModelDocument.model_validate(
+        rewrite(rejected.model_dump(), mapping)
+    )
+    result = _post_document(rebound, replace=True)
+    assert result.status_code == 200, result.text
+    created = result.json()["summary"]["created"]
+    assert created["columns"] == 1
+    assert all(value == 0 for key, value in created.items() if key != "columns")
+    added = store().query_read(
+        select(s.catalog_column).where(s.catalog_column.c.imported_id == new_column_id)
+    )
+    assert len(added) == 1
+    assert added[0]["table_id"] == world.orders
+    assert added[0]["description"] == "Keep this new field"
+    assert [
+        (fk.source_column_id, fk.target_column_id)
+        for fk in rebound.data_layer.foreign_keys
+    ] == [(world.customer_ref, world.customer_id)]
+    assert rebound.semantic_layer.terms[0].represents == [world.orders]
+    assert (
+        rebound.semantic_layer.terms[0].columns_attributes[0].column_id
+        == world.order_id
+    )
+    assert rebound.semantic_layer.semantic_fks[0].column_attribute_id == world.attribute
+    repeated = _post_document(rebound, replace=True)
+    assert repeated.status_code == 200
+    assert all(value == 0 for value in repeated.json()["summary"]["created"].values())
+
+
+@pytest.mark.parametrize(
+    "entity", ["database", "schema", "table", "column", "term", "attribute"]
+)
+def test_http_rejects_ambiguous_live_and_imported_ids(
+    world: World, entity: str
+) -> None:
+    table, identity, props = {
+        "database": (
+            s.catalog_database,
+            world.database,
+            {"name": f"{world.prefix}-other"},
+        ),
+        "schema": (
+            s.catalog_schema,
+            world.schema,
+            {"name": "other", "database_id": world.database},
+        ),
+        "table": (
+            s.catalog_table,
+            world.orders,
+            {"name": "other", "schema_id": world.schema},
+        ),
+        "column": (
+            s.catalog_column,
+            world.order_id,
+            {"name": "other", "table_id": world.orders},
+        ),
+        "term": (
+            s.term,
+            world.term,
+            {"name": f"{world.prefix}-other", "source": SEMANTIC_SOURCE},
+        ),
+        "attribute": (
+            s.column_attribute,
+            world.attribute,
+            {
+                "name": f"{world.prefix}-other",
+                "source_column": "id",
+                "term_name": "other",
+                "table_id": world.orders,
+            },
+        ),
+    }[entity]
+    other = _add(table, imported_id=identity, **props)
+    response = _post_document(_document(world))
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "ambiguous_id"
+        and c["proposed_id"] == identity
+        and set(c["existing_ids"]) == {identity, other}
+        for c in response.json()["detail"]["conflicts"]
+    )
+
+
+def test_http_imported_ids_and_exact_live_ids_both_survive_replace(
+    world: World,
+) -> None:
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    attr = term.columns_attributes[0]
+    # Stamped aliases differ from live IDs. Exact live IDs must remain legal
+    # under replacement, without deleting the objects they identify.
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(imported_id="external-term")
+    )
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == world.attribute)
+        .values(imported_id="external-attr")
+    )
+    assert _post_document(document, replace=True).status_code == 200
+    term.id = "external-term"
+    attr.id = "external-attr"
+    document.semantic_layer.semantic_fks[0].column_attribute_id = attr.id
+    result = _post_document(document, replace=True)
+    assert result.status_code == 200
+    assert result.json()["summary"]["created"]["terms"] == 0
+    assert result.json()["summary"]["created"]["column_attributes"] == 0
+    assert store().query_read(select(s.term.c.id).where(s.term.c.id == world.term))
+    assert store().query_read(
+        select(s.column_attribute.c.id).where(
+            s.column_attribute.c.id == world.attribute
+        )
+    )
+
+
+def test_http_replacement_allows_in_scope_semantic_id_change(world: World) -> None:
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    term.id = "replacement-term"
+    term.columns_attributes[0].id = "replacement-attribute"
+    document.semantic_layer.semantic_fks[
+        0
+    ].column_attribute_id = "replacement-attribute"
+    result = _post_document(document, replace=True)
+    assert result.status_code == 200
+    assert result.json()["summary"]["created"]["terms"] == 1
+    assert not store().query_read(select(s.term.c.id).where(s.term.c.id == world.term))
+
+
+def test_http_replacement_cannot_delete_a_cross_database_term(world: World) -> None:
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, name="public", database_id=other_db)
+    other_table = _add(s.catalog_table, name="orders", schema_id=other_schema)
+    _link(s.table__term, table_id=other_table, term_id=world.term)
+    document = _document(world)
+    document.semantic_layer.terms[0].id = "replacement-term"
+    response = _post_document(document, replace=True)
+    assert response.status_code == 409
+    assert any(
+        c["entity_type"] == "term" and world.term in c["existing_ids"]
+        for c in response.json()["detail"]["conflicts"]
+    )
+    assert store().query_read(
+        select(s.table__term).where(s.table__term.c.table_id == other_table)
+    )
+
+
+def test_http_real_integrity_failure_rolls_back_and_redacts(world: World) -> None:
+    from unittest.mock import patch
+
+    document = _document(world)
+    before = mi.fetch_export_rows([world.database])
+    original = mi._import_terms
+
+    def violate_constraint(*args: Any, **kwargs: Any) -> None:
+        # Simulate a writer racing preflight: earlier catalog stamps/writes
+        # must roll back when a real Postgres uniqueness constraint fails.
+        store().query_write(s.term.insert().values(name=f"{world.prefix}-Order"))
+        original(*args, **kwargs)
+
+    with patch.object(mi, "_import_terms", side_effect=violate_constraint):
+        response = _post_document(document, replace=True)
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflicts"] == [
+        {"kind": "integrity_conflict", "existing_ids": []}
+    ]
+    assert "INSERT INTO" not in response.text
+    assert "uq_term" not in response.text
+    assert mi.fetch_export_rows([world.database]) == before
+
+
+def test_sql_attributes_and_analyses_create_and_reimport_by_both_id_forms(
+    world: World,
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    document = _document(world)
+    document.semantic_layer.sql_attributes.manual.append(
+        ModelSqlAttribute(
+            id=f"{world.prefix}-external-sql",
+            name=f"{world.prefix}-sql",
+            term_id=world.term,
+            sql="SELECT id FROM public.orders",
+            sql_column_is=[world.order_id],
+        )
+    )
+    document.semantic_layer.custom_analyses.append(
+        ModelCustomAnalysis(
+            id=f"{world.prefix}-external-analysis",
+            name=f"{world.prefix}-analysis",
+            sql="SELECT id FROM public.orders",
+            sql_column_is=[world.order_id],
+        )
+    )
+    result = _post_document(document, replace=True)
+    assert result.status_code == 200, result.text
+    assert result.json()["summary"]["created"]["sql_attributes"] == 1
+    assert result.json()["summary"]["created"]["custom_analyses"] == 1
+    second = _post_document(document, replace=True)
+    assert second.status_code == 200, second.text
+    assert all(value == 0 for value in second.json()["summary"]["created"].values())
+    sql_live = store().query_read(
+        select(s.sql_attribute.c.id).where(
+            s.sql_attribute.c.name == f"{world.prefix}-sql"
+        )
+    )[0]["id"]
+    analysis_live = store().query_read(
+        select(s.custom_analysis.c.id).where(
+            s.custom_analysis.c.name == f"{world.prefix}-analysis"
+        )
+    )[0]["id"]
+    document.semantic_layer.sql_attributes.manual[0].id = sql_live
+    document.semantic_layer.custom_analyses[0].id = analysis_live
+    third = _post_document(document, replace=True)
+    assert third.status_code == 200, third.text
+    assert all(value == 0 for value in third.json()["summary"]["created"].values())
+
+
+@pytest.mark.parametrize("entity", ["sql_attribute", "custom_analysis"])
+def test_sql_owner_identity_ambiguity_is_reported(world: World, entity: str) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    document = _document(world)
+    table = getattr(s, entity)
+    live_id = _add(table, name=f"{world.prefix}-one")
+    other_id = _add(table, name=f"{world.prefix}-two", imported_id=live_id)
+    if entity == "sql_attribute":
+        document.semantic_layer.sql_attributes.manual.append(
+            ModelSqlAttribute(
+                id=live_id, name=f"{world.prefix}-one", term_id=world.term
+            )
+        )
+    else:
+        document.semantic_layer.custom_analyses.append(
+            ModelCustomAnalysis(id=live_id, name=f"{world.prefix}-one")
+        )
+    response = _post_document(document)
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "ambiguous_id" and set(c["existing_ids"]) == {live_id, other_id}
+        for c in response.json()["detail"]["conflicts"]
+    )
+
+
+def test_identity_ambiguity_appearing_after_preflight_rolls_back(world: World) -> None:
+    from unittest.mock import patch
+
+    document = _document(world)
+    before = mi.fetch_export_rows([world.database])
+    original = mi._import_catalog
+
+    def race_after_preflight(*args: Any, **kwargs: Any) -> list[str]:
+        result = original(*args, **kwargs)
+        _add(s.term, name=f"{world.prefix}-racing", imported_id=world.term)
+        return result
+
+    with patch.object(mi, "_import_catalog", side_effect=race_after_preflight):
+        response = _post_document(document)
+    assert response.status_code == 409
+    assert response.json()["detail"]["conflicts"][0]["kind"] == "ambiguous_id"
+    assert mi.fetch_export_rows([world.database]) == before
+    assert not store().query_read(
+        select(s.term.c.id).where(s.term.c.name == f"{world.prefix}-racing")
+    )
+
+
+def test_two_payload_aliases_cannot_bind_to_one_semantic_entity(world: World) -> None:
+    document = _document(world)
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(imported_id="other-alias")
+    )
+    duplicate = document.semantic_layer.terms[0].model_copy(deep=True)
+    duplicate.id = "other-alias"
+    duplicate.name = f"{world.prefix}-new-name"
+    duplicate.columns_attributes = []
+    document.semantic_layer.terms.append(duplicate)
+    response = _post_document(document)
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "duplicate_payload_path" and c["proposed_id"] == "other-alias"
+        for c in response.json()["detail"]["conflicts"]
+    )
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_unapplied_matched_term_names_do_not_create_path_conflicts(
+    world: World, replace: bool
+) -> None:
+    other = _add(s.term, name=f"{world.prefix}-Customer", source=SEMANTIC_SOURCE)
+    _link(s.table__term, table_id=world.customers, term_id=other)
+    document = _document(world)
+    for term in document.semantic_layer.terms:
+        term.name = f"{world.prefix}-Customer"
+    response = _post_document(document, replace=replace)
+    assert response.status_code == 200, response.text
+    assert response.json()["summary"]["created"]["terms"] == 0
+    rows = store().query_read(
+        select(s.term.c.id, s.term.c.name).where(s.term.c.id.in_([world.term, other]))
+    )
+    assert {r["id"]: r["name"] for r in rows} == {
+        world.term: f"{world.prefix}-Order",
+        other: f"{world.prefix}-Customer",
+    }
+
+
+@pytest.mark.parametrize("match", ["id", "imported_id"])
+def test_wrong_parent_committed_after_preflight_is_not_reused(
+    world: World, match: str
+) -> None:
+    from unittest.mock import patch
+    from auto_ontology.dal.session import get_engine
+    from auto_ontology.server.model_interchange.schemas import ModelTable, ModelColumn
+
+    outside_schema = _add(s.catalog_schema, database_id=world.database, name="outside")
+    document = _document(world)
+    proposed_id = f"{world.prefix}-late-table"
+    proposed_column = f"{world.prefix}-late-column"
+    document.data_layer.databases[0].schemas[0].tables.append(
+        ModelTable(
+            id=proposed_id,
+            name="late_table",
+            columns=[ModelColumn(id=proposed_column, name="id")],
+        )
+    )
+    original = mi._import_catalog
+    other_id = proposed_id if match == "id" else f"{world.prefix}-other-live-id"
+    before = mi.fetch_export_rows([world.database])
+
+    def aliases() -> list[list[dict[str, Any]]]:
+        return [
+            store().query_read(
+                select(table.c.id, table.c.imported_id).where(table.c.id == identity)
+            )
+            for table, identity in (
+                (s.catalog_database, world.database),
+                (s.catalog_schema, world.schema),
+            )
+        ]
+
+    before_aliases = aliases()
+    assert all(row[0]["imported_id"] is None for row in before_aliases)
+
+    def concurrent_insert(*args: Any, **kwargs: Any) -> list[str]:
+        # A different transaction commits after preflight but before resolution.
+        with get_engine().begin() as connection:
+            connection.execute(
+                s.catalog_table.insert().values(
+                    id=other_id,
+                    imported_id=proposed_id if match == "imported_id" else None,
+                    name="late_table",
+                    schema_id=outside_schema,
+                )
+            )
+        return original(*args, **kwargs)
+
+    with patch.object(mi, "_import_catalog", side_effect=concurrent_insert):
+        response = _post_document(document)
+    assert response.status_code == 409
+    assert any(
+        c["kind"] == "identity_path_mismatch" and c["proposed_id"] == proposed_id
+        for c in response.json()["detail"]["conflicts"]
+    )
+    # The concurrent writer's row remains, but this import must not attach or
+    # create columns on it. Earlier stamps in our transaction are rolled back.
+    row = store().query_read(
+        select(s.catalog_table).where(s.catalog_table.c.id == other_id)
+    )[0]
+    assert row["schema_id"] == outside_schema
+    assert not store().query_read(
+        select(s.catalog_column.c.id).where(s.catalog_column.c.table_id == other_id)
+    )
+    assert not store().query_read(
+        select(s.catalog_column.c.id).where(
+            s.catalog_column.c.imported_id == proposed_column
+        )
+    )
+    assert mi.fetch_export_rows([world.database]) == before
+    assert aliases() == before_aliases
+
+
+@pytest.mark.parametrize("entity", ["sql_attribute", "custom_analysis"])
+@pytest.mark.parametrize("replace", [False, True])
+def test_matched_sql_owner_name_edits_are_skipped(
+    world: World, entity: str, replace: bool
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import (
+        ModelSqlAttribute,
+        ModelCustomAnalysis,
+    )
+
+    table = getattr(s, entity)
+    first = _add(table, name=f"{world.prefix}-original")
+    second = _add(table, name=f"{world.prefix}-taken")
+    document = _document(world)
+    if entity == "sql_attribute":
+        document.semantic_layer.sql_attributes.manual.append(
+            ModelSqlAttribute(
+                id=first, name=f"{world.prefix}-taken", term_id=world.term
+            )
+        )
+    else:
+        document.semantic_layer.custom_analyses.append(
+            ModelCustomAnalysis(id=first, name=f"{world.prefix}-taken")
+        )
+    response = _post_document(document, replace=replace)
+    assert response.status_code == 200, response.text
+    assert {
+        r["id"]: r["name"]
+        for r in store().query_read(
+            select(table.c.id, table.c.name).where(table.c.id.in_([first, second]))
+        )
+    } == {first: f"{world.prefix}-original", second: f"{world.prefix}-taken"}
+
+
+def test_two_aliases_committed_after_preflight_are_not_merged(world: World) -> None:
+    from unittest.mock import patch
+    from auto_ontology.dal.session import get_engine
+    from auto_ontology.server.model_interchange.schemas import ModelTable, ModelColumn
+
+    document = _document(world)
+    a, b = f"{world.prefix}-alias-a", f"{world.prefix}-alias-b"
+    document.data_layer.databases[0].schemas[0].tables.extend(
+        [
+            ModelTable(
+                id=identity,
+                name=f"table_{index}",
+                columns=[ModelColumn(id=f"{identity}-col", name=f"col_{index}")],
+            )
+            for index, identity in enumerate((a, b))
+        ]
+    )
+    original = mi._import_catalog
+
+    def concurrent_insert(*args: Any, **kwargs: Any) -> list[str]:
+        with get_engine().begin() as connection:
+            connection.execute(
+                s.catalog_table.insert().values(
+                    id=a, imported_id=b, name="table_0", schema_id=world.schema
+                )
+            )
+        return original(*args, **kwargs)
+
+    with patch.object(mi, "_import_catalog", side_effect=concurrent_insert):
+        response = _post_document(document)
+    assert response.status_code == 409, response.text
+    conflicts = response.json()["detail"]["conflicts"]
+    assert {
+        c["proposed_id"] for c in conflicts if c["kind"] == "duplicate_payload_path"
+    } == {a, b}
+    assert not store().query_read(
+        select(s.catalog_column.c.id).where(s.catalog_column.c.table_id == a)
+    )
+
+
+@pytest.mark.parametrize("same_parent", [False, True])
+@pytest.mark.parametrize("rollback", [False, True])
+def test_concurrent_absent_source_id_is_resolved_after_first_transaction(
+    world: World, same_parent: bool, rollback: bool
+) -> None:
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from auto_ontology.dal.session import write_transaction
+
+    other_schema = (
+        world.schema
+        if same_parent
+        else _add(s.catalog_schema, database_id=world.database, name="other")
+    )
+    source_id = f"{world.prefix}-concurrent-source"
+    ready = threading.Barrier(2)
+    inserted, release = threading.Event(), threading.Event()
+    pids: list[int] = []
+
+    class AbortFirst(Exception):
+        pass
+
+    def resolve(parent: str) -> tuple[str, Any]:
+        try:
+            with write_transaction():
+                # Both transactions observe an absent identity before resolution.
+                assert not store().query_read(
+                    select(s.catalog_table.c.id).where(
+                        s.catalog_table.c.imported_id == source_id
+                    )
+                )
+                pids.append(
+                    store().query_read("SELECT pg_backend_pid() AS pid")[0]["pid"]
+                )
+                ready.wait(timeout=10)
+                result = mi._resolve_entities_batch(
+                    s.catalog_table,
+                    [(source_id, {"name": "concurrent", "schema_id": parent})],
+                )
+                if result[source_id][1] and not inserted.is_set():
+                    inserted.set()
+                    assert release.wait(10)
+                    if rollback:
+                        raise AbortFirst
+            return "ok", result[source_id]
+        except AbortFirst:
+            return "rollback", None
+        except mi.ModelImportConflictError as error:
+            return "conflict", error.conflicts
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(resolve, parent) for parent in (world.schema, other_schema)
+        ]
+        try:
+            assert inserted.wait(10)
+            deadline = time.monotonic() + 10
+            while not store().query_read(
+                "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND pid = ANY(:pids)",
+                {"pids": pids},
+            ):
+                assert time.monotonic() < deadline, (
+                    "second importer did not wait on the source-ID lock"
+                )
+                time.sleep(0.01)
+            assert not any(f.done() for f in futures)
+        finally:
+            release.set()
+        outcomes = [f.result(timeout=10) for f in futures]
+    rows = store().query_read(
+        select(s.catalog_table).where(s.catalog_table.c.imported_id == source_id)
+    )
+    assert len(rows) == 1
+    if rollback:
+        assert sorted(status for status, _ in outcomes) == ["ok", "rollback"]
+        assert next(value for status, value in outcomes if status == "ok")[1] is True
+    elif same_parent:
+        assert [status for status, _ in outcomes] == ["ok", "ok"]
+        assert sorted(value[1] for _, value in outcomes) == [False, True]
+    else:
+        assert sorted(status for status, _ in outcomes) == ["conflict", "ok"]
+        assert (
+            next(value for status, value in outcomes if status == "conflict")[0]["kind"]
+            == "identity_path_mismatch"
+        )
+    with write_transaction():
+        assert mi._resolve_entities_batch(
+            s.catalog_table,
+            [(source_id, {"name": "concurrent", "schema_id": rows[0]["schema_id"]})],
+        ) == {source_id: (rows[0]["id"], False)}
+
+
+def test_gateway_snapshot_failure_still_cleans_committed_fixture() -> None:
+    from unittest.mock import Mock, patch
+    from dev_tools import verify_model_import_gateway as harness
+
+    def fixtures() -> list[dict[str, Any]]:
+        return store().query_read(
+            select(s.catalog_database)
+            .where(s.catalog_database.c.name.like("issue267-gateway-%"))
+            .order_by(s.catalog_database.c.id)
+        )
+
+    before = fixtures()
+    connection = Mock(wraps=store())
+    connection.query_read.side_effect = RuntimeError("snapshot read failed")
+    with patch.object(harness, "store", return_value=connection):
+        with pytest.raises(RuntimeError, match="snapshot read failed"):
+            harness.main()
+    connection.query_write.assert_called_once()
+    assert fixtures() == before
+
+
+@pytest.mark.parametrize("repeat_first", [False, True])
+@pytest.mark.parametrize("replace", [False, True])
+def test_shared_attribute_repetition_preserves_first_persisted_key(
+    world: World, repeat_first: bool, replace: bool
+) -> None:
+    from auto_ontology.server.model_interchange.schemas import ModelColumnAttribute
+
+    document = _document(world)
+    term = document.semantic_layer.terms[0]
+    first = ModelColumnAttribute(
+        id=f"{world.prefix}-shared-new", name="Shared", column_id=world.order_id
+    )
+    repeat = first.model_copy(update={"column_id": world.customer_ref})
+    distinct = first.model_copy(
+        update={"id": f"{world.prefix}-distinct-new", "column_id": world.customer_ref}
+    )
+    term.columns_attributes = (
+        [first, repeat, distinct] if repeat_first else [first, distinct, repeat]
+    )
+    response = _post_document(document, replace=replace)
+    assert response.status_code == 200, response.text
+    assert response.json()["summary"]["created"]["column_attributes"] == 2
+    rows = store().query_read(
+        select(s.column_attribute).where(
+            s.column_attribute.c.imported_id.in_([first.id, distinct.id])
+        )
+    )
+    assert {r["imported_id"]: r["source_column"] for r in rows} == {
+        first.id: "id",
+        distinct.id: "customer_id",
+    }
+    assert _post_document(document, replace=replace).status_code == 200
+
+
+def test_large_import_identity_locks_have_a_fixed_bound() -> None:
+    from auto_ontology.dal.session import write_transaction
+
+    identities = [f"large-model-column-{index}" for index in range(20_000)]
+    with write_transaction():
+        for table in mi._IMPORT_LOCK_TABLES:
+            mi._lock_import_identities(table, identities)
+        locks = store().query_read(
+            "SELECT objid FROM pg_locks WHERE locktype = 'advisory' "
+            "AND pid = pg_backend_pid() AND classid = :namespace ORDER BY objid",
+            {"namespace": mi._IMPORT_LOCK_NAMESPACE},
+        )
+        assert len(locks) == len(mi._IMPORT_LOCK_TABLES) * mi._IMPORT_LOCK_BUCKETS
+        for table in mi._IMPORT_LOCK_TABLES:
+            mi._lock_import_identities(
+                table, [f"another-{identity}" for identity in identities]
+            )
+        assert (
+            store().query_read(
+                "SELECT objid FROM pg_locks WHERE locktype = 'advisory' "
+                "AND pid = pg_backend_pid() AND classid = :namespace ORDER BY objid",
+                {"namespace": mi._IMPORT_LOCK_NAMESPACE},
+            )
+            == locks
+        )
+
+
+@pytest.mark.parametrize("lower,upper", [("internal.local", "example.org"), ("", "")])
+def test_gateway_child_keeps_existing_proxy_exclusions(lower: str, upper: str) -> None:
+    from unittest.mock import patch
+    from dev_tools import verify_model_import_gateway as harness
+
+    def child(*args: Any, **kwargs: Any) -> None:
+        environment = kwargs["env"]
+        assert environment["no_proxy"].split(",") == ([lower] if lower else []) + [
+            "127.0.0.1"
+        ]
+        assert environment["NO_PROXY"].split(",") == ([upper] if upper else []) + [
+            "127.0.0.1"
+        ]
+
+    with (
+        patch.dict(os.environ, {"no_proxy": lower, "NO_PROXY": upper}),
+        patch.object(harness.subprocess, "run", side_effect=child) as run,
+    ):
+        harness.main()
+    run.assert_called_once()
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_dbt_generated_ossie_ids_conflict_and_recover_through_export(
+    replace: bool,
+) -> None:
+    import json
+    from pathlib import Path
+    import yaml
+    from ossie_nvidia_auto_ontology import convert_ossie_to_auto_ontology
+    from auto_ontology.server.model_interchange.schemas import ModelSemanticLayer
+
+    prefix = f"ossie267_{uuid.uuid4().hex[:8]}"
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "dev_tools/fixtures/model_import/wwi.ossie.yaml"
+    )
+    ossie = yaml.safe_load(fixture.read_text())
+    assert ossie["version"] == "0.2.0.dev0"
+    names = {
+        dataset["name"]: f"{prefix}_{dataset['name']}" for dataset in ossie["datasets"]
+    }
+    for dataset in ossie["datasets"]:
+        dataset["name"] = names[dataset["name"]]
+        dataset["source"] = dataset["source"].replace("wide_world_importers", prefix)
+        for field in dataset["fields"]:
+            field["name"] = f"{prefix}_{field['name']}"
+    for relationship in ossie["relationships"]:
+        relationship["from"] = names[relationship["from"]]
+        relationship["to"] = names[relationship["to"]]
+    ossie_text = yaml.safe_dump(ossie)
+    incoming = mi.AutoOntologyModelDocument.model_validate(
+        yaml.safe_load(convert_ossie_to_auto_ontology(ossie_text))
+    )
+    catalog = incoming.model_copy(deep=True)
+    catalog.semantic_layer = ModelSemanticLayer()
+    catalog = _reid(catalog, f"{prefix}-catalog")
+
+    def physical_paths(
+        document: mi.AutoOntologyModelDocument,
+    ) -> dict[tuple[str, ...], str]:
+        paths: dict[tuple[str, ...], str] = {}
+        for db in document.data_layer.databases:
+            db_name = db.schemas[0].database_name
+            paths[(db_name,)] = db.id
+            for schema in db.schemas:
+                paths[(db_name, schema.name)] = schema.id
+                for table in schema.tables:
+                    paths[(db_name, schema.name, table.name)] = table.id
+                    for column in table.columns:
+                        paths[(db_name, schema.name, table.name, column.name)] = (
+                            column.id
+                        )
+        return paths
+
+    def rebind(value: Any, mapping: dict[str, str], key: str = "") -> Any:
+        if isinstance(value, dict):
+            return {k: rebind(v, mapping, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [rebind(v, mapping, key) for v in value]
+        if isinstance(value, str) and (
+            key == "id" or key.endswith("_id") or key in ("represents", "sql_column_is")
+        ):
+            return mapping.get(value, value)
+        return value
+
+    def snapshot() -> dict[str, list[dict[str, Any]]]:
+        return {
+            table.name: sorted(
+                store().query_read(select(table)),
+                key=lambda row: json.dumps(row, sort_keys=True, default=str),
+            )
+            for table in s.METADATA.sorted_tables
+        }
+
+    try:
+        seeded = mi.apply_import_model(catalog, replace=False)
+        before = snapshot()
+        response = _http_client().post(
+            f"/api/model/import?replace={str(replace).lower()}&embed=false",
+            content=ossie_text,
+            headers={"Content-Type": "application/yaml"},
+        )
+        assert response.status_code == 409, response.text
+        conflicts = response.json()["detail"]["conflicts"]
+        assert response.json()["detail"]["code"] == "model_import_conflict"
+        assert len(conflicts) == 14  # Database, schema, three views, nine columns.
+        assert all(
+            conflict["kind"] == "natural_name_conflict" for conflict in conflicts
+        )
+        assert snapshot() == before
+        exported = _http_client().post(
+            "/api/model/export", json={"databases": seeded["database_ids"]}
+        )
+        assert exported.status_code == 200, exported.text
+        target = physical_paths(
+            mi.AutoOntologyModelDocument.model_validate(yaml.safe_load(exported.text))
+        )
+        proposed = physical_paths(incoming)
+        assert len(proposed) == 14
+        assert all(identity != target[path] for path, identity in proposed.items())
+        bound = mi.AutoOntologyModelDocument.model_validate(
+            rebind(
+                incoming.model_dump(),
+                {identity: target[path] for path, identity in proposed.items()},
+            )
+        )
+        recovered = _post_document(bound, replace=replace)
+        assert recovered.status_code == 200, recovered.text
+        created = recovered.json()["summary"]["created"]
+        assert {
+            key: created[key] for key in ("databases", "schemas", "tables", "columns")
+        } == {"databases": 0, "schemas": 0, "tables": 0, "columns": 0}
+        assert created["terms"] == 3
+        assert created["column_attributes"] == 9
+        after = snapshot()
+        for entity in (
+            "catalog_database",
+            "catalog_schema",
+            "catalog_table",
+            "catalog_column",
+        ):
+            assert after[entity] == before[entity]
+        repeated = _post_document(bound, replace=replace)
+        assert repeated.status_code == 200, repeated.text
+        assert all(
+            value == 0 for value in repeated.json()["summary"]["created"].values()
+        )
+    finally:
+        _cleanup(prefix)
