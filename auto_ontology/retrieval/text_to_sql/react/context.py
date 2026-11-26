@@ -96,6 +96,7 @@ class ToolContext:
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     submitted_database: str | None = None
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
+    deferred_join_pairs: set[frozenset[str]] = field(default_factory=set)
     join_paths: list[dict[str, Any]] = field(default_factory=list)
     anchor_column_ids: dict[str, str | None] = field(default_factory=dict)
     sibling_pairs: set[frozenset[str]] = field(default_factory=set)

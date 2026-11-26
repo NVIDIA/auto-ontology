@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 import sqlglot
 from sqlglot import exp
@@ -358,6 +358,17 @@ def _sample_values(values: Any) -> str:
 _MATCH_MARK = " ← matches the query"
 
 
+#: Marks a description or definition a person certified (#268). The model is
+#: told to prefer these over uncertified ones that compete.
+_CERTIFIED_MARK = "[certified]"
+
+
+def _described(text: Any, certified: Any) -> str:
+    """*text* clipped for display, marked when it is certified."""
+    clipped = _clip(text, _MAX_DESCRIPTION_CHARS)
+    return f"{_CERTIFIED_MARK} {clipped}" if certified else clipped
+
+
 def _column_line(column: dict, matched: set[str] | frozenset[str] = frozenset()) -> str:
     """One column; *matched* is the lowercase names the search matched."""
     parts = [f"  {column.get('name')} {column.get('data_type') or ''}".rstrip()]
@@ -365,7 +376,9 @@ def _column_line(column: dict, matched: set[str] | frozenset[str] = frozenset())
         parts.append(_MATCH_MARK)
     details = []
     if column.get("description"):
-        details.append(_clip(column["description"], _MAX_DESCRIPTION_CHARS))
+        details.append(
+            _described(column["description"], column.get("description_certified"))
+        )
     if samples := _sample_values(column.get("sample_values")):
         details.append(f"values: {samples}")
     if column.get("format"):
@@ -408,7 +421,9 @@ def _shown_columns(table: dict, matched: set[str]) -> tuple[list[dict], int]:
 def _table_block(table: dict, matched: set[str], seen_before: bool) -> str:
     header = f"TABLE {_qualified(table)}"
     if table.get("description"):
-        header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
+        header += (
+            f" — {_described(table['description'], table.get('description_certified'))}"
+        )
     if seen_before:
         lowered = {m.lower() for m in matched}
         columns = [
@@ -438,7 +453,9 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     """
     header = f"TABLE {_qualified(table)}"
     if table.get("description"):
-        header += f" — {_clip(table['description'], _MAX_DESCRIPTION_CHARS)}"
+        header += (
+            f" — {_described(table['description'], table.get('description_certified'))}"
+        )
     keys = {str(k) for k in table.get("pk") or []}
     lowered = {m.lower() for m in matched}
     columns = list(table.get("columns") or [])
@@ -474,8 +491,14 @@ def _definition_block(hit: dict) -> str | None:
         line = f"ATTRIBUTE {name}"
         if hit.get("term_name"):
             line += f" (of {hit['term_name']})"
-        if description:
-            line += f" — {description}"
+        # After the dash: the text before it is read back as the name.
+        detail = " ".join(
+            part
+            for part in (_CERTIFIED_MARK if hit.get("certified") else "", description)
+            if part
+        )
+        if detail:
+            line += f" — {detail}"
         if hit.get("sql"):
             line += f"\n  SQL: {_clip(hit['sql'], _MAX_DEFINITION_CHARS)}"
         return line
@@ -550,36 +573,42 @@ def _tables_in_view(sql: str | None) -> set[tuple[str | None, str | None]]:
     }
 
 
-def _join_lines(
-    ctx: ToolContext, new_tables: list[dict]
-) -> list[tuple[str, set[tuple[str | None, str | None]]]]:
-    """Join routes from each new table to every table already in view.
+class _JoinRoute(NamedTuple):
+    pair: frozenset[str]
+    line: str
+    hops: list[dict]
 
-    Each route comes with every table on it, bridges included.
-    """
-    lines: list[tuple[str, set[tuple[str | None, str | None]]]] = []
-    lookups = 0
+
+def _join_lines(
+    ctx: ToolContext, new_tables: list[dict], table_ids: list[str]
+) -> list[_JoinRoute]:
+    """Find routes involving a result table and another visible or new table."""
+    lines: list[_JoinRoute] = []
+    candidates: dict[frozenset[str], tuple[dict, dict]] = {}
     others = list(ctx.seen_tables.values()) + new_tables
-    for table in new_tables:
+    # A later search can retry a clipped route by finding either endpoint.
+    revisit = [ctx.seen_tables[tid] for tid in table_ids if tid in ctx.seen_tables]
+    for table in new_tables + revisit:
         for other in others:
             pair = frozenset((str(table["id"]), str(other["id"])))
-            if len(pair) < 2 or pair in ctx.joined_pairs:
-                continue
-            if lookups >= _JOIN_PAIRS_PER_CALL:
-                return lines
-            lookups += 1
+            if len(pair) == 2 and pair not in ctx.joined_pairs:
+                candidates.setdefault(pair, (table, other))
+    # Probe untried pairs before retrying clipped ones. An oversized prefix
+    # must not consume the lookup budget on every search.
+    pairs = sorted(candidates, key=lambda pair: pair in ctx.deferred_join_pairs)
+    for pair in pairs[:_JOIN_PAIRS_PER_CALL]:
+        table, other = candidates[pair]
+        anchor = _anchor_column_id(ctx, table)
+        dest = _anchor_column_id(ctx, other)
+        hops = find_join_path(anchor, dest) if anchor and dest else []
+        if not hops:
             ctx.joined_pairs.add(pair)
-            anchor = _anchor_column_id(ctx, table)
-            dest = _anchor_column_id(ctx, other)
-            if not anchor or not dest:
-                continue
-            hops = find_join_path(anchor, dest)
-            if hops:
-                ctx.join_paths.append({"path": hops})
-                line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
-                    _hop_text(h) for h in hops
-                )
-                lines.append((line, _hop_tables(hops)))
+            ctx.deferred_join_pairs.discard(pair)
+            continue
+        line = f"JOIN {_qualified(table)} ↔ {_qualified(other)}: " + " → ".join(
+            _hop_text(h) for h in hops
+        )
+        lines.append(_JoinRoute(pair, line, hops))
     return lines
 
 
@@ -713,27 +742,36 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         return {(table.get("schema_name"), table.get("name"))}
 
     # Most useful first, since the limit shortens or only names what comes
-    # last: new tables, how they join, definitions that carry SQL, then tables
-    # seen before. Each block carries the tables it names.
+    # last: certified definitions, new tables, how they join,
+    # other definitions that carry SQL, then tables seen before. Each block
+    # carries the tables it names.
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
-    named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
-        (new_blocks[str(t["id"])], own(t)) for t in new_tables
-    ]
-    named += _join_lines(ctx, new_tables)
+    # Certified definitions lead, ahead of the tables (#268). They are short,
+    # and they are the deployment's reviewed answer to how a measure is
+    # calculated: placed after the tables, as other definitions are, the
+    # limit cut them on any catalog wide enough to fill it, so certifying a
+    # definition changed nothing the model saw. Uncertified definitions keep
+    # their place, so a catalog with nothing certified reads as before.
+    definitions: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    certified: list[tuple[str, set[tuple[str | None, str | None]]]] = []
+    for hit in hits:
+        if (block := _definition_block(hit)) is not None:
+            entry = (block, _tables_in_view(hit.get("sql")))
+            (certified if hit.get("certified") else definitions).append(entry)
+    named: list[tuple[str, set[tuple[str | None, str | None]]]] = list(certified)
+    named += [(new_blocks[str(t["id"])], own(t)) for t in new_tables]
+    join_routes = _join_lines(ctx, new_tables, table_ids)
+    named += [(route.line, _hop_tables(route.hops)) for route in join_routes]
     if config.siblings_enabled():
         named += [
             (line, set().union(*(own(t) for t in tables)))
             for line, tables in sibling_lines(ctx, new_tables)
         ]
-    definitions = [
-        (block, _tables_in_view(hit.get("sql")))
-        for hit in hits
-        if (block := _definition_block(hit)) is not None
-    ]
     named += definitions
+    definitions = certified + definitions
     analysis_by_block = {
         block: hit
         for hit in hits
@@ -774,6 +812,13 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
             if kept.get(new_blocks[str(t["id"])]) == new_blocks[str(t["id"])]
         }
     )
+    for route in join_routes:
+        if route.line in kept:
+            ctx.joined_pairs.add(route.pair)
+            ctx.deferred_join_pairs.discard(route.pair)
+            ctx.join_paths.append({"path": route.hops})
+        else:
+            ctx.deferred_join_pairs.add(route.pair)
     for block, hit in analysis_by_block.items():
         if kept.get(block) == block:
             ctx.shown_analyses[str(hit["id"])] = {

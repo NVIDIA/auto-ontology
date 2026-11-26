@@ -915,3 +915,151 @@ def test_a_single_connection_does_not_offer_another_databases_tables() -> None:
     assert tool._in_database(connected, {"database_name": "a"})
     assert not tool._in_database(connected, {"database_name": "gone"})
     assert tool._in_database(connected, {"name": "no_database_recorded"})
+
+
+# --------------------------------------------------------------------------
+# Certified definitions at answer time (#268)
+# --------------------------------------------------------------------------
+
+
+def test_certified_descriptions_and_definitions_are_marked(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orders = {
+        **ORDERS,
+        "description_certified": True,
+        "columns": [
+            {**c, "description_certified": c["name"] == "cust_ref"}
+            for c in ORDERS["columns"]
+        ],
+    }
+    monkeypatch.setitem(TABLES, "t-orders", orders)
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda *a, **k: [{**REVENUE, "certified": True}],
+    )
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert "TABLE sales.orders — [certified] One row per order" in text
+    assert "cust_ref INT — [certified] Who placed the order" in text
+    assert (
+        "ATTRIBUTE Revenue (of Order) — [certified] Money kept from paid orders" in text
+    )
+
+
+def test_a_certified_definition_comes_before_the_tables(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a wide catalog the limit cuts what comes last, so a certified
+    definition placed after the tables was cut and never seen."""
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda *a, **k: [{**REVENUE, "certified": True}],
+    )
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.index("ATTRIBUTE Revenue") < text.index("TABLE sales.orders")
+
+
+def test_a_clipped_join_route_can_be_retrieved_after_both_tables_were_shown(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    certified = {
+        **REVENUE,
+        "certified": True,
+        "relevant_tables": [{"id": "t-orders"}, {"id": "t-customers"}],
+    }
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda r, q, *a, **k: (
+            [certified if q == "revenue and customers" else CUSTOMER_TERM]
+            if r is SEMANTIC_STORE
+            else []
+        ),
+    )
+    ctx = _ctx()
+    kept = [
+        tool._definition_block(certified),
+        tool._table_block(ORDERS, set(), False),
+        tool._table_block(CUSTOMERS, set(), False),
+    ]
+    limit = sum(len(block or "") + 2 for block in kept) + len(tool._missed_line([], 1))
+    monkeypatch.setattr(tool.config, "max_observation_chars", lambda: limit)
+    first = tool.retrieve(ctx, "revenue and customers")
+
+    assert "[certified]" in first
+    assert set(ctx.seen_tables) == {"t-orders", "t-customers"}
+    assert not any(line.startswith("JOIN ") for line in first.splitlines())
+    assert not ctx.join_paths
+    assert len(calls["join"]) == 1
+
+    second = tool.retrieve(ctx, "customers")
+
+    assert any(line.startswith("JOIN ") for line in second.splitlines())
+    assert len(ctx.join_paths) == 1
+    assert not tool.retrieve(ctx, "customers").startswith("JOIN ")
+    assert len(calls["join"]) == 2
+
+
+def test_a_clipped_pair_does_not_starve_an_untried_join_route(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    branch = {**ORDERS, "id": "t-branch", "name": "branch"}
+    ctx = _ctx()
+    ctx.seen_tables.update(
+        {"t-customers": CUSTOMERS, "t-orders": ORDERS, "t-branch": branch}
+    )
+    monkeypatch.setattr(tool, "_JOIN_PAIRS_PER_CALL", 1)
+    monkeypatch.setattr(tool.config, "max_observation_chars", lambda: 250)
+    monkeypatch.setattr(tool, "_resolve_tables", lambda *_: (["t-customers"], {}))
+    find_path = tool.find_join_path
+
+    def path_with_one_oversized_route(anchor: str, dest: str) -> list[dict]:
+        hops = find_path(anchor, dest)
+        if dest.startswith("orders."):
+            return [{**hops[0], "source_column": "x" * 500}]
+        return hops
+
+    monkeypatch.setattr(tool, "find_join_path", path_with_one_oversized_route)
+
+    assert "not shown" in tool.retrieve(ctx, "customers")
+    assert len(calls["join"]) == 1
+    assert "JOIN crm.customers ↔ sales.branch" in tool.retrieve(ctx, "customers")
+    assert len(calls["join"]) == 2
+
+
+def test_an_uncertified_definition_still_follows_the_tables(calls: dict) -> None:
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.index("TABLE sales.orders") < text.index("ATTRIBUTE Revenue")
+
+
+def test_a_certified_definition_comes_before_an_uncertified_one(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Search ranked the uncertified definition first; the reviewed one leads."""
+    gross = {**REVENUE, "id": "a-gross", "name": "Gross Revenue"}
+    net = {**REVENUE, "id": "a-net", "name": "Net Revenue", "certified": True}
+    monkeypatch.setattr(
+        tool, "_get_candidates_information", lambda *a, **k: [gross, net]
+    )
+
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert text.index("ATTRIBUTE Net Revenue") < text.index("ATTRIBUTE Gross Revenue")
+
+
+def test_the_certified_mark_is_not_part_of_a_definitions_name() -> None:
+    """The text before the dash is read back as the name elsewhere."""
+    block = tool._definition_block({**REVENUE, "certified": True})
+    no_description = tool._definition_block(
+        {**REVENUE, "description": "", "certified": True}
+    )
+
+    assert block.split("\n")[0].split(" — ")[0] == "ATTRIBUTE Revenue (of Order)"
+    assert no_description.split("\n")[0] == "ATTRIBUTE Revenue (of Order) — [certified]"
