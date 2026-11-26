@@ -120,6 +120,21 @@ CURATED: tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
+        method="GET",
+        path="/api/graph/terms/{term_id}/neighborhood",
+        name="explore_term_graph",
+        description=(
+            "Walk outward from one glossary term, one to three hops, and get "
+            "every connected object with the relationship that links it: the "
+            "tables that REPRESENT the term, their columns, the attributes and "
+            "SQL attributes that are PROPERTY_OF it, the tables it JOINs to, "
+            "and the tags and zones on the way. Use it to see how two business "
+            "concepts connect before asking a question that spans them. "
+            "Available only when the deployment has the optional Apache AGE "
+            "graph projection enabled; otherwise it returns 503."
+        ),
+    ),
+    ToolSpec(
         method="POST",
         path="/api/question-entity-coverage",
         name="check_answerable",

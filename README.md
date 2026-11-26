@@ -471,6 +471,7 @@ Auto Ontology,
 | Authentication, SSO, and API tokens     | [docs/authentication.md](./docs/authentication.md)   |
 | Conversation API                        | [docs/conversation-api.md](./docs/conversation-api.md) |
 | MCP server                              | [docs/mcp.md](./docs/mcp.md)                         |
+| Apache AGE graph projection (optional)  | [docs/age-graph.md](./docs/age-graph.md)             |
 | REST API                                | [docs/openapi/auto-ontology-api.json](./docs/openapi/auto-ontology-api.json) |
 
 ## License
