@@ -33,6 +33,11 @@ CATALOG = {
 TYPE_MISMATCH = "SELECT order_id FROM sales_orders WHERE site_id = '1'"
 
 
+@pytest.fixture(autouse=True)
+def enable_empty_result_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK", "true")
+
+
 @pytest.fixture
 def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     catalog = FakeCatalog(CATALOG)

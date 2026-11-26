@@ -8,7 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
-from auto_ontology.retrieval.text_to_sql.react import loop, prompts
+from auto_ontology.retrieval.text_to_sql.react import config, loop, prompts
 from auto_ontology.retrieval.text_to_sql.react import run_sql as run_sql_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode
@@ -47,6 +47,20 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
 
 def _reply(*calls: dict) -> AIMessage:
     return AIMessage(content="", tool_calls=list(calls))
+
+
+def test_result_checks_are_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_FANOUT_CHECK", raising=False)
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK", raising=False)
+
+    assert not config.fanout_check_enabled()
+    assert not config.empty_result_check_enabled()
+
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_FANOUT_CHECK", "true")
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_EMPTY_RESULT_CHECK", "true")
+
+    assert config.fanout_check_enabled()
+    assert config.empty_result_check_enabled()
 
 
 def test_search_check_and_submit(ctx: ToolContext) -> None:

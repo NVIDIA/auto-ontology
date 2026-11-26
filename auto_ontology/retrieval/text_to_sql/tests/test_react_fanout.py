@@ -70,6 +70,11 @@ TABLES = {
 CATALOG = FakeCatalog(TABLES)
 
 
+@pytest.fixture(autouse=True)
+def enable_fanout_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_FANOUT_CHECK", "true")
+
+
 def _profiles_from(conn: sqlite3.Connection) -> dict[str, KeyProfile]:
     """What profiling would store: the declared key, and each column's ratio."""
     profiles = {}
