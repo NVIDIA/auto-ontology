@@ -1267,3 +1267,61 @@ def test_a_failing_ask_user_and_wrong_arguments_are_observations(
     assert observations[1].startswith("Wrong arguments for ask_user")
     assert result.reason == "submitted"
     assert result.tool_calls == 3
+
+
+@pytest.mark.parametrize("mode", [EpisodeMode.PREDICT, EpisodeMode.AUTO])
+def test_ask_user_is_offered_only_in_a_sql_episode(mode: EpisodeMode) -> None:
+    # predict builds its input from the question alone, so a reply would not
+    # reach the prediction.
+    sql_tools = prompts.tools_for(EpisodeMode.SQL, ask_user=True)
+    tools = prompts.tools_for(mode, ask_user=True)
+
+    assert sql_tools[-1]["function"]["name"] == "ask_user"
+    assert "ask_user" not in [t["function"]["name"] for t in tools]
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_a_question_whose_call_failed_can_be_asked_again(ctx: ToolContext) -> None:
+    asked: list[str] = []
+
+    def ask_user(question: str) -> str:
+        asked.append(question)
+        if len(asked) == 1:
+            raise ConnectionError("the user is away")
+        return "The active ones."
+
+    ctx.ask_user = ask_user
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers?")),
+            _reply(call("ask_user", "2", question="Which customers?")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[:2] == ["ask_user failed: the user is away", "The active ones."]
+    assert asked == ["Which customers?", "Which customers?"]
+    assert result.tool_calls == 3
+
+
+@pytest.mark.usefixtures("ask_user_on")
+def test_a_question_the_user_answered_is_not_asked_again(ctx: ToolContext) -> None:
+    asked: list[str] = []
+    ctx.ask_user = _asker(["The active ones.", "All of them."], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers?")),
+            _reply(call("ask_user", "2", question="Which customers?")),
+            _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[1].startswith("You already made this exact call")
+    assert asked == ["Which customers?"]
+    assert result.tool_calls == 3

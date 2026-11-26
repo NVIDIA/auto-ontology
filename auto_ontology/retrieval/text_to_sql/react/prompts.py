@@ -712,12 +712,15 @@ def tools_for(
     """The tools offered in *mode*; on the last turn, only the ones that answer.
 
     *ask_user* adds ``ask_user``, which never answers, so the last turn does
-    not offer it.
+    not offer it. Only a ``sql`` episode offers it: ``predict`` builds its
+    input from the question alone, so a reply would not reach the prediction.
     """
     tools = _mode_tools(
         mode, last_turn, calculation_answers, information_answers, conversation_answers
     )
-    return [*tools, ASK_USER_TOOL] if ask_user and not last_turn else tools
+    if ask_user and mode == EpisodeMode.SQL and not last_turn:
+        return [*tools, ASK_USER_TOOL]
+    return tools
 
 
 def _mode_tools(

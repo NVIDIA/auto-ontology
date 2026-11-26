@@ -76,7 +76,9 @@ class ToolContext:
     ``ask_user`` is for callers whose user can be asked, such as a benchmark's
     simulated user: it takes the model's question and returns the user's reply.
     The episode offers the ``ask_user`` tool only when it is set and
-    ``TEXT_TO_SQL_REACT_ASK_USER`` is on.
+    ``TEXT_TO_SQL_REACT_ASK_USER`` is on, and only in a ``sql`` episode.
+    ``answered_questions`` holds the questions the user replied to; asking one
+    again is refused, while a question whose call failed can be asked again.
 
     ``empty_result_checked`` holds the queries ``submit`` held back once for
     an empty result to check their filters; the same query is accepted next,
@@ -117,6 +119,7 @@ class ToolContext:
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
     ask_user: Callable[[str], str] | None = None
+    answered_questions: set[str] = field(default_factory=set)
     empty_result_checked: set[str] = field(default_factory=set)
     last_answer_attempt: bool = False
     fanout_refused: set[str] = field(default_factory=set)

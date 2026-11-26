@@ -245,7 +245,7 @@ Green: model call. Gray: deterministic (SQL or rules). Purple: model-chosen tool
 | `run_sql` | Checks the query's table and column names against the catalog of the database it runs on, suggesting the closest real names for unknown ones, and rejects tables no `retrieve` result named. Then runs it under the SQL query timeout and returns up to 100 rows | SQL, no model | Always |
 | `submit` | Applies the same checks and runs the final query. A clean run is the answer; an error or a rewrite goes back to the model. For an information question, `sql` is left empty and `response` is the answer | SQL, no model | Always (with `TEXT_TO_SQL_REACT_SUBMIT_TOOL=false`, `run_sql(final=true)` answers instead) |
 | `grep` | Searches all rows of a `run_sql` result too long to show | Deterministic | Off; `TEXT_TO_SQL_REACT_GREP=true` |
-| `ask_user` | Asks the user a clarification question and returns the reply. Never answers; not offered on the last turn or after the queries run out | Caller's function | Off; `TEXT_TO_SQL_REACT_ASK_USER=true` and the caller sets `ToolContext.ask_user` |
+| `ask_user` | Asks the user a clarification question and returns the reply. Never answers; not offered on the last turn or after the queries run out | Caller's function | Off; `TEXT_TO_SQL_REACT_ASK_USER=true`, the caller sets `ToolContext.ask_user`, and the episode is in `sql` mode (`predict` would not see the reply) |
 | `predict` | Builds a KumoRFM graph over the tables `retrieve` showed, writes PQL with the `NON_REASONING` model, and predicts. Ends the episode | `NON_REASONING` LLM + KumoRFM | Only when `KUMO_RFM_API_URL` is set |
 
 Only the loop itself and `predict` call a language model. There's no separate
