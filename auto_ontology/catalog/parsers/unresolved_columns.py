@@ -110,11 +110,19 @@ def _is_output_alias_reference(
         exp.Having,
         exp.Qualify,
     )
-    if dialect and dialect.lower() == "sqlite":
+    normalized_dialect = dialect.lower() if dialect else ""
+    if normalized_dialect == "sqlite":
         # SQLite extends standard alias visibility to WHERE and JOIN ... ON.
         alias_clauses += (exp.Where, exp.Join)
+    elif normalized_dialect == "duckdb":
+        # DuckDB allows non-aggregate SELECT aliases in WHERE, but not JOIN ... ON.
+        alias_clauses += (exp.Where,)
     current = column.parent
     while current is not None and current is not query:
+        # An identifier inside an aggregate is an input column, even when its
+        # name matches a SELECT alias used by the surrounding clause.
+        if isinstance(current, exp.AggFunc):
+            return False
         if isinstance(current, alias_clauses):
             return True
         current = current.parent
@@ -152,12 +160,14 @@ def find_unresolved_columns(
             for select in query.selects
             if isinstance(select, exp.Alias)
         }
-        for column in scope.columns:
-            # sqlglot also lists a subquery's unqualified columns on its outer
-            # scopes; each is checked once, by the SELECT it is written in.
+        # Scope.columns omits identifiers that sqlglot assumes are output
+        # aliases, including identifiers nested inside aggregates. Walk the
+        # SELECT directly so those input-column references are still checked.
+        for column in query.find_all(exp.Column):
+            # Nested subquery columns are checked by their own scope.
             if column.find_ancestor(exp.Select) is not query:
                 continue
-            if isinstance(column.this, exp.Star) or column.args.get("db"):
+            if isinstance(column.this, exp.Star):
                 continue
             name = column.name.lower()
             table = column.table.lower()

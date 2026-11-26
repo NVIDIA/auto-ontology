@@ -13,6 +13,7 @@ from auto_ontology.server.custom_analyses import service as custom_analyses_dal
 from auto_ontology.server.datasources import service as dal
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.pql_analyses import service as pql_analyses_dal
+from auto_ontology.server.sql_utils import SqlParseError
 from auto_ontology.dal.owners import edit_subject
 from auto_ontology.server.models import NodeUpdateResult
 from auto_ontology.server.owners import enforce_edit, owner_from_body
@@ -191,7 +192,7 @@ def validate_custom_analysis_sql(body: CustomAnalysisValidate) -> dict:
     """
     try:
         result = custom_analyses_dal.validate_custom_analysis_sql(body.sql)
-    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+    except SqlParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}
 
@@ -222,7 +223,7 @@ def create_custom_analysis(body: CustomAnalysisCreate) -> dict:
         custom_analyses_dal.CustomAnalysisSqlConflict,
     ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+    except SqlParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": row}
 
@@ -249,7 +250,7 @@ def update_custom_analysis(analysis_id: str, body: CustomAnalysisCreate) -> dict
         custom_analyses_dal.CustomAnalysisSqlConflict,
     ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+    except SqlParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if row is None:

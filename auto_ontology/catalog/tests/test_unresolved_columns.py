@@ -56,6 +56,10 @@ def _schemas() -> dict:
             "SELECT orders.foo FROM orders JOIN other ON orders.id = other.id",
             ["orders.foo"],
         ),
+        (
+            "SELECT sales.orders.missing FROM sales.orders",
+            ["orders.missing"],
+        ),
     ],
     ids=[
         "bare",
@@ -70,6 +74,7 @@ def _schemas() -> dict:
         "alias-in-where",
         "alias-name-collision",
         "qualified-beside-unknown-table",
+        "schema-qualified-column",
     ],
 )
 def test_reports_columns_the_catalog_rules_out(sql: str, expected: list[str]) -> None:
@@ -126,15 +131,24 @@ def test_stays_silent_when_nothing_is_proven_missing(sql: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "sql",
+    ("dialect", "sql"),
     [
-        "SELECT amount AS total FROM orders WHERE total > 1",
-        "SELECT o.amount AS total FROM orders o JOIN customers c ON total = c.id",
+        ("sqlite", "SELECT amount AS total FROM orders WHERE total > 1"),
+        (
+            "sqlite",
+            "SELECT o.amount AS total FROM orders o JOIN customers c ON total = c.id",
+        ),
+        ("duckdb", "SELECT amount + 1 AS total FROM orders WHERE total > 1"),
     ],
-    ids=["where-alias", "join-on-alias"],
+    ids=["sqlite-where-alias", "sqlite-join-on-alias", "duckdb-where-alias"],
 )
-def test_sqlite_allows_output_aliases_in_where_and_join_on(sql: str) -> None:
-    assert find_unresolved_columns(sql, "sqlite", _schemas()) == []
+def test_dialect_specific_output_alias_visibility(dialect: str, sql: str) -> None:
+    assert find_unresolved_columns(sql, dialect, _schemas()) == []
+
+
+def test_alias_name_inside_aggregate_is_an_input_column() -> None:
+    sql = "SELECT amount AS missing FROM orders GROUP BY amount HAVING SUM(missing) > 1"
+    assert find_unresolved_columns(sql, "duckdb", _schemas()) == ["missing"]
 
 
 def test_an_empty_catalog_verifies_nothing() -> None:
