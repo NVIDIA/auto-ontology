@@ -118,7 +118,8 @@ def update_pql_analysis(
 
     from auto_ontology.vdb import get_semantic_vdb
 
-    get_semantic_vdb().delete_by_id(analysis_id)
+    with get_semantic_vdb() as vdb:
+        vdb.delete_by_id(analysis_id)
     _embed(analysis_id)
 
     return {"id": analysis_id, "name": name, "description": description, "pql": pql}
@@ -136,6 +137,7 @@ def delete_pql_analysis(analysis_id: str) -> dict[str, str] | None:
 
     from auto_ontology.vdb import get_semantic_vdb
 
-    get_semantic_vdb().delete_by_id(analysis_id)
+    with get_semantic_vdb() as vdb:
+        vdb.delete_by_id(analysis_id)
 
     return {"id": analysis_id}

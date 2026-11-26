@@ -468,6 +468,7 @@ def delete_sql_attribute(attr_id: str) -> dict[str, Any] | None:
         return None
 
     delete_sql_attribute_node(attr_id)
-    get_semantic_vdb().delete_by_id(attr_id)
+    with get_semantic_vdb() as vdb:
+        vdb.delete_by_id(attr_id)
 
     return {"id": attr_id}
