@@ -176,6 +176,7 @@ _MARGIN = "SELECT unitprice - unitcost AS x FROM sales.orderlines WHERE "
         "unitprice = 10.0",
         "unitcost > 0",
         "unitcost > -5",
+        "status = ('Shipped')",
     ],
     ids=[
         "qualified",
@@ -185,6 +186,7 @@ _MARGIN = "SELECT unitprice - unitcost AS x FROM sales.orderlines WHERE "
         "numeric-eq-other-form",
         "range",
         "negative-range",
+        "parenthesized-string",
     ],
 )
 def test_where_literal_backed_by_its_columns_samples_survives(
@@ -208,6 +210,9 @@ def test_where_literal_backed_by_its_columns_samples_survives(
         "unitprice = -10",
         "unitprice IN (10, -999)",
         "unitprice = 10.000000000000001",
+        "unitprice = (999)",
+        "(unitprice) = 999",
+        "unitprice = -(999)",
     ],
     ids=[
         "case-mismatch",
@@ -220,6 +225,9 @@ def test_where_literal_backed_by_its_columns_samples_survives(
         "negative-number",
         "negative-in-value",
         "float-precision",
+        "parenthesized-number",
+        "parenthesized-column",
+        "negated-parenthesized-number",
     ],
 )
 def test_where_literal_not_in_its_columns_samples_is_dropped(

@@ -181,8 +181,9 @@ def _as_decimal(value: Any) -> Decimal | None:
 
 def _literal_value(node: exp.Expression) -> tuple[exp.Literal, str | Decimal] | None:
     """A literal operand and its value, with a leading minus applied to numbers."""
+    node = node.unnest()
     negate = isinstance(node, exp.Neg)
-    literal = node.this if negate else node
+    literal = node.this.unnest() if negate else node
     if not isinstance(literal, exp.Literal) or (negate and literal.is_string):
         return None
     if literal.is_string:
@@ -206,11 +207,11 @@ def _compared_column(
 ) -> tuple[exp.Column, list[exp.Expression]] | None:
     """The bare column and the operands an ``=``, ``<>`` or ``IN`` compares it with."""
     if isinstance(predicate, exp.In):
-        column, others = predicate.this, predicate.expressions
-    elif isinstance(predicate.this, exp.Column):
-        column, others = predicate.this, [predicate.expression]
+        column, others = predicate.this.unnest(), predicate.expressions
+    elif isinstance(predicate.this.unnest(), exp.Column):
+        column, others = predicate.this.unnest(), [predicate.expression]
     else:
-        column, others = predicate.expression, [predicate.this]
+        column, others = predicate.expression.unnest(), [predicate.this]
     if not isinstance(column, exp.Column):
         return None
     return column, others
