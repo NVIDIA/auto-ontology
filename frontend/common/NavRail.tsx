@@ -65,11 +65,11 @@ type Theme = 'light' | 'dark';
 // The icons are static, fixed-size files, so a plain <img> is all they need.
 /* eslint-disable @next/next/no-img-element */
 
-// The design's hover icon for Chat comes as loose parts rather than one file:
-// a pale tile, the bubble outline and three green lines.
+// Chat's hover state is the only one the design draws on a pale tile, so the
+// tile is a span behind the icon. The icon is one 36px file drawn exactly over
+// the default one, so the glyph does not shift when hover swaps them.
 const ChatHoverIcon = ({ theme }: { theme: Theme }) => {
 	const dark = theme === 'dark';
-	const line = `absolute left-3 h-px rounded-[2px] ${dark ? 'bg-[#8ad21a]' : 'bg-[#76b900]'}`;
 
 	return (
 		<span
@@ -78,13 +78,12 @@ const ChatHoverIcon = ({ theme }: { theme: Theme }) => {
 			}`}
 		>
 			<img
-				src={dark ? '/nav/dark/chat-hover-bubble.svg' : '/nav/chat-hover-bubble.svg'}
+				src={dark ? '/nav/dark/chat-hover.svg' : '/nav/chat-hover.svg'}
 				alt=""
-				className="absolute left-[7.5px] top-[9px] h-[20.3px] w-[21px] max-w-none"
+				width={36}
+				height={36}
+				className={TILE}
 			/>
-			<span className={`${line} top-[14px] w-3`} />
-			<span className={`${line} top-[17px] w-[11px]`} />
-			<span className={`${line} top-5 w-[7px]`} />
 		</span>
 	);
 };
