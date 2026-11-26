@@ -3297,30 +3297,39 @@
     "datasources.fetch_columns_for_table__unknown": null,
     "datasources.fetch_databases[admin]": [
       {
+        "created": "<redacted>",
         "description": null,
+        "dialect": null,
         "id": "<db:chinook>",
         "name": "chinook",
         "num_of_schemas": 1,
         "owner_id": null,
+        "pulled": "<redacted>",
         "schemas": []
       },
       {
+        "created": "<redacted>",
         "description": null,
+        "dialect": null,
         "id": "<db:pagila>",
         "name": "pagila",
         "num_of_schemas": 2,
         "owner_id": null,
+        "pulled": "<redacted>",
         "schemas": []
       }
     ],
     "datasources.fetch_databases[none]": [],
     "datasources.fetch_databases[scoped]": [
       {
+        "created": "<redacted>",
         "description": null,
+        "dialect": null,
         "id": "<db:pagila>",
         "name": "pagila",
         "num_of_schemas": 1,
         "owner_id": null,
+        "pulled": "<redacted>",
         "schemas": []
       }
     ],
