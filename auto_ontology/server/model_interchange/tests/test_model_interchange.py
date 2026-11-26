@@ -344,6 +344,53 @@ def test_assemble_export_document_keeps_in_scope_references() -> None:
     assert document.semantic_layer.terms[0].represents == ["tbl-1"]
 
 
+def test_assemble_export_document_keeps_term_generation_provenance() -> None:
+    rows = _export_rows()
+    rows["terms"][0]["generation_status"] = "fallback"
+    rows["terms"][0]["generation_note"] = "the model returned no structured result"
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    term = document.semantic_layer.terms[0]
+    assert term.generation_status == "fallback"
+    assert term.generation_note == "the model returned no structured result"
+
+
+def test_legacy_term_without_generation_fields_defaults_to_generated() -> None:
+    document = AutoOntologyModelDocument.model_validate(
+        {
+            "semantic_layer": {
+                "terms": [{"id": "term-1", "name": "Order"}],
+            }
+        }
+    )
+
+    term = document.semantic_layer.terms[0]
+    assert term.generation_status == "generated"
+    assert term.generation_note is None
+
+
+def test_unknown_term_generation_status_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        AutoOntologyModelDocument.model_validate(
+            {
+                "semantic_layer": {
+                    "terms": [
+                        {
+                            "id": "term-1",
+                            "name": "Order",
+                            "generation_status": "unknown",
+                        }
+                    ],
+                }
+            }
+        )
+
+
 def test_assemble_export_document_drops_sql_attributes_of_absent_terms() -> None:
     rows = _export_rows()
     rows["terms"] = []

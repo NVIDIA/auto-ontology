@@ -404,6 +404,43 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
         _cleanup(f"{world.prefix}-copy")
 
 
+def test_fallback_term_provenance_survives_the_round_trip(world) -> None:
+    store().query_write(
+        s.term.update()
+        .where(s.term.c.id == world.term)
+        .values(
+            generation_status="fallback",
+            generation_note="the model returned no structured result",
+        )
+    )
+    target = f"{world.prefix}-copy"
+    document = _reid(_document(world), target)
+    document.data_layer.databases[0].schemas[0].database_name = target
+    exported_term = document.semantic_layer.terms[0]
+
+    try:
+        assert exported_term.generation_status == "fallback"
+        assert (
+            exported_term.generation_note == "the model returned no structured result"
+        )
+
+        mi.apply_import_model(document, replace=False)
+
+        imported = store().query_read(
+            select(s.term.c.generation_status, s.term.c.generation_note).where(
+                s.term.c.imported_id == exported_term.id
+            )
+        )
+        assert imported == [
+            {
+                "generation_status": "fallback",
+                "generation_note": "the model returned no structured result",
+            }
+        ]
+    finally:
+        _cleanup(f"{world.prefix}-copy")
+
+
 def test_the_round_trip_is_idempotent(world) -> None:
     """Idempotence.
 
