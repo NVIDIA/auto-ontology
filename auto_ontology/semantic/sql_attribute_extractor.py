@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import json
 import logging
+import numbers
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import sqlglot
 from langchain_core.messages import HumanMessage, SystemMessage
+from sqlglot import exp
 
 from auto_ontology.semantic.models import (
     SqlAttributeExtractionResult,
@@ -25,11 +29,17 @@ from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
 )
+from auto_ontology.utils.sql_equivalence import SQL_ERRORS, sql_equivalence_key
 
 logger = logging.getLogger(__name__)
 
 _MAX_PROMPT_COLUMNS = 40
 _MAX_PROMPT_SAMPLES = 5
+
+
+class SqlAttributeExtractionFailed(RuntimeError):
+    """The LLM call produced no result, as distinct from proposing zero metrics."""
+
 
 _SYSTEM = """\
 You are an analytics engineer building a semantic layer for a text-to-SQL system.
@@ -156,37 +166,93 @@ _SINGLE_COLUMN_ALIAS = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-_WHERE_WITH_LITERAL = re.compile(
-    r"\bWHERE\b.+?(?:=\s*'|IN\s*\()",
-    re.IGNORECASE | re.DOTALL,
-)
-
-_QUOTED_LITERAL = re.compile(r"'([^']*)'")
+_WHERE = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
 
-def _collect_sample_values(columns: list[dict[str, Any]]) -> set[str]:
-    """Return a lowercased flat set of all sample values across the given columns."""
-    values: set[str] = set()
-    for col in columns:
-        values.update(str(v).lower() for v in _sample_list(col))
-    return values
+def _as_decimal(value: Any) -> Decimal | None:
+    """A numeric sample as an exact Decimal; None for non-numbers and booleans."""
+    if not isinstance(value, numbers.Number) or isinstance(value, bool):
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
+
+
+def _literal_value(node: exp.Expression) -> tuple[exp.Literal, str | Decimal] | None:
+    """A literal operand and its value, with a leading minus applied to numbers."""
+    node = node.unnest()
+    negate = isinstance(node, exp.Neg)
+    literal = node.this.unnest() if negate else node
+    if not isinstance(literal, exp.Literal) or (negate and literal.is_string):
+        return None
+    if literal.is_string:
+        return literal, literal.this
+    try:
+        number = Decimal(literal.this)
+    except InvalidOperation:
+        return None
+    return literal, -number if negate else number
+
+
+def _value_in_samples(value: str | Decimal, samples: list[Any]) -> bool:
+    """Exact match: strings by case-sensitive text, numbers by numeric value."""
+    if isinstance(value, str):
+        return any(isinstance(s, str) and s == value for s in samples)
+    return any(_as_decimal(s) == value for s in samples)
+
+
+def _compared_column(
+    predicate: exp.Expression,
+) -> tuple[exp.Column, list[exp.Expression]] | None:
+    """The bare column and the operands an ``=``, ``<>`` or ``IN`` compares it with."""
+    if isinstance(predicate, exp.In):
+        column, others = predicate.this.unnest(), predicate.expressions
+    elif isinstance(predicate.this.unnest(), exp.Column):
+        column, others = predicate.this.unnest(), [predicate.expression]
+    else:
+        column, others = predicate.expression.unnest(), [predicate.this]
+    if not isinstance(column, exp.Column):
+        return None
+    return column, others
 
 
 def _where_literals_valid(expression: str, columns: list[dict[str, Any]]) -> bool:
-    """Return False if the expression has a WHERE literal not backed by sample values."""
-    if not _WHERE_WITH_LITERAL.search(expression):
-        return True
+    """Every WHERE literal compared with a column must be one of *its* samples.
 
-    all_samples = _collect_sample_values(columns)
-    if not all_samples:
-        return False
+    Covers WHERE clauses in subqueries too. String literals that cannot be tied
+    to a known column by ``=``, ``<>`` or ``IN`` fail as well: the prompt only
+    allows filtering on sampled values.
+    """
+    try:
+        wheres = list(sqlglot.parse_one(expression).find_all(exp.Where))
+    except SQL_ERRORS:
+        return not _WHERE.search(expression)
 
-    literals = _QUOTED_LITERAL.findall(expression)
-    if not literals:
-        # Numeric comparisons cannot be checked without the schema.
-        return True
+    samples_by_column = {col["name"].lower(): _sample_list(col) for col in columns}
+    checked: set[int] = set()
+    for where in wheres:
+        for predicate in where.find_all(exp.EQ, exp.NEQ, exp.In):
+            pair = _compared_column(predicate)
+            if pair is None:
+                continue
+            column, operands = pair
+            samples = samples_by_column.get(column.name.lower())
+            for operand in operands:
+                found = _literal_value(operand)
+                if found is None:
+                    continue
+                literal, value = found
+                if not samples or not _value_in_samples(value, samples):
+                    return False
+                checked.add(id(literal))
 
-    return all(lit.lower() in all_samples for lit in literals)
+    return all(
+        id(lit) in checked
+        for where in wheres
+        for lit in where.find_all(exp.Literal)
+        if lit.is_string
+    )
 
 
 def _uses_length_arithmetic(expression: str) -> bool:
@@ -231,6 +297,9 @@ def extract_sql_attributes(
 
     *columns* must already exclude PII-tagged columns: their names,
     descriptions, and sample values all go into the prompt.
+
+    Raises :class:`SqlAttributeExtractionFailed` when the LLM returns nothing,
+    so callers can tell a failed call from an empty proposal list.
     """
     if len(columns) < 2:
         return []
@@ -257,15 +326,15 @@ def extract_sql_attributes(
         SqlAttributeExtractionResult,
     )
     if result is None:
-        logger.warning(
-            "LLM returned no SqlAttribute proposals for table %s", table_name
+        raise SqlAttributeExtractionFailed(
+            f"LLM returned no result for table {qualified_table}, "
+            f"term {term.get('name', '')!r}"
         )
-        return []
 
     accepted: list[SqlAttributeProposal] = []
     seen_expressions: set[str] = set()
     for proposal in result.metrics:
-        normalized = " ".join(proposal.expression.lower().split())
+        normalized = sql_equivalence_key(proposal.expression)
         if normalized in seen_expressions:
             logger.debug("Dropping duplicate proposal %r", proposal.name)
             continue
