@@ -15,11 +15,16 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
 pytest.importorskip("sqlalchemy")
+
+from sqlalchemy import Table  # noqa: E402
+from sqlalchemy.exc import OperationalError, ProgrammingError  # noqa: E402
 
 from auto_ontology.dal import datasources as ds  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
@@ -29,16 +34,18 @@ PULLED = datetime(2026, 11, 20, 9, 30, tzinfo=timezone.utc)
 
 
 @pytest.fixture(scope="module", autouse=True)
-def require_schema():
+def require_schema() -> None:
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
         store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
-    except Exception as exc:  # noqa: BLE001
+    except (OperationalError, ProgrammingError) as exc:
+        # Only "no database" or "no table yet" is a reason to skip; anything else
+        # is a real failure and must surface.
         pytest.skip(f"auto_ontology schema unavailable (alembic upgrade head): {exc}")
 
 
-def _add(table, **values) -> str:
+def _add(table: Table, **values: Any) -> str:
     return store().query_write(table.insert().values(**values).returning(table.c.id))[
         0
     ]["id"]
@@ -67,12 +74,12 @@ class Databases:
             s.zone_target.insert().values(zone_id=self.zone, table_id=table)
         )
 
-    def mine(self, rows: list[dict]) -> dict[str, dict]:
+    def mine(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return {r["name"]: r for r in rows if r["name"].startswith(self.prefix)}
 
 
 @pytest.fixture
-def databases():
+def databases() -> Iterator[Databases]:
     d = Databases()
     yield d
     store().query_write(s.zone.delete().where(s.zone.c.id == d.zone))
@@ -82,7 +89,7 @@ def databases():
         )
 
 
-def test_returns_dialect_created_and_pulled(databases):
+def test_returns_dialect_created_and_pulled(databases: Databases) -> None:
     rows = databases.mine(ds.fetch_databases())
 
     full = rows[databases.full_name]
@@ -91,7 +98,7 @@ def test_returns_dialect_created_and_pulled(databases):
     assert isinstance(full["created"], datetime)
 
 
-def test_null_dialect_and_pulled_stay_null(databases):
+def test_null_dialect_and_pulled_stay_null(databases: Databases) -> None:
     rows = databases.mine(ds.fetch_databases())
 
     bare = rows[databases.bare_name]
@@ -101,7 +108,7 @@ def test_null_dialect_and_pulled_stay_null(databases):
     assert isinstance(bare["created"], datetime)
 
 
-def test_zone_scoped_read_returns_the_same_fields(databases):
+def test_zone_scoped_read_returns_the_same_fields(databases: Databases) -> None:
     rows = databases.mine(ds.fetch_databases(zone_ids=[databases.zone]))
 
     assert set(rows) == {databases.full_name}
