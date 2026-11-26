@@ -408,7 +408,7 @@ def two_databases() -> Iterator[tuple[str, str]]:
     maintenance = os.environ.get("POSTGRES_DATABASE", "postgres")
     try:
         admin = psycopg.connect(_admin_dsn(maintenance), autocommit=True)
-    except Exception as exc:  # noqa: BLE001 — any failure means "no fixture DB"
+    except psycopg.OperationalError as exc:
         pytest.skip(f"postgres not reachable: {exc}")
     with admin:
         try:
