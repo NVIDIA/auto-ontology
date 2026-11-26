@@ -106,7 +106,7 @@ export const FileUpload = ({
 					: `cursor-pointer ${
 							isDragOver
 								? 'border-[#76b900] bg-[#76b900]/5'
-								: 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-600 dark:hover:border-zinc-500'
+								: 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-secondary'
 						}`
 			} ${className}`}
 		>
@@ -132,7 +132,7 @@ export const FileUpload = ({
 			) : (
 				<>
 					<p className="text-sm text-body">
-						<span className="font-semibold text-[#5e9400] dark:text-[#a3d63a]">
+						<span className="font-semibold text-[#5e9400] dark:text-action">
 							{label}
 						</span>{' '}
 						or drag and drop

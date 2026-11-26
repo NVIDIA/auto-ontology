@@ -230,7 +230,7 @@ export const GlobalSearchResults = ({
 					<Link
 						href={href}
 						onClick={onNavigate}
-						className="flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 select-none [&_*]:cursor-pointer transition-colors hover:border-[#76b900]/50 hover:bg-[#76b900]/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-[#76b900]/40 dark:hover:bg-[#76b900]/10"
+						className="flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 select-none [&_*]:cursor-pointer transition-colors hover:border-[#76b900]/50 hover:bg-[#76b900]/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-action/40 dark:hover:bg-action-light-hover"
 					>
 						<div className="flex min-w-0 items-center gap-2 overflow-hidden">
 							<Icon name={typeIcon} className="h-4 w-4 shrink-0 text-secondary" />

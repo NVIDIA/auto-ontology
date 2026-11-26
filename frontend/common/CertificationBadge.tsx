@@ -14,9 +14,9 @@ export const CERTIFICATION_LABEL: Record<CertificationStatus, string> = {
 
 const PILL_CLASS: Record<CertificationStatus, string> = {
 	[CertificationStatus.Certified]:
-		'border-[#76b900]/40 bg-[#76b900]/10 text-[#4d7a00] dark:border-[#76b900]/30 dark:bg-[#76b900]/15 dark:text-[#a3d63a]',
+		'border-[#76b900]/40 bg-[#76b900]/10 text-[#4d7a00] dark:border-action/30 dark:bg-action-light-hover dark:text-action',
 	[CertificationStatus.Partial]:
-		'border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300',
+		'border-amber-300/60 bg-amber-100 text-amber-700 dark:border-warning-bg dark:bg-warning-bg dark:text-warning',
 	[CertificationStatus.Pending]:
 		'border-zinc-200 bg-zinc-100 text-secondary dark:border-zinc-700 dark:bg-zinc-800',
 };

@@ -47,7 +47,7 @@ export const ColorSwatch = ({
 			'cursor-pointer rounded-full border-2 transition hover:scale-105',
 			sizeClasses[size],
 			selected
-				? 'border-zinc-900 ring-2 ring-[#76b900]/60 dark:border-zinc-100'
+				? 'border-zinc-900 ring-2 ring-[#76b900]/60 dark:border-heading'
 				: 'border-white/80 ring-1 ring-zinc-300/80 dark:border-zinc-900 dark:ring-zinc-700',
 			colorClass,
 		].join(' ')}

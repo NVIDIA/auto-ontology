@@ -256,7 +256,7 @@ export const SemanticCompilationForm = ({
 									type="button"
 									disabled={saving}
 									onClick={() => setConfirmModalOpen(true)}
-									className="cursor-pointer rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-error transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:hover:bg-red-950/40"
+									className="cursor-pointer rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-error transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-error-bg dark:hover:bg-error-bg"
 								>
 									Reset
 								</button>

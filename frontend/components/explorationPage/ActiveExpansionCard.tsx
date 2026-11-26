@@ -128,7 +128,7 @@ const PathChain = ({ hops }: { hops: ExplorationLinkPathHopDto[] }) => {
 					</div>
 					{index < hops.length && (
 						<div className="ml-2 flex items-center gap-1.5 py-1 pl-[7px]">
-							<div className="h-4 w-px bg-zinc-300 dark:bg-zinc-600" />
+							<div className="h-4 w-px bg-zinc-300 dark:bg-zinc-700" />
 							<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-secondary dark:bg-zinc-800">
 								{hops[index].relationship}
 							</span>

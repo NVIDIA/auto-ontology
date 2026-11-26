@@ -12,9 +12,9 @@ import { Text } from '@/common/Text';
 const LABEL_BASE =
 	'inline-flex min-w-0 max-w-[min(24rem,100%)] items-center overflow-hidden rounded-full border px-3 py-1 text-xs font-semibold';
 const LABEL_GREEN =
-	'border-[#76b900]/40 bg-[#76b900]/10 text-[#4d7a00] dark:border-[#76b900]/30 dark:bg-[#76b900]/15 dark:text-[#a3d63a]';
+	'border-[#76b900]/40 bg-[#76b900]/10 text-[#4d7a00] dark:border-action/30 dark:bg-action-light-hover dark:text-action';
 const LABEL_GREEN_HOVER =
-	'hover:border-[#76b900]/70 hover:bg-[#76b900]/20 hover:text-[#3d6200] dark:hover:border-[#76b900]/60 dark:hover:bg-[#76b900]/25 dark:hover:text-[#b6e05a]';
+	'hover:border-[#76b900]/70 hover:bg-[#76b900]/20 hover:text-[#3d6200] dark:hover:border-action/60 dark:hover:bg-action-selected dark:hover:text-action-fill-hover';
 const LABEL_NEUTRAL = 'border-zinc-200 bg-zinc-100 text-body dark:border-zinc-700 dark:bg-zinc-800';
 const LABEL_MUTED =
 	'border-zinc-200 bg-zinc-100 text-secondary dark:border-zinc-700 dark:bg-zinc-800';

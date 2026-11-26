@@ -217,9 +217,9 @@ const DescriptionSuggestion = ({
 	if (!loading && suggestion == null && error == null) return null;
 
 	return (
-		<div className="mt-3 rounded-lg border border-[#76b900]/40 bg-[#76b900]/[0.06] p-4 dark:border-[#76b900]/30 dark:bg-[#76b900]/10">
+		<div className="mt-3 rounded-lg border border-[#76b900]/40 bg-[#76b900]/[0.06] p-4 dark:border-action/30 dark:bg-action-light-hover">
 			<div className="flex items-center justify-between gap-3">
-				<h3 className="text-xs font-semibold uppercase text-[#4d7a00] dark:text-[#a3d63a]">
+				<h3 className="text-xs font-semibold uppercase text-[#4d7a00] dark:text-action">
 					Description Suggestion
 				</h3>
 				{suggestion != null && (
@@ -235,14 +235,14 @@ const DescriptionSuggestion = ({
 			</div>
 			<div className="mt-2 text-sm text-body">
 				{loading ? (
-					<span className="flex items-center gap-2 italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">
+					<span className="flex items-center gap-2 italic text-[#4d7a00]/70 dark:text-action/70">
 						<Spinner aria-label="Generating suggestion" className="h-3.5 w-3.5" />
 						Generating suggestion…
 					</span>
 				) : suggestion != null ? (
 					suggestion
 				) : (
-					<span className="italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">{error}</span>
+					<span className="italic text-[#4d7a00]/70 dark:text-action/70">{error}</span>
 				)}
 			</div>
 		</div>
@@ -294,7 +294,7 @@ const EditableTextCard = ({
 				value={value}
 				onChange={handleChange}
 				rows={4}
-				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900"
+				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900"
 			/>
 			{section.suggestable === true && onSuggest != null && (
 				<DescriptionSuggestion onSuggest={onSuggest} onApply={handleApplySuggestion} />
@@ -1185,7 +1185,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						onChange={(e) => {
 							pendingEditsRef.current.name = e.target.value;
 						}}
-						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xl font-semibold text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900"
+						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xl font-semibold text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900"
 						aria-label="Name"
 					/>
 				) : (
@@ -1203,7 +1203,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden bg-white dark:bg-zinc-950"
 			>
 				{header.errorBanner ? (
-					<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+					<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-warning-bg dark:bg-warning-bg dark:text-warning">
 						{String(header.errorBanner)}
 					</div>
 				) : null}
@@ -1376,7 +1376,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 						{entityUpdatingProperties &&
 						Object.keys(entityUpdatingProperties).length > 0 ? (
-							<div className="mt-6 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-600">
+							<div className="mt-6 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
 								<p className="mb-2 text-xs font-semibold uppercase text-secondary">
 									Entity updates (preview)
 								</p>

@@ -2202,7 +2202,7 @@ export const ExplorationView = () => {
 
 			{!loading && error != null && (
 				<div className="flex h-full items-center justify-center px-6 text-center">
-					<div className="rounded-xl border border-red-200 bg-white px-8 py-6 text-sm text-error shadow-lg dark:border-red-900/50 dark:bg-zinc-900">
+					<div className="rounded-xl border border-red-200 bg-white px-8 py-6 text-sm text-error shadow-lg dark:border-error-bg dark:bg-zinc-900">
 						Couldn&apos;t load exploration: {error}
 					</div>
 				</div>

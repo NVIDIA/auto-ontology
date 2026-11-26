@@ -371,7 +371,7 @@ export const GlobalSearch = () => {
 				type="button"
 				onClick={() => setOpen(true)}
 				aria-label="Search Auto Ontology"
-				className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-3 text-sm text-link transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 dark:bg-blue-950/40 dark:hover:bg-blue-900/50"
+				className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-full bg-blue-50 px-3 text-sm text-link transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 dark:bg-link-hover-bg dark:hover:bg-link-hover-bg"
 			>
 				<svg
 					className="h-4 w-4 shrink-0"

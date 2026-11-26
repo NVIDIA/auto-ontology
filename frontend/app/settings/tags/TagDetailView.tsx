@@ -269,7 +269,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 				</div>
 
 				{!itemsLoading && itemsError != null && items.length === 0 ? (
-					<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-error dark:border-red-900/50 dark:bg-red-950/40">
+					<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-error dark:border-error-bg dark:bg-error-bg">
 						{itemsError}
 					</div>
 				) : null}
@@ -296,7 +296,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 						icon={IconName.Tag}
 						title="Nothing is tagged with this tag"
 						description="Terms, tables, columns, column attributes and SQL attributes carrying this tag will be listed here."
-						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-700 dark:bg-zinc-900/30"
 					/>
 				) : null}
 			</div>

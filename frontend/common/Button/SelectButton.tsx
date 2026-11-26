@@ -28,7 +28,7 @@ const themeClasses: Record<SelectButtonTheme, ThemeClasses> = {
 		base: `${listItemBase} items-center gap-2 rounded-md px-3 py-2`,
 		selected: listItemSelected,
 		unselected: 'text-body hover:bg-zinc-100 dark:hover:bg-zinc-800',
-		danger: 'text-error hover:bg-red-50 dark:hover:bg-red-950/40',
+		danger: 'text-error hover:bg-red-50 dark:hover:bg-error-bg',
 	},
 	[SelectButtonTheme.ListItemLink]: {
 		base: `${listItemBase} items-center justify-between gap-2 rounded-md px-4 py-3`,
@@ -47,7 +47,7 @@ const themeClasses: Record<SelectButtonTheme, ThemeClasses> = {
 		unselected: 'text-body hover:bg-zinc-100 hover:text-heading dark:hover:bg-zinc-800',
 	},
 	[SelectButtonTheme.SelectField]: {
-		base: 'flex min-h-10 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm text-body transition-colors hover:border-zinc-400 focus:border-[#76b900] focus:outline-none focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900',
+		base: 'flex min-h-10 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm text-body transition-colors hover:border-zinc-400 focus:border-[#76b900] focus:outline-none focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-700 dark:bg-zinc-900',
 	},
 	[SelectButtonTheme.Switcher]: {
 		base: 'cursor-pointer rounded-md px-3 py-1.5 text-sm font-semibold transition-colors',
