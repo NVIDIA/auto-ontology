@@ -35,6 +35,7 @@ from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.tags import PII_TAG_NAME
 from auto_ontology.dal.term_families import attribute_family_prefix
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
+from auto_ontology.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,48 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
         .limit(1)
     )
     return rows[0]["id"] if rows else None
+
+
+def fetch_attr_sample_values(attr_ids: list[str]) -> dict[str, list[str]]:
+    """Profiled sample values of each attribute's owning column, keyed by attribute id.
+
+    The owning column is the one linked by ``HAS_ATTRIBUTE``. Values are the
+    column's persisted ``sample_values``: the full distinct set for a
+    low-cardinality text column, the most common few otherwise, so a value that
+    is absent here may still exist in the warehouse. Attributes whose column
+    has no profiled values are left out.
+
+    Returns ``{}`` on failure rather than raising, like its neighbours: this
+    only widens what counts as covered.
+    """
+    if not attr_ids:
+        return {}
+    statement = (
+        select(
+            s.column__has_attribute.c.attribute_id,
+            s.catalog_column.c.sample_values,
+        )
+        .select_from(
+            s.column__has_attribute.join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+        )
+        .where(s.column__has_attribute.c.attribute_id.in_(list(attr_ids)))
+        .where(s.catalog_column.c.sample_values.is_not(None))
+    )
+    try:
+        rows = store().query_read(statement)
+    except Exception:
+        logger.warning("fetch_attr_sample_values: query failed", exc_info=True)
+        return {}
+
+    result: dict[str, list[str]] = {}
+    for row in rows:
+        values = stringify_sample_values(row["sample_values"])
+        if values:
+            result.setdefault(row["attribute_id"], []).extend(values)
+    return result
 
 
 def fetch_attr_column_contexts(
