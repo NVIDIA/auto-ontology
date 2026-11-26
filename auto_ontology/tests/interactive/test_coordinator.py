@@ -118,6 +118,7 @@ def test_step_initial_sets_question():
             "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
             return_value="SELECT 1",
         ),
+        patch("auto_ontology.retrieval.interactive.coordinator._get_llm"),
         patch(
             "auto_ontology.retrieval.interactive.coordinator.should_clarify",
             return_value=(False, None),
