@@ -302,6 +302,11 @@ class DatabaseSummary(ApiModel):
     description: str | None = None
     num_of_schemas: int | None = None
     owner_id: str | None = None
+    # The connector type (e.g. "snowflake"), when one was recorded.
+    dialect: str | None = None
+    created: datetime | None = None
+    # When the catalog was last pulled from the source; None if never.
+    pulled: datetime | None = None
     schemas: list[SchemaSummary] = Field(default_factory=list)
 
 
