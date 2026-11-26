@@ -178,7 +178,9 @@ def test_sql_attribute_extraction_runs_last_when_enabled(
     _stubbed: None, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(
-        visit_enter, "_extract_sql_attrs_for_terms", lambda *_a, **_k: ["Margin"]
+        visit_enter,
+        "_extract_sql_attrs_for_terms",
+        lambda *_a, **_k: (["Margin"], []),
     )
     embedder = SimpleNamespace(embed_term=lambda *_a: None)
 
@@ -232,3 +234,73 @@ def test_sql_attribute_extraction_leaves_out_pii_columns(
 
     # Customer is left with one column once email is dropped, so it is skipped.
     assert seen == [["price", "cost"]]
+
+
+def test_one_term_failing_does_not_stop_the_others(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _extract(
+        _table: Any, _cols: Any, _schema: Any, term: dict[str, Any], _db: Any
+    ) -> list[str]:
+        if term["name"] == "Order":
+            raise RuntimeError("LLM down")
+        return [f"{term['name']} Margin"]
+
+    monkeypatch.setattr(visit_enter, "_extract_sql_attributes_for_table", _extract)
+    ctx = {"columns": [{"name": "price"}, {"name": "cost"}], "fks": []}
+    both = [{"source_column": "price"}, {"source_column": "cost"}]
+
+    names, failed = visit_enter._extract_sql_attrs_for_terms(
+        TABLE,
+        ctx,
+        [{"id": "t1", "name": "Order"}, {"id": "t2", "name": "Shipment"}],
+        {"Order": both, "Shipment": both},
+        "mydb",
+        pii_columns=set(),
+        profiling={},
+    )
+
+    assert names == ["Shipment Margin"]
+    assert failed == ["Order"]
+
+
+def test_sql_attribute_failures_are_reported_on_the_result(
+    _stubbed: None, monkeypatch: MonkeyPatch
+) -> None:
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(visit_enter, "_extract_sql_attrs_for_terms", _boom)
+
+    result = visit_enter.process_table(
+        TABLE,
+        CTX,
+        domain_summary=None,
+        database_name="mydb",
+        extract_table_sql_attributes=True,
+    )
+
+    assert result.term_names == ["Order"]
+    assert result.sql_attr_failed_terms == ["Order"]
+
+
+def test_the_terms_own_description_reaches_the_prompt(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def _extract(_table: Any, _cols: Any, _schema: Any, term: Any) -> list[Any]:
+        seen.append(term)
+        return []
+
+    monkeypatch.setattr(visit_enter, "extract_sql_attributes", _extract)
+
+    visit_enter._extract_sql_attributes_for_table(
+        {**TABLE, "description": "Raw order rows"},
+        [{"name": "price"}, {"name": "cost"}],
+        "public",
+        {"id": "t1", "name": "Order", "description": "A customer order"},
+        "mydb",
+    )
+
+    assert seen == [{"name": "Order", "description": "A customer order"}]

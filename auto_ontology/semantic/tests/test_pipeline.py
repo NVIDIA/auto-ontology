@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from auto_ontology.semantic.models import ProcessTableResult
 from auto_ontology.semantic.pipeline import compile_semantic_layer
@@ -117,3 +120,43 @@ def test_compile_continues_after_error(
     count = compile_semantic_layer("dbx")
 
     assert count == 0
+
+
+@patch("auto_ontology.semantic.pipeline.process_table")
+@patch("auto_ontology.semantic.pipeline.fetch_table_context")
+@patch("auto_ontology.semantic.pipeline.load_domain_summary", return_value=None)
+@patch("auto_ontology.semantic.pipeline.fetch_all_tables_without_term")
+def test_sql_attribute_failures_are_summarised(
+    mock_fetch_tables: MagicMock,
+    _mock_summary: MagicMock,
+    mock_fetch_ctx: MagicMock,
+    mock_process: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Tables that will not be retried are named once at the end of the run."""
+    mock_fetch_tables.return_value = [
+        {"id": "t1", "name": "orders", "schema_name": "sales"},
+        {"id": "t2", "name": "orders", "schema_name": "archive"},
+        {"id": "t3", "name": "customers", "schema_name": "sales"},
+    ]
+    mock_fetch_ctx.return_value = {"columns": [{"name": "x"}], "fks": []}
+    failed = {"t1": ["Order"], "t2": ["Old Order"]}
+    mock_process.side_effect = lambda table, _ctx, **_k: ProcessTableResult(
+        term_names=["T"],
+        sql_attr_failed_terms=failed.get(table["id"], []),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="auto_ontology.semantic.pipeline"):
+        count = compile_semantic_layer("dbx")
+
+    assert count == 3
+    errors = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "auto_ontology.semantic.pipeline" and r.levelno == logging.ERROR
+    ]
+    assert len(errors) == 1
+    assert (
+        "failed for 2 table(s): archive.orders (Old Order); sales.orders (Order)"
+        in errors[0]
+    )

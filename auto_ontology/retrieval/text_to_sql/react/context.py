@@ -72,6 +72,14 @@ class ToolContext:
     because every query changes it. ``None`` when queries are free.
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
+
+    ``empty_result_checked`` holds the queries ``submit`` held back once for
+    an empty result to check their filters; the same query is accepted next,
+    and a query on the last answer attempt is accepted without checking.
+
+    ``fanout_refused`` holds the SQL texts ``submit`` refused once for a join
+    that repeats an aggregate's rows; the same text is accepted the second time,
+    and on the last answer attempt the first.
     """
 
     connectors: list[SQLDatabase]
@@ -103,6 +111,9 @@ class ToolContext:
     shown_analyses: dict[str, dict[str, str]] = field(default_factory=dict)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    empty_result_checked: set[str] = field(default_factory=set)
+    last_answer_attempt: bool = False
+    fanout_refused: set[str] = field(default_factory=set)
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:
