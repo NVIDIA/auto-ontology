@@ -46,6 +46,12 @@ PII detection), `NON_REASONING` (follow-up rewrites, charts, PQL, interactive
 analysis), `EMBED`, `RERANK` (bridge-table compilation only). `*_API_KEY` also
 falls back to `NVIDIA_API_KEY`.
 
+`NON_REASONING_THINKING=off` (Helm `nonReasoningThinking`) turns a hybrid
+model's thinking off for the non-reasoning steps. It applies to every
+`ChatNVIDIA` client, hosted or self-hosted NIM, and has no `DEFAULT_MODELS_`
+fallback and no `REASONING` equivalent. Set it only for hybrid models: an
+endpoint that rejects the field fails the call over to the reasoning model.
+
 `EMBED_ENDPOINT` + `EMBED_MODEL` must be the same at ingest and query.
 Defaults in `.env.example` include a Nemotron embed model id; changing it
 without re-ingest breaks retrieval.
