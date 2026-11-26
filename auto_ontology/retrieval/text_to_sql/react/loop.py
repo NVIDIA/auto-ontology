@@ -308,10 +308,11 @@ def run_episode(
     offers both and lets the model choose. *custom_prompts* is the
     organization's sections from :func:`prompts.custom_prompts_section`.
     *sql_examples*, *value_anchors* and *shorten_answer* shape a SQL answer, so
-    a ``predict`` episode ignores them. When *ctx* has ``ask_user``, the
-    ``ask_user`` tool is offered beside the mode's tools, except on the turns
-    for the answer alone (the last one, and those after the queries run out);
-    each call of it counts against the budget like any other.
+    a ``predict`` episode ignores them. When *ctx* has ``ask_user`` and
+    :func:`config.ask_user_enabled` is on, the ``ask_user`` tool is offered
+    beside the mode's tools, except on the turns for the answer alone (the
+    last one, and those after the queries run out); each call of it counts
+    against the budget like any other.
     """
     # A predict episode ends with a prediction; a no-calculation episode
     # cannot write a query at all. Neither wants the dialect rules, the
@@ -346,7 +347,7 @@ def run_episode(
     trajectory: list[dict[str, Any]] = [
         {"role": m.type, "content": m.content} for m in messages
     ]
-    can_ask = ctx.ask_user is not None
+    can_ask = ctx.ask_user is not None and config.ask_user_enabled()
     tools = prompts.tools_for(
         mode,
         calculation_answers=ctx.calculation_answers,

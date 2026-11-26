@@ -75,7 +75,8 @@ class ToolContext:
 
     ``ask_user`` is for callers whose user can be asked, such as a benchmark's
     simulated user: it takes the model's question and returns the user's reply.
-    The episode offers the ``ask_user`` tool only when it is set.
+    The episode offers the ``ask_user`` tool only when it is set and
+    ``TEXT_TO_SQL_REACT_ASK_USER`` is on.
 
     ``empty_result_checked`` holds the queries ``submit`` held back once for
     an empty result to check their filters; the same query is accepted next,

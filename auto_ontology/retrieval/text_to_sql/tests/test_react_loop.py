@@ -1129,6 +1129,12 @@ def _asker(answers: list[str], asked: list[str]) -> Callable[[str], str]:
     return ask_user
 
 
+@pytest.fixture
+def ask_user_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_ASK_USER", "true")
+
+
+@pytest.mark.usefixtures("ask_user_on")
 def test_ask_user_is_offered_when_the_caller_can_ask_and_its_reply_reaches_the_model(
     ctx: ToolContext,
 ) -> None:
@@ -1170,6 +1176,29 @@ def test_an_episode_with_no_one_to_ask_does_not_offer_ask_user(
     assert result.reason == "submitted"
 
 
+def test_ask_user_is_not_offered_when_the_flag_is_off(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("TEXT_TO_SQL_REACT_ASK_USER", raising=False)
+    asked: list[str] = []
+    ctx.ask_user = _asker(["The active ones."], asked)
+    model = ScriptedModel(
+        [
+            _reply(call("ask_user", "1", question="Which customers count?")),
+            _reply(call("submit", "2", sql=FINAL_SQL, response="x")),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, "q")
+
+    assert "ask_user" not in model.bound_tool_names[0]
+    assert asked == []
+    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
+    assert observations[0].startswith("Unknown tool 'ask_user'")
+    assert result.reason == "submitted"
+
+
+@pytest.mark.usefixtures("ask_user_on")
 def test_the_last_turn_does_not_offer_ask_user(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1192,6 +1221,7 @@ def test_the_last_turn_does_not_offer_ask_user(
     assert result.reason == "budget_exhausted"
 
 
+@pytest.mark.usefixtures("ask_user_on")
 def test_the_turns_after_the_queries_run_out_do_not_offer_ask_user(
     ctx: ToolContext,
 ) -> None:
@@ -1214,6 +1244,7 @@ def test_the_turns_after_the_queries_run_out_do_not_offer_ask_user(
     assert result.reason == "submitted"
 
 
+@pytest.mark.usefixtures("ask_user_on")
 def test_a_failing_ask_user_and_wrong_arguments_are_observations(
     ctx: ToolContext,
 ) -> None:

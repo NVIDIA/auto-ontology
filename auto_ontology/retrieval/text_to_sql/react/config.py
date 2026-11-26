@@ -162,6 +162,16 @@ def grep_enabled() -> bool:
     return value in _TRUTHY
 
 
+def ask_user_enabled() -> bool:
+    """Whether an episode whose caller can reach the user offers ``ask_user``.
+
+    Off by default. ``TEXT_TO_SQL_REACT_ASK_USER=true`` turns it on; the tool
+    is still offered only when the caller sets ``ToolContext.ask_user``.
+    """
+    value = os.environ.get("TEXT_TO_SQL_REACT_ASK_USER", "").strip().lower()
+    return value in _TRUTHY
+
+
 def max_page_rows() -> int:
     """Rows of one result kept for ``grep``; the rest are dropped."""
     return _int_env("TEXT_TO_SQL_REACT_MAX_PAGE_ROWS", 100_000)
