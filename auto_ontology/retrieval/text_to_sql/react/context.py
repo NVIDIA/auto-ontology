@@ -73,11 +73,6 @@ class ToolContext:
     an empty result to check their filters; the same query is accepted next,
     and a query on the last answer attempt is accepted without checking.
 
-    ``answer_numbers_checked`` records that ``submit`` already sent an answer
-    back for citing numbers its rows don't hold (#252), which it does once per
-    episode; ``last_answer_attempt`` is set by the loop when the model would
-    get no turn to answer again, so that check stays out of the way.
-
     ``fanout_refused`` holds the SQL texts ``submit`` refused once for a join
     that repeats an aggregate's rows; the same text is accepted the second time,
     and on the last answer attempt the first.
@@ -112,7 +107,6 @@ class ToolContext:
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
     empty_result_checked: set[str] = field(default_factory=set)
-    answer_numbers_checked: bool = False
     last_answer_attempt: bool = False
     fanout_refused: set[str] = field(default_factory=set)
 

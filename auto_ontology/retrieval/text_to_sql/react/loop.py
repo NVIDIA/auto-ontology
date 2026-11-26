@@ -35,7 +35,6 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 )
 from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, fanout, prompts
-from auto_ontology.retrieval.text_to_sql.react.answer_numbers import numbers_check
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.conversation import conversation
 from auto_ontology.retrieval.text_to_sql.react.empty_result import (
@@ -164,16 +163,6 @@ def submit(
     ):
         return rejection, None
     response = (response or "").strip()
-    sent_back = numbers_check(
-        ctx,
-        sql,
-        response,
-        db_response,
-        check.statement,
-        getattr(connector, "dialect", None),
-    )
-    if sent_back is not None:
-        return sent_back, None
     submission = Submission(sql, response, assumptions, db_response)
     ctx.submitted_database = getattr(connector, "database_name", None)
     return "Accepted.", submission

@@ -928,61 +928,6 @@ def test_retries_end_and_the_episode_gives_up(
     assert len(sleeps) == 2
 
 
-def test_an_answer_citing_none_of_its_rows_goes_back_once(ctx: ToolContext) -> None:
-    """#252: the response is written before the query runs. FINAL_SQL returns
-    160; prose from another query goes back once with the rows, and the
-    restated answer is accepted."""
-    model = ScriptedModel(
-        [
-            _reply(call("submit", "1", sql=FINAL_SQL, response="Revenue is 1,872.")),
-            _reply(call("submit", "2", sql=FINAL_SQL, response="Revenue is 160.")),
-        ]
-    )
-
-    result = loop.run_episode(model, ctx, "What is revenue from active customers?")
-
-    assert result.reason == "submitted"
-    assert result.submission.response == "Revenue is 160."
-    observations = [t["content"] for t in result.trajectory if t["role"] == "tool"]
-    assert observations[0].startswith("Not accepted yet.")
-    assert "cites 1,872," in observations[0]
-    assert "160.0" in observations[0]
-
-
-def test_an_unchanged_resubmission_is_accepted(ctx: ToolContext) -> None:
-    wrong = "Revenue is 1,872."
-    model = ScriptedModel(
-        [
-            _reply(call("submit", "1", sql=FINAL_SQL, response=wrong)),
-            _reply(call("submit", "2", sql=FINAL_SQL, response=wrong)),
-        ]
-    )
-
-    result = loop.run_episode(model, ctx, "q")
-
-    assert result.reason == "submitted"
-    assert result.submission.response == wrong
-    assert result.tool_calls == 2
-
-
-def test_the_last_answer_attempt_is_not_sent_back(
-    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Sending it back would lose an answer whose query ran cleanly."""
-    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "1")
-    model = ScriptedModel(
-        [
-            _reply(call("retrieve", "1", query="a")),
-            _reply(call("submit", "2", sql=FINAL_SQL, response="Revenue is 1,872.")),
-        ]
-    )
-
-    result = loop.run_episode(model, ctx, "q")
-
-    assert result.reason == "submitted"
-    assert result.submission.response == "Revenue is 1,872."
-
-
 def _searched(searched: ToolContext, query: str) -> str:
     """Stands in for a conversation search that ran, flag included."""
     searched.conversation_retrieved = True
