@@ -1110,13 +1110,6 @@ def process_table(
                 "[%s] Skipping SQL attribute extraction — could not read PII tags",
                 table_name,
             )
-        elif connector is None:
-            # Persisting validates the SQL against this connector's catalog.
-            logger.warning(
-                "[%s] Skipping SQL attribute extraction — no live connector for %r",
-                table_name,
-                database_name,
-            )
         else:
             try:
                 with _step(table_name, "Extracting SQL attributes"):
