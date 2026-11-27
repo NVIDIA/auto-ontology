@@ -682,6 +682,55 @@ def test_merge_is_idempotent_and_preserves_a_curated_description(world) -> None:
     assert row["datatype"] == "bigint"
 
 
+def _merge_customer_id(world, **kwargs) -> str:
+    return a.merge_column_attribute(
+        term_name=f"{world.prefix}-Customer",
+        table_id=world.tables["customers"],
+        source_column="id",
+        attr_name="customer id",
+        **kwargs,
+    )
+
+
+def test_a_recompile_keeps_a_certified_attribute_description(world) -> None:
+    """#259: a person's certified description outlives the next compile."""
+    world.table("customers")
+    world.column("customers", "id")
+    world.term("Customer")
+    attr_id = _merge_customer_id(world, datatype="integer", description="reviewed")
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == attr_id)
+        .values(certified=True)
+    )
+
+    _merge_customer_id(world, datatype="bigint", description="compiled again")
+
+    row = store().query_read(
+        select(s.column_attribute.c.description, s.column_attribute.c.datatype).where(
+            s.column_attribute.c.id == attr_id
+        )
+    )[0]
+    assert row["description"] == "reviewed"
+    assert row["datatype"] == "bigint"
+
+
+def test_an_uncertified_attribute_description_takes_the_compiled_one(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.term("Customer")
+    attr_id = _merge_customer_id(world, datatype="integer", description="first")
+
+    _merge_customer_id(world, datatype="integer", description="compiled again")
+
+    row = store().query_read(
+        select(s.column_attribute.c.description).where(
+            s.column_attribute.c.id == attr_id
+        )
+    )[0]
+    assert row["description"] == "compiled again"
+
+
 def test_merge_writes_nothing_when_the_column_is_missing(world) -> None:
     world.table("customers")
     world.term("Customer")

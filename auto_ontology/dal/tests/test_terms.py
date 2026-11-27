@@ -445,6 +445,30 @@ def test_upsert_table_term_is_idempotent_for_one_table(world) -> None:
     assert row["description"] == "rebuilt"
 
 
+def test_a_recompile_keeps_a_certified_term_description(world) -> None:
+    """#259: recompiling a table must not replace a description a person
+    certified. Synonyms carry no certification flag, so they still update."""
+    world.table("orders")
+    term_id, _ = t.upsert_table_term(
+        f"{world.prefix}-Order", "reviewed", world.tables["orders"], synonyms=["po"]
+    )
+    t.update_term(term_id, description_certified=True)
+
+    again = t.upsert_table_term(
+        f"{world.prefix}-Order",
+        "compiled again",
+        world.tables["orders"],
+        synonyms=["purchase order"],
+    )
+
+    assert again[0] == term_id
+    row = store().query_read(
+        select(s.term.c.description, s.term.c.synonyms).where(s.term.c.id == term_id)
+    )[0]
+    assert row["description"] == "reviewed"
+    assert row["synonyms"] == ["purchase order"]
+
+
 def test_upsert_table_term_never_stores_an_empty_name(world: World) -> None:
     """An empty proposal falls back to the physical table name instead of
     being stored as "" (never embedded) or the next as " (db.schema.table)".
