@@ -54,7 +54,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | Requests | >=2.34.2 | Apache-2.0 | https://github.com/psf/requests |
 | snowflake-connector-python | >=4.7.2 | Apache-2.0 | https://github.com/snowflakedb/snowflake-connector-python |
 | SQLAlchemy | >=2.0.52 | MIT | https://github.com/sqlalchemy/sqlalchemy |
-| SQLGlot | >=30.17.0 | MIT | https://github.com/tobymao/sqlglot |
+| SQLGlot (`sqlglot[c]`) | >=30.17.0 | MIT | https://github.com/tobymao/sqlglot |
 | Thrift | >=0.24.0 | Apache-2.0 | https://github.com/apache/thrift |
 | thrift-sasl | >=0.4.3 | Apache-2.0 | https://github.com/cloudera/thrift_sasl |
 | tqdm | >=4.70.0 | MPL-2.0 AND MIT | https://github.com/tqdm/tqdm |
@@ -72,6 +72,10 @@ them.
 The `pyarrow` extra of `databricks-sql-connector` installs Apache Arrow's
 `pyarrow` (Apache-2.0), whose wheel bundles the Arrow C++ libraries and
 their own notices.
+
+The `c` extra of `sqlglot` installs `sqlglotc` (MIT, same project), prebuilt
+mypyc-compiled extension modules for SQLGlot's tokenizer, parser and
+generator. The wheels embed mypyc's runtime library, part of mypy (MIT).
 
 `mysql-connector-python` is licensed under GPL-2.0 with Oracle's Universal
 FOSS Exception, which lets it be combined with software under OSI-approved

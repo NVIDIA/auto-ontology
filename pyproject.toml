@@ -54,7 +54,9 @@ dependencies = [
     # nemo-retriever.
     "langchain-nvidia-ai-endpoints>=1.4.3",
     "langchain-core>=1.6.1",
-    "sqlglot>=30.17.0",
+    # `c` adds sqlglotc: mypyc-compiled tokenizer, parser and generator, ~1.8x
+    # faster on query-history ingest. It pins sqlglot to its own version.
+    "sqlglot[c]>=30.17.0",
     "numpy>=2.5.2",
     "requests>=2.34.2",
     "tqdm>=4.70.0",
