@@ -95,7 +95,7 @@ def render_sample_value(value: Any) -> str:
     """
     if isinstance(value, str):
         return value
-    if isinstance(value, (bool, int, float)):
+    if value is not None and not isinstance(value, (dict, list, tuple)):
         return str(value)
     try:
         return json.dumps(value, sort_keys=True, default=str)

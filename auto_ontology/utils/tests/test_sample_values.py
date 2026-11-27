@@ -98,3 +98,11 @@ def test_dump_sample_values_stores_what_a_prompt_would_render() -> None:
     assert stringify_sample_values(
         dump_sample_values(values)
     ) == stringify_sample_values(values)
+
+
+def test_decimal_sample_round_trip_keeps_scale_without_extra_quotes() -> None:
+    from decimal import Decimal
+
+    sample = Decimal("12.50")
+    assert parse_sample_values(dump_sample_values([sample])) == ["12.50"]
+    assert stringify_sample_values([sample]) == ["12.50"]
