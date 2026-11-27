@@ -156,6 +156,10 @@ parsing prose. Results are capped at 100 rows, with `row_count` and `truncated`
 reporting what was withheld. It emits MCP progress notifications as the agent
 works, mirroring the reasoning trace the web UI shows.
 
+Pass `database` to scope a question to a catalog database by name or UUID. If
+omitted, Auto Ontology chooses the database as usual. An invalid database
+returns an error without falling back to another database.
+
 ### About `check_readiness`
 
 Answering a question needs two independent things: a compiled semantic layer to
