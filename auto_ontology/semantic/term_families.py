@@ -34,7 +34,7 @@ members of sibling families with the same ``base_name``.
 from __future__ import annotations
 
 import logging
-import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations
@@ -47,6 +47,7 @@ from auto_ontology.dal.term_families import (
     replace_term_families,
 )
 from auto_ontology.dal.terms import fetch_terms_and_attributes_for_table
+from auto_ontology.semantic.deterministic import _words
 from auto_ontology.semantic.embed import SemanticEmbedder
 
 logger = logging.getLogger(__name__)
@@ -85,13 +86,34 @@ class _Table:
     term_ids: list[str] = field(default_factory=list)
 
 
+def _fold(name: str) -> str:
+    """*name* upper-cased and in NFC, the form every comparison is made in.
+
+    NFC before upper-casing, so a name stored decomposed and the same name
+    stored precomposed compare equal, and after it as well: upper-casing a
+    few characters yields a base letter plus a combining mark, and NFC
+    composes those again where a precomposed character exists. Both passes
+    are needed. Upper-casing ``α`` + U+0345 + U+0301 turns the combining
+    iota into a letter ahead of the accent, and a single NFC afterwards
+    can no longer compose the result, while the precomposed form gives
+    ``ΆΙ``.
+    """
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", name).upper())
+
+
 def _tokens(name: str) -> list[str]:
-    return [t for t in re.split(r"[^A-Za-z0-9]+", name.upper()) if t]
+    """The words of *name*: letters, digits and combining marks in any script.
+
+    An ASCII-only split used to drop or cut non-ASCII words, so ``V1_고객``
+    had one token and no prefix, and ``OLD_SOCIÉTÉ`` became ``OLD`` and
+    ``SOCI_T``.
+    """
+    return _words(_fold(name))
 
 
 def _strip_prefix(name: str, prefix: str) -> str:
     """*name* upper-cased, without a leading ``<prefix>_``."""
-    upper = name.upper()
+    upper = _fold(name)
     lead = f"{prefix}_"
     return upper[len(lead) :] if upper.startswith(lead) and upper != lead else upper
 
