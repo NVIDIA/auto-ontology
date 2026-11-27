@@ -37,7 +37,27 @@ export const searchTokens = (query: string): string[] => [
 	),
 ];
 
-/** The whole words a synonym must contain, as `synonym_word_tokens` splits them. */
+/**
+ * A word character, for anything that has to agree with the backend on where a
+ * word starts and ends: letters, digits and marks of any script.
+ *
+ * A dependent vowel sign is a mark, not a separator, so `कला` is one word. An
+ * ASCII-only class cut it in two, which both dropped the highlight on a synonym
+ * that had matched and marked `कल` inside `कला`.
+ */
+export const WORD_CHAR = '[\\p{L}\\p{N}\\p{M}]';
+
+/** Everything that is not a word character, for whole-word boundaries. */
+export const NOT_WORD_CHAR = '[^\\p{L}\\p{N}\\p{M}]';
+
+/**
+ * The whole words a synonym must contain, as `synonym_word_tokens` splits them.
+ *
+ * The tokens keep the query's own casing: the matcher that consumes them is
+ * case-insensitive, and lowercasing first expands a character such as `İ` into
+ * `i` plus a combining dot, two code points the matcher can no longer find in a
+ * text holding the single original character.
+ */
 export const synonymWordTokens = (query: string): string[] => [
-	...new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? []),
+	...new Set(query.match(new RegExp(`${WORD_CHAR}+`, 'gu')) ?? []),
 ];
