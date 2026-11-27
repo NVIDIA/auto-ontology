@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 STATUS_PATH = "/api/semantic-compilation/status"
 CONNECTIONS_PATH = "/api/connections"
+# True when connections come from the CONNECTION_STRINGS env var rather than
+# from rows saved in the UI. The Compose deployment ships that way, and such a
+# deployment has working connections that GET /api/connections never lists.
+ENV_SOURCE_PATH = "/api/connections/source"
 DATABASES_PATH = "/api/datasources/dbs"
 
 
@@ -142,7 +146,9 @@ async def _probe(client: httpx.AsyncClient, path: str) -> Any:
         return None
 
 
-def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
+def _summarise(
+    status: Any, connections: Any, databases: Any, env_source: Any = None
+) -> Readiness:
     """Fold the three probes into one verdict.
 
     A forbidden probe is recorded as unverified rather than as a blocker, so a
@@ -191,7 +197,9 @@ def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
         )
         can_execute = False
     else:
-        can_execute = int(connections.get("count") or 0) > 0
+        # Env-managed connections (``CONNECTION_STRINGS``) are real connections
+        # that the UI-managed list does not contain.
+        can_execute = int(connections.get("count") or 0) > 0 or env_source is True
         if not can_execute:
             blockers.append(
                 "No database connection is configured, so generated SQL cannot "
@@ -264,12 +272,13 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
     )
     async def check_readiness() -> Readiness:
         """Probe the deployment and report what it can currently do."""
-        status, connections, databases = await asyncio.gather(
+        status, connections, databases, env_source = await asyncio.gather(
             _probe(client, STATUS_PATH),
             _probe(client, CONNECTIONS_PATH),
             _probe(client, DATABASES_PATH),
+            _probe(client, ENV_SOURCE_PATH),
         )
-        readiness = _summarise(status, connections, databases)
+        readiness = _summarise(status, connections, databases, env_source)
         if not readiness.ready:
             logger.info("Deployment not ready: %s", "; ".join(readiness.blockers))
         return readiness
@@ -277,6 +286,7 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
 
 __all__ = [
     "CONNECTIONS_PATH",
+    "ENV_SOURCE_PATH",
     "DATABASES_PATH",
     "FORBIDDEN",
     "STATUS_PATH",

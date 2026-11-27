@@ -19,6 +19,7 @@ from auto_ontology_mcp.config import DEFAULT_SPEC_PATH, Settings
 from auto_ontology_mcp.readiness import (
     CONNECTIONS_PATH,
     DATABASES_PATH,
+    ENV_SOURCE_PATH,
     STATUS_PATH,
     Readiness,
 )
@@ -53,12 +54,16 @@ def _routed(**bodies: Any) -> Callable[[httpx.Request], httpx.Response]:
         STATUS_PATH: bodies.get("status", _COMPILED),
         CONNECTIONS_PATH: bodies.get("connections", _ONE_CONNECTION),
         DATABASES_PATH: bodies.get("databases", _ONE_DATABASE),
+        ENV_SOURCE_PATH: bodies.get("env_source", False),
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = routes[request.url.path]
         if body is None:
             raise httpx.ConnectError("boom", request=request)
+        # A bool is a body here, not a status: /api/connections/source returns one.
+        if isinstance(body, bool):
+            return httpx.Response(200, json=body)
         if isinstance(body, int):
             return httpx.Response(body, json={"detail": "nope"})
         return httpx.Response(200, json=body)
@@ -106,6 +111,16 @@ def test_a_compiled_layer_with_no_connection_is_not_ready() -> None:
     # that a question can be answered.
     assert result.databases == ["dw"]
     assert any("No database connection" in blocker for blocker in result.blockers)
+
+
+def test_connections_from_the_environment_count_as_configured() -> None:
+    # The Compose deployment takes its connections from ConnectionStrings, so
+    # the UI-managed list is empty while SQL still executes. Reading only that
+    # list called a working deployment unready.
+    result = _check(_routed(connections=_NO_CONNECTIONS, env_source=True))
+
+    assert result.ready is True
+    assert result.can_execute_sql is True
 
 
 def test_an_uncompiled_layer_says_to_compile_it() -> None:
