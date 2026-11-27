@@ -6,10 +6,15 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from auto_ontology.semantic.term_families import (
+    _strip_prefix,
+    _tokens,
     detect_term_families,
     resolve_term_families,
 )
@@ -126,6 +131,121 @@ def test_a_word_prefix_without_twins_is_no_family() -> None:
     ]
 
     assert detect_term_families(rows, []) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "tokens"),
+    [
+        ("V1_المتبرعون", ["V1", "المتبرعون"]),
+        ("OLD_고객", ["OLD", "고객"]),
+        ("V2_顧客", ["V2", "顧客"]),
+        ("قديم_العملاء", ["قديم", "العملاء"]),
+        ("旧_CUSTOMER_ORDERS", ["旧", "CUSTOMER", "ORDERS"]),
+        ("OLD_ÉQUIPE", ["OLD", "ÉQUIPE"]),
+        ("OLD_SOCIÉTÉ", ["OLD", "SOCIÉTÉ"]),
+        ("NUMÉRO_CLIENTS", ["NUMÉRO", "CLIENTS"]),
+        ("ORDER_ITEMS", ["ORDER", "ITEMS"]),
+    ],
+)
+def test_tokens_keep_words_in_any_script(name: str, tokens: list[str]) -> None:
+    assert _tokens(name) == tokens
+
+
+def test_tokens_and_stripping_ignore_the_unicode_form() -> None:
+    decomposed = unicodedata.normalize("NFD", "OLD_SOCIÉTÉ")
+
+    assert decomposed != "OLD_SOCIÉTÉ"
+    assert _tokens(decomposed) == ["OLD", "SOCIÉTÉ"]
+    assert _strip_prefix(decomposed, "OLD") == "SOCIÉTÉ"
+    assert _strip_prefix("new_Société", "NEW") == "SOCIÉTÉ"
+
+
+def test_twins_with_non_ascii_base_names_make_a_family_pair() -> None:
+    """The reproduction from #709: every table used to be dropped."""
+    bases = ["المتبرعون", "الحملات", "المدفوعات"]
+    rows = _copies("V1", bases) + _copies("V2", bases)
+
+    families = detect_term_families(rows, [])
+
+    assert [f.prefix for f in families] == ["V1", "V2"]
+    for family in families:
+        assert set(family.members.values()) == set(bases)
+        assert (family.twins, family.expanded) == (3, 0)
+
+
+def test_cjk_and_hangul_prefixes_make_a_family_pair() -> None:
+    bases = ["CUSTOMER_ORDERS", "顧客", "고객주문"]
+    rows = _copies("旧", bases) + _copies("新", bases)
+
+    families = detect_term_families(rows, [])
+
+    assert [f.prefix for f in families] == sorted(["旧", "新"])
+    old = next(f for f in families if f.prefix == "旧")
+    assert old.members["term:dw.旧_CUSTOMER_ORDERS"] == "CUSTOMER_ORDERS"
+    assert old.members["term:dw.旧_고객주문"] == "고객주문"
+
+
+def test_accented_words_are_not_split_or_taken_for_a_prefix() -> None:
+    """``NUMÉRO`` is a word like any other: alone it is no family, and as a
+    twin's base name it stays whole."""
+    assert detect_term_families([_table("NUMÉRO_CLIENTS")], []) == []
+
+    bases = ["ÉQUIPE", "SOCIÉTÉ", "NUMÉRO_CLIENTS"]
+    families = detect_term_families(_copies("OLD", bases) + _copies("NEW", bases), [])
+
+    assert [f.prefix for f in families] == ["NEW", "OLD"]
+    old = next(f for f in families if f.prefix == "OLD")
+    assert old.members == {
+        "term:dw.OLD_ÉQUIPE": "ÉQUIPE",
+        "term:dw.OLD_SOCIÉTÉ": "SOCIÉTÉ",
+        "term:dw.OLD_NUMÉRO_CLIENTS": "NUMÉRO_CLIENTS",
+    }
+
+
+def test_twins_stored_in_different_unicode_forms_match() -> None:
+    """One copy is stored decomposed and the other precomposed, in the table
+    names and in the prefixed column names."""
+    bases = ["ÉQUIPE", "SOCIÉTÉ", "NUMÉRO"]
+    rows = []
+    for prefix, form in (("OLD", "NFC"), ("NEW", "NFD")):
+        for base in bases:
+            columns = [
+                unicodedata.normalize(form, f"{prefix}_{c}")
+                for c in ("ID", "NOM", "ADRESSE_ÉLECTRONIQUE")
+            ]
+            rows.append(
+                _table(unicodedata.normalize(form, f"{prefix}_{base}"), columns)
+            )
+
+    families = detect_term_families(rows, [])
+
+    assert [f.prefix for f in families] == ["NEW", "OLD"]
+    old = next(f for f in families if f.prefix == "OLD")
+    assert sorted(old.members.values()) == ["NUMÉRO", "SOCIÉTÉ", "ÉQUIPE"]
+
+
+def test_prefixed_non_ascii_columns_match_after_stripping() -> None:
+    """Arabic prefixes, base names and column names: the columns of two twins
+    differ only in their prefix."""
+    bases = ["المدفوعات", "الحملات", "المتبرعون"]
+    old, new = "قديم", "جديد"
+    rows = []
+    for prefix in (old, new):
+        for base in bases:
+            rows.append(
+                _table(
+                    f"{prefix}_{base}",
+                    [f"{prefix}_{base}_{c}" for c in ("هوية", "اسم")],
+                )
+            )
+
+    families = detect_term_families(rows, [])
+
+    assert [f.prefix for f in families] == sorted([old, new])
+    assert all(
+        family.members and set(family.members.values()) == set(bases)
+        for family in families
+    )
 
 
 def test_a_mirrored_edge_counts_and_relaxes_the_twin_bar() -> None:
