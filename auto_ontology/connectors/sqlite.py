@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
+from auto_ontology.utils.sql_identifiers import quoted_identifier
 from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
@@ -166,10 +167,12 @@ class SQLiteDatabase(SQLDatabase):
         tables = self.get_tables()
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
-            info = self._conn.execute(f'PRAGMA table_xinfo("{table_name}")').fetchall()
+            info = self._conn.execute(
+                f"PRAGMA table_xinfo({quoted_identifier(table_name, self.dialect)})"
+            ).fetchall()
             if not info:
                 info = self._conn.execute(
-                    f'PRAGMA table_info("{table_name}")'
+                    f"PRAGMA table_info({quoted_identifier(table_name, self.dialect)})"
                 ).fetchall()
                 for cid, name, data_type, notnull, _default, _pk in info:
                     rows.append(
@@ -221,7 +224,9 @@ class SQLiteDatabase(SQLDatabase):
         tables = self.get_tables()
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
-            info = self._conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+            info = self._conn.execute(
+                f"PRAGMA table_info({quoted_identifier(table_name, self.dialect)})"
+            ).fetchall()
             for cid, name, _type, _notnull, _default, pk in info:
                 if pk > 0:
                     rows.append(
@@ -251,11 +256,11 @@ class SQLiteDatabase(SQLDatabase):
         def columns_of(table_name: str) -> list:
             if table_name not in table_info:
                 info = self._conn.execute(
-                    f'PRAGMA table_xinfo("{table_name}")'
+                    f"PRAGMA table_xinfo({quoted_identifier(table_name, self.dialect)})"
                 ).fetchall()
                 if not info:
                     table_info[table_name] = self._conn.execute(
-                        f'PRAGMA table_info("{table_name}")'
+                        f"PRAGMA table_info({quoted_identifier(table_name, self.dialect)})"
                     ).fetchall()
                 else:
                     table_info[table_name] = [c for c in info if c[6] != 1]
@@ -270,7 +275,7 @@ class SQLiteDatabase(SQLDatabase):
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
             fks = self._conn.execute(
-                f'PRAGMA foreign_key_list("{table_name}")'
+                f"PRAGMA foreign_key_list({quoted_identifier(table_name, self.dialect)})"
             ).fetchall()
             for _id, seq, ref_table, from_col, ref_col, *_rest in fks:
                 parent = declared.get(_fold_identifier(ref_table))
