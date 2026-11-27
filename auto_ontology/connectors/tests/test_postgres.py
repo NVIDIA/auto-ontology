@@ -21,11 +21,13 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
+import pandas as pd
 import psycopg
 import pytest
 from psycopg.rows import tuple_row
 
 from auto_ontology.catalog.constants import TableTypes
+from auto_ontology.catalog.extract import extract_tabular_db_data
 from auto_ontology.connectors.postgres import PostgresDatabase, _fetch_frame
 from auto_ontology.connectors.registry import create_connector
 
@@ -246,8 +248,8 @@ def test_cross_and_same_schema_foreign_keys_on_one_table(
 
 
 # ----------------------------------------------------------------------------
-# Foreign-key shapes the Pagila fixture does not have. Each test gets a scratch
-# database so the shared fixture (and the DAL goldens recorded from it) stay put.
+# Catalog shapes the Pagila fixture does not have. Use a scratch database so
+# the shared fixture (and the DAL goldens recorded from it) stays put.
 # ----------------------------------------------------------------------------
 
 _FK_SHAPES_DDL = """
@@ -257,8 +259,15 @@ CREATE TABLE w.warehouses (id int PRIMARY KEY);
 CREATE TABLE s.customers (id int PRIMARY KEY);
 -- Same constraint name on two tables of one schema: legal, names are per table.
 CREATE TABLE s.orders (
-    cust_id int CONSTRAINT fk_ref REFERENCES s.customers (id)
+    cust_id int CONSTRAINT fk_ref REFERENCES s.customers (id),
+    obsolete int,
+    status text
 );
+ALTER TABLE s.orders DROP COLUMN obsolete;
+COMMENT ON TABLE s.orders IS 'One row per order.';
+COMMENT ON COLUMN s.orders.status IS 'Status at last refresh.';
+CREATE MATERIALIZED VIEW s.order_status AS SELECT status FROM s.orders;
+COMMENT ON MATERIALIZED VIEW s.order_status IS 'Snapshot of order statuses.';
 CREATE TABLE s.shipments (
     warehouse_id int CONSTRAINT fk_ref REFERENCES w.warehouses (id)
 );
@@ -357,6 +366,29 @@ def test_select_only_role_sees_foreign_keys(fk_shapes_db: str) -> None:
         assert _fk_rows(connector) == _EXPECTED_FK_ROWS
     finally:
         connector.close()
+
+
+def test_postgres_comments_reach_catalog_extraction(fk_shapes_db: str) -> None:
+    connector = create_connector(_admin_dsn(fk_shapes_db))
+    try:
+        catalog = extract_tabular_db_data(connector)
+    finally:
+        connector.close()
+
+    tables = catalog["tables"].set_index(["table_schema", "table_name"])
+    columns = catalog["columns"].set_index(
+        ["table_schema", "table_name", "column_name"]
+    )
+    assert tables.loc[("s", "orders"), "description"] == "One row per order."
+    assert (
+        tables.loc[("s", "order_status"), "description"]
+        == "Snapshot of order statuses."
+    )
+    assert pd.isna(tables.loc[("s", "customers"), "description"])
+    assert columns.loc[("s", "orders", "status"), "description"] == (
+        "Status at last refresh."
+    )
+    assert pd.isna(columns.loc[("s", "orders", "cust_id"), "description"])
 
 
 @pytest.mark.parametrize(

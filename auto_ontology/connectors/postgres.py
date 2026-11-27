@@ -169,7 +169,8 @@ class PostgresDatabase(SQLDatabase):
                     WHEN 'v' THEN '{view_type}'
                     WHEN 'm' THEN '{materialized_view_type}'
                     ELSE '{base_table_type}'
-                END AS table_type
+                END AS table_type,
+                pg_catalog.obj_description(c.oid, 'pg_class') AS description
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
@@ -218,7 +219,8 @@ class PostgresDatabase(SQLDatabase):
                 NOT a.attnotnull                 AS is_nullable,
                 row_number() OVER (
                     PARTITION BY c.oid ORDER BY a.attnum
-                )                                AS ordinal_position
+                )                                AS ordinal_position,
+                pg_catalog.col_description(c.oid, a.attnum) AS description
             FROM pg_attribute a
             JOIN pg_class c ON c.oid = a.attrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
