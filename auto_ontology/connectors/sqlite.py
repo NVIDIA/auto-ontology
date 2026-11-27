@@ -84,7 +84,9 @@ class SQLiteDatabase(SQLDatabase):
         """Return this thread's SQLite connection, creating it on first use."""
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(str(self._db_path))
+            # A worker owns all queries on its connection, while the thread
+            # tearing down the connector closes it after those queries finish.
+            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             self._local.conn = conn
             with self._conns_lock:
