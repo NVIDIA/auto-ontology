@@ -202,8 +202,8 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         # unparseable URL -- ``urlparse(...).port`` raises rather than returning
         # anything the connector could fall back from.
         port_from_host = ""
-        if host.count(":") == 1:
-            host, _, candidate = host.partition(":")
+        if host.count(":") == 1 or (host.startswith("[") and "]:" in host):
+            host, _, candidate = host.rpartition(":")
             if candidate.isdigit():
                 port_from_host = candidate
             else:
