@@ -24,7 +24,7 @@ def _mock_ec_state(
     }
 
 
-def test_ambiguous_entity_with_filler_word_is_demoted_to_unresolvable():
+def test_ambiguous_entity_with_filler_word_is_demoted_to_unresolvable() -> None:
     raw_entity = "Price-to-Book (P/B) ratio"
     norm_entity = "price-to-book (p/b)"
     ec_state = _mock_ec_state(
@@ -93,7 +93,7 @@ def test_ambiguous_entity_with_filler_word_is_demoted_to_unresolvable():
         assert resolved_hits_no_out == []
 
 
-def test_ambiguous_entity_rescued_by_kb_is_not_unresolvable_or_resolved_hit():
+def test_ambiguous_entity_rescued_by_kb_is_not_unresolvable_or_resolved_hit() -> None:
     raw_entity = "Price-to-Book (P/B) ratio"
     norm_entity = "price-to-book (p/b)"
     ec_state = _mock_ec_state(
@@ -146,7 +146,9 @@ def test_ambiguous_entity_rescued_by_kb_is_not_unresolvable_or_resolved_hit():
     assert norm_entity not in {norm for norm, *_ in resolved_hits}
 
 
-def test_colliding_entities_reconcile_without_dropping_non_colliding_ambiguity():
+def test_colliding_entities_reconcile_without_dropping_non_colliding_ambiguity() -> (
+    None
+):
     ec_state = _mock_ec_state(
         entities=["Alpha", "Beta", "Signal Score"],
         col_hits=[
@@ -184,7 +186,9 @@ def test_colliding_entities_reconcile_without_dropping_non_colliding_ambiguity()
         uncovered_entities=["Beta"],
     )
 
-    def _fake_search(_retriever, query, **_kwargs):
+    def _fake_search(
+        _retriever: object, query: str, **_kwargs: object
+    ) -> list[dict[str, object]]:
         if query == "Alpha":
             return [
                 {
@@ -229,7 +233,7 @@ def test_colliding_entities_reconcile_without_dropping_non_colliding_ambiguity()
     assert resolved_by_norm == {"alpha": "col_1", "beta": "col_2"}
 
 
-def test_dropped_collision_entity_becomes_unresolvable():
+def test_dropped_collision_entity_becomes_unresolvable() -> None:
     ec_state = _mock_ec_state(
         entities=["Alpha", "Beta"],
         col_hits=[
@@ -272,3 +276,80 @@ def test_dropped_collision_entity_becomes_unresolvable():
 
     assert unresolvable == [("beta", None)]
     assert [norm for norm, *_ in resolved_hits] == ["alpha"]
+
+
+def test_colliding_alias_does_not_clear_ambiguous_entity_sharing_norm() -> None:
+    ec_state = _mock_ec_state(
+        entities=["Alpha", "Average Alpha", "Beta"],
+        col_hits=[
+            {
+                "id": "col_alpha_a",
+                "text": "ColumnAttribute: Alpha Primary.",
+                "score": 0.30,
+                "query_entities": ["Alpha"],
+            },
+            {
+                "id": "col_alpha_b",
+                "text": "ColumnAttribute: Alpha Secondary.",
+                "score": 0.32,
+                "query_entities": ["Alpha"],
+            },
+            {
+                "id": "col_shared",
+                "text": "ColumnAttribute: Shared.",
+                "score": 0.20,
+                "query_entities": ["Average Alpha"],
+            },
+            {
+                "id": "col_shared",
+                "text": "ColumnAttribute: Shared.",
+                "score": 0.28,
+                "query_entities": ["Beta"],
+            },
+        ],
+    )
+
+    def _fake_search(
+        _retriever: object, query: str, **_kwargs: object
+    ) -> list[dict[str, object]]:
+        if query == "Average Alpha":
+            return [
+                {
+                    "id": "col_shared",
+                    "text": "ColumnAttribute: Shared.",
+                    "score": 0.20,
+                }
+            ]
+        if query == "Beta":
+            return [
+                {
+                    "id": "col_shared",
+                    "text": "ColumnAttribute: Shared.",
+                    "score": 0.28,
+                },
+                {
+                    "id": "col_beta",
+                    "text": "ColumnAttribute: Beta Alt.",
+                    "score": 0.32,
+                },
+            ]
+        return []
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.entity_resolution._run_entity_coverage_pipeline",
+            return_value=ec_state,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.entity_resolution.search_semantic_index",
+            side_effect=_fake_search,
+        ),
+    ):
+        unresolvable, resolved_hits, *_ = _find_unresolvable_entities(
+            "Compare Alpha, Average Alpha, and Beta",
+            MagicMock(),
+            "test_db",
+        )
+
+    assert unresolvable == [("alpha", None)]
+    assert {norm for norm, *_ in resolved_hits} == {"beta"}

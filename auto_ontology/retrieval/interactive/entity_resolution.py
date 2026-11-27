@@ -1329,9 +1329,10 @@ def _find_unresolvable_entities(
     for entity in colliding_entities:
         norm = _normalize_entity(entity) or entity.lower().strip()
         if entity in best_hit_per_entity:
-            needs_kb_rescue.discard(
-                norm
-            )  # now cleanly resolved — no longer ambiguous/uncovered
+            # Keep rescue for an ambiguous key: another raw label with this
+            # normalized form may still be ambiguous.
+            if norm not in normalized_ambiguous:
+                needs_kb_rescue.discard(norm)  # now cleanly resolved
         elif norm in search_norms:
             needs_kb_rescue.add(
                 norm
