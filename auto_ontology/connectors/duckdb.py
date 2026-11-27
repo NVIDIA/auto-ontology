@@ -161,8 +161,10 @@ class DuckDBDatabase(SQLDatabase):
                 table_schema,
                 table_name
             FROM information_schema.tables
+            WHERE table_catalog = ?
             ORDER BY table_schema, table_name
-        """
+        """,
+            [self.database_name],
         )
 
     def get_columns(self) -> pd.DataFrame:
@@ -177,8 +179,10 @@ class DuckDBDatabase(SQLDatabase):
                 is_nullable = 'YES' AS is_nullable,
                 ordinal_position
             FROM information_schema.columns
+            WHERE table_catalog = ?
             ORDER BY table_schema, table_name, ordinal_position
-        """
+        """,
+            [self.database_name],
         )
 
     def get_queries(self) -> pd.DataFrame:
@@ -208,8 +212,10 @@ class DuckDBDatabase(SQLDatabase):
                 table_name,
                 view_definition
             FROM information_schema.views
+            WHERE table_catalog = ?
             ORDER BY table_catalog, table_schema, table_name
-        """
+        """,
+            [self.database_name],
         )
 
     def get_pks(self) -> pd.DataFrame:
