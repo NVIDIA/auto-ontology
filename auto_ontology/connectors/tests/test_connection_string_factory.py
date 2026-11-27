@@ -112,3 +112,36 @@ def test_round_trip_reaches_the_driver_kwargs() -> None:
     # key itself -- proving the value arrived intact rather than being mangled.
     with pytest.raises(ValueError, match="could not be parsed"):
         _parse_connection_string(build_connection_string(connection))
+
+
+def test_query_options_are_decoded_once() -> None:
+    from auto_ontology.connectors import databricks, kyuubi, snowflake, trino
+    from auto_ontology.connectors.connection_string_factory import (
+        build_connection_string,
+    )
+
+    value = "sales%2Fretail"
+    base = {
+        "host": "example.org",
+        "user": "analyst",
+        "password": "example",
+        "database": "catalog",
+    }
+    snow = build_connection_string(
+        {
+            **base,
+            "type": "snowflake",
+            "database": value,
+            "account": "example",
+            "warehouse": "wh",
+        }
+    )
+    assert snowflake._parse_connection_string(snow)[2] == value
+    tr = build_connection_string({**base, "type": "trino", "schema": value})
+    assert trino._parse_connection_string(tr)["schema"] == value
+    path = "/sql/" + value
+    db = build_connection_string({**base, "type": "databricks", "http_path": path})
+    assert databricks._parse_connection_string(db)[0]["http_path"] == path
+    url = "https://example.org/" + value
+    ky = build_connection_string({**base, "type": "kyuubi", "ssa_url": url})
+    assert kyuubi._parse_connection_string(ky)["ssa_url"] == url

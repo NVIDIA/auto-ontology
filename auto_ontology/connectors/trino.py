@@ -124,7 +124,7 @@ def _quoted_literal(value: str) -> str:
 def _first(query: dict[str, list[str]], key: str) -> str | None:
     """Return the first value for *key*, URL-decoded, or ``None``."""
     value = query.get(key, [None])[0]
-    return unquote(value) if value else None
+    return value or None
 
 
 def _is_true(value: str | None, default: bool = True) -> bool:

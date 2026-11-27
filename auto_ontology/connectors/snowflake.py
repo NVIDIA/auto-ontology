@@ -127,9 +127,7 @@ def _parse_connection_string(
         raise ValueError("Snowflake connection string requires ?warehouse=COMPUTE_WH")
 
     database = query.get("database", [None])[0]
-    if database:
-        database = unquote(database)
-    else:
+    if not database:
         database = unquote(parsed.path.lstrip("/"))
     if not database:
         raise ValueError(
