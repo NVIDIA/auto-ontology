@@ -23,6 +23,7 @@ import pytest
 from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.embedding_rows import build_embed_row
+from auto_ontology.vdb import get_vdb
 from auto_ontology.vdb.postgres import PostgresVDB
 from auto_ontology.vdb.records import to_vdb_records, write_embedded_rows
 
@@ -102,8 +103,8 @@ def test_a_dataframe_is_accepted() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _unit(axis: int) -> list[float]:
-    vector = [0.0] * _DIMENSIONS
+def _unit(axis: int, dimensions: int = _DIMENSIONS) -> list[float]:
+    vector = [0.0] * dimensions
     vector[axis] = 1.0
     return vector
 
@@ -171,6 +172,57 @@ def test_written_rows_come_back_from_a_search(
     assert (
         retriever.query("who buys", vdb_kwargs={"where": {"database_name": "x"}}) == []
     )
+
+
+def test_configured_width_round_trips_with_an_index(
+    vdb: PostgresVDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AUTO_ONTOLOGY_VECTOR_SIZE", "1024")
+    store = get_vdb(collection_name=vdb.collection_name)
+    try:
+        vector = _unit(0, dimensions=1024)
+        assert store.run(to_vdb_records([_row("orders", vector)])) == 1
+        [[hit]] = store.retrieval([vector])
+        assert hit["metadata"]["id"] == "orders"
+        assert hit["_distance"] == pytest.approx(0.0, abs=1e-3)
+        with psycopg.connect(store.connection_string) as conn:
+            index = conn.execute(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = %s AND indexname = %s",
+                (store.schema_name, f"ix_hnsw_{store.collection_name}_embedding"),
+            ).fetchone()
+        assert index is not None and "USING hnsw" in index[0]
+    finally:
+        store.close()
+
+
+def test_width_mismatch_does_not_reset_existing_vectors(
+    vdb: PostgresVDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AUTO_ONTOLOGY_VECTOR_SIZE", raising=False)
+    vector = _unit(0)
+    assert vdb.run(to_vdb_records([_row("orders", vector)])) == 1
+
+    monkeypatch.setenv("AUTO_ONTOLOGY_VECTOR_SIZE", "1024")
+    with pytest.raises(ValueError, match=r"2048.*1024"):
+        get_vdb(database_name="shop", collection_name=vdb.collection_name, reset=True)
+
+    [[hit]] = vdb.retrieval([vector])
+    assert hit["metadata"]["id"] == "orders"
+
+    monkeypatch.delenv("AUTO_ONTOLOGY_VECTOR_SIZE")
+    reopened = get_vdb(collection_name=vdb.collection_name)
+    try:
+        [[hit]] = reopened.retrieval([vector])
+        assert hit["metadata"]["id"] == "orders"
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("value", ["invalid", "", "0", "-1", "4001"])
+def test_invalid_configured_width(value: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTO_ONTOLOGY_VECTOR_SIZE", value)
+    with pytest.raises(ValueError, match="AUTO_ONTOLOGY_VECTOR_SIZE"):
+        get_vdb()
 
 
 def _turn(node_id: str, conversation_id: str, axis: int) -> dict:

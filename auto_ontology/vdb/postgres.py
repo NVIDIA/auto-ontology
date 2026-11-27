@@ -266,6 +266,33 @@ class PostgresVDB:
                 )
             conn.commit()
 
+    def _check_existing_width(self) -> bool:
+        """Return whether the collection exists, rejecting an incompatible width."""
+        with psycopg.connect(self.connection_string) as conn:
+            row = conn.execute(
+                """
+                SELECT a.atttypmod
+                FROM pg_catalog.pg_class AS c
+                JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+                LEFT JOIN pg_catalog.pg_attribute AS a
+                    ON a.attrelid = c.oid AND a.attname = 'embedding'
+                    AND NOT a.attisdropped
+                WHERE n.nspname = %s AND c.relname = %s
+                """,
+                (self.schema_name, self.collection_name),
+            ).fetchone()
+        if row is None:
+            return False
+        width = row[0]
+        if self.vector_size is not None and width != self.vector_size:
+            raise ValueError(
+                f"Vector collection {self.schema_name}.{self.collection_name} has "
+                f"embedding width {width if width and width > 0 else 'unknown'}, "
+                f"but AUTO_ONTOLOGY_VECTOR_SIZE is {self.vector_size}. "
+                "Restore the previous setting or rebuild embeddings in a fresh store."
+            )
+        return True
+
     def _get_store(self) -> Optional[PGVectorStore]:
         """Return the vector store, creating the table on first write.
 
@@ -275,8 +302,12 @@ class PostgresVDB:
         if self._store is not None:
             return self._store
 
+        exists = self._check_existing_width()
+        if not exists and self.vector_size is None:
+            return None
+
         engine = self._get_engine()
-        if not self._table_exists():
+        if not exists:
             self._ensure_schema()
             engine.init_vectorstore_table(
                 table_name=self.collection_name,

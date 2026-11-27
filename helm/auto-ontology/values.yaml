@@ -57,6 +57,9 @@ kumoRfmApiUrl: ""
 # auto-derive from the API key prefix; set to override just the embedder.
 embedEndpoint: ""
 embedModel: ""
+# Match the embedding model's output width (1-4000). Changing this on an
+# existing store requires rebuilding embeddings in fresh vector collections.
+vectorSize: 2048
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.

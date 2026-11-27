@@ -5,6 +5,7 @@
 """VDB initialization — data layer, semantic layer and conversation collections."""
 
 import functools
+import os
 
 from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.vdb.postgres import PostgresVDB
@@ -53,6 +54,19 @@ ONE_HOP_PATH_VDB_COLLECTION: str = "1hop_pathes"
 VDB_SCHEMA: str = "vdb"
 
 
+def _configured_vector_size() -> int:
+    # The halfvec HNSW index supports at most 4000 dimensions.
+    setting = "AUTO_ONTOLOGY_VECTOR_SIZE"
+    message = f"{setting} must be an integer from 1 to 4000"
+    try:
+        size = int(os.environ.get(setting, "2048"))
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if not 1 <= size <= 4000:
+        raise ValueError(message)
+    return size
+
+
 def get_vdb(
     *,
     database_name: str | None = None,
@@ -63,9 +77,9 @@ def get_vdb(
 
     When database_name is provided, the VDB will use it to reset old embeddings for the given database.
     """
-    connection_string = get_postgres_connection_string()
     kwargs: dict = {
-        "connection_string": connection_string,
+        "vector_size": _configured_vector_size(),
+        "connection_string": get_postgres_connection_string(),
         "collection_name": collection_name,
         "schema_name": VDB_SCHEMA,
     }
