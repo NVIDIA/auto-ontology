@@ -1203,10 +1203,10 @@ def _find_unresolvable_entities(
     # string space as everything else it might overlap with (KB coverage,
     # collision resolution).
     ambiguous_entities = _ambiguity_check(ec_path_state)
-    if ambiguous_entities and ambiguous_hits_out is not None:
-        normalized_ambiguous = {
-            _normalize_entity(e) or e.lower().strip() for e in ambiguous_entities
-        }
+    normalized_ambiguous = {
+        _normalize_entity(e) or e.lower().strip() for e in ambiguous_entities
+    }
+    if normalized_ambiguous and ambiguous_hits_out is not None:
         # ambiguous_hits_out was already reset to empty above — this populates
         # it fresh with exactly this call's ambiguous entities, nothing carried
         # over from an earlier turn's (possibly stale) working_question.
@@ -1230,7 +1230,7 @@ def _find_unresolvable_entities(
         else:
             vdb_uncovered_norms.add(raw.lower().strip())
     # Merge in ambiguous entities (they came back "covered" by score but are not reliable).
-    needs_kb_rescue = vdb_uncovered_norms | (ambiguous_entities & search_norms)
+    needs_kb_rescue = vdb_uncovered_norms | (normalized_ambiguous & search_norms)
 
     # Find each entity's single best VDB hit (score <= CLARIFY_MAX_DISTANCE).
     col_hits: list[dict] = ec_path_state.get("retrieved_column_attributes") or []
@@ -1302,7 +1302,15 @@ def _find_unresolvable_entities(
                 kb_text_by_norm[norm] = (entry_name, entry_text)
 
     # Resolve any entities that collided on the same best hit, in place.
-    entities_before_resolution = set(best_hit_per_entity.keys())
+    id_counts: dict[str, int] = {}
+    for hit in best_hit_per_entity.values():
+        hid = str(hit.get("id") or "")
+        id_counts[hid] = id_counts.get(hid, 0) + 1
+    colliding_entities = {
+        entity
+        for entity, hit in best_hit_per_entity.items()
+        if id_counts.get(str(hit.get("id") or ""), 0) > 1
+    }
     json_notes = _resolve_collisions(
         question,
         relevant_knowledge_text,
@@ -1316,19 +1324,16 @@ def _find_unresolvable_entities(
     )
 
     # Reconcile needs_kb_rescue against what collision resolution actually did —
-    # it was computed before _resolve_collisions ran, so on its own it doesn't
-    # know an entity got cleanly resolved (and would wrongly keep it excluded
-    # from resolved_hits below / stuck in the final unresolvable list), nor that
-    # an entity got dropped (and would wrongly be treated as resolved with no
-    # hit, silently vanishing from both resolved_hits and unresolvable instead
-    # of surfacing as something that may still need a clarifying question).
-    for entity in entities_before_resolution | set(best_hit_per_entity.keys()):
+    # scoped to colliding entities only so non-colliding ambiguous or VDB-uncovered
+    # entities keep their needs_kb_rescue status intact.
+    for entity in colliding_entities:
         norm = _normalize_entity(entity) or entity.lower().strip()
         if entity in best_hit_per_entity:
-            needs_kb_rescue.discard(
-                norm
-            )  # now cleanly resolved — no longer ambiguous/uncovered
-        else:
+            # Keep rescue for an ambiguous key: another raw label with this
+            # normalized form may still be ambiguous.
+            if norm not in normalized_ambiguous:
+                needs_kb_rescue.discard(norm)  # now cleanly resolved
+        elif norm in search_norms:
             needs_kb_rescue.add(
                 norm
             )  # collision resolution dropped it — treat as unresolved
