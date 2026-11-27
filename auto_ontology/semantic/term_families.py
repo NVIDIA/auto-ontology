@@ -89,12 +89,16 @@ class _Table:
 def _fold(name: str) -> str:
     """*name* upper-cased and in NFC, the form every comparison is made in.
 
-    NFC after upper-casing, so a name stored decomposed and the same name
-    stored precomposed compare equal. Upper-casing a few characters yields a
-    base letter plus a combining mark, and NFC composes those again where a
-    precomposed character exists.
+    NFC before upper-casing, so a name stored decomposed and the same name
+    stored precomposed compare equal, and after it as well: upper-casing a
+    few characters yields a base letter plus a combining mark, and NFC
+    composes those again where a precomposed character exists. Both passes
+    are needed. Upper-casing ``α`` + U+0345 + U+0301 turns the combining
+    iota into a letter ahead of the accent, and a single NFC afterwards
+    can no longer compose the result, while the precomposed form gives
+    ``ΆΙ``.
     """
-    return unicodedata.normalize("NFC", name.upper())
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", name).upper())
 
 
 def _tokens(name: str) -> list[str]:

@@ -160,6 +160,19 @@ def test_tokens_and_stripping_ignore_the_unicode_form() -> None:
     assert _strip_prefix("new_Société", "NEW") == "SOCIÉTÉ"
 
 
+def test_equivalent_names_fold_the_same_when_upper_casing_reorders() -> None:
+    """Upper-casing ``α`` + U+0345 + U+0301 turns the combining iota into a
+    letter ahead of the accent, so NFC has to run before it as well."""
+    decomposed = "OLD_\u03b1\u0345\u0301"
+    precomposed = "OLD_\u1fb4"
+
+    assert unicodedata.normalize("NFC", decomposed) == precomposed
+    folded = ["OLD", "\u0386\u0399"]
+    assert _tokens(decomposed) == _tokens(precomposed) == folded
+    assert _strip_prefix(decomposed, "OLD") == _strip_prefix(precomposed, "OLD")
+    assert _strip_prefix(decomposed, "OLD") == folded[1]
+
+
 def test_twins_with_non_ascii_base_names_make_a_family_pair() -> None:
     """The reproduction from #709: every table used to be dropped."""
     bases = ["المتبرعون", "الحملات", "المدفوعات"]
