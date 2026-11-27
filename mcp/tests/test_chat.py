@@ -322,13 +322,35 @@ def test_forwards_evidence_separately_from_question() -> None:
     }
 
 
-def test_the_database_cannot_be_pinned_by_a_caller() -> None:
-    # target_db exists on the API for benchmarking. Exposing it would invite an
-    # agent to route around the semantic layer, so the tool has no such
-    # parameter and a caller passing one is rejected rather than silently
-    # ignored.
+def test_forwards_database_as_target_db() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return _stream(_sse({"type": "result", "answer": _ANSWER}))(request)
+
+    _call(_server(handler), {"question": "how many?", "database": "sales"})
+
+    assert captured == {"question": "how many?", "target_db": "sales"}
+
+
+def test_reports_invalid_target_without_falling_back() -> None:
+    requests: list[dict[str, Any]] = []
+    detail = "target_db 'unknown' does not match a catalog database UUID or name."
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(422, json={"detail": detail})
+
+    with pytest.raises(ToolError, match="does not match a catalog database"):
+        _call(_server(handler), {"question": "how many?", "database": "unknown"})
+
+    assert requests == [{"question": "how many?", "target_db": "unknown"}]
+
+
+def test_rejects_blank_database_without_sending_chat() -> None:
     def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
         raise AssertionError("the request should never be sent")
 
-    with pytest.raises(ToolError):
-        _call(_server(handler), {"question": "how many?", "target_db": "sales"})
+    with pytest.raises(ToolError, match="database must not be blank"):
+        _call(_server(handler), {"question": "how many?", "database": "  "})

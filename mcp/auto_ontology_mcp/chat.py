@@ -160,7 +160,8 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
             "slow — many sequential model calls, typically tens of seconds — "
             "so use check_answerable first when you are unsure the question is "
             "in scope, and prefer one well-formed question over several "
-            "narrow ones."
+            "narrow ones. Optionally pass database to scope the question to "
+            "one catalog database by name or UUID."
         ),
     )
     async def ask_question(
@@ -168,13 +169,9 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
         ctx: Context,
         conversation_id: str | None = None,
         evidence: str | None = None,
+        database: str | None = None,
     ) -> DataAnswer:
         """Run one text-to-SQL turn and return its structured result.
-
-        The API also accepts ``target_db`` to pin retrieval to one database.
-        It is not exposed here: it exists for benchmarking, the web UI never
-        sends it, and letting the deployment choose is what the semantic layer
-        is for.
 
         Args:
             question: The question, in plain language.
@@ -184,12 +181,20 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
                 question while the first is still running.
             evidence: Optional authoritative evidence supplied separately
                 from the question.
+            database: Optional catalog database name or UUID. Omit to let the
+                deployment choose the database as usual.
         """
         body: dict[str, Any] = {"question": question}
         if conversation_id:
             body["conversation_id"] = conversation_id
         if evidence:
             body["evidence"] = evidence
+        if database is not None:
+            if not database.strip():
+                raise ToolError(
+                    "database must not be blank; omit it for automatic routing."
+                )
+            body["target_db"] = database
 
         answer: DataAnswer | None = None
         steps = 0
