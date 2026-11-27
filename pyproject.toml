@@ -64,6 +64,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "regex>=2026.7.19",
     "google-cloud-bigquery>=3.30.0",
+    "pymongo>=4.20.0",
 ]
 
 [project.optional-dependencies]

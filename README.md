@@ -394,7 +394,7 @@ in the [OpenAPI spec](./docs/openapi/auto-ontology-api.json).
 
 ### Sources
 
-Auto Ontology connects to eleven engines:
+Auto Ontology connects to twelve engines:
 
 - PostgreSQL
 - MySQL
@@ -407,9 +407,10 @@ Auto Ontology connects to eleven engines:
 - HeavyDB
 - DuckDB
 - SQLite
+- MongoDB and Amazon DocumentDB
 
 Add connections under **Settings → Connections**, or list them in
-`CONNECTION_STRINGS`. DuckDB and SQLite are connection-string only. See
+`CONNECTION_STRINGS`. DuckDB, SQLite, and MongoDB are connection-string only. See
 [docs/connections.md](./docs/connections.md) for URL schemes, scoping, and
 credential storage.
 
