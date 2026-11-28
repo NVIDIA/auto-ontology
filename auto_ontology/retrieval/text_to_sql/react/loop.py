@@ -19,7 +19,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from functools import partial
+from inspect import signature
 from typing import Any, Callable
+from uuid import uuid4
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -44,6 +47,12 @@ from auto_ontology.retrieval.text_to_sql.react.grep import grep
 from auto_ontology.retrieval.text_to_sql.react.information import information
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
 from auto_ontology.retrieval.text_to_sql.react.predict import Prediction, predict
+from auto_ontology.retrieval.text_to_sql.react.receipts import (
+    EpisodeEndReason,
+    EpisodeReceipt,
+    ToolDecision,
+    ToolOutcome,
+)
 from auto_ontology.retrieval.text_to_sql.react.catalog import retrieve
 from auto_ontology.utils.llm_invoke import invoke_with_retry
 from auto_ontology.retrieval.text_to_sql.react.run_sql import (
@@ -82,6 +91,7 @@ class EpisodeResult:
     tool_calls: int
     trajectory: list[dict[str, Any]] = field(default_factory=list)
     prediction: Prediction | None = None
+    receipt: EpisodeReceipt | None = None
 
 
 def _prose_sources(ctx: ToolContext) -> str:
@@ -226,21 +236,6 @@ def _can_run_queries(ctx: ToolContext) -> bool:
     return ctx.can_run_queries is None or ctx.can_run_queries()
 
 
-def _submit_draft(
-    ctx: ToolContext, draft: str | None, calls: int, trajectory: list[dict[str, Any]]
-) -> EpisodeResult | None:
-    """Submit the latest drafted query when the budget ended the episode."""
-    if not draft:
-        return None
-    # The model gets no turn to resend a draft that is sent back.
-    ctx.last_answer_attempt = True
-    observation, submission = submit(ctx, draft)
-    trajectory.append({"role": "draft_submission", "content": observation})
-    if submission is None:
-        return None
-    return EpisodeResult(submission, "submitted_draft", calls, trajectory)
-
-
 def _with_cost_status(ctx: ToolContext, text: str) -> str:
     status = ctx.cost_status() if ctx.cost_status else None
     return f"{text}\n\n{status}" if status else text
@@ -248,7 +243,7 @@ def _with_cost_status(ctx: ToolContext, text: str) -> str:
 
 def _dispatch(
     ctx: ToolContext, name: str, args: dict, offered: list[str]
-) -> tuple[str, Submission | Prediction | None]:
+) -> tuple[str, Submission | Prediction | None, ToolOutcome]:
     # A model that omits *purpose* gets the first source this episode offers,
     # not whichever one happened to be written here. Defaulting to "sql" sent a
     # conversation-only episode to the catalog, which on a database of
@@ -266,26 +261,52 @@ def _dispatch(
             ctx, page, pattern, offset
         ),
     }
+    if name not in offered:
+        return (
+            f"Unknown tool {name!r}. Use {', '.join(offered)}.",
+            None,
+            ToolOutcome.NOT_OFFERED,
+        )
     try:
-        if name not in offered:
-            return f"Unknown tool {name!r}. Use {', '.join(offered)}.", None
+        returns_answer = prompts.is_answer(name, args)
+        handler: Callable[..., Any]
+        fixed_args = {}
         if name == ToolName.SUBMIT:
-            return submit(ctx, **args)
-        if name == ToolName.RUN_SQL and prompts.is_answer(name, args):
-            final_args = {k: v for k, v in args.items() if k != "final"}
-            return submit(
-                ctx, **final_args, resubmit="run this version with final=true"
+            handler = partial(submit, ctx)
+        elif name == ToolName.RUN_SQL and returns_answer:
+            handler = partial(submit, ctx)
+            args = {k: v for k, v in args.items() if k != "final"}
+            fixed_args = {"resubmit": "run this version with final=true"}
+        elif name == ToolName.PREDICT:
+            handler = partial(predict, ctx)
+            args = {}
+        else:
+            handler = handlers[name]
+            if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
+                args = {k: v for k, v in args.items() if k == "sql"}
+
+        bind = signature(handler).bind
+        try:
+            bind(**args, **fixed_args)
+        except TypeError as error:
+            return (
+                f"Wrong arguments for {name}: {error}",
+                None,
+                ToolOutcome.WRONG_ARGUMENTS,
             )
-        if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
-            args = {k: v for k, v in args.items() if k == "sql"}
-        if name == ToolName.PREDICT:
-            return predict(ctx)
-        return handlers[name](**args), None
-    except TypeError as error:
-        return f"Wrong arguments for {name}: {error}", None
+
+        result = handler(**args, **fixed_args)
+        if not returns_answer:
+            return result, None, ToolOutcome.RETURNED
+        observation, answer = result
+        return (
+            observation,
+            answer,
+            ToolOutcome.ANSWERED if answer is not None else ToolOutcome.DECLINED,
+        )
     except Exception as error:  # noqa: BLE001 — a failing tool must not end the question
         logger.warning("ReAct tool %s raised", name, exc_info=True)
-        return f"{name} failed: {error}", None
+        return f"{name} failed: {error}", None, ToolOutcome.RAISED
 
 
 def run_episode(
@@ -355,6 +376,33 @@ def run_episode(
     made: set[str] = set()
     draft: str | None = None
     out_of_queries = False
+    run_id = str(uuid4())
+    decisions: list[ToolDecision] = []
+
+    def finish(
+        reason: EpisodeEndReason,
+        submission: Submission | None = None,
+        prediction: Prediction | None = None,
+    ) -> EpisodeResult:
+        receipt = EpisodeReceipt(run_id, mode, reason, tuple(decisions))
+        return EpisodeResult(submission, reason, calls, trajectory, prediction, receipt)
+
+    def submit_draft() -> EpisodeResult | None:
+        if not draft:
+            return None
+        # The model gets no turn to resend a draft that is sent back.
+        ctx.last_answer_attempt = True
+        observation, submission = submit(ctx, draft)
+        trajectory.append({"role": "draft_submission", "content": observation})
+        outcome = (
+            ToolOutcome.ANSWERED if submission is not None else ToolOutcome.DECLINED
+        )
+        decisions.append(
+            ToolDecision(
+                len(decisions) + 1, ToolName.SUBMIT, outcome, "budget_fallback"
+            )
+        )
+        return finish("submitted_draft", submission=submission) if submission else None
 
     while True:
         last_turn = calls >= budget
@@ -397,7 +445,7 @@ def run_episode(
         except Exception as error:  # noqa: BLE001
             logger.error("ReAct turn failed: %s", error, exc_info=True)
             trajectory.append({"role": "error", "content": str(error)})
-            return EpisodeResult(None, "model_error", calls, trajectory)
+            return finish("model_error")
 
         messages.append(reply)
         tool_calls = list(getattr(reply, "tool_calls", None) or [])
@@ -415,10 +463,10 @@ def run_episode(
             nudges += 1
             if last_turn or nudges > _MAX_CONSECUTIVE_NUDGES:
                 if out_of_queries:
-                    fallback = _submit_draft(ctx, draft, calls, trajectory)
+                    fallback = submit_draft()
                     if fallback is not None:
                         return fallback
-                return EpisodeResult(None, "no_submission", calls, trajectory)
+                return finish("no_submission")
             nudge = prompts.nudge_for(
                 mode,
                 calculation_answers=ctx.calculation_answers,
@@ -446,6 +494,7 @@ def run_episode(
                 # Past the budget a reply gets one answer attempt; each attempt
                 # can run SQL, so further ones in the same reply are refused.
                 observation, answer = (prompts.out_of_calls_for(mode), None)
+                outcome = ToolOutcome.BUDGET_EXHAUSTED
             elif key in made and not answers:
                 # Counted though not run: otherwise a model that repeats one
                 # call never reaches the budget and the episode never ends.
@@ -454,13 +503,16 @@ def run_episode(
                     "You already made this exact call; its result is above.",
                     None,
                 )
+                outcome = ToolOutcome.DUPLICATE
             else:
                 if calls >= budget:
                     answered_over_budget = True
                 ctx.last_answer_attempt = calls >= budget
                 made.add(key)
                 calls += 1
-                observation, answer = _dispatch(ctx, name, args, offered)
+                observation, answer, outcome = _dispatch(ctx, name, args, offered)
+            tool = ToolName(name) if name in ToolName else None
+            decisions.append(ToolDecision(len(decisions) + 1, tool, outcome))
             if answer is None:
                 observation = _with_cost_status(ctx, observation)
             messages.append(
@@ -468,15 +520,13 @@ def run_episode(
             )
             trajectory.append({"role": "tool", "name": name, "content": observation})
             if isinstance(answer, Submission):
-                return EpisodeResult(answer, "submitted", calls, trajectory)
+                return finish("submitted", submission=answer)
             if isinstance(answer, Prediction):
-                return EpisodeResult(
-                    None, "predicted", calls, trajectory, prediction=answer
-                )
+                return finish("predicted", prediction=answer)
 
         if last_turn:
             if out_of_queries:
-                fallback = _submit_draft(ctx, draft, calls, trajectory)
+                fallback = submit_draft()
                 if fallback is not None:
                     return fallback
-            return EpisodeResult(None, "budget_exhausted", calls, trajectory)
+            return finish("budget_exhausted")

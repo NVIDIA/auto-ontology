@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,8 @@ from auto_ontology.retrieval.text_to_sql import pipeline
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import QueryResponse
 from auto_ontology.retrieval.text_to_sql.react import agent as agent_module
 from auto_ontology.retrieval.text_to_sql.react.loop import EpisodeResult, Submission
+from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode
+from auto_ontology.retrieval.text_to_sql.react.receipts import EpisodeReceipt
 
 
 def _state() -> dict:
@@ -36,9 +39,9 @@ def _episode(submission: Submission | None, reason: str) -> EpisodeResult:
 def test_an_answer_is_handed_to_formatting(monkeypatch: pytest.MonkeyPatch) -> None:
     db_response = QueryResponse(result=['[{"total": 160.0}]'], sliced=False)
     submission = Submission("SELECT 1", "Revenue of active customers.", "", db_response)
-    monkeypatch.setattr(
-        agent_module, "run_episode", lambda *a, **k: _episode(submission, "submitted")
-    )
+    episode = _episode(submission, "submitted")
+    episode.receipt = EpisodeReceipt("run-id", EpisodeMode.SQL, "submitted", ())
+    monkeypatch.setattr(agent_module, "run_episode", lambda *a, **k: episode)
 
     result = agent_module.ReactSQLAgent().execute(_state())
 
@@ -49,6 +52,7 @@ def test_an_answer_is_handed_to_formatting(monkeypatch: pytest.MonkeyPatch) -> N
         path_state["sql_generation_result"].response == "Revenue of active customers."
     )
     assert path_state["sql_response_from_db"] == ['[{"total": 160.0}]']
+    assert path_state["react_receipt"] == asdict(episode.receipt)
     assert path_state["thoughts_log"] == [
         {"node": "react_sql_agent", "text": "Searching for: revenue"}
     ]

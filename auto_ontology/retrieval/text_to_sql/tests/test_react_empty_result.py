@@ -320,7 +320,7 @@ def test_a_final_run_sql_is_told_to_run_again(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_SUBMIT_TOOL", "false")
-    observation, _ = loop._dispatch(
+    observation, _, _ = loop._dispatch(
         ctx, "run_sql", {"sql": TYPE_MISMATCH, "final": True}, ["run_sql"]
     )
 
