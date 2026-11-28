@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from auto_ontology.catalog.table_filter import TableFilter, from_connection
 from auto_ontology.connectors.base import SQLDatabase
@@ -71,6 +71,24 @@ def parse_connection_strings(raw: str) -> list[str]:
     ]
 
 
+# Query parameters whose value is a credential, by decoded, lowercased name.
+_SECRET_PARAMS = frozenset({"token"})
+_QUERY_PARAM = re.compile(r"([?&])([^=&#]*)=([^&#]*)")
+
+
+def _mask_secret_param(match: re.Match[str]) -> str:
+    """Mask a query parameter's value when its name is a credential.
+
+    The name is percent-decoded before it is compared, so ``%74oken=`` is
+    masked too. A connector may refuse that spelling, but the URL is logged
+    precisely when parsing fails, so it still must not leak.
+    """
+    separator, name, value = match.groups()
+    if value and unquote(name).lower() in _SECRET_PARAMS:
+        return f"{separator}{name}=***"
+    return match.group(0)
+
+
 def _redact(connection_string: str) -> str:
     """Mask the password/token in a connection string before logging it.
 
@@ -87,7 +105,7 @@ def _redact(connection_string: str) -> str:
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )
     connection_string = re.sub(r"(credentials=)[^&]+", r"\1***", connection_string)
-    connection_string = re.sub(r"([?&]token=)[^&]+", r"\1***", connection_string)
+    connection_string = _QUERY_PARAM.sub(_mask_secret_param, connection_string)
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string

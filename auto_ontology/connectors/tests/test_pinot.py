@@ -239,6 +239,25 @@ def test_ipv6_hosts_keep_their_brackets() -> None:
     httpx.URL(settings["broker_url"])  # parses
 
 
+@pytest.mark.parametrize("name", ["token", "%74oken", "TOKEN", "%54oken"])
+def test_redact_masks_encoded_token_names(name: str) -> None:
+    redacted = _redact(f"pinot://broker/default?{name}=SECRET&http_scheme=ftp")
+    assert "SECRET" not in redacted
+    assert "http_scheme=ftp" in redacted
+
+
+def test_failed_connector_log_never_holds_the_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bad URL is logged in full by the registry; the token must not be."""
+    from auto_ontology.connectors.registry import create_connector
+
+    with pytest.raises(ValueError):
+        create_connector("pinot://broker/default?%74oken=SECRET&http_scheme=ftp")
+    assert caplog.records
+    assert "SECRET" not in caplog.text
+
+
 def test_redact_masks_the_token() -> None:
     redacted = _redact("pinot://broker:8099/default?token=SECRET&http_scheme=https")
     assert "SECRET" not in redacted
