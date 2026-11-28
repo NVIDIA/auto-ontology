@@ -23,6 +23,7 @@ import yaml
 from ossie_nvidia_auto_ontology import (
     AutoOntologyConversionError,
     convert_auto_ontology_to_ossie,
+    convert_ossie_to_auto_ontology,
 )
 from pydantic import ValidationError
 
@@ -46,6 +47,7 @@ from auto_ontology.server.model_interchange.embed import (
 from auto_ontology.server.model_interchange.schemas import (
     ExportRequest,
     AutoOntologyModelDocument,
+    ModelColumn,
     ModelFormat,
     ModelSemanticFk,
 )
@@ -376,6 +378,21 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
     )
 
 
+def test_model_column_nullability_is_tri_state() -> None:
+    """An omitted field keeps the old nullable default; explicit null stays unknown."""
+    omitted = ModelColumn.model_validate({"id": "c1", "name": "id"})
+    unknown = ModelColumn.model_validate(
+        {"id": "c2", "name": "id", "is_nullable": None}
+    )
+    declared = ModelColumn.model_validate(
+        {"id": "c3", "name": "id", "is_nullable": False}
+    )
+
+    assert omitted.is_nullable is True
+    assert unknown.is_nullable is None
+    assert declared.is_nullable is False
+
+
 @patch(
     "auto_ontology.server.model_interchange.service.dal.make_cached_sql_column_resolver",
     return_value=lambda *args, **kwargs: [],
@@ -442,6 +459,33 @@ def test_export_model_ossie_format_emits_ossie_document(
     model = payload
     assert [dataset["name"] for dataset in model["datasets"]] == ["order"]
     assert model["datasets"][0]["source"] == "retail.main.orders"
+
+
+def test_ossie_round_trip_reads_unknown_nullability_as_nullable() -> None:
+    """Ossie has only a boolean, so NULL must not come back as NOT NULL.
+
+    The converter reads the embedded native document with ``bool(...)``, which
+    turns ``None`` into ``False``. Unknown means the source never declared the
+    constraint, so the permissive reading for Ossie is nullable.
+    """
+    rows = _export_rows()
+    rows["catalog"][0]["is_nullable"] = None
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    round_tripped = yaml.safe_load(
+        convert_ossie_to_auto_ontology(
+            convert_auto_ontology_to_ossie(service._ossie_source(document))
+        )
+    )
+    columns = round_tripped["data_layer"]["databases"][0]["schemas"][0]["tables"][0][
+        "columns"
+    ]
+
+    assert columns[0]["is_nullable"] is True
 
 
 @patch(

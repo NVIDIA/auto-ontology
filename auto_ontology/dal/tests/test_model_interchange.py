@@ -94,7 +94,7 @@ class World:
             name="id",
             data_type="integer",
             ordinal_position=1,
-            is_nullable=False,
+            is_nullable=None,
         )
         _link(
             s.column__foreign_key,
@@ -233,16 +233,27 @@ def test_nullability_survives_the_export(world) -> None:
     assert columns["customer_id"].is_nullable is True
 
 
-def test_an_undetermined_column_exports_as_nullable() -> None:
-    """NULL means the connector could not tell, and absent has always meant
-    nullable — the permissive reading for a constraint we cannot prove.
+def test_an_undetermined_column_exports_as_unknown(world) -> None:
+    """NULL means the connector could not tell, and the interchange keeps it.
 
-    The export schema types ``is_nullable`` as a plain ``bool``, so this is the
-    one place the store's three states collapse into two.
+    The permissive reading belongs to a consumer that cannot represent the third
+    state, not to the document: claiming nullable here would make the export
+    assert something the source never declared.
     """
-    assert mi._nullable_or_default(None) is True
-    assert mi._nullable_or_default(True) is True
-    assert mi._nullable_or_default(False) is False
+    document = _document(world)
+    customers = {
+        column.name: column
+        for database in document.data_layer.databases
+        for schema in database.schemas
+        for table in schema.tables
+        if table.name == "customers"
+        for column in table.columns
+    }
+
+    assert customers["id"].is_nullable is None
+    assert mi._nullable(None) is None
+    assert mi._nullable(True) is True
+    assert mi._nullable(False) is False
 
 
 # --------------------------------------------------------------------------
@@ -493,6 +504,14 @@ def test_nullability_survives_the_whole_round_trip(world) -> None:
         }
         assert columns["id"].is_nullable is False
         assert columns["customer_id"].is_nullable is True
+        customers = {
+            column.name: column
+            for schema in reexported.data_layer.databases[0].schemas
+            for table in schema.tables
+            if table.name == "customers"
+            for column in table.columns
+        }
+        assert customers["id"].is_nullable is None
     finally:
         _cleanup(f"{world.prefix}-copy")
 

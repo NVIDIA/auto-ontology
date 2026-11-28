@@ -105,19 +105,21 @@ class ModelImportValidationError(ModelInterchangeError):
 # ---------------------------------------------------------------------------
 
 
-def _nullable_or_default(raw: Any) -> bool:
-    """The stored boolean, defaulting an undetermined column to nullable.
+def _nullable(raw: Any) -> bool | None:
+    """The stored tri-state, with an undetermined column left unknown.
 
-    The catalog stores ``is_nullable`` as a real boolean but leaves it NULL
-    when the connector could not determine it; the export schema types it as a
-    plain ``bool``. Absent has always meant nullable — the permissive reading
-    for a constraint we cannot prove — so that is what NULL becomes here.
+    The catalog stores ``is_nullable`` as a nullable boolean: true or false when
+    the connector declared it, NULL when it could not tell. The interchange keeps
+    all three states so an export of an undetermined column stays undetermined
+    instead of claiming a nullability the source never declared. Import writes
+    NULL back as NULL, and an omitted YAML field still defaults to nullable at
+    the schema.
 
     This is the *only* place the two vocabularies meet. It used to be a pair of
     string parsers on both sides of the store, because the column held
     ``'YES'``/``'NO'`` and ``bool('NO')`` is ``True``.
     """
-    return True if raw is None else bool(raw)
+    return None if raw is None else bool(raw)
 
 
 def _database_scope(database_ids: list[str]):
@@ -652,7 +654,7 @@ def _assemble_databases(
                     # re-importable, so an integer column has to leave as
                     # numbers to come back as numbers.
                     sample_values=parse_sample_values(row.get("sample_values")) or [],
-                    is_nullable=_nullable_or_default(row.get("is_nullable")),
+                    is_nullable=_nullable(row.get("is_nullable")),
                     is_unique=bool(row.get("is_unique") or False),
                 ),
             )
