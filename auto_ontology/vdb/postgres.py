@@ -332,6 +332,14 @@ class PostgresVDB:
         try:
             with psycopg.connect(self.connection_string) as conn:
                 with conn.cursor() as cur:
+                    # The ALTER below takes an ACCESS EXCLUSIVE lock on the
+                    # collection and holds it until the index is built, and
+                    # PostgreSQL's defaults bound neither the lock wait nor
+                    # the build. Cap both (transaction-local): on timeout the
+                    # rollback and warning below keep the store available,
+                    # just unindexed until a later write retries.
+                    cur.execute("SET LOCAL lock_timeout = '10s'")
+                    cur.execute("SET LOCAL statement_timeout = '300s'")
                     cur.execute(
                         sql.SQL(
                             "ALTER TABLE {table} "

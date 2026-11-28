@@ -111,7 +111,7 @@ def _plan(name: str) -> str:
             return "\n".join(row[0] for row in cur.fetchall())
 
 
-def test_a_table_that_predates_the_index_is_upgraded(collection) -> None:
+def test_a_table_that_predates_the_index_is_upgraded(collection: str) -> None:
     """Store init is the only upgrade path an existing collection has.
 
     The fixture table is exactly what an older version left behind: a plain
