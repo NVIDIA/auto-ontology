@@ -151,6 +151,11 @@ function parseChartSpecObject(value: unknown): ChartSpec | null {
 			if (!isValueFormat(value.y.format)) return null;
 			y.format = value.y.format;
 		}
+		if (value.y.currency !== undefined) {
+			if (typeof value.y.currency !== 'string' || value.y.currency.length === 0)
+				return null;
+			y.currency = value.y.currency;
+		}
 		spec.y = y;
 	}
 

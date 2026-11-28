@@ -13,7 +13,7 @@ import type { Mark, RenderInput } from './types';
  * series down to the baseline.
  */
 export function renderLine({ spec, box, min, max, colors, fmt }: RenderInput): Mark[] {
-	const marks: Mark[] = verticalAxis(box, min, max, fmt, spec.y?.label);
+	const marks: Mark[] = verticalAxis(box, min, max, fmt, spec.y?.label, spec.y?.currency);
 	const cats = spec.data.map((row) => String(row[spec.x.key] ?? ''));
 	const baselineY = projectY(Math.max(min, 0), box, min, max);
 	const columnX = (i: number): number =>
@@ -54,7 +54,7 @@ export function renderLine({ spec, box, min, max, colors, fmt }: RenderInput): M
 					cx: p.x,
 					cy: p.y,
 					color: colors[si],
-					tip: `${cats[p.i]} · ${series.label ?? series.key}: ${formatValueFull(p.value, fmt)}`,
+					tip: `${cats[p.i]} · ${series.label ?? series.key}: ${formatValueFull(p.value, fmt, spec.y?.currency)}`,
 				});
 			}
 		}

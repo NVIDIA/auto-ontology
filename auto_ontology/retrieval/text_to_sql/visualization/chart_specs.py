@@ -307,10 +307,15 @@ def build_chart_spec(
         "type": plot_type,
         "title": plot.title,
         "x": {"key": x_col, "label": x_col},
-        "y": {"label": plot.y or y_col, "format": plot.y_format or "compact"},
+        "y": {
+            "label": plot.y or y_col,
+            "format": plot.y_format or "compact",
+        },
         "series": series,
         "data": data,
     }
+    if plot.currency:
+        spec["y"]["currency"] = plot.currency
     if notes:
         spec["subtitle"] = " · ".join(notes)
     return spec

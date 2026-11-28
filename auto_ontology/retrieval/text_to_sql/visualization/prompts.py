@@ -60,6 +60,14 @@ class PlotRecommendation(BaseModel):
         default="compact",
         description="How to format Y values on the axis.",
     )
+    currency: Optional[str] = Field(
+        default=None,
+        description=(
+            "ISO 4217 currency code (e.g. 'USD', 'EUR') when y_format is "
+            "'currency'. Omit when unknown; the frontend then renders plain "
+            "numbers instead of assuming USD."
+        ),
+    )
 
 
 class VisualizationRecommendation(BaseModel):

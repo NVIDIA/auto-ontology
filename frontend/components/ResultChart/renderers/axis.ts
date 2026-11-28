@@ -18,6 +18,7 @@ export function verticalAxis(
 	max: number,
 	fmt: ValueFormat,
 	unit?: string,
+	currency?: string,
 ): Mark[] {
 	const marks: Mark[] = [];
 	const span = max - min || 1;
@@ -28,7 +29,7 @@ export function verticalAxis(
 			kind: 'text',
 			x: box.x0 - 8,
 			y: y + 3.5,
-			text: formatTick(value, fmt),
+			text: formatTick(value, fmt, currency),
 			anchor: 'end',
 			variant: 'tick',
 		});
@@ -47,7 +48,13 @@ export function verticalAxis(
 }
 
 /** Value-axis gridlines + tick labels along the bottom edge (horizontal bar types). */
-export function horizontalAxis(box: PlotBox, min: number, max: number, fmt: ValueFormat): Mark[] {
+export function horizontalAxis(
+	box: PlotBox,
+	min: number,
+	max: number,
+	fmt: ValueFormat,
+	currency?: string,
+): Mark[] {
 	const marks: Mark[] = [];
 	const span = max - min || 1;
 	for (const value of ticks(min, max, 4)) {
@@ -57,7 +64,7 @@ export function horizontalAxis(box: PlotBox, min: number, max: number, fmt: Valu
 			kind: 'text',
 			x,
 			y: box.y0 + 16,
-			text: formatTick(value, fmt),
+			text: formatTick(value, fmt, currency),
 			anchor: 'middle',
 			variant: 'tick',
 		});
