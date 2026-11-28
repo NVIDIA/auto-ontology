@@ -636,6 +636,27 @@ def test_tables_come_before_definitions(calls: dict) -> None:
     assert text.index("TABLE sales.orders") < text.index("ATTRIBUTE Revenue")
 
 
+@pytest.mark.parametrize("flag", [True, "True"])
+def test_a_certified_definition_comes_before_tables(
+    calls: dict, monkeypatch: pytest.MonkeyPatch, flag: object
+) -> None:
+    monkeypatch.setitem(REVENUE, "certified", flag)
+    text = tool.retrieve(_ctx(), "order amount")
+
+    assert text.index("ATTRIBUTE Revenue") < text.index("TABLE sales.orders")
+
+
+def test_a_certified_definition_survives_a_limit_that_drops_a_table(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(REVENUE, "certified", True)
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "200")
+    text = tool.retrieve(_ctx(), "how is revenue calculated")
+
+    assert "SQL: SELECT SUM(amount - discount) FROM sales.orders" in text
+    assert "TABLE sales.orders —" not in text
+
+
 def test_a_table_the_limit_cut_comes_back_in_full(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:

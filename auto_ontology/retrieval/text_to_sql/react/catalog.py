@@ -465,6 +465,12 @@ def _short_table_block(table: dict, matched: set[str]) -> str:
     return "\n".join(lines)
 
 
+def _is_certified(hit: dict) -> bool:
+    """Whether a person certified *hit*; the vector store may hold the flag as text."""
+    value = hit.get("certified")
+    return value is True or str(value).strip().lower() == "true"
+
+
 def _definition_block(hit: dict) -> str | None:
     """A line for a hit that carries meaning beyond a table: a definition."""
     label = hit.get("label")
@@ -713,27 +719,34 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
         return {(table.get("schema_name"), table.get("name"))}
 
     # Most useful first, since the limit shortens or only names what comes
-    # last: new tables, how they join, definitions that carry SQL, then tables
-    # seen before. Each block carries the tables it names.
+    # last: certified definitions, new tables, how they join, other
+    # definitions that carry SQL, then tables seen before. A certified
+    # definition is a reviewed answer to a question about a measure and is
+    # short, so it goes ahead of the tables; behind them it was the first thing
+    # the limit dropped, and the model rebuilt the measure from columns. Each
+    # block carries the tables it names.
+    definitions = [
+        (block, _tables_in_view(hit.get("sql")), _is_certified(hit))
+        for hit in hits
+        if (block := _definition_block(hit)) is not None
+    ]
     new_blocks = {
         str(t["id"]): _table_block(t, matched.get(str(t["id"]), set()), False)
         for t in new_tables
     }
     named: list[tuple[str, set[tuple[str | None, str | None]]]] = [
-        (new_blocks[str(t["id"])], own(t)) for t in new_tables
+        (block, tables) for block, tables, certified in definitions if certified
     ]
+    named += [(new_blocks[str(t["id"])], own(t)) for t in new_tables]
     named += _join_lines(ctx, new_tables)
     if config.siblings_enabled():
         named += [
             (line, set().union(*(own(t) for t in tables)))
             for line, tables in sibling_lines(ctx, new_tables)
         ]
-    definitions = [
-        (block, _tables_in_view(hit.get("sql")))
-        for hit in hits
-        if (block := _definition_block(hit)) is not None
+    named += [
+        (block, tables) for block, tables, certified in definitions if not certified
     ]
-    named += definitions
     analysis_by_block = {
         block: hit
         for hit in hits
@@ -745,7 +758,7 @@ def retrieve(ctx: ToolContext, query: str, kinds: list[str] | None = None) -> st
     named += [(block, own(t)) for block, t in earlier]
     block_names = {
         **{new_blocks[str(t["id"])]: _qualified(t) for t in new_tables},
-        **{block: block.split("\n")[0].split(" — ")[0] for block, _ in definitions},
+        **{block: block.split("\n")[0].split(" — ")[0] for block, _, _ in definitions},
     }
     if not named:
         return (
