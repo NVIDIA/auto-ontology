@@ -21,6 +21,7 @@ DEFAULT_HEAVYDB_PORT = "6274"
 DEFAULT_KYUUBI_PORT = "10000"
 DEFAULT_TRINO_PORT = "8080"
 DEFAULT_CLICKHOUSE_PORT = "8123"
+DEFAULT_PINOT_BROKER_PORT = "8099"
 DEFAULT_HEAVYDB_PROTOCOL = "binary"
 
 
@@ -183,6 +184,57 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             params.append(f"http_scheme={_enc(http_scheme)}")
 
         url = f"trino://{credentials}@{host}:{port}/{_enc(catalog)}"
+        if params:
+            url += f"?{'&'.join(params)}"
+        return url
+
+    if conn_type == "pinot":
+        # The host is the broker, which runs queries. A pasted scheme is kept as
+        # the transport, since the broker port alone rarely implies TLS.
+        host = _require(connection, "host").rstrip("/")
+        scheme_from_host = ""
+        if host.startswith(("https://", "http://")):
+            scheme_from_host, host = host.split("://", 1)
+        # A pasted endpoint carries its port too. Appending the Port field (or
+        # the default) as well would yield ``host:443:8099``, which does not
+        # parse, so a port in the host is taken out and used as the fallback.
+        port_from_host = ""
+        name, sep, candidate = host.rpartition(":")
+        if sep and candidate.isdigit() and ":" not in name:
+            host, port_from_host = name, candidate
+        database = _require(connection, "database")
+        port = (
+            str(connection.get("port") or "").strip()
+            or port_from_host
+            or DEFAULT_PINOT_BROKER_PORT
+        )
+
+        # Both credentials are optional: an open cluster takes none. A password
+        # with no user is a bearer token -- the shape of a managed Pinot API key
+        # -- and travels as ``token=`` rather than as basic auth.
+        user = str(connection.get("user") or "").strip()
+        password = str(connection.get("password") or "").strip()
+        credentials = ""
+        params = []
+        if user and password:
+            credentials = f"{_enc(user)}:{_enc(password)}@"
+        elif user:
+            credentials = f"{_enc(user)}@"
+        elif password:
+            params.append(f"token={_enc(password)}")
+
+        # Metadata comes from the controller, which defaults to the broker's
+        # host on port 9000 in the connector when unset.
+        controller = str(connection.get("controller") or "").strip().rstrip("/")
+        if controller:
+            params.append(f"controller={_enc(controller)}")
+        http_scheme = (
+            str(connection.get("http_scheme") or "").strip().lower() or scheme_from_host
+        )
+        if http_scheme:
+            params.append(f"http_scheme={_enc(http_scheme)}")
+
+        url = f"pinot://{credentials}{host}:{port}/{_enc(database)}"
         if params:
             url += f"?{'&'.join(params)}"
         return url

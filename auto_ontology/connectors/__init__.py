@@ -12,6 +12,7 @@ from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.kyuubi import KyuubiDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
+from auto_ontology.connectors.pinot import PinotDatabase
 from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.registry import (
     get_connectors,
@@ -30,6 +31,7 @@ __all__ = [
     "HeavyDBDatabase",
     "KyuubiDatabase",
     "MySQLDatabase",
+    "PinotDatabase",
     "PostgresDatabase",
     "SnowflakeDatabase",
     "SQLiteDatabase",

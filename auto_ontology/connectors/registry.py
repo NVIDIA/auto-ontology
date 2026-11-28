@@ -22,6 +22,7 @@ from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.kyuubi import KyuubiDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
+from auto_ontology.connectors.pinot import PinotDatabase
 from auto_ontology.connectors.postgres import PostgresDatabase
 from auto_ontology.connectors.snowflake import SnowflakeDatabase
 from auto_ontology.connectors.sqlite import SQLiteDatabase
@@ -52,6 +53,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "clickhouse": ClickHouseDatabase,
     "heavydb": HeavyDBDatabase,
     "kyuubi": KyuubiDatabase,
+    "pinot": PinotDatabase,
     "sqlite": SQLiteDatabase,
     "trino": TrinoDatabase,
     "bigquery": BigQueryDatabase,
@@ -77,13 +79,15 @@ def _redact(connection_string: str) -> str:
 
     An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
     and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
-    on every connector failure. A BigQuery service-account key travels in the
-    query string rather than the password slot, so it is masked separately.
+    on every connector failure. A BigQuery service-account key and a Pinot
+    bearer token travel in the query string rather than the password slot, so
+    they are masked separately.
     """
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )
     connection_string = re.sub(r"(credentials=)[^&]+", r"\1***", connection_string)
+    connection_string = re.sub(r"([?&]token=)[^&]+", r"\1***", connection_string)
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string
