@@ -101,7 +101,18 @@ class Readiness(BaseModel):
     )
 
 
-async def _probe(client: httpx.AsyncClient, path: str) -> Any:
+class DatabaseReadiness(Readiness):
+    """Readiness of one database and its semantic search index."""
+
+    database_name: str
+    semantic_searchable: bool | None = Field(
+        description="Whether the database has stored semantic vectors."
+    )
+
+
+async def _probe(
+    client: httpx.AsyncClient, path: str, *, params: dict[str, str] | None = None
+) -> Any:
     """GET *path*, returning ``None`` when it cannot be read.
 
     A readiness check that dies on its first bad response is not much of a
@@ -117,7 +128,7 @@ async def _probe(client: httpx.AsyncClient, path: str) -> Any:
     at all there would deny a caller the verdict over a fact they never needed.
     """
     try:
-        response = await client.get(path)
+        response = await client.get(path, params=params)
     except httpx.HTTPError as exc:
         logger.warning("Readiness probe %s failed: %s", path, exc)
         return None
@@ -242,6 +253,46 @@ def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
     )
 
 
+async def _check_database(
+    client: httpx.AsyncClient, database_name: str
+) -> DatabaseReadiness:
+    status = await _probe(client, STATUS_PATH, params={"database_name": database_name})
+    database = status.get("database") if isinstance(status, dict) else None
+    checks = {
+        "ingested": "Ingest its catalog before asking questions.",
+        "connected": "Configure a connection for this database.",
+        "compiled": "Compile its semantic layer.",
+        "searchable": "Look for missing semantic embeddings in the compile logs.",
+    }
+    # An older server can reply 200 with the deployment-wide report, so require
+    # the scoped payload before announcing that this database is ready.
+    if (
+        not isinstance(database, dict)
+        or database.get("name") != database_name
+        or any(not isinstance(database.get(key), bool) for key in checks)
+    ):
+        return DatabaseReadiness(
+            database_name=database_name,
+            ready=False,
+            semantic_layer_built=None,
+            can_execute_sql=None,
+            catalog_present=None,
+            semantic_searchable=None,
+            blockers=[f"Could not verify readiness for database {database_name!r}."],
+        )
+
+    return DatabaseReadiness(
+        database_name=database_name,
+        ready=all(database[key] for key in checks),
+        semantic_layer_built=database["compiled"],
+        can_execute_sql=database["connected"],
+        catalog_present=database["ingested"],
+        semantic_searchable=database["searchable"],
+        databases=[database_name] if database["ingested"] else [],
+        blockers=[message for key, message in checks.items() if not database[key]],
+    )
+
+
 def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> None:
     """Attach ``check_readiness`` to *mcp*."""
 
@@ -252,9 +303,11 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
             "whether a catalog has been ingested, whether a live database "
             "connection exists to run SQL against, and whether the semantic "
             "layer has been compiled. All three are required.\n\n"
+            "Pass database_name to check those requirements and the semantic "
+            "search index for that exact database. Omit it for the deployment report.\n\n"
             "Use it before the first question against an unfamiliar "
-            "deployment, and whenever ask_question returns an empty answer. It is "
-            "three cheap reads, and it separates 'this deployment is not set "
+            "deployment, and whenever ask_question returns an empty answer. It separates "
+            "'this deployment is not set "
             "up' from 'the question was not understood' — which otherwise look "
             "identical and are fixed in completely different places.\n\n"
             "Facts the signed-in account may not read come back under "
@@ -262,8 +315,13 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
             "unverified entries still means questions can be asked."
         ),
     )
-    async def check_readiness() -> Readiness:
-        """Probe the deployment and report what it can currently do."""
+    async def check_readiness(
+        database_name: str | None = None,
+    ) -> DatabaseReadiness | Readiness:
+        """Probe the deployment or a named database."""
+        if database_name is not None:
+            return await _check_database(client, database_name)
+
         status, connections, databases = await asyncio.gather(
             _probe(client, STATUS_PATH),
             _probe(client, CONNECTIONS_PATH),

@@ -200,11 +200,22 @@ class HealthResponse(_Payload):
     migrations: dict[str, str]
 
 
+class DatabaseSemanticStatus(_Payload):
+    """Readiness of the exact database named by the caller."""
+
+    name: str
+    ingested: bool
+    connected: bool
+    compiled: bool
+    searchable: bool
+
+
 class SemanticStatusResponse(_Payload):
     calculated: bool
     running: bool
     last_success_at: str | None
     last_failure_at: str | None
+    database: DatabaseSemanticStatus | None = None
 
 
 class SemanticRunningResponse(_Payload):

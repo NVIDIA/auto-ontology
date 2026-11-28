@@ -32,6 +32,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.datasources import database_catalog_status  # noqa: E402
 from auto_ontology.dal import terms as t  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
@@ -545,6 +546,21 @@ def test_semantic_layer_calculated(world) -> None:
     world.table("orders")
     world.term("Order", represents=("orders",))
     assert t.semantic_layer_calculated() is True
+
+
+def test_database_catalog_status_requires_a_semantic_term_on_its_own_table(
+    world: World,
+) -> None:
+    assert database_catalog_status(world.prefix) == (False, False)
+    assert database_catalog_status(f"{world.prefix}-missing") == (False, False)
+
+    world.table("orders")
+    world.term("Unattached")
+    world.term("Other source", represents=("orders",), source="other")
+    assert database_catalog_status(world.prefix) == (True, False)
+
+    world.term("Order", represents=("orders",))
+    assert database_catalog_status(world.prefix) == (True, True)
 
 
 # --------------------------------------------------------------------------

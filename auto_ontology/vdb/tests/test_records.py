@@ -236,3 +236,24 @@ def test_clearing_one_conversation_leaves_the_others(vdb: Any) -> None:
             f"FROM vdb.{vdb.collection_name}"
         ).fetchall()
     assert left == [("c2",)]
+
+
+def test_has_embeddings_is_read_only_and_scoped_by_database(vdb: PostgresVDB) -> None:
+    assert not vdb.has_embeddings_for_database("sales")
+    assert not vdb._table_exists()
+
+    vdb.write_to_index(
+        [
+            {
+                "text": "orders",
+                "metadata": {
+                    "id": "orders",
+                    "database_name": "sales",
+                    "embedding": _unit(0),
+                },
+            },
+        ]
+    )
+    assert vdb.has_embeddings_for_database("sales")
+    assert not vdb.has_embeddings_for_database("Sales")
+    assert not vdb.has_embeddings_for_database("stock")

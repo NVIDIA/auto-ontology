@@ -13,6 +13,7 @@ database's semantic layer and custom analyses.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -76,3 +77,83 @@ def test_reset_proxy_runs_outside_the_event_loop(
     assert resp.status_code == 202
     assert resp.json() == {"status": "accepted"}
     assert worker_calls == ["sales"]
+
+
+@pytest.fixture
+def scheduler(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool | str | None]:
+    monkeypatch.setattr(module, "is_semantic_compilation_running", lambda: False)
+    monkeypatch.setattr(
+        module, "get_last_successful_run", lambda: "2026-11-01T12:00:00Z"
+    )
+    monkeypatch.setattr(module, "get_last_failure_if_most_recent", lambda: None)
+    return {
+        "running": False,
+        "last_success_at": "2026-11-01T12:00:00Z",
+        "last_failure_at": None,
+    }
+
+
+def test_unscoped_status_keeps_the_deployment_response(
+    client: TestClient,
+    scheduler: dict[str, bool | str | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(module, "semantic_layer_calculated", lambda: True)
+    response = client.get("/api/semantic-compilation/status")
+    assert response.status_code == 200
+    assert response.json() == {"calculated": True, **scheduler}
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("sales", (True, True, True, True)),
+        ("stock", (True, True, False, False)),
+        ("archived", (True, False, True, False)),
+        ("Sales", (False, False, False, False)),
+    ],
+)
+def test_scoped_status_uses_only_the_requested_database(
+    client: TestClient,
+    scheduler: dict[str, bool | str | None],
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    expected: tuple[bool, bool, bool, bool],
+) -> None:
+    monkeypatch.setattr(
+        module,
+        "database_catalog_status",
+        lambda name: {
+            "sales": (True, True),
+            "stock": (True, False),
+            "archived": (True, True),
+        }.get(name, (False, False)),
+    )
+    monkeypatch.setattr(
+        module,
+        "get_connectors",
+        lambda: [SimpleNamespace(database_name=name) for name in ("sales", "stock")],
+    )
+    monkeypatch.setattr(
+        module,
+        "shared_vdb",
+        lambda _: SimpleNamespace(
+            has_embeddings_for_database=lambda name: name == "sales"
+        ),
+    )
+    response = client.get(
+        "/api/semantic-compilation/status", params={"database_name": name}
+    )
+    ingested, connected, compiled, searchable = expected
+    assert response.status_code == 200
+    assert response.json() == {
+        "calculated": compiled,
+        **scheduler,
+        "database": {
+            "name": name,
+            "ingested": ingested,
+            "connected": connected,
+            "compiled": compiled,
+            "searchable": searchable,
+        },
+    }

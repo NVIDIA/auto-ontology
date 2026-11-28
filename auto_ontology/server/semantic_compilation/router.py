@@ -16,6 +16,8 @@ import logging
 
 from fastapi import APIRouter, Query
 
+from auto_ontology.connectors.registry import get_connectors
+from auto_ontology.dal.datasources import database_catalog_status
 from auto_ontology.dal.terms import semantic_layer_calculated
 from auto_ontology.ingestion_service.history import (
     get_last_failure_if_most_recent,
@@ -26,7 +28,12 @@ from auto_ontology.server.ingestion.proxy import (
     trigger_semantic_compile,
     trigger_semantic_reset,
 )
-from auto_ontology.server.responses import SemanticStatusResponse, StatusResponse
+from auto_ontology.server.responses import (
+    DatabaseSemanticStatus,
+    SemanticStatusResponse,
+    StatusResponse,
+)
+from auto_ontology.vdb import SEMANTIC_VDB_COLLECTION, shared_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -64,22 +71,49 @@ def reset(
     return {"status": "accepted"}
 
 
-@router.get("/semantic-compilation/status", response_model=SemanticStatusResponse)
-def semantic_status() -> dict[str, bool | str | None]:
-    """Report whether the semantic layer has been calculated (any Term exists),
-    whether the ingestion service is compiling it right now, when the last
-    pass completed successfully, and when it last failed.
+@router.get(
+    "/semantic-compilation/status",
+    response_model=SemanticStatusResponse,
+    response_model_exclude_unset=True,
+)
+def semantic_status(
+    database_name: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Report readiness for this database's exact connector name.",
+    ),
+) -> SemanticStatusResponse:
+    """Report semantic compilation status, optionally for one database.
 
-    ``running`` needs the live ingestion process, so it goes through the HTTP
-    proxy and degrades to ``False`` if that's unreachable. ``last_success_at``
-    and ``last_failure_at`` are read straight from the ``semantic_compilation_history``
-    table instead — a temporarily unreachable ingestion service has no bearing
-    on Postgres, so history stays visible even while it's down (see
-    ``auto_ontology/server/ingestion/proxy.py``).
+    With a database name, report whether it has catalog tables, a configured
+    connector, any table representing a semantic term, and stored semantic
+    vectors. ``calculated`` then reflects that database's compilation state.
+    Otherwise, ``calculated`` reports whether any semantic term exists.
+
+    ``running`` and the last success and failure times describe the deployment's
+    compilation scheduler in both cases. History remains available from Postgres
+    when the ingestion process is unreachable.
     """
-    return {
-        "calculated": semantic_layer_calculated(),
+    scheduler = {
         "running": is_semantic_compilation_running(),
         "last_success_at": get_last_successful_run(),
         "last_failure_at": get_last_failure_if_most_recent(),
     }
+    if database_name is None:
+        return SemanticStatusResponse(
+            calculated=semantic_layer_calculated(), **scheduler
+        )
+
+    ingested, compiled = database_catalog_status(database_name)
+    database = DatabaseSemanticStatus(
+        name=database_name,
+        ingested=ingested,
+        connected=any(
+            connector.database_name == database_name for connector in get_connectors()
+        ),
+        compiled=compiled,
+        searchable=shared_vdb(SEMANTIC_VDB_COLLECTION).has_embeddings_for_database(
+            database_name
+        ),
+    )
+    return SemanticStatusResponse(calculated=compiled, database=database, **scheduler)

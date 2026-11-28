@@ -45,7 +45,7 @@ from auto_ontology.dal.sql_fragments import (
 )
 from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
-from auto_ontology.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
+from auto_ontology.semantic.constants import SEMANTIC_SOURCE, SQL_ATTR_SOURCE_BRIDGE
 from auto_ontology.utils.sample_values import (
     dump_sample_values,
     parse_sample_values,
@@ -89,6 +89,25 @@ def _table_join():
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
+
+
+def database_catalog_status(database_name: str) -> tuple[bool, bool]:
+    """Return whether a database has tables and whether any represents a semantic term."""
+    tables = (
+        select(s.catalog_table.c.id)
+        .select_from(_table_join())
+        .where(s.catalog_database.c.name == database_name)
+    )
+    represented = (
+        tables.join(s.table__term, s.table__term.c.table_id == s.catalog_table.c.id)
+        .join(s.term, s.term.c.id == s.table__term.c.term_id)
+        .where(s.term.c.source == SEMANTIC_SOURCE)
+    )
+    statement = select(
+        tables.exists().label("ingested"), represented.exists().label("compiled")
+    )
+    row = store().query_read(statement)[0]
+    return bool(row["ingested"]), bool(row["compiled"])
 
 
 def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:

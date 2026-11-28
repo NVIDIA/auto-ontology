@@ -6124,6 +6124,27 @@
       "get": {
         "description": "Whether the semantic layer has been calculated (any Term exists). The chat\npage uses this to gate the conversation area when the layer is missing.",
         "operationId": "get_api_semantic_compilation_status",
+        "parameters": [
+          {
+            "description": "Report readiness for this database's exact connector name.",
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Report readiness for this database's exact connector name.",
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6140,6 +6161,16 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Whether the semantic layer has been calculated (any Term exists).",
@@ -9220,6 +9251,35 @@
         "title": "CustomAnalysisValidate",
         "type": "object"
       },
+      "DatabaseSemanticStatus": {
+        "additionalProperties": true,
+        "description": "Readiness of the exact database named by the caller.",
+        "properties": {
+          "compiled": {
+            "title": "Compiled",
+            "type": "boolean"
+          },
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "ingested": {
+            "title": "Ingested",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "searchable": {
+            "title": "Searchable",
+            "type": "boolean"
+          }
+        },
+        "required": ["name", "ingested", "connected", "compiled", "searchable"],
+        "title": "DatabaseSemanticStatus",
+        "type": "object"
+      },
       "DatabaseSummary": {
         "additionalProperties": true,
         "description": "One catalog database. ``schemas`` is always empty — the tree is lazy.",
@@ -11658,6 +11718,16 @@
           "calculated": {
             "title": "Calculated",
             "type": "boolean"
+          },
+          "database": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseSemanticStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_failure_at": {
             "anyOf": [
