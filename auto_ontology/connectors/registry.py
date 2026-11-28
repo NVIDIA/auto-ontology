@@ -80,6 +80,13 @@ def _redact(connection_string: str) -> str:
     on every connector failure. A BigQuery service-account key travels in the
     query string rather than the password slot, so it is masked separately.
     """
+    # Python 3.12+ WHATWG behavior: urlparse strips tab/newline/CR from the
+    # URL before parsing, so a raw tab makes the parsed netloc differ from
+    # the string itself and a netloc-based replacement would silently miss
+    # and log the password. Normalize first: everything below then operates
+    # on exactly the text urlparse will read (tabs are junk in a connection
+    # string anyway; a log line may safely drop them).
+    connection_string = re.sub(r"[\t\n\r]", "", connection_string)
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )
@@ -87,7 +94,21 @@ def _redact(connection_string: str) -> str:
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string
-    return connection_string.replace(parsed.password, "***", 1)
+    # Mask the password slot exactly as urlparse reads it: the span after
+    # the first ':' of the userinfo up to the LAST '@' of the netloc. A
+    # regex anchored on a nonempty username or stopping at the first '@'
+    # would miss ":pass@host" and "user:p@ss@host", and ``str.replace``
+    # masks the first substring occurrence of the password, which can
+    # land inside the username (the repo's own test config runs
+    # user == password).
+    netloc = parsed.netloc
+    at = netloc.rfind("@")
+    colon = netloc.find(":")
+    if at < 0 or colon < 0 or colon > at:
+        return connection_string
+    return connection_string.replace(
+        netloc, netloc[: colon + 1] + "***" + netloc[at:], 1
+    )
 
 
 def _schema_filter(connection: dict) -> list[str] | None:
@@ -161,9 +182,13 @@ def create_connector(
         connector_class = CONNECTOR_REGISTRY.get(connector_type)
 
         if connector_class is None:
+            # Redact here, not just in the log message below: this
+            # exception travels through `raise` and logger.exception's
+            # traceback, so a raw connection string here reaches the logs
+            # regardless of any _redact() in the log call itself.
             raise ValueError(
                 f"Unsupported database type: {connector_type!r}. "
-                f"Connection string: {connection_string}"
+                f"Connection string: {_redact(connection_string)}"
             )
 
         if schemas and connector_class in (
