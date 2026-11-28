@@ -237,6 +237,13 @@ def import_model(
         raise ValueError("YAML document must deserialize to a mapping")
     source_format = detect_model_format(payload)
     if source_format is ModelFormat.OSSIE:
+        version = str(payload.get("version", "")).strip()
+        if version.split(".")[:2] == ["0", "2"]:
+            raise AutoOntologyConversionError(
+                f"Ossie version {version!r} requires migration. Convert it to native "
+                "Auto Ontology YAML with the 0.2-compatible converter, then import "
+                "the converted file. See docs/ossie-interchange.md."
+            )
         payload = yaml.safe_load(convert_ossie_to_auto_ontology(yaml_text))
     document = AutoOntologyModelDocument.model_validate(payload)
     embed_buffer = ImportEmbedBuffer() if embed else None

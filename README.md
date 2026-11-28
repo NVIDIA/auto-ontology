@@ -222,7 +222,8 @@ open standard for exchanging semantic models. Ossie includes a
 [converter for Auto Ontology](https://github.com/apache/ossie-converters/tree/main/nvidia),
 which Auto Ontology uses to import and export model definitions as Ossie YAML.
 Use **Settings → Import / Export**, or `POST /api/model/import` and
-`POST /api/model/export`.
+`POST /api/model/export`. See the [Ossie compatibility and migration guide](./docs/ossie-interchange.md)
+for supported versions and how to import older files.
 
 The services behind both stages, and how clients reach them:
 
