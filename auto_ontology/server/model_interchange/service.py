@@ -40,6 +40,14 @@ _AUTO_ONTOLOGY_ROOT_KEYS = frozenset(AutoOntologyModelDocument.model_fields)
 # The files of an Ossie export with its ontology. The mapping references the
 # other two by these names, relative to itself.
 OSSIE_EXPORT_FILES = ("semantic_model.yaml", "ontology.yaml", "mapping.yaml")
+# libyaml's C parser and emitter. `yaml.safe_load`/`safe_dump` always use the
+# pure-Python ones, even when PyYAML is built with libyaml (its wheels are).
+# Same safe constructor and resolver, so the same objects, about 3x faster on a
+# large model. The emitted text can differ only in where a long escaped string
+# (a non-ASCII description) wraps; it loads back identical. The fallback covers
+# a PyYAML built without libyaml.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 
 
 def _dialect_by_database_name() -> dict[str, str]:
@@ -155,8 +163,9 @@ def _project_terms_onto_one_table(
 
 
 def _dump_yaml(document: AutoOntologyModelDocument) -> str:
-    return yaml.safe_dump(
+    return yaml.dump(
         document.model_dump(mode="python"),
+        Dumper=_YAML_DUMPER,
         sort_keys=False,
         default_flow_style=False,
     )
@@ -232,12 +241,14 @@ def import_model(
     embed: bool = True,
 ) -> dict[str, Any]:
     """Validate and apply a YAML model document in either supported format."""
-    payload = yaml.safe_load(yaml_text)
+    payload = yaml.load(yaml_text, Loader=_YAML_LOADER)
     if not isinstance(payload, dict):
         raise ValueError("YAML document must deserialize to a mapping")
     source_format = detect_model_format(payload)
     if source_format is ModelFormat.OSSIE:
-        payload = yaml.safe_load(convert_ossie_to_auto_ontology(yaml_text))
+        payload = yaml.load(
+            convert_ossie_to_auto_ontology(yaml_text), Loader=_YAML_LOADER
+        )
     document = AutoOntologyModelDocument.model_validate(payload)
     embed_buffer = ImportEmbedBuffer() if embed else None
     summary = dal.apply_import_model(
