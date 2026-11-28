@@ -44,7 +44,6 @@ from auto_ontology.retrieval.text_to_sql.react.catalog import (
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_TERM
 
 _DESCRIPTION_CHARS = 200
-_SQL_CHARS = 600
 #: Terms shown with their attributes and definitions; the rest get one line.
 _FULL_TERMS = 2
 
@@ -163,7 +162,7 @@ def _term_block(ctx: ToolContext, term: dict[str, Any]) -> str:
             text += f" — {_clip(d['description'], _DESCRIPTION_CHARS)}"
         lines.append(text)
         if d.get("sql"):
-            lines.append(f"      SQL: {_clip(d['sql'], _SQL_CHARS)}")
+            lines.append(f"      SQL: {d['sql']}")
     return "\n".join(lines)
 
 

@@ -734,23 +734,27 @@ def test_a_quoted_table_name_ending_in_punctuation_is_in_view(
     assert not ctx.was_shown("finance", "refunds")
 
 
-def test_a_table_named_only_past_the_clipped_sql_is_not_in_view(
+def test_a_saved_definition_uses_the_observation_budget(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     padding = ", ".join(f"c{i}" for i in range(300))
-    long_sql = (
-        f"SELECT {padding} FROM finance.refunds r "
+    sql = (
+        f"SELECT {padding}\nFROM finance.refunds r\n"
         "JOIN finance.hidden_ledger h ON h.id = r.id"
     )
-    assert long_sql.index("hidden_ledger") > 500
-    clipped = {**REVENUE, "sql": long_sql}
+    assert sql.index("hidden_ledger") > 500
     monkeypatch.setattr(
-        tool, "_get_candidates_information", lambda *a, **k: [dict(clipped)]
+        tool, "_get_candidates_information", lambda *a, **k: [{**REVENUE, "sql": sql}]
     )
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "4000")
     ctx = _ctx()
+    assert sql in tool.retrieve(ctx, "refunds")
+    assert ctx.was_shown("finance", "hidden_ledger")
 
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "500")
+    ctx = _ctx()
     text = tool.retrieve(ctx, "refunds")
-
+    assert len(text) <= 500
     assert "hidden_ledger" not in text
     assert not ctx.was_shown("finance", "hidden_ledger")
 
