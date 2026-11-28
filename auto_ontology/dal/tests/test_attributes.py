@@ -25,6 +25,8 @@ from auto_ontology.dal import attributes as a  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.tags import PII_TAG_NAME, get_or_create_tag  # noqa: E402
+from auto_ontology.retrieval.text_to_sql.react import catalog as react_catalog  # noqa: E402
+from auto_ontology.retrieval.text_to_sql.react.context import ToolContext  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -537,6 +539,53 @@ def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
         ("customers", "id"),
         ("addresses", "id"),
     ]
+
+
+@pytest.mark.parametrize("middle_link", [True, False], ids=["complete", "missing-link"])
+def test_retrieve_traces_recorded_incident_dependencies(
+    world: World, monkeypatch: pytest.MonkeyPatch, middle_link: bool
+) -> None:
+    """Trace an incident through a component and deployment to a release."""
+    for table in ("releases", "deployments", "components", "incidents"):
+        world.table(table, pk=["id"])
+        world.column(table, "id")
+    world.column("incidents", "component_id", 2)
+    world.column("components", "deployment_id", 2)
+    world.column("deployments", "release_id", 2)
+
+    world.attribute("component-id", owner="components.id")
+    world.attribute("deployment-id", owner="deployments.id")
+    world.attribute("release-id", owner="releases.id")
+    world.references("incidents.component_id", "component-id")
+    if middle_link:
+        world.references("components.deployment_id", "deployment-id")
+    world.references("deployments.release_id", "release-id")
+
+    # Leave name search, lookup, traversal, and rendering on the real catalog.
+    # Only the model-backed search and optional sibling suggestions are off.
+    monkeypatch.setattr(react_catalog, "_meaning_hits", lambda *_: [])
+    monkeypatch.setattr(react_catalog, "_uncovered_physical_hits", lambda *_: [])
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_SIBLINGS", "false")
+    ctx = ToolContext(connectors=[], database_name=f"{world.prefix}-shopdb")
+
+    assert "TABLE public.releases" in react_catalog.retrieve(ctx, "releases", ["term"])
+    result = react_catalog.retrieve(ctx, "incidents", ["term"])
+    assert "TABLE public.incidents" in result
+    if not middle_link:
+        assert "JOIN public.incidents" not in result
+        assert ctx.join_paths == []
+        assert not ctx.was_shown("public", "components")
+        assert not ctx.was_shown("public", "deployments")
+        return
+
+    assert (
+        "JOIN public.incidents ↔ public.releases: "
+        "public.incidents.component_id = public.components.id → "
+        "public.components.deployment_id = public.deployments.id → "
+        "public.deployments.release_id = public.releases.id"
+    ) in result
+    assert ctx.was_shown("public", "components")
+    assert ctx.was_shown("public", "deployments")
 
 
 def test_a_cycle_terminates(world) -> None:

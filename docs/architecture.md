@@ -258,6 +258,46 @@ the model calls `retrieve` with `purpose=information` and submits the answer in
 words. Interactive analysis turns this off and always asks for SQL
 (`calculation_only`).
 
+### Multi-hop dependency queries
+
+The SQL agent can trace recorded dependencies across several tables in one
+source database. The question “Which release was deployed to the component
+recorded on incident 42?” can use the catalog path below.
+
+```text
+incidents.component_id = components.id
+components.deployment_id = deployments.id
+deployments.release_id = releases.id
+```
+
+When `retrieve` finds the endpoint tables, it can show the join columns and
+name both intermediate tables. The agent can then use those tables in a SQL
+query. The route uses eligible semantic foreign keys and their owning columns.
+Traversal is bounded and prefers a shortest path. A reverse hop requires the
+owner column to be a declared primary key. If an intermediate link is missing,
+that chain cannot supply a route.
+
+Entities in this workflow are grounded in source tables and columns. Compiled
+terms and attributes help retrieve those catalog objects under different names.
+The path itself follows stored column identities and joins. To match
+labels across free-text extractions, an unstructured document corpus would
+need a separate extraction and entity-resolution step to produce these objects.
+
+The example can answer which release the source records, or trace a cause
+already recorded in the source if its relationship is modeled. Determining
+whether that release caused the incident would require causal evidence and
+analysis beyond this join path.
+
+The [incident dependency fixture](../auto_ontology/dal/tests/test_attributes.py)
+checks the three-hop route and its missing-link variant with a real ontology
+store. It exercises catalog name search and `retrieve` without model calls, so
+it measures path retrieval independently of natural-language SQL generation.
+Set up the test database as described in [CONTRIBUTING.md](../CONTRIBUTING.md#checks-before-a-pull-request) before running the fixture.
+
+```bash
+uv run pytest auto_ontology/dal/tests/test_attributes.py -k recorded_incident
+```
+
 ### Stop conditions
 
 | End | Result |
