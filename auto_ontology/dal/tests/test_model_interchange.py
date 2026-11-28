@@ -22,17 +22,22 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import date
+from decimal import Decimal
 
 import pytest
+import yaml
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import inspect, select  # noqa: E402
 
 from auto_ontology.dal import model_interchange as mi  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
-from auto_ontology.dal.session import store  # noqa: E402
+from auto_ontology.dal.session import get_engine, store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
+from auto_ontology.server.model_interchange import schemas as models  # noqa: E402
+from auto_ontology.server.model_interchange import service  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -658,3 +663,251 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
             mi.apply_import_model(document, replace=False)
     finally:
         _cleanup(f"{world.prefix}-copy")
+
+
+@pytest.fixture
+def governed_result_source():
+    """Source-owned facts and membership live outside the exchanged model."""
+    scope = f"governed_{uuid.uuid4().hex[:10]}"
+    with get_engine().connect() as source:
+        # PostgreSQL rolls back this schema and its contents when the connection closes.
+        source.exec_driver_sql(f"CREATE SCHEMA {scope}")
+        source.exec_driver_sql(f"""
+            CREATE TABLE {scope}.entity (id integer PRIMARY KEY);
+            CREATE TABLE {scope}.membership (
+                producer text, run_id text, entity_id integer REFERENCES {scope}.entity,
+                PRIMARY KEY (producer, run_id, entity_id)
+            );
+            CREATE TABLE {scope}.result (
+                id text PRIMARY KEY, producer text NOT NULL, run_id text NOT NULL,
+                entity_id integer NOT NULL REFERENCES {scope}.entity,
+                starts date NOT NULL, ends date NOT NULL, amount numeric NOT NULL,
+                unit text NOT NULL, status text NOT NULL, scenario text NOT NULL,
+                commitment text NOT NULL, evidence text NOT NULL,
+                predecessor text REFERENCES {scope}.result
+            );
+            INSERT INTO {scope}.entity VALUES (1), (2), (3);
+            INSERT INTO {scope}.membership VALUES
+                ('a', 'r1', 1), ('a', 'r1', 2), ('a', 'r2', 1), ('b', 'r1', 1);
+            INSERT INTO {scope}.result VALUES
+                ('old', 'a', 'r1', 1, '2026-01-01', '2026-01-03', 99,
+                    'kg', 'superseded', 'base', 'published', 'modeled', NULL),
+                ('qty', 'a', 'r1', 1, '2026-01-01', '2026-01-03', 3,
+                    'kg', 'current', 'base', 'published', 'modeled', 'old'),
+                ('rate', 'a', 'r1', 1, '2026-01-03', '2026-01-08', 250,
+                    'g/day', 'current', 'base', 'published', 'modeled', NULL),
+                ('entity', 'a', 'r1', 2, '2026-01-01', '2026-01-03', 7,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('run', 'a', 'r2', 1, '2026-01-01', '2026-01-03', 8,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('producer', 'b', 'r1', 1, '2026-01-01', '2026-01-03', 9,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('invalid', 'a', 'r1', 1, '2026-01-08', '2026-01-09', 99,
+                    'kg', 'invalid', 'base', 'published', 'modeled', NULL),
+                ('duplicate-a', 'a', 'r1', 1, '2026-01-01', '2026-01-08', 99,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('duplicate-b', 'a', 'r1', 1, '2026-01-01', '2026-01-08', 100,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('no-member', 'a', 'r1', 3, '2026-01-01', '2026-01-03', 99,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('wrong-unit', 'a', 'r1', 1, '2026-01-10', '2026-01-11', 99,
+                    'm', 'current', 'base', 'published', 'modeled', NULL),
+                ('empty-window', 'a', 'r1', 1, '2026-01-11', '2026-01-11', 99,
+                    'kg', 'current', 'base', 'published', 'modeled', NULL),
+                ('scenario', 'a', 'r1', 1, '2026-01-01', '2026-01-03', 99,
+                    'kg', 'current', 'alternate', 'published', 'modeled', NULL),
+                ('unpublished', 'a', 'r1', 1, '2026-01-11', '2026-01-12', 99,
+                    'kg', 'current', 'base', 'draft', 'modeled', NULL),
+                ('wrong-evidence', 'a', 'r1', 1, '2026-01-12', '2026-01-13', 99,
+                    'kg', 'current', 'base', 'published', 'estimate', NULL);
+        """)
+        try:
+            yield scope, source
+        finally:
+            _cleanup(scope)
+
+
+def _governed_result_model(scope, source):
+    catalog = inspect(source)
+    tables = []
+    foreign_keys = []
+    for name in ("entity", "membership", "result"):
+        table_id = f"{scope}.{name}"
+        tables.append(
+            models.ModelTable(
+                id=table_id,
+                name=name,
+                pk=catalog.get_pk_constraint(name, schema=scope)["constrained_columns"],
+                type="base table",
+                columns=[
+                    models.ModelColumn(
+                        id=f"{table_id}.{column['name']}",
+                        name=column["name"],
+                        type=str(column["type"]).lower(),
+                        is_nullable=column["nullable"],
+                    )
+                    for column in catalog.get_columns(name, schema=scope)
+                ],
+            )
+        )
+        foreign_keys.extend(
+            models.ModelForeignKey(
+                source_column_id=f"{table_id}.{column}",
+                target_column_id=f"{scope}.{fk['referred_table']}.{target}",
+            )
+            for fk in catalog.get_foreign_keys(name, schema=scope)
+            for column, target in zip(
+                fk["constrained_columns"], fk["referred_columns"], strict=True
+            )
+        )
+
+    result = f"{scope}.result"
+    # The source contract selects a scenario, commitment and evidence class.
+    # Two compatible rows at the same grain are ambiguous, so discard both.
+    sql = f"""
+        WITH eligible AS (
+            SELECT r.id, r.producer, r.run_id, r.entity_id, r.starts, r.ends,
+                   r.predecessor, r.evidence,
+                   CASE r.unit
+                       WHEN 'kg' THEN r.amount
+                       WHEN 'g/day' THEN r.amount * (r.ends - r.starts) / 1000
+                   END AS quantity_kg,
+                   COUNT(*) OVER (
+                       PARTITION BY r.producer, r.run_id, r.entity_id, r.starts, r.ends
+                   ) AS candidates
+            FROM {result} AS r
+            JOIN {scope}.membership AS m
+              ON r.producer = m.producer AND r.run_id = m.run_id AND r.entity_id = m.entity_id
+            WHERE r.status = 'current' AND r.scenario = 'base'
+              AND r.commitment = 'published' AND r.evidence = 'modeled'
+              AND r.starts < r.ends AND r.unit IN ('kg', 'g/day')
+        )
+        SELECT id, producer, run_id, entity_id, starts, ends, predecessor, evidence,
+               quantity_kg,
+               SUM(quantity_kg) OVER (PARTITION BY producer, run_id, entity_id) AS horizon_kg
+        FROM eligible
+        WHERE candidates = 1
+        ORDER BY producer, run_id, entity_id, starts, ends
+    """.strip()
+    return models.AutoOntologyModelDocument(
+        data_layer=models.ModelDataLayer(
+            databases=[
+                models.ModelDatabase(
+                    id=f"{scope}-db",
+                    dialect="postgres",
+                    schemas=[
+                        models.ModelSchema(
+                            id=f"{scope}-schema",
+                            name=scope,
+                            database_name=scope,
+                            tables=tables,
+                        )
+                    ],
+                )
+            ],
+            foreign_keys=foreign_keys,
+            joins=[
+                models.ModelJoin(
+                    source_table_id=result,
+                    target_table_id=f"{scope}.membership",
+                    join_columns=[
+                        {"source": key, "target": key}
+                        for key in ("producer", "run_id", "entity_id")
+                    ],
+                )
+            ],
+        ),
+        semantic_layer=models.ModelSemanticLayer(
+            terms=[
+                models.ModelTerm(
+                    id=f"{scope}-term", name=f"{scope} Result", represents=[result]
+                )
+            ],
+            custom_analyses=[
+                models.ModelCustomAnalysis(
+                    id=f"{scope}-analysis",
+                    name=f"{scope} Published quantity",
+                    description="Modeled quantities in kilograms over source windows [starts, ends).",
+                    sql=sql,
+                    sql_column_is=[f"{result}.id"],
+                )
+            ],
+        ),
+    )
+
+
+def test_governed_result_round_trip_preserves_keyed_quantities(
+    governed_result_source,
+) -> None:
+    scope, source = governed_result_source
+    model = _governed_result_model(scope, source)
+    first = mi.apply_import_model(model, replace=False)
+    exported = service.export_model(
+        models.ExportRequest(databases=first["database_ids"])
+    )
+    # Remove just the catalog/semantic scope. The source facts stay available.
+    _cleanup(scope)
+    second = service.import_model(exported, replace=False, embed=False)
+    assert second["created"]["custom_analyses"] == 1
+    rebuilt = models.AutoOntologyModelDocument.model_validate(
+        yaml.safe_load(
+            service.export_model(models.ExportRequest(databases=second["database_ids"]))
+        )
+    )
+    (database,) = rebuilt.data_layer.databases
+    (schema,) = database.schemas
+    columns = {c.id: (t.name, c.name, c.type) for t in schema.tables for c in t.columns}
+    assert {
+        (columns[fk.source_column_id], columns[fk.target_column_id])
+        for fk in rebuilt.data_layer.foreign_keys
+    } == {
+        (("membership", "entity_id", "integer"), ("entity", "id", "integer")),
+        (("result", "entity_id", "integer"), ("entity", "id", "integer")),
+        (("result", "predecessor", "text"), ("result", "id", "text")),
+    }
+    tables = {table.id: table.name for table in schema.tables}
+    assert {table.name: table.pk for table in schema.tables} == {
+        "entity": ["id"],
+        "membership": ["producer", "run_id", "entity_id"],
+        "result": ["id"],
+    }
+    (join,) = rebuilt.data_layer.joins
+    assert (tables[join.source_table_id], tables[join.target_table_id]) == (
+        "result",
+        "membership",
+    )
+    assert join.join_columns == model.data_layer.joins[0].join_columns
+    (term,) = rebuilt.semantic_layer.terms
+    assert [tables[table_id] for table_id in term.represents] == ["result"]
+    (analysis,) = rebuilt.semantic_layer.custom_analyses
+    bound_columns = {columns[column_id][:2] for column_id in analysis.sql_column_is}
+    assert {
+        ("membership", "producer"),
+        ("membership", "run_id"),
+        ("membership", "entity_id"),
+        ("result", "amount"),
+        ("result", "starts"),
+        ("result", "ends"),
+        ("result", "predecessor"),
+    } <= bound_columns
+
+    jan_1, jan_3, jan_8 = (date(2026, 1, day) for day in (1, 3, 8))
+    rows = source.exec_driver_sql(analysis.sql).all()
+    assert [
+        (r.id, r.producer, r.run_id, r.entity_id, r.starts, r.ends) for r in rows
+    ] == [
+        ("qty", "a", "r1", 1, jan_1, jan_3),
+        ("rate", "a", "r1", 1, jan_3, jan_8),
+        ("entity", "a", "r1", 2, jan_1, jan_3),
+        ("run", "a", "r2", 1, jan_1, jan_3),
+        ("producer", "b", "r1", 1, jan_1, jan_3),
+    ]
+    assert [r.predecessor for r in rows] == ["old", None, None, None, None]
+    assert {r.evidence for r in rows} == {"modeled"}
+    assert [(r.quantity_kg, r.horizon_kg) for r in rows] == [
+        (Decimal("3"), Decimal("4.25")),
+        (Decimal("1.25"), Decimal("4.25")),
+        (Decimal("7"), Decimal("7")),
+        (Decimal("8"), Decimal("8")),
+        (Decimal("9"), Decimal("9")),
+    ]
