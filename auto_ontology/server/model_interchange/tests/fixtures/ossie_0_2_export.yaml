@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, souljoy.
+# SPDX-License-Identifier: Apache-2.0
+
+# Exported from a synthetic retail model using converter cb4b46b97bcdb9f2685ef2f7023b9134a4426da2.
+version: 0.2.0.dev0
+name: retail
+datasets:
+- name: order_record
+  source: retail.public.orders
+  primary_key:
+  - order_key
+  fields:
+  - name: order_key
+    expression:
+      dialects:
+      - dialect: ANSI_SQL
+        expression: order_id
+    datatype: Integer
+custom_extensions:
+- vendor_name: NVIDIA_AUTO_ONTOLOGY
+  data: '{"model_name":"retail","native_document":{"data_layer":{"databases":[{"dialect":"postgres","id":"db","schemas":[{"database_name":"retail","id":"schema","name":"public","tables":[{"columns":[{"id":"column","is_nullable":false,"is_unique":true,"name":"order_id","type":"INTEGER"}],"id":"table","name":"orders","pk":["order_id"]}]}]}],"foreign_keys":[],"joins":[]},"semantic_layer":{"custom_analyses":[],"semantic_fks":[],"sql_attributes":{"bridge_table":[],"manual":[],"sql":[],"table":[]},"terms":[{"columns_attributes":[{"column_id":"column","id":"attribute","name":"Order
+    key"}],"id":"term","name":"Order record","represents":["table"]}]},"zones":[]}}'

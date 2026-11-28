@@ -16,10 +16,13 @@ from __future__ import annotations
 import io
 import zipfile
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from ossie_nvidia_auto_ontology import (
     AutoOntologyConversionError,
     convert_auto_ontology_to_ossie,
@@ -43,12 +46,16 @@ from auto_ontology.server.model_interchange.embed import (
     build_table_data_row,
     flush_import_embeddings,
 )
+from auto_ontology.server.model_interchange.router import router
 from auto_ontology.server.model_interchange.schemas import (
     ExportRequest,
     AutoOntologyModelDocument,
     ModelFormat,
     ModelSemanticFk,
 )
+
+
+_FIXTURES = Path(__file__).with_name("fixtures")
 
 
 @contextmanager
@@ -440,6 +447,7 @@ def test_export_model_ossie_format_emits_ossie_document(
 
     assert "data_layer" not in payload
     model = payload
+    assert model["version"] == "0.3.0.dev0"
     assert [dataset["name"] for dataset in model["datasets"]] == ["order"]
     assert model["datasets"][0]["source"] == "retail.main.orders"
 
@@ -467,9 +475,12 @@ def test_export_ossie_documents_zips_the_model_its_ontology_and_mapping(
     assert set(files) == {semantic_model, ontology, mapping}
     # The zip carries the same semantic model the single-file export returns.
     assert files[semantic_model] == service.export_model(request)
-    concepts = [item["concept"] for item in yaml.safe_load(files[ontology])["ontology"]]
+    ontology_document = yaml.safe_load(files[ontology])
+    assert ontology_document["version"] == "0.3.0.dev0"
+    concepts = [item["concept"] for item in ontology_document["ontology"]]
     assert concepts == ["Order"]
     references = yaml.safe_load(files[mapping])
+    assert references["version"] == "0.3.0.dev0"
     assert references["ontology_ref"]["iri"] == f"./{ontology}"
     assert references["semantic_model_ref"]["iri"] == f"./{semantic_model}"
 
@@ -730,16 +741,80 @@ def test_import_model_converts_ossie_document_back_to_auto_ontology(
         document.model_dump(mode="python"), sort_keys=False
     )
     ossie_yaml = convert_auto_ontology_to_ossie(auto_ontology_yaml)
+    ossie = yaml.safe_load(ossie_yaml)
+    assert ossie["version"] == "0.3.0.dev0"
+    assert ossie["nonportable_extensions"][0]["vendor_name"] == "NVIDIA_AUTO_ONTOLOGY"
 
     summary = service.import_model(ossie_yaml, replace=True, embed=False)
 
     assert summary["format"] == ModelFormat.OSSIE.value
     imported = mock_apply.call_args[0][0]
     assert isinstance(imported, AutoOntologyModelDocument)
-    assert [term.name for term in imported.semantic_layer.terms] == ["Order"]
+    (term,) = imported.semantic_layer.terms
+    assert (term.id, term.name) == ("term-1", "Order")
+    attributes = {attribute.id: attribute for attribute in term.columns_attributes}
+    assert attributes["attr-1"].column_id == "col-1"
     table = imported.data_layer.databases[0].schemas[0].tables[0]
     assert table.name == "orders"
     assert [column.name for column in table.columns] == ["id"]
+
+
+@patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
+def test_import_dbt_ossie_0_3_resolves_physical_field_references(
+    mock_apply: MagicMock,
+) -> None:
+    mock_apply.return_value = {}
+    ossie_yaml = (_FIXTURES / "ossie_0_3_dbt.yaml").read_text(encoding="utf-8")
+
+    summary = service.import_model(ossie_yaml, replace=False, embed=False)
+
+    assert summary["format"] == ModelFormat.OSSIE.value
+    imported = mock_apply.call_args.args[0]
+    (database,) = imported.data_layer.databases
+    (schema,) = database.schemas
+    tables = {table.name: table for table in schema.tables}
+    orders, customers = tables["orders"], tables["customers"]
+    order_columns = {column.name: column.id for column in orders.columns}
+    customer_columns = {column.name: column.id for column in customers.columns}
+    assert orders.pk == ["order_id"]
+    terms = {term.name: term for term in imported.semantic_layer.terms}
+    assert {a.name: a.column_id for a in terms["orders"].columns_attributes} == {
+        "order_key": order_columns["order_id"],
+        "customer_key": order_columns["buyer_id"],
+        "status": order_columns["order_status"],
+        "amount": order_columns["order_amount"],
+    }
+    (join,) = imported.data_layer.joins
+    assert (join.source_table_id, join.target_table_id) == (orders.id, customers.id)
+    assert join.join_columns == [{"source": "buyer_id", "target": "customer_id"}]
+    (fk,) = imported.data_layer.foreign_keys
+    assert fk.source_column_id == order_columns["buyer_id"]
+    assert fk.target_column_id == customer_columns["customer_id"]
+    (analysis,) = imported.semantic_layer.custom_analyses
+    assert analysis.name == "total_revenue"
+    assert analysis.sql_column_is == [order_columns["order_amount"]]
+
+
+@patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
+def test_import_legacy_ossie_export_returns_migration_help_without_writes(
+    mock_apply: MagicMock,
+) -> None:
+    app = FastAPI()
+    app.include_router(router)
+    legacy = (_FIXTURES / "ossie_0_2_export.yaml").read_bytes()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/model/import?replace=true&embed=false",
+            files={"file": ("legacy.ossie.yaml", legacy, "application/x-yaml")},
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "0.2.0.dev0" in detail
+    assert "native Auto Ontology YAML" in detail
+    assert "docs/ossie-interchange.md" in detail
+    mock_apply.assert_not_called()
 
 
 @patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")

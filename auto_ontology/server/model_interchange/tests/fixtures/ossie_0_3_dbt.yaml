@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, souljoy.
+# SPDX-License-Identifier: Apache-2.0
+
+# Generated from a synthetic MetricFlow manifest with the dbt converter at
+# apache/ossie-converters@4661b0d93c0ff79d060feeb7c9a79821c3879065.
+version: 0.3.0.dev0
+name: retail
+datasets:
+- name: orders
+  source: retail.public.orders
+  primary_key:
+  - order_id
+  fields:
+  - name: order_key
+    expression:
+      dialects:
+      - dialect: ANSI_SQL
+        expression: order_id
+  - name: customer_key
+    expression:
+      dialects:
+      - dialect: ANSI_SQL
+        expression: buyer_id
+  - name: status
+    expression:
+      dialects:
+      - dialect: ANSI_SQL
+        expression: order_status
+    dimension:
+      is_time: false
+    nonportable_extensions:
+    - vendor_name: DBT
+      data:
+        meta:
+          report_label: Status
+  - name: amount
+    expression:
+      dialects:
+      - dialect: ANSI_SQL
+        expression: order_amount
+- name: customers
+  source: retail.public.customers
+  primary_key:
+  - customer_id
+  fields:
+  - name: customer_key
+    expression:
+      dialects:
+      - dialect: ANSI_SQL
+        expression: customer_id
+relationships:
+- name: orders__customers__customer_key
+  from: orders
+  to: customers
+  from_columns:
+  - buyer_id
+  to_columns:
+  - customer_id
+metrics:
+- name: total_revenue
+  expression:
+    dialects:
+    - dialect: ANSI_SQL
+      expression: SUM(orders.order_amount)
