@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 
@@ -30,7 +31,7 @@ import yaml
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import inspect, select  # noqa: E402
+from sqlalchemy import Connection, inspect, select  # noqa: E402
 
 from auto_ontology.dal import model_interchange as mi  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
@@ -665,8 +666,47 @@ def test_an_import_cannot_duplicate_a_term_name(world) -> None:
         _cleanup(f"{world.prefix}-copy")
 
 
+def _governed_result_sql(scope: str) -> str:
+    # The source contract selects a scenario, commitment and evidence class.
+    # Two compatible rows at the same grain are ambiguous, so discard both.
+    return f"""
+        WITH eligible AS (
+            SELECT r.id, r.producer, r.run_id, r.entity_id, r.starts, r.ends,
+                   r.predecessor, r.evidence,
+                   CASE r.unit
+                       WHEN 'kg' THEN r.amount
+                       WHEN 'g/day' THEN r.amount * (r.ends - r.starts) / 1000
+                   END AS quantity_kg,
+                   COUNT(*) OVER (
+                       PARTITION BY r.producer, r.run_id, r.entity_id, r.starts, r.ends
+                   ) AS candidates
+            FROM {scope}.result AS r
+            JOIN {scope}.membership AS m
+              ON r.producer = m.producer AND r.run_id = m.run_id AND r.entity_id = m.entity_id
+            WHERE r.status = 'current' AND r.scenario = 'base'
+              AND r.commitment = 'published' AND r.evidence = 'modeled'
+              AND r.starts < r.ends AND r.unit IN ('kg', 'g/day')
+        )
+        SELECT id, producer, run_id, entity_id, starts, ends, predecessor, evidence,
+               quantity_kg,
+               SUM(quantity_kg) OVER (PARTITION BY producer, run_id, entity_id) AS horizon_kg
+        FROM eligible
+        WHERE candidates = 1
+        ORDER BY producer, run_id, entity_id, starts, ends
+    """.strip()
+
+
+def _cleanup_governed_result(scope: str) -> None:
+    _cleanup(scope)
+    store().query_write(
+        s.sql_query.delete().where(
+            s.sql_query.c.sql_full_query == _governed_result_sql(scope)
+        )
+    )
+
+
 @pytest.fixture
-def governed_result_source():
+def governed_result_source() -> Iterator[tuple[str, Connection]]:
     """Source-owned facts and membership live outside the exchanged model."""
     scope = f"governed_{uuid.uuid4().hex[:10]}"
     with get_engine().connect() as source:
@@ -724,10 +764,12 @@ def governed_result_source():
         try:
             yield scope, source
         finally:
-            _cleanup(scope)
+            _cleanup_governed_result(scope)
 
 
-def _governed_result_model(scope, source):
+def _governed_result_model(
+    scope: str, source: Connection
+) -> models.AutoOntologyModelDocument:
     catalog = inspect(source)
     tables = []
     foreign_keys = []
@@ -762,33 +804,6 @@ def _governed_result_model(scope, source):
         )
 
     result = f"{scope}.result"
-    # The source contract selects a scenario, commitment and evidence class.
-    # Two compatible rows at the same grain are ambiguous, so discard both.
-    sql = f"""
-        WITH eligible AS (
-            SELECT r.id, r.producer, r.run_id, r.entity_id, r.starts, r.ends,
-                   r.predecessor, r.evidence,
-                   CASE r.unit
-                       WHEN 'kg' THEN r.amount
-                       WHEN 'g/day' THEN r.amount * (r.ends - r.starts) / 1000
-                   END AS quantity_kg,
-                   COUNT(*) OVER (
-                       PARTITION BY r.producer, r.run_id, r.entity_id, r.starts, r.ends
-                   ) AS candidates
-            FROM {result} AS r
-            JOIN {scope}.membership AS m
-              ON r.producer = m.producer AND r.run_id = m.run_id AND r.entity_id = m.entity_id
-            WHERE r.status = 'current' AND r.scenario = 'base'
-              AND r.commitment = 'published' AND r.evidence = 'modeled'
-              AND r.starts < r.ends AND r.unit IN ('kg', 'g/day')
-        )
-        SELECT id, producer, run_id, entity_id, starts, ends, predecessor, evidence,
-               quantity_kg,
-               SUM(quantity_kg) OVER (PARTITION BY producer, run_id, entity_id) AS horizon_kg
-        FROM eligible
-        WHERE candidates = 1
-        ORDER BY producer, run_id, entity_id, starts, ends
-    """.strip()
     return models.AutoOntologyModelDocument(
         data_layer=models.ModelDataLayer(
             databases=[
@@ -828,7 +843,7 @@ def _governed_result_model(scope, source):
                     id=f"{scope}-analysis",
                     name=f"{scope} Published quantity",
                     description="Modeled quantities in kilograms over source windows [starts, ends).",
-                    sql=sql,
+                    sql=_governed_result_sql(scope),
                     sql_column_is=[f"{result}.id"],
                 )
             ],
@@ -837,7 +852,7 @@ def _governed_result_model(scope, source):
 
 
 def test_governed_result_round_trip_preserves_keyed_quantities(
-    governed_result_source,
+    governed_result_source: tuple[str, Connection],
 ) -> None:
     scope, source = governed_result_source
     model = _governed_result_model(scope, source)
@@ -845,8 +860,13 @@ def test_governed_result_round_trip_preserves_keyed_quantities(
     exported = service.export_model(
         models.ExportRequest(databases=first["database_ids"])
     )
-    # Remove just the catalog/semantic scope. The source facts stay available.
-    _cleanup(scope)
+    # Remove the saved query and ontology scope. The source facts stay available.
+    saved_query = select(s.sql_query.c.id).where(
+        s.sql_query.c.sql_full_query == _governed_result_sql(scope)
+    )
+    assert store().query_read(saved_query)
+    _cleanup_governed_result(scope)
+    assert not store().query_read(saved_query)
     second = service.import_model(exported, replace=False, embed=False)
     assert second["created"]["custom_analyses"] == 1
     rebuilt = models.AutoOntologyModelDocument.model_validate(
@@ -890,6 +910,21 @@ def test_governed_result_round_trip_preserves_keyed_quantities(
         ("result", "ends"),
         ("result", "predecessor"),
     } <= bound_columns
+    # Export resolves links from the SQL text. Check the importer also persisted one.
+    linked_columns = store().query_read(
+        select(s.sql_query__column.c.column_id)
+        .select_from(
+            s.custom_analysis__sql.join(
+                s.sql_query__column,
+                s.custom_analysis__sql.c.sql_query_id
+                == s.sql_query__column.c.sql_query_id,
+            )
+        )
+        .where(s.custom_analysis__sql.c.analysis_id == analysis.id)
+    )
+    assert ("result", "amount") in {
+        columns[row["column_id"]][:2] for row in linked_columns
+    }
 
     jan_1, jan_3, jan_8 = (date(2026, 1, day) for day in (1, 3, 8))
     rows = source.exec_driver_sql(analysis.sql).all()
