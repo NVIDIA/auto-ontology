@@ -14,10 +14,9 @@ Probes run **inline on the calling thread**. The pipeline's connectors are
 shared and long-lived, and thread-affine connectors (e.g. SQLite binds each
 connection to its creating thread) reuse the calling thread's existing
 connection — so inline execution avoids leaking a fresh connection per probe.
-Bounding therefore relies on ``LIMIT`` + the call budget rather than a hard
-wall-clock timeout; per-dialect statement timeouts (Postgres ``statement_timeout``,
-SQLite ``set_progress_handler``) are the right tool once Phase 2 runs arbitrary
-model-authored SQL.
+Bounding relies on ``LIMIT``, the call budget, and an optional wall-clock
+budget shared by every probe. Connectors that advertise statement-timeout
+support receive the remaining wall-clock budget for each statement.
 
 The same executor backs both the Phase-1 deterministic probes and any future
 Phase-2 LLM-driven exploration loop, so all live access inherits these guards.
@@ -92,13 +91,22 @@ class ProbeExecutor:
     connector:
         The resolved :class:`SQLDatabase` to probe (may be ``None`` — every
         ``run`` then fails gracefully).
+    total_timeout_s:
+        Optional wall-clock budget shared by all calls. Each statement receives
+        only the time remaining in this budget.
     """
 
     connector: Optional[SQLDatabase]
     max_calls: int = DB_PROBE_MAX_CALLS
     max_rows: int = DB_PROBE_MAX_ROWS
+    total_timeout_s: float | None = None
     calls: int = field(default=0, init=False)
     log: list[dict[str, Any]] = field(default_factory=list, init=False)
+    _deadline: float | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        if self.total_timeout_s is not None:
+            self._deadline = time.monotonic() + max(0.0, self.total_timeout_s)
 
     @property
     def budget_left(self) -> int:
@@ -141,6 +149,14 @@ class ProbeExecutor:
             self.log.append(entry)
             return entry
 
+        remaining_s = (
+            self._deadline - time.monotonic() if self._deadline is not None else None
+        )
+        if remaining_s is not None and remaining_s <= 0:
+            entry["error"] = "probe time budget exhausted"
+            self.log.append(entry)
+            return entry
+
         if not is_read_only_select(sql):
             entry["error"] = "rejected: not a single read-only SELECT"
             logger.warning("Probe rejected (not read-only): %s", sql)
@@ -153,7 +169,12 @@ class ProbeExecutor:
 
         start = time.perf_counter()
         try:
-            df = execute_chat_sql(self.connector, bounded_sql, kind="probe SQL")
+            df = execute_chat_sql(
+                self.connector,
+                bounded_sql,
+                kind="probe SQL",
+                timeout_s=remaining_s,
+            )
         except Exception as exc:  # noqa: BLE001 — probes must never break the pipeline
             entry["error"] = str(exc)
             entry["elapsed_ms"] = int((time.perf_counter() - start) * 1000)

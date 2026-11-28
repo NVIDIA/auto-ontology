@@ -91,28 +91,40 @@ class Retriever:
         ]
 
     def _embed_query(self, text: str) -> list[float] | None:
-        for attempt in range(1, _QUERY_ATTEMPTS + 1):
-            try:
-                return embed_texts(
-                    [text],
-                    self.embed_params,
-                    "query",
-                    timeout=_QUERY_TIMEOUT_S,
-                    retries=0,
-                )[0]
-            except Exception as exc:
-                if attempt == _QUERY_ATTEMPTS or not _is_transient(exc):
-                    raise
-                wait = 2**attempt + random.uniform(0, 1)
-                logger.warning(
-                    "Embedding the query failed on attempt %d/%d, retrying in %.1fs: %s",
-                    attempt,
-                    _QUERY_ATTEMPTS,
-                    wait,
-                    str(exc)[:200],
-                )
-                time.sleep(wait)
-        raise AssertionError("unreachable")
+        return embed_query(text, self.embed_params)
+
+
+def embed_query(text: str, params: EmbedParams | None = None) -> list[float] | None:
+    """*text* embedded as a search query, or ``None`` when it is blank.
+
+    A timeout, a dropped connection or a 5xx/408/429 is retried with backoff;
+    anything else, or a blip that outlasts the attempts, raises. Every search
+    path embeds through here, so a stalled endpoint costs each one the same
+    three short attempts rather than the ingest-sized wait.
+    """
+    params = params or get_embed_params()
+    for attempt in range(1, _QUERY_ATTEMPTS + 1):
+        try:
+            return embed_texts(
+                [text],
+                params,
+                "query",
+                timeout=_QUERY_TIMEOUT_S,
+                retries=0,
+            )[0]
+        except Exception as exc:
+            if attempt == _QUERY_ATTEMPTS or not _is_transient(exc):
+                raise
+            wait = 2**attempt + random.uniform(0, 1)
+            logger.warning(
+                "Embedding the query failed on attempt %d/%d, retrying in %.1fs: %s",
+                attempt,
+                _QUERY_ATTEMPTS,
+                wait,
+                str(exc)[:200],
+            )
+            time.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 _data_retriever: Retriever | None = None

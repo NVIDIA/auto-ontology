@@ -896,33 +896,6 @@
         "title": "ColumnSummary",
         "type": "object"
       },
-      "ConceptRef": {
-        "additionalProperties": true,
-        "description": "The Concept a term belongs to, and every term that is a member of it.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "term_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Term Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ],
-        "title": "ConceptRef",
-        "type": "object"
-      },
       "ConnectionBody": {
         "properties": {
           "connection": {
@@ -2362,7 +2335,7 @@
       },
       "GraphLink": {
         "additionalProperties": true,
-        "description": "An undirected term\u2194term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.\n``SAME_CONCEPT`` links two terms that are members of one Concept, whether\nor not they share a table.",
+        "description": "An undirected term\u2194term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
         "properties": {
           "relationship_types": {
             "items": {
@@ -3651,16 +3624,6 @@
               }
             ],
             "title": "Column Attributes Count"
-          },
-          "concept": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConceptRef"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "description": {
             "anyOf": [
@@ -8789,8 +8752,28 @@
     },
     "/api/semantic-compilation/reset": {
       "post": {
-        "description": "Ask the ingestion service to rebuild every database's semantic layer.\n\nThe service deletes the semantic nodes and embeddings and compiles them\nagain, so the layer is rebuilt without waiting for the next scheduled run.",
+        "description": "Ask the ingestion service to rebuild the semantic layer.\n\nThe service deletes the semantic nodes and embeddings and compiles them\nagain, so the layer is rebuilt without waiting for the next scheduled run.\nWith ``database_name`` only that database's layer is deleted; without it,\nevery database's.",
         "operationId": "reset_api_semantic_compilation_reset_post",
+        "parameters": [
+          {
+            "description": "Reset only this database's semantic layer. Omit to reset every database.",
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Reset only this database's semantic layer. Omit to reset every database.",
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "202": {
             "content": {
@@ -8801,6 +8784,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Reset",

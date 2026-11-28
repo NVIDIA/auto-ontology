@@ -36,7 +36,6 @@ __all__ = [
     "ColumnAttribute",
     "ColumnRef",
     "ColumnSummary",
-    "ConceptRef",
     "CustomAnalysis",
     "DataExplorationGraph",
     "DataGraphNode",
@@ -777,21 +776,11 @@ class GraphLink(ApiModel):
     ``relationship_types`` names the relationship kind(s)
     (``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either
     term to a table they share, for labeling the connection in the graph.
-    ``SAME_CONCEPT`` links two terms that are members of one Concept, whether
-    or not they share a table.
     """
 
     source: str
     target: str
     relationship_types: list[str] = Field(default_factory=list)
-
-
-class ConceptRef(ApiModel):
-    """The Concept a term belongs to, and every term that is a member of it."""
-
-    id: str
-    name: str
-    term_ids: list[str] = Field(default_factory=list)
 
 
 class SemanticGraphNode(ApiModel):
@@ -805,7 +794,6 @@ class SemanticGraphNode(ApiModel):
     relationship_count: int | None = None
     column_attributes_count: int | None = None
     sql_attributes_count: int | None = None
-    concept: ConceptRef | None = None
 
 
 class SemanticExplorationGraph(ApiModel):

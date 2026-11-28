@@ -6056,8 +6056,28 @@
     },
     "/api/semantic-compilation/reset": {
       "post": {
-        "description": "semanticCompilationApi.reset — delete every database's compiled semantic\nlayer. Destructive, so it sits behind `manage` rather than the `read` tier\nthat may view the toggle.",
+        "description": "semanticCompilationApi.reset — delete the compiled semantic layer. Scoped to\none database when `database_name` is given, every database otherwise.\nDestructive, so it sits behind `manage` rather than the `read` tier that\nmay view the toggle.",
         "operationId": "post_api_semantic_compilation_reset",
+        "parameters": [
+          {
+            "description": "Reset only this database's semantic layer. Omit to reset every database.",
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Reset only this database's semantic layer. Omit to reset every database.",
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "202": {
             "content": {
@@ -6074,9 +6094,19 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
-        "summary": "semanticCompilationApi.reset — delete every database's compiled semantic layer.",
+        "summary": "semanticCompilationApi.reset — delete the compiled semantic layer.",
         "tags": ["semantic-compilation"],
         "security": [
           {
@@ -9056,30 +9086,6 @@
         "title": "ColumnSummary",
         "type": "object"
       },
-      "ConceptRef": {
-        "additionalProperties": true,
-        "description": "The Concept a term belongs to, and every term that is a member of it.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "term_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Term Ids",
-            "type": "array"
-          }
-        },
-        "required": ["id", "name"],
-        "title": "ConceptRef",
-        "type": "object"
-      },
       "ConnectionBody": {
         "properties": {
           "connection": {
@@ -10420,7 +10426,7 @@
       },
       "GraphLink": {
         "additionalProperties": true,
-        "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.\n``SAME_CONCEPT`` links two terms that are members of one Concept, whether\nor not they share a table.",
+        "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
         "properties": {
           "relationship_types": {
             "items": {
@@ -11578,16 +11584,6 @@
               }
             ],
             "title": "Column Attributes Count"
-          },
-          "concept": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConceptRef"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "description": {
             "anyOf": [

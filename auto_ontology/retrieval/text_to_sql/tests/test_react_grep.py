@@ -34,9 +34,7 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_RESULT_ROWS", "2")
     catalog = FakeCatalog(SHOP_CATALOG)
     monkeypatch.setattr(run_sql_module, "catalog_for", lambda *_: catalog)
-    return show_shop_tables(
-        ToolContext(retriever=None, connectors=[SQLiteConnector(SHOP_SCRIPT)])
-    )
+    return show_shop_tables(ToolContext(connectors=[SQLiteConnector(SHOP_SCRIPT)]))
 
 
 def test_a_result_too_long_to_show_is_saved_as_a_page(ctx: ToolContext) -> None:
@@ -84,7 +82,7 @@ def test_grep_without_a_pattern_pages_through_the_result(ctx: ToolContext) -> No
 
 
 def test_grep_reads_a_bad_pattern_as_plain_text() -> None:
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     ctx.pages.append(pd.DataFrame({"name": ["a(b", "c"]}))
 
     assert grep(ctx, 1, "a(b").splitlines()[0] == "1 of 2 rows match"
@@ -94,7 +92,7 @@ def test_grep_stops_a_pattern_that_backtracks_without_end(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(config, "grep_timeout_s", lambda: 0.2)
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     ctx.pages.append(pd.DataFrame({"name": ["a" * 60 + "b"]}))
 
     started = time.monotonic()
@@ -117,7 +115,7 @@ def test_grep_stops_when_the_shared_budget_is_spent_between_rows(
     monkeypatch.setattr(
         grep_module, "time", types.SimpleNamespace(monotonic=lambda: next(ticks))
     )
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     ctx.pages.append(pd.DataFrame({"name": ["a", "a", "a", "a"]}))
 
     text = grep(ctx, 1, "a")
@@ -129,14 +127,14 @@ def test_grep_stops_when_the_shared_budget_is_spent_between_rows(
 
 
 def test_grep_still_matches_case_insensitively_under_the_time_budget() -> None:
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     ctx.pages.append(pd.DataFrame({"name": ["Alice", "bob", "ALICIA"]}))
 
     assert grep(ctx, 1, "^ali").splitlines()[0] == "2 of 3 rows match"
 
 
 def test_grep_finds_a_value_past_the_cut_of_a_long_cell() -> None:
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     ctx.pages.append(pd.DataFrame({"note": ["x" * 200 + "NEEDLE", "short"]}))
 
     text = grep(ctx, 1, "NEEDLE")
@@ -147,7 +145,7 @@ def test_grep_finds_a_value_past_the_cut_of_a_long_cell() -> None:
 
 
 def test_grep_explains_a_missing_page() -> None:
-    ctx = ToolContext(retriever=None, connectors=[])
+    ctx = ToolContext(connectors=[])
     assert grep(ctx, 1, "x").startswith("Error: no saved results.")
     ctx.pages.append(pd.DataFrame({"x": [1]}))
     assert grep(ctx, 2, "x") == "Error: no page 2; pages 1 to 1 exist."
@@ -192,7 +190,7 @@ def test_the_episode_offers_grep_only_when_on(
 
     monkeypatch.setenv("TEXT_TO_SQL_REACT_GREP", "false")
     model = ScriptedModel(list(script))
-    result = loop.run_episode(model, ToolContext(None, ctx.connectors), "q")
+    result = loop.run_episode(model, ToolContext(ctx.connectors), "q")
 
     assert model.bound_tool_names[0] == ["retrieve", "run_sql", "submit"]
     assert model.seen[0][0].content == prompts.system_prompt_for(EpisodeMode.SQL, None)

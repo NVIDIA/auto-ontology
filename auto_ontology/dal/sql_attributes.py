@@ -31,6 +31,7 @@ from auto_ontology.dal.sql_fragments import column_description_expr
 from auto_ontology.dal.tags import TARGET_SQL_ATTRIBUTE, fetch_tags_map
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.server.sql_utils import SqlParseError
+from auto_ontology.utils.sql_equivalence import sql_equivalence_key
 
 logger = logging.getLogger(__name__)
 
@@ -387,15 +388,12 @@ def find_attr_by_expression(
 ) -> dict[str, str] | None:
     """A same-term SqlAttribute with equivalent SQL, or ``None``.
 
-    Equivalence ignores case and collapses whitespace, matching the legacy
-    snippet validation. Compared in Python rather than SQL, as before: the
-    normalisation is ``" ".join(x.split())``, which collapses *runs* of any
-    whitespace to one space, and no SQL expression reproduces that — ``regexp_replace``
-    on ``\\s+`` comes close but differs on the Unicode whitespace ``str.split``
-    accepts. Matching the old behaviour exactly is worth one full scan of a
+    Equivalence is :func:`sql_equivalence_key`: formatting and keyword or
+    identifier case are ignored, string literals are not. Compared in Python
+    because the key comes from parsing the SQL, which costs one full scan of a
     single term's attributes.
     """
-    normalized = " ".join(expression.split()).lower()
+    normalized = sql_equivalence_key(expression)
     statement = (
         select(
             s.sql_attribute.c.id,
@@ -417,7 +415,7 @@ def find_attr_by_expression(
         candidate = row["expression"]
         if not isinstance(candidate, str):
             continue
-        if " ".join(candidate.split()).lower() == normalized:
+        if sql_equivalence_key(candidate) == normalized:
             return {"id": row["id"], "name": row["name"]}
     return None
 

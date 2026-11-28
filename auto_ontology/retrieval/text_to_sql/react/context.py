@@ -40,43 +40,65 @@ class ToolContext:
     ``pages`` holds the ``run_sql`` results too long to show, for ``grep`` to
     search; page *n* is ``pages[n - 1]``.
 
+    ``submitted_database`` is the database the accepted submission was written
+    for, whether it ran or was accepted unrun for lack of budget.
+
     ``shown_tables`` is every table a ``retrieve`` result named — in a table
     block, a JOIN route, a SIMILAR line or a definition's SQL — as lowercased
     ``(schema, name)``. It is wider than ``seen_tables`` on purpose: a bridge
     table on a join route or the other copy on a SIMILAR line is one the model
     is told to use, though its columns were never listed.
 
-    ``retriever`` searches the semantic collection; ``data_retriever`` the one
-    tables and columns are embedded in, for what the semantic layer leaves out.
+    ``shown_analyses`` holds each saved custom analysis (``id``, ``name``, full
+    ``sql``) a ``retrieve`` result showed the model, keyed by id; it is what the
+    response's ``custom_analyses_used`` provenance is built from.
 
     ``information_answers`` lets ``submit`` take an information question's answer
     with no SQL; it stays off wherever a grader scores the SQL.
     ``information_retrieved`` records that ``retrieve`` showed the information
     view, which such an answer has to come from; a SQL-view search does not count.
 
+    ``conversation_answers`` is the same switch for a third source, this
+    database's past conversations, and off by default because most databases
+    have none. ``conversation_retrieved`` is its half of the same evidence
+    rule: an answer that cites a past conversation has to have searched one.
+
+    ``calculation_answers`` is whether querying the data is on the table at
+    all. Off, no ``run_sql`` is offered and ``connectors`` may be empty -- the
+    state a database holding transcripts and no tables is in.
+
     ``cost_status`` is for callers that charge for queries: it returns what the
     model has left to spend and what each action costs, read fresh each time
     because every query changes it. ``None`` when queries are free.
     ``can_run_queries`` comes with it: False once the next query would be
     refused, so the episode can still submit instead of trying to run one.
+
+    ``empty_result_checked`` holds the queries ``submit`` held back once for
+    an empty result to check their filters; the same query is accepted next,
+    and a query on the last answer attempt is accepted without checking.
+
+    ``fanout_refused`` holds the SQL texts ``submit`` refused once for a join
+    that repeats an aggregate's rows; the same text is accepted the second time,
+    and on the last answer attempt the first.
     """
 
-    retriever: Any
     connectors: list[SQLDatabase]
     database_name: str | None = None
-    data_retriever: Any = None
     numeric_type_alignment: bool = False
+    calculation_answers: bool = True
     information_answers: bool = False
     information_retrieved: bool = False
+    conversation_answers: bool = False
+    conversation_retrieved: bool = False
     question: str = ""
     prediction_llm: Any = None
     custom_prompts: str = ""
     seen_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
+    submitted_database: str | None = None
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
     join_paths: list[dict[str, Any]] = field(default_factory=list)
     anchor_column_ids: dict[str, str | None] = field(default_factory=dict)
     sibling_pairs: set[frozenset[str]] = field(default_factory=set)
-    shown_concepts: set[str] = field(default_factory=set)
     catalog_tables: list[dict[str, Any]] | None = None
     row_counts: dict[str, int | None] = field(default_factory=dict)
     counts_left: int = 0
@@ -86,8 +108,12 @@ class ToolContext:
     prediction_refusal: str = ""
     pages: list[Any] = field(default_factory=list)
     shown_tables: set[tuple[str, str]] = field(default_factory=set)
+    shown_analyses: dict[str, dict[str, str]] = field(default_factory=dict)
     cost_status: Callable[[], str | None] | None = None
     can_run_queries: Callable[[], bool] | None = None
+    empty_result_checked: set[str] = field(default_factory=set)
+    last_answer_attempt: bool = False
+    fanout_refused: set[str] = field(default_factory=set)
 
     def show_table(self, schema: str | None, name: str | None) -> None:
         if name:

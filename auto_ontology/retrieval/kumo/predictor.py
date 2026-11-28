@@ -262,7 +262,7 @@ def _error_response(message: str) -> dict[str, Any]:
         "response": message,
         "sql_code": "",
         "sql_columns": [],
-        "custom_analyses_used": [],
+        "custom_analyses_used": [],  # never retrieves saved analyses: not applicable
         "sql_response_from_db": None,
     }
 
@@ -323,7 +323,7 @@ def _format_result(result: Any) -> dict[str, Any]:
         "response": "\n\n".join(parts),
         "sql_code": result.pql or "",
         "sql_columns": result.columns,
-        "custom_analyses_used": [],
+        "custom_analyses_used": [],  # never retrieves saved analyses: not applicable
         "sql_response_from_db": _json_safe_rows(result.rows) or None,
     }
 

@@ -91,7 +91,7 @@ export const DataTreeSelect = ({
 }: DataTreeSelectProps) => {
 	const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 	const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
-	const lastAppliedExpandKeyRef = useRef<number | undefined>(undefined);
+	const [appliedExpandKey, setAppliedExpandKey] = useState<number | undefined>(undefined);
 	const showTableRows = showSchemas && showTables;
 
 	const setLoading = (id: string, loading: boolean) => {
@@ -194,38 +194,37 @@ export const DataTreeSelect = ({
 		}
 	}, [databases, selectedItems, onSelectedItemsChange, showSchemas, showTableRows]);
 
-	useEffect(() => {
-		if (expandSelectedOnlyKey == null) return;
-		if (lastAppliedExpandKeyRef.current === expandSelectedOnlyKey) return;
-		lastAppliedExpandKeyRef.current = expandSelectedOnlyKey;
+	// Each new `expandSelectedOnlyKey` opens exactly the nodes that hold a
+	// selection, once. That is state following a prop, so it is adjusted while
+	// rendering (React re-renders at once, before anything is painted) rather
+	// than in an effect that would set it a commit late.
+	if (expandSelectedOnlyKey != null && appliedExpandKey !== expandSelectedOnlyKey) {
+		setAppliedExpandKey(expandSelectedOnlyKey);
 
 		const nextOpenIds: Record<string, boolean> = {};
-		if (!showSchemas) {
-			setOpenIds(nextOpenIds);
-			return;
-		}
-		databases.forEach((db) => {
-			const dbHasSelectedSchema = db.schemas.some(
-				(schema) =>
-					selectedItems.has(schema.id) ||
-					schema.tables.some((table) => selectedItems.has(table.id)),
-			);
-			if (selectedItems.has(db.id) || dbHasSelectedSchema) {
-				nextOpenIds[db.id] = true;
-			}
-
-			db.schemas.forEach((schema) => {
-				const schemaHasSelectedTable = schema.tables.some((table) =>
-					selectedItems.has(table.id),
+		if (showSchemas) {
+			databases.forEach((db) => {
+				const dbHasSelectedSchema = db.schemas.some(
+					(schema) =>
+						selectedItems.has(schema.id) ||
+						schema.tables.some((table) => selectedItems.has(table.id)),
 				);
-				if (selectedItems.has(schema.id) || schemaHasSelectedTable) {
-					nextOpenIds[schema.id] = true;
+				if (selectedItems.has(db.id) || dbHasSelectedSchema) {
+					nextOpenIds[db.id] = true;
 				}
-			});
-		});
 
+				db.schemas.forEach((schema) => {
+					const schemaHasSelectedTable = schema.tables.some((table) =>
+						selectedItems.has(table.id),
+					);
+					if (selectedItems.has(schema.id) || schemaHasSelectedTable) {
+						nextOpenIds[schema.id] = true;
+					}
+				});
+			});
+		}
 		setOpenIds(nextOpenIds);
-	}, [databases, selectedItems, expandSelectedOnlyKey, showSchemas]);
+	}
 
 	const toggleDatabase = async (db: Database) => {
 		if (!showSchemas) return;

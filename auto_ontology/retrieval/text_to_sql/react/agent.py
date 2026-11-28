@@ -20,10 +20,12 @@ from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.loop import run_episode
 from auto_ontology.retrieval.text_to_sql.react.mode import ToolName, episode_mode
+from auto_ontology.retrieval.text_to_sql.react.provenance import custom_analyses_used
 from auto_ontology.retrieval.text_to_sql.react.run_sql import connector_for
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
+    resolve_sources,
     get_standalone_question,
 )
 
@@ -42,6 +44,8 @@ def _tool_thought(call: dict[str, Any]) -> str:
     name = call.get("name")
     if name == ToolName.RETRIEVE and args.get("purpose") == "information":
         return f"Looking up the catalog: {args.get('query') or 'everything'}"
+    if name == ToolName.RETRIEVE and args.get("purpose") == "conversation":
+        return f"Looking through past conversations: {args.get('query', '')}"
     if name == ToolName.RETRIEVE:
         return f"Searching for: {args.get('query', '')}"
     if name == ToolName.RUN_SQL and str(args.get("final")).lower() != "true":
@@ -51,8 +55,18 @@ def _tool_thought(call: dict[str, Any]) -> str:
     if name == ToolName.GREP:
         return f"Searching a saved result for: {args.get('pattern', '')}"
     if name == ToolName.SUBMIT and not str(args.get("sql") or "").strip():
-        return "Answering an information question."
+        return "Answering from what is recorded, without a query."
     return "Submitting the final query."
+
+
+def tables_in_database(tables: list[dict], database_name: str) -> list[dict]:
+    """*tables* of *database_name*, ignoring case as routing does, plus untagged ones."""
+    wanted = database_name.casefold()
+    return [
+        t
+        for t in tables
+        if not t.get("database_name") or str(t["database_name"]).casefold() == wanted
+    ]
 
 
 class ReactSQLAgent(BaseAgent):
@@ -62,17 +76,26 @@ class ReactSQLAgent(BaseAgent):
         super().__init__("react_sql_agent", failure_decision="unconstructable")
 
     def validate_input(self, state: AgentState) -> bool:
-        return bool(state.get("initial_question")) and bool(state.get("connectors"))
+        # Connectors only when there is querying to do. An episode that answers
+        # from the catalog or from past conversations needs no warehouse, which
+        # is the only way a database that holds transcripts and no tables can
+        # be asked anything at all.
+        if not state.get("initial_question"):
+            return False
+        return (
+            bool(state.get("connectors")) or not resolve_sources(state)["calculation"]
+        )
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = dict(state.get("path_state") or {})
+        sources = resolve_sources(state)
         ctx = ToolContext(
-            retriever=state.get("semantic_retriever") or state.get("data_retriever"),
-            data_retriever=state.get("data_retriever"),
             connectors=list(state.get("connectors") or []),
             database_name=path_state.get("target_db"),
             numeric_type_alignment=bool(state.get("numeric_type_alignment")),
-            information_answers=not state.get("calculation_only"),
+            calculation_answers=sources["calculation"],
+            information_answers=sources["information"],
+            conversation_answers=sources["conversation"],
             question=get_standalone_question(state),
             prediction_llm=state.get("llm"),
             custom_prompts=state.get("custom_prompts") or "",
@@ -85,12 +108,13 @@ class ReactSQLAgent(BaseAgent):
         can_run_queries = getattr(connector, "can_run_queries", None)
         if callable(can_run_queries):
             ctx.can_run_queries = can_run_queries
+        dialect = getattr(connector, "dialect", None)
         result = run_episode(
             state.get("reasoning_llm") or state["llm"],
             ctx,
             question=get_question_for_processing(state),
             evidence=state.get("evidence"),
-            dialect=getattr(connector, "dialect", None),
+            dialect=dialect,
             mode=episode_mode(state.get("prediction_override")),
             custom_prompts=state.get("custom_prompts"),
             sql_examples=state.get("sql_examples"),
@@ -109,6 +133,11 @@ class ReactSQLAgent(BaseAgent):
             response = result.prediction.response
             markdown = str(response.get("response") or "")
             path_state["formatted_response"] = markdown
+            # A prediction runs no SQL, so saved analyses stop at "retrieved".
+            response = {
+                **response,
+                "custom_analyses_used": custom_analyses_used(ctx, None, dialect),
+            }
             path_state["final_response"] = response
             return {
                 "decision": "predicted",
@@ -123,6 +152,9 @@ class ReactSQLAgent(BaseAgent):
             path_state["unconstructable_explanation"] = (
                 ctx.prediction_refusal or _UNANSWERED
             )
+            path_state["custom_analyses_used"] = custom_analyses_used(
+                ctx, None, dialect
+            )
             return {"decision": "unconstructable", "path_state": path_state}
 
         if submission.db_response is None:
@@ -131,7 +163,7 @@ class ReactSQLAgent(BaseAgent):
                 "response": submission.response,
                 "sql_code": "",
                 "sql_columns": [],
-                "custom_analyses_used": [],
+                "custom_analyses_used": custom_analyses_used(ctx, None, dialect),
                 "sql_response_from_db": None,
             }
             return {
@@ -141,6 +173,10 @@ class ReactSQLAgent(BaseAgent):
                 "path_state": path_state,
             }
 
+        if ctx.submitted_database:
+            path_state["relevant_tables"] = tables_in_database(
+                path_state["relevant_tables"], ctx.submitted_database
+            )
         path_state["sql_code"] = submission.sql
         path_state["sql_generation_result"] = SQLGenerationModel(
             thought=submission.assumptions or _NO_ASSUMPTIONS,
@@ -148,6 +184,9 @@ class ReactSQLAgent(BaseAgent):
             response=submission.response or "Here is the result of the query.",
         )
         path_state["sql_response_from_db"] = submission.db_response.result
+        path_state["custom_analyses_used"] = custom_analyses_used(
+            ctx, submission.sql, dialect
+        )
         path_state.setdefault("candidates", [])
         if ctx.numeric_type_alignment:
             path_state["result_numeric_kinds"] = submission.db_response.numeric_kinds

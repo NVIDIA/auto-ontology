@@ -46,6 +46,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -390,6 +391,328 @@ table__join = Table(
 )
 
 # ---------------------------------------------------------------------------
+# Conversation tier — Database -> Conversation turn
+# ---------------------------------------------------------------------------
+
+#: One question/answer exchange from a chat transcript.
+#:
+#: The grain is the *pair*, not the message, because the pair is the unit that
+#: answers a question on its own: an assistant turn read without its prompt is
+#: a paragraph with no subject, and retrieving one without the other puts the
+#: model in exactly that position.
+#:
+#: Hangs off ``catalog_database`` for the same reason the catalog tier does.
+#: ``database_name`` is already what scopes a connector, an embedding row and
+#: a pgvector delete, so a conversation that is its own database needs no new
+#: scoping concept — and ``ON DELETE CASCADE`` means ``delete_all_data`` sweeps
+#: these up without being taught about them.
+#:
+#: Two levels of ordering are kept rather than one. ``turn_index`` is unique
+#: within the conversation and is what "the next thing said" means; a BEAM
+#: transcript is split into sessions held days apart, and the gap between
+#: ``session_index`` 1 and 2 is the difference between a correction and a
+#: change of mind.
+conversation = Table(
+    "conversation",
+    METADATA,
+    _id(),
+    Column(
+        "database_id",
+        Text,
+        ForeignKey(catalog_database.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    # The transcript this pair came from. Not a foreign key: a conversation has
+    # no attributes of its own that a row here does not already carry, and a
+    # parent table holding only a name would be a join for nothing.
+    Column("conversation_id", Text, nullable=False),
+    Column("turn_index", Integer, nullable=False),
+    Column("session_index", Integer, nullable=True),
+    Column("question", Text, nullable=False),
+    Column("answer", Text, nullable=False),
+    # What the speaker treated as "now". BEAM states it per turn, and without
+    # it "next Tuesday" cannot be resolved to a date -- the transcript's own
+    # ordering gives the sequence but never the calendar.
+    Column("time_anchor", Text, nullable=True),
+    # Also the index for reading a conversation back in order, the common
+    # query: the semantic pass walks a transcript start to finish, and
+    # retrieval widens a hit to its neighbours. Postgres backs the constraint
+    # with a unique index on these columns, so a second index would only double
+    # the cost of every write.
+    UniqueConstraint(
+        "database_id",
+        "conversation_id",
+        "turn_index",
+        name="uq_conversation_database_conversation_turn",
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Conversation semantic tier — one transcript's graph
+# ---------------------------------------------------------------------------
+
+#: What a node *is*, on the axis the benchmark's abilities run along.
+#:
+#: Multi-valued on the row, because a node is honestly more than one of these at
+#: once: a deadline is an ``event`` (it has a date) and a ``state`` (it moved),
+#: and forcing a single label means picking which question it is allowed to
+#: answer. The ``type`` column carries the other axis -- ``Person``,
+#: ``Technology``, ``Timestamp`` -- which is open vocabulary and names the
+#: domain rather than the use.
+#:
+#: ``object`` is the kind of a thing that asserts nothing. ``Redis`` is not a
+#: fact; "the project is built with Redis" is the fact, and that is an edge.
+#: Having an explicit kind for things rather than an empty list keeps the column
+#: non-empty, which makes "every node of this sort" a containment test instead
+#: of a null check.
+#:
+#: The rest are reverse-engineered from what a transcript gets asked:
+#:
+#: ``fact``
+#:     Asserted once and stable. The endpoint a project targets.
+#: ``preference``
+#:     A standing constraint on how the speaker wants things done, which should
+#:     still apply to a question asked later.
+#: ``event``
+#:     Something that happened, with a date. Ordering and interval questions are
+#:     answered from these and they are useless undated.
+#: ``state``
+#:     The current value of something that moves, with the previous value still
+#:     in the transcript. That is the difference between retrieving a quota and
+#:     retrieving the wrong quota.
+#: ``request``
+#:     Something the speaker asked for help with, as against something the
+#:     project has. Without it the only box "I want to display friendly
+#:     messages for 404 and 400" fits is ``fact``, which stores it as a
+#:     description of the app and drops the wanting; a question counting what
+#:     the speaker raised then has every feature to choose from and no set to
+#:     count. Distinct from ``preference``, which is standing and applies to a
+#:     later answer, and from ``target``, which wants a value rather than work.
+CONVERSATION_NODE_KINDS = (
+    "object",
+    "fact",
+    "preference",
+    "event",
+    "state",
+    "target",
+    "proposed",
+    "request",
+)
+
+#: The node type of a bare date. A leaf by construction: a date is something
+#: other nodes point at and never something that points. Keeping dates as nodes
+#: rather than as strings inside a sentence is what turns "how many days between
+#: X and Y" from reading comprehension into subtraction.
+CONVERSATION_NODE_TIMESTAMP = "Timestamp"
+
+#: The node type of the transcript's own root subject, one per conversation.
+CONVERSATION_NODE_SUBJECT = "Subject"
+
+#: The two layers of the graph, carried on every edge.
+#:
+#: ``knowledge`` is the domain relation an entity-relationship extraction
+#: produces: ``builds``, ``built_with``, ``has_component``, ``ends_at``. Its
+#: ``role`` is open vocabulary, and has to be -- the relation name *is* the
+#: content of the edge, and collapsing ``built_with`` and ``deployed_to`` into
+#: ``related_to`` throws away exactly what made it worth extracting.
+#:
+#: ``semantic`` is the layer above it: not how two things stand in the world,
+#: but how two *statements* stand to each other. Its ``role`` is closed, because
+#: that is a question with four answers rather than as many as the domain has
+#: verbs.
+CONVERSATION_EDGE_TYPES = ("knowledge", "semantic")
+
+#: The closed half of ``role``: how two statements of one transcript relate.
+#:
+#: Chosen against what the questions need rather than what a transcript
+#: contains. A plain "related" edge is cheap to extract and answers nothing: the
+#: costly failures are reading a superseded value as current and reading two
+#: statements of one thing as a contradiction, and those need the direction.
+#:
+#: ``supersedes`` and ``contradicts`` both join two statements that disagree and
+#: are kept apart because the right answer differs. A superseded value has one
+#: answer, the later one. A contradiction has no later one -- the speaker said
+#: both and never resolved it -- and the answer is to say so.
+#:
+#: ``unrelated`` is a verdict, not a relation. Candidates come from vector
+#: proximity, which cannot tell a superseded value from an unrelated one --
+#: "the cap is 3,000" and "the cap is 4,800" embed about as close as "coverage
+#: is 71%" and "coverage is 84%" -- so it is reached often, and storing it is what
+#: stops the next pass paying to reach it again.
+CONVERSATION_SEMANTIC_ROLES = (
+    "supersedes",
+    "contradicts",
+    "precedes",
+    "refines",
+    "unrelated",
+)
+
+#: Nodes of one transcript's graph: things, and the statements made about them.
+#:
+#: One table rather than an entity table and a statement table, because the
+#: edges have to join across the two and SQL cannot point one foreign key at
+#: two tables. That constraint turned out to be a feature: a ``semantic`` edge
+#: between a thing and a statement about a different thing is expressible here
+#: and is not in the split schema.
+#:
+#: Identity is the normalised name, not the id the extractor made up. A model
+#: reading window 3 and window 40 writes "Shipping Rates API" both times when asked
+#: to, and ``uq_conversation_node_name`` is what makes the second one land on
+#: the first one's row instead of beside it.
+#:
+#: ``turn_indexes`` holds the provenance: the chunks a model read and cited for
+#: this node. An array on the row rather than a link table, which is what makes
+#: retrieval one indexed lookup -- node vectors come back from pgvector and the
+#: turns they point at are already on the row. Turn *indexes*, not row ids,
+#: because the index is what the extractor cites, what the time anchors are
+#: expressed in, and what ``conversation.store.fetch_turns`` takes as a span.
+conversation_node = Table(
+    "conversation_node",
+    METADATA,
+    _id(),
+    Column(
+        "database_id",
+        Text,
+        ForeignKey(catalog_database.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    # Which transcript. Matches `conversation.conversation_id` and is not a
+    # foreign key for the same reason that column is not: there is no
+    # conversation entity table, only turns carrying the id.
+    Column("conversation_id", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    # Lowercased, punctuation-stripped `name`. Stored rather than computed in
+    # the unique index because the normalisation is Python's, not Postgres's,
+    # and the two must not be allowed to disagree.
+    Column("normalized_name", Text, nullable=False),
+    # Open vocabulary, the extractor's own word: Person, Project, Technology,
+    # Metric, Timestamp, Platform.
+    Column("type", Text, nullable=False),
+    Column("kinds", ARRAY(Text), nullable=False),
+    Column("description", Text, nullable=True),
+    # The property this node states, normalised, and the value it states.
+    #
+    # These are what make `supersedes` and `contradicts` derivable instead of
+    # adjudicated. Two nodes attached to one subject with one `attribute_key`
+    # and different `value`s are, by construction, two readings of one quantity
+    # -- no model has to be asked whether "the cap is 3,000" and "the cap is
+    # 4,800" are about the same thing. Which is current is then a question about
+    # their turn numbers, which is also not a judgement call.
+    #
+    # Separate from `name` because `name` is what a reader sees and drifts
+    # between windows ("Daily cap" / "API daily label cap"); the key is
+    # machine-facing and normalised so the two collapse.
+    Column("attribute_key", Text, nullable=True),
+    Column("value", Text, nullable=True),
+    Column("turn_indexes", ARRAY(Integer), nullable=True),
+    # A quote the extractor copied from one of those turns, kept because it is
+    # the one piece of attribution that cannot be wrong -- a cited turn index
+    # can be a hallucination, a verbatim string that appears in the turn cannot.
+    Column("evidence", Text, nullable=True),
+    # What the speaker treated as "now" when this was said, copied from the
+    # earliest turn cited.
+    Column("time_anchor", Text, nullable=True),
+    # When the event this node describes actually *happened*.
+    #
+    # Distinct from `time_anchor`, and the distinction cost a wrong answer
+    # before it existed: the anchor is when the speaker was talking, so an April
+    # turn recalling a March event anchors to April. Ordering by the anchor
+    # orders the telling, not the events. This column is parsed out of what the
+    # extractor read in the sentence itself, and ordering by it is a sort rather
+    # than a model call.
+    Column("occurred_on", Date, nullable=True),
+    *_edited(),
+    CheckConstraint(
+        "kinds <@ ARRAY["
+        f"{', '.join(repr(k) for k in CONVERSATION_NODE_KINDS)}"
+        "]::text[] AND array_length(kinds, 1) >= 1",
+        name="conversation_node_kinds_value",
+    ),
+    UniqueConstraint(
+        "database_id",
+        "conversation_id",
+        "normalized_name",
+        name="uq_conversation_node_name",
+    ),
+    Index(
+        "ix_conversation_node_database_conversation",
+        "database_id",
+        "conversation_id",
+    ),
+    # Reaching every node of one kind is what an aggregate question needs --
+    # "how many bugs did I fix" is a count over `event`, not a similarity
+    # search -- and GIN is what makes the containment test an index scan.
+    Index("ix_conversation_node_kinds", "kinds", postgresql_using="gin"),
+)
+
+#: Every edge of the graph, both layers, in one table.
+#:
+#: ``type`` says which layer and ``role`` says which relation within it. One
+#: table because the layers share endpoints and a reader wants them together:
+#: the knowledge edges say what the things are to each other, the semantic edges
+#: say which of the statements about them still holds, and answering a question
+#: usually needs both.
+#:
+#: Directed, and the direction is load-bearing: ``supersedes`` means source
+#: replaces target, ``precedes`` means source happened first, ``builds`` means
+#: source is the builder. A reader that ignores it inverts the answer.
+conversation_edge = Table(
+    "conversation_edge",
+    METADATA,
+    Column(
+        "source_id",
+        Text,
+        ForeignKey(conversation_node.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "target_id",
+        Text,
+        ForeignKey(conversation_node.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("type", Text, nullable=False, primary_key=True),
+    Column("role", Text, nullable=False, primary_key=True),
+    # The edge as a sentence. Rendered once, at write time, so that every
+    # reader of this row gets the same wording -- the document pipeline learned
+    # this the expensive way, by having three callers render relations
+    # separately until one of them printed the role raw and told the model
+    # nothing.
+    Column("statement", Text, nullable=True),
+    # Which turns asserted the edge, and a quote from one of them. An
+    # entity-relationship extraction normally keeps neither, and then a reader
+    # that doubts an edge has nothing to check it against.
+    Column("turn_indexes", ARRAY(Integer), nullable=True),
+    Column("evidence", Text, nullable=True),
+    Column("reason", Text, nullable=True),
+    # Whether this came from comparing fields or from a model call. Kept
+    # because the two have different failure modes and a reader auditing a
+    # surprising edge needs to know which one to doubt.
+    Column("derived", Boolean, nullable=False, server_default=text("false")),
+    # What proposed the pair, not what decided it. Kept so the candidate
+    # threshold can be re-tuned against its own recall.
+    Column("distance", Text, nullable=True),
+    CheckConstraint(
+        f"type IN ({', '.join(repr(t) for t in CONVERSATION_EDGE_TYPES)})",
+        name="conversation_edge_type_value",
+    ),
+    # Only the semantic half is closed. A knowledge role is whatever verb the
+    # transcript used, and constraining it would mean rejecting a correct edge
+    # for using a word this file had not thought of.
+    CheckConstraint(
+        "type <> 'semantic' OR role IN "
+        f"({', '.join(repr(r) for r in CONVERSATION_SEMANTIC_ROLES)})",
+        name="conversation_edge_semantic_role_value",
+    ),
+    # Reading every edge of the nodes a search matched is the query-time
+    # question, and it asks from both sides.
+    Index("ix_conversation_edge_source", "source_id"),
+    Index("ix_conversation_edge_target", "target_id"),
+    Index("ix_conversation_edge_type", "type"),
+)
+
+
+# ---------------------------------------------------------------------------
 # SQL statements and their table references
 # ---------------------------------------------------------------------------
 
@@ -600,9 +923,18 @@ column_attribute__term = Table(
     UniqueConstraint("attribute_id"),
 )
 
-# HAS_ATTRIBUTE: this column *is* an instance of the attribute. A column can
-# carry several. A column that *references* another table's key is a
-# SEMANTIC_FK instead, below, and targets a Concept key rather than an attribute.
+# HAS_ATTRIBUTE and SEMANTIC_FK both run Column -> ColumnAttribute, but they
+# assert different things and get their own tables rather than one table with a
+# `kind` discriminator:
+#
+#   HAS_ATTRIBUTE  this column *is* an instance of the attribute
+#   SEMANTIC_FK    this column *references* the attribute, which describes a
+#                  column on another table
+#
+# Their cardinality already differs -- `resolve_semantic_fks` treats a column as
+# unlinked when it has no SEMANTIC_FK, so at most one is expected, whereas a
+# column can carry several attributes -- and a discriminator in the primary key
+# makes any constraint that applies to only one of them impossible to express.
 column__has_attribute = Table(
     "column__has_attribute",
     METADATA,
@@ -620,97 +952,6 @@ column__has_attribute = Table(
     ),
 )
 
-# A Concept is one real-world entity, whatever number of tables it is stored in.
-# Every Term belongs to exactly one: most Concepts have a single member, and an
-# entity split across tables that share a key (`customer` and `customer_ext`)
-# has one member per table (`auto_ontology.semantic.concepts`).
-#
-# Scoped by database so a data reset removes it by cascade. Compilation merges
-# Concepts by moving rows, never by deleting and recreating them, so the
-# semantic FKs that target a Concept's keys survive a recompile.
-concept = Table(
-    "concept",
-    METADATA,
-    _id(),
-    Column(
-        "database_id",
-        Text,
-        ForeignKey(catalog_database.c.id, ondelete="CASCADE"),
-        nullable=False,
-    ),
-    Column("name", Text, nullable=False),
-    Column("description", Text, nullable=True),
-    Column("source", Text, nullable=False, server_default=text("'semantic'")),
-    _certified("certified"),
-    *_edited(),
-    _imported_id(),
-    UniqueConstraint("database_id", "name", name="uq_concept_database_name"),
-)
-
-# MEMBER_OF: Term -> Concept. `UNIQUE(term_id)`: a Term belongs to one Concept.
-term__concept = Table(
-    "term__concept",
-    METADATA,
-    Column(
-        "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
-    ),
-    Column(
-        "concept_id",
-        Text,
-        ForeignKey(concept.c.id, ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    UniqueConstraint("term_id"),
-)
-
-# A key identifies the Concept's rows, such as `customer_id`. A Concept can have
-# more than one: a surrogate id and a business code both identify a customer.
-concept_key = Table(
-    "concept_key",
-    METADATA,
-    _id(),
-    Column(
-        "concept_id",
-        Text,
-        ForeignKey(concept.c.id, ondelete="CASCADE"),
-        nullable=False,
-    ),
-    Column("name", Text, nullable=False),
-)
-
-# The column that holds a key on one member table. This is what a join through
-# the Concept lands on, so every hop stays `schema.table.column` of a real
-# table: `UNIQUE(key_id, table_id)` keeps one column per member table, and
-# `UNIQUE(column_id)` keeps a column the key of one Concept only.
-concept_key__column = Table(
-    "concept_key__column",
-    METADATA,
-    Column(
-        "key_id",
-        Text,
-        ForeignKey(concept_key.c.id, ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    Column(
-        "column_id",
-        Text,
-        ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    Column(
-        "table_id",
-        Text,
-        ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
-        nullable=False,
-    ),
-    UniqueConstraint("key_id", "table_id"),
-    UniqueConstraint("column_id"),
-)
-
-# SEMANTIC_FK: Column -> ConceptKey. The column references the Concept, and a
-# join reaches whichever member table holds the field a query needs, on that
-# member's key column. The column is the primary key: a column references at
-# most one key, which `resolve_semantic_fks` relies on to find unlinked ones.
 column__semantic_fk = Table(
     "column__semantic_fk",
     METADATA,
@@ -721,10 +962,10 @@ column__semantic_fk = Table(
         primary_key=True,
     ),
     Column(
-        "key_id",
+        "attribute_id",
         Text,
-        ForeignKey(concept_key.c.id, ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
     ),
     Column(
         "use_in_join_paths",
@@ -1363,13 +1604,7 @@ Index("ix_sql_attribute__term_term_id", sql_attribute__term.c.term_id)
 # (`fetch_attr_column_contexts` binds the attribute first). The composite
 # primary key already indexes the column_id order; these cover the reverse.
 Index("ix_column__has_attribute_attribute_id", column__has_attribute.c.attribute_id)
-Index("ix_column__semantic_fk_key_id", column__semantic_fk.c.key_id)
-
-# A Concept's members, keys and key columns are read from the Concept side.
-Index("ix_concept_database_id", concept.c.database_id)
-Index("ix_term__concept_concept_id", term__concept.c.concept_id)
-Index("ix_concept_key_concept_id", concept_key.c.concept_id)
-Index("ix_concept_key__column_table_id", concept_key__column.c.table_id)
+Index("ix_column__semantic_fk_attribute_id", column__semantic_fk.c.attribute_id)
 
 # Supports the case-insensitive name check that replaces a unique constraint.
 Index("ix_zone_name_lower", func.lower(zone.c.name))
@@ -1407,7 +1642,6 @@ for _table in (
     catalog_table,
     catalog_column,
     term,
-    concept,
     column_attribute,
     sql_attribute,
     custom_analysis,
@@ -1465,11 +1699,83 @@ for _table in TRIGRAM_SEARCH_TABLES:
             postgresql_ops={_column: "gin_trgm_ops"},
         )
 
+# ---------------------------------------------------------------------------
+# join_path_edge view -- no longer read from Python; see note below.
+# ---------------------------------------------------------------------------
+
+#: Was the edge set for :func:`auto_ontology.dal.attributes.find_join_path` and
+#: :func:`auto_ontology.dal.attributes.find_table_bridge`; both now traverse
+#: ``_find_table_join_hops`` instead, which reads ``column__semantic_fk`` and
+#: ``column__has_attribute`` directly rather than through this view. Nothing
+#: in ``auto_ontology/dal/attributes.py`` queries this view anymore -- it's kept
+#: (unused) rather than dropped here, since removing it is a migration
+#: decision, not a side effect of a traversal change. Its original shape,
+#: kept for that future cleanup:
+#:
+#: * ``CONTAINS`` (Table <-> Column) and ``HAS_ATTRIBUTE``
+#:   (Column <-> ColumnAttribute) appear in both directions.
+#: * ``SEMANTIC_FK`` appears **outgoing only** (Column -> ColumnAttribute).
+#:
+#: Note carefully what that last line does *not* say. ``SEMANTIC_FK`` is
+#: **stored** in one direction, but the codebase reads it in both:
+#: ``fetch_attr_column_contexts`` binds a ColumnAttribute and finds the columns
+#: referencing it, which is the reverse traversal. Anything needing that must
+#: query :data:`column__semantic_fk` directly rather than this view.
+#:
+#: The restriction is specific to path-finding. Allowed to traverse SEMANTIC_FK
+#: backwards, a path would hop from one FK column up to a shared target
+#: attribute and back down a *different* FK column, inventing a join between two
+#: columns that merely reference the same thing -- two ``customer_id`` columns
+#: joined to each other. Here that is simply a row the view does not emit.
+JOIN_PATH_EDGE_VIEW_SQL = """
+CREATE OR REPLACE VIEW join_path_edge AS
+    SELECT 'column'::text AS src_kind, c.id       AS src_id,
+           'table'::text  AS dst_kind, c.table_id AS dst_id
+      FROM catalog_column c
+    UNION ALL
+    SELECT 'table', c.table_id, 'column', c.id
+      FROM catalog_column c
+    UNION ALL
+    SELECT 'column', h.column_id, 'column_attribute', h.attribute_id
+      FROM column__has_attribute h
+    UNION ALL
+    SELECT 'column_attribute', h.attribute_id, 'column', h.column_id
+      FROM column__has_attribute h
+    UNION ALL
+    SELECT 'column', f.column_id, 'column_attribute', f.attribute_id
+      FROM column__semantic_fk f
+"""
+
+DROP_JOIN_PATH_EDGE_VIEW_SQL = "DROP VIEW IF EXISTS join_path_edge"
+
+#: The view as something ``select()`` can take, on its **own** ``MetaData``.
+#:
+#: Not on :data:`METADATA`, deliberately. Alembic autogenerates by diffing that
+#: object against the database and cannot tell a view from a table, so a view
+#: registered there would be emitted as a ``CREATE TABLE`` on the next
+#: autogenerate and then reported as permanent drift. Keeping it in a separate
+#: registry means the DDL above stays the single definition of this view, while
+#: queries still get column objects instead of raw strings.
+VIEWS = MetaData()  # unqualified, for the same reason as METADATA
+
+join_path_edge = Table(
+    "join_path_edge",
+    VIEWS,
+    Column("src_kind", Text, nullable=False),
+    Column("src_id", Text, nullable=False),
+    Column("dst_kind", Text, nullable=False),
+    Column("dst_id", Text, nullable=False),
+)
+
 __all__ = [
     "METADATA",
     "TRIGRAM_SEARCH_TABLES",
     "column__join",
     "column__union",
+    "VIEWS",
+    "join_path_edge",
+    "JOIN_PATH_EDGE_VIEW_SQL",
+    "DROP_JOIN_PATH_EDGE_VIEW_SQL",
     "analysis",
     "catalog_column",
     "catalog_database",
@@ -1480,9 +1786,6 @@ __all__ = [
     "column__semantic_fk",
     "column_attribute__term",
     "column__foreign_key",
-    "concept",
-    "concept_key",
-    "concept_key__column",
     "custom_analysis",
     "custom_analysis__sql",
     "pql_analysis",
@@ -1496,7 +1799,6 @@ __all__ = [
     "table__join",
     "table__term",
     "term",
-    "term__concept",
     "term__term_family",
     "term_family",
     "text_attribute",

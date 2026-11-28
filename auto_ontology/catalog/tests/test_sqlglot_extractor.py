@@ -36,6 +36,76 @@ def test_extract_tables_and_columns_with_column() -> None:
     assert result.tables["s.t"].columns == {"col"}
 
 
+def test_extract_tables_and_columns_bare_columns_per_select() -> None:
+    """Without schemas, a bare column belongs to the one table its own SELECT reads."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t WHERE b IN (SELECT c FROM u) GROUP BY a HAVING COUNT(d) > 1",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"a", "b", "d"}
+    assert result.tables["u"].columns == {"c"}
+
+
+def test_extract_tables_and_columns_bare_columns_beside_a_visible_cte() -> None:
+    """A CTE a SELECT can see but doesn't read isn't one of its tables."""
+    result = extract_tables_and_columns(
+        "WITH c AS (SELECT a FROM t), d AS (SELECT b FROM u) SELECT * FROM c CROSS JOIN d",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"a"}
+    assert result.tables["u"].columns == {"b"}
+
+
+def test_extract_tables_and_columns_subquery_inside_having() -> None:
+    """A subquery's own columns aren't taken for the outer HAVING's output names."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t GROUP BY a HAVING a IN (SELECT c FROM u)", ["postgres"], {}
+    )
+    assert result.tables["u"].columns == {"c"}
+
+
+def test_extract_tables_and_columns_window_order_by_matching_an_output_alias() -> None:
+    """An ORDER BY inside a window or WITHIN GROUP isn't a SELECT output clause."""
+    window = extract_tables_and_columns(
+        "SELECT ROW_NUMBER() OVER (ORDER BY a) AS a FROM t", ["postgres"], {}
+    )
+    assert window.tables["t"].columns == {"a"}
+    within_group = extract_tables_and_columns(
+        "SELECT STRING_AGG(b, ',') WITHIN GROUP (ORDER BY a) AS a FROM t",
+        ["postgres"],
+        {},
+    )
+    assert within_group.tables["t"].columns == {"a", "b"}
+
+
+def test_extract_tables_and_columns_aggregate_argument_named_like_an_output() -> None:
+    """``SUM(a)`` in HAVING reads the input column a, even beside ``AS a``."""
+    result = extract_tables_and_columns(
+        "SELECT SUM(b) AS a FROM t HAVING SUM(a) > 1", ["postgres"], {}
+    )
+    assert result.tables["t"].columns == {"a", "b"}
+
+
+def test_extract_tables_and_columns_scalar_function_of_an_output_alias() -> None:
+    """``ORDER BY ABS(total)`` reads the output alias, not a column of the table."""
+    result = extract_tables_and_columns(
+        "SELECT SUM(b) AS total, c FROM t GROUP BY c ORDER BY ABS(total)",
+        ["postgres"],
+        {},
+    )
+    assert result.tables["t"].columns == {"b", "c"}
+
+
+def test_extract_tables_and_columns_duplicate_alias_keeps_the_tables() -> None:
+    """A query sqlglot can't resolve still returns the tables it names."""
+    result = extract_tables_and_columns(
+        "SELECT a FROM t AS x JOIN u AS x ON TRUE", ["postgres"], {}
+    )
+    assert set(result.tables) == {"t", "u"}
+
+
 def test_extract_tables_and_columns_cte_virtual_tables_excluded() -> None:
     """CTE aliases must not be treated as real source tables."""
     result = extract_tables_and_columns(

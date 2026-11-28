@@ -12,7 +12,7 @@ import logging
 from typing import Any, Callable, Dict, Iterator, Literal
 
 from auto_ontology.retrieval.text_to_sql.state import (
-    TextToSQLPayload,
+    AgentRequest,
     AgentState,
     get_question_for_processing,
 )
@@ -82,7 +82,7 @@ def run_steps(state: AgentState, steps: dict[str, Step]) -> Iterator[StepEvent]:
 
 
 __all__ = [
-    "TextToSQLPayload",
+    "AgentRequest",
     "AgentState",
     "create_steps",
     "get_question_for_processing",

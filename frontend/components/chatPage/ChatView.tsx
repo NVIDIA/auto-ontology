@@ -79,20 +79,40 @@ export const ChatView = () => {
 		}
 	}, []);
 
+	// First load. `sidebarLoading` already starts true, so nothing is set up front.
 	useEffect(() => {
-		setSidebarLoading(true);
-		refreshConversations().finally(() => setSidebarLoading(false));
+		let cancelled = false;
+		const loadSidebar = async () => {
+			await refreshConversations();
+			if (!cancelled) setSidebarLoading(false);
+		};
+		void loadSidebar();
 
 		semanticCompilationApi
 			.getStatus()
-			.then((res) => setSemanticReady(res.calculated))
-			.catch(() => setSemanticReady(false));
+			.then((res) => {
+				if (!cancelled) setSemanticReady(res.calculated);
+			})
+			.catch(() => {
+				if (!cancelled) setSemanticReady(false);
+			});
+		return () => {
+			cancelled = true;
+		};
 	}, [refreshConversations]);
+
+	// When the URL stops naming a conversation, nothing is left to load. That is
+	// state following a prop, so it is adjusted while rendering instead of by an
+	// effect that would clear it a commit late.
+	const [previousFocusId, setPreviousFocusId] = useState(focusId);
+	if (previousFocusId !== focusId) {
+		setPreviousFocusId(focusId);
+		if (focusId == null) setMessageListLoading(false);
+	}
 
 	useEffect(() => {
 		if (!focusId) {
 			loadedFocusRef.current = null;
-			setMessageListLoading(false);
 			return;
 		}
 		if (loadedFocusRef.current === focusId) return;
@@ -100,24 +120,24 @@ export const ChatView = () => {
 		clearConversation();
 
 		let active = true;
-		setMessageListLoading(true);
-		conversationsApi
-			.get(focusId)
-			.then((detail: ConversationDetail) => {
+		const loadFocused = async () => {
+			setMessageListLoading(true);
+			try {
+				const detail: ConversationDetail = await conversationsApi.get(focusId);
 				if (!active) return;
 				const conv = toConversation(detail);
 				setActiveConvId(detail.id);
 				setMessages(conv.messages);
 				resumeIfRunning(detail.id);
-			})
-			.catch(() => {
+			} catch {
 				if (!active) return;
 				loadedFocusRef.current = null;
 				updateFocusInUrl(null);
-			})
-			.finally(() => {
+			} finally {
 				if (active) setMessageListLoading(false);
-			});
+			}
+		};
+		void loadFocused();
 		return () => {
 			active = false;
 		};

@@ -2,12 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
 import pytest
 
-from auto_ontology.retrieval.text_to_sql.react import retrieve as tool
+from auto_ontology.retrieval.text_to_sql.react import catalog as tool
 from auto_ontology.retrieval.text_to_sql.react import siblings
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 
@@ -66,11 +67,28 @@ ATTRIBUTE_COLUMNS = {
 }
 
 
+SEMANTIC_STORE = object()
+DATA_STORE = object()
+
+
+@pytest.fixture(autouse=True)
+def stores(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the two collections the tool opens when it searches.
+
+    Patched rather than passed: the tool opens the store it needs where it
+    needs it, so there is no handle to hand it. Sentinels, because a test
+    asserts which of the two a search went to, never what it holds.
+    """
+    monkeypatch.setattr(tool, "get_semantic_objects_retriever", lambda: SEMANTIC_STORE)
+    monkeypatch.setattr(tool, "get_data_objects_retriever", lambda: DATA_STORE)
+
+
 @pytest.fixture
 def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Stub every data-access call the tool makes, recording what it asked."""
     seen: dict[str, list[Any]] = {
         "meaning": [],
+        "physical": [],
         "names": [],
         "name_scopes": [],
         "join": [],
@@ -83,13 +101,17 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     }
 
     def meaning(
-        _retriever: object,
+        retriever: object,
         query: str,
         list_of_semantic: list[str],
         database_name: str | None,
         per_label_k: dict[str, int],
     ) -> list[dict]:
-        seen["meaning"].append((query, list_of_semantic, database_name))
+        # Kept apart by which collection was searched. One search of meaning
+        # goes to each, and a test that asked what the semantic layer was
+        # sent should not have to count the physical call in between.
+        where = "meaning" if retriever is SEMANTIC_STORE else "physical"
+        seen[where].append((query, list_of_semantic, database_name))
         return [dict(h) for h in meaning_hits.get(query, [])]
 
     def names(
@@ -127,18 +149,12 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         seen["join"].append((anchor, dest))
         return [
             {
-                "hops": [
-                    {
-                        "source_schema": "sales",
-                        "source_table": "orders",
-                        "source_column": "cust_ref",
-                        "target_schema": "crm",
-                        "target_table": "customers",
-                        "target_column": "customer_id",
-                        "key": "Customer.customer_id",
-                    }
-                ],
-                "default": True,
+                "source_schema": "sales",
+                "source_table": "orders",
+                "source_column": "cust_ref",
+                "target_schema": "crm",
+                "target_table": "customers",
+                "target_column": "customer_id",
             }
         ]
 
@@ -154,7 +170,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         "find_column_id_by_table_and_name",
         lambda table, column, database: f"{table}.{column}",
     )
-    monkeypatch.setattr(tool, "find_join_routes", join_path)
+    monkeypatch.setattr(tool, "find_join_path", join_path)
     monkeypatch.setattr(
         tool,
         "fetch_attr_column_contexts",
@@ -168,7 +184,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(retriever=object(), connectors=[], database_name="shop")
+    return ToolContext(connectors=[], database_name="shop")
 
 
 def test_definition_comes_back_with_its_sql_and_its_table(calls: dict) -> None:
@@ -183,6 +199,60 @@ def test_definition_comes_back_with_its_sql_and_its_table(calls: dict) -> None:
     )
 
 
+def test_a_shown_analysis_is_recorded_but_an_attribute_is_not(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    analysis = {
+        "id": "an-bulk",
+        "label": "CustomAnalysis",
+        "name": "bulk_units",
+        "description": "Units on bulk lines",
+        "sql": "SELECT SUM(amount) FROM sales.orders WHERE discount > 0",
+        "relevant_tables": [{"id": "t-orders"}],
+    }
+    original = tool._get_candidates_information
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda r, q, *a, **k: (
+            [analysis, REVENUE] if r is SEMANTIC_STORE else original(r, q, *a, **k)
+        ),
+    )
+    ctx = _ctx()
+    tool.retrieve(ctx, "how is revenue calculated")
+
+    assert set(ctx.shown_analyses) == {"an-bulk"}
+    assert ctx.shown_analyses["an-bulk"]["sql"] == analysis["sql"]
+
+
+def test_an_analysis_the_limit_dropped_is_not_recorded_as_shown(
+    calls: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no SQL and no description its block is just ``ANALYSIS bulk_units``,
+    # which is also how the "also found" line names it once it is dropped.
+    analysis = {
+        "id": "an-bulk",
+        "label": "CustomAnalysis",
+        "name": "bulk_units",
+        "relevant_tables": [{"id": "t-orders"}],
+    }
+    original = tool._get_candidates_information
+    monkeypatch.setattr(
+        tool,
+        "_get_candidates_information",
+        lambda r, q, *a, **k: (
+            [REVENUE, analysis] if r is SEMANTIC_STORE else original(r, q, *a, **k)
+        ),
+    )
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "200")
+    ctx = _ctx()
+    text = tool.retrieve(ctx, "how is revenue calculated")
+
+    assert "ALSO FOUND" in text
+    assert text.split("ALSO FOUND")[1].count("ANALYSIS bulk_units") == 1
+    assert "an-bulk" not in ctx.shown_analyses
+
+
 def test_second_search_joins_new_tables_to_ones_already_shown(calls: dict) -> None:
     ctx = _ctx()
     tool.retrieve(ctx, "how is revenue calculated")
@@ -195,42 +265,9 @@ def test_second_search_joins_new_tables_to_ones_already_shown(calls: dict) -> No
     )
     assert (
         "JOIN crm.customers ↔ sales.orders: "
-        "sales.orders.cust_ref = crm.customers.customer_id [key Customer.customer_id]"
+        "sales.orders.cust_ref = crm.customers.customer_id"
     ) in text
     assert calls["join"] == [("customers.customer_id", "orders.order_id")]
-
-
-def test_every_direct_join_is_listed_with_the_default_first(
-    calls: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def hop(column: str) -> dict:
-        return {
-            "source_schema": "sales",
-            "source_table": "orders",
-            "source_column": column,
-            "target_schema": "crm",
-            "target_table": "customers",
-            "target_column": "customer_id",
-            "key": "Customer.customer_id",
-        }
-
-    routes = [
-        {"hops": [hop("cust_ref")], "default": True},
-        {"hops": [hop("billing_ref")], "default": False},
-    ]
-    monkeypatch.setattr(tool, "find_join_routes", lambda _a, _d: routes)
-    ctx = _ctx()
-    tool.retrieve(ctx, "how is revenue calculated")
-    text = tool.retrieve(ctx, "customer status")
-
-    assert (
-        "JOIN crm.customers ↔ sales.orders, one of:\n"
-        "  sales.orders.cust_ref = crm.customers.customer_id"
-        " [key Customer.customer_id] (default)\n"
-        "  sales.orders.billing_ref = crm.customers.customer_id"
-        " [key Customer.customer_id]"
-    ) in text
-    assert ctx.join_paths == [{"path": routes[0]["hops"]}]
 
 
 def test_a_table_already_shown_is_not_repeated_in_full(calls: dict) -> None:
@@ -345,7 +382,7 @@ def test_physical_names_are_searched_in_the_target_database_only(
 def test_names_are_searched_everywhere_without_a_target_database(
     calls: dict,
 ) -> None:
-    ctx = ToolContext(retriever=object(), connectors=[])
+    ctx = ToolContext(connectors=[])
 
     tool.retrieve(ctx, "customers")
 
@@ -517,7 +554,6 @@ def test_empty_query_is_refused(calls: dict) -> None:
 def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     """Two retrievers: the semantic one finds nothing, the data one finds a
     covered column, an uncovered foreign key and a covered table."""
-    data_retriever = object()
     seen: dict[str, list] = {"coverage": []}
 
     def meaning(
@@ -527,7 +563,7 @@ def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         database_name: str | None,
         per_label_k: dict[str, int],
     ) -> list[dict]:
-        if retriever is not data_retriever:
+        if retriever is not DATA_STORE:
             return []
         seen["labels"] = list_of_semantic
         return [
@@ -553,14 +589,7 @@ def physical(calls: dict, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
 
     monkeypatch.setattr(tool, "_get_candidates_information", meaning)
     monkeypatch.setattr(tool, "fetch_semantic_coverage", coverage)
-    seen["ctx"] = [
-        ToolContext(
-            retriever=object(),
-            data_retriever=data_retriever,
-            connectors=[],
-            database_name="shop",
-        )
-    ]
+    seen["ctx"] = [ToolContext(connectors=[], database_name="shop")]
     return seen
 
 
@@ -662,17 +691,12 @@ def test_a_bridge_on_a_join_route_is_in_view(
     hop = {"source_column": "id", "target_column": "id"}
     monkeypatch.setattr(
         tool,
-        "find_join_routes",
+        "find_join_path",
         lambda _a, _d: [
-            {
-                "hops": [
-                    {**hop, "source_schema": "sales", "source_table": "orders"}
-                    | {"target_schema": "sales", "target_table": "order_links"},
-                    {**hop, "source_schema": "sales", "source_table": "order_links"}
-                    | {"target_schema": "crm", "target_table": "customers"},
-                ],
-                "default": True,
-            }
+            {**hop, "source_schema": "sales", "source_table": "orders"}
+            | {"target_schema": "sales", "target_table": "order_links"},
+            {**hop, "source_schema": "sales", "source_table": "order_links"}
+            | {"target_schema": "crm", "target_table": "customers"},
         ],
     )
     ctx = _ctx()
@@ -710,25 +734,29 @@ def test_a_quoted_table_name_ending_in_punctuation_is_in_view(
     assert not ctx.was_shown("finance", "refunds")
 
 
-def test_a_table_named_after_500_characters_in_saved_sql_is_in_view(
+def test_a_saved_definition_uses_the_observation_budget(
     calls: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     padding = ", ".join(f"c{i}" for i in range(300))
-    long_sql = (
-        f"SELECT {padding} FROM finance.refunds r "
+    sql = (
+        f"SELECT {padding}\nFROM finance.refunds r\n"
         "JOIN finance.hidden_ledger h ON h.id = r.id"
     )
-    assert long_sql.index("hidden_ledger") > 500
-    analysis = {**REVENUE, "sql": long_sql}
+    assert sql.index("hidden_ledger") > 500
     monkeypatch.setattr(
-        tool, "_get_candidates_information", lambda *a, **k: [dict(analysis)]
+        tool, "_get_candidates_information", lambda *a, **k: [{**REVENUE, "sql": sql}]
     )
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "4000")
     ctx = _ctx()
-
-    text = tool.retrieve(ctx, "refunds")
-
-    assert long_sql in text
+    assert sql in tool.retrieve(ctx, "refunds")
     assert ctx.was_shown("finance", "hidden_ledger")
+
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "500")
+    ctx = _ctx()
+    text = tool.retrieve(ctx, "refunds")
+    assert len(text) <= 500
+    assert "hidden_ledger" not in text
+    assert not ctx.was_shown("finance", "hidden_ledger")
 
 
 ORDERS_ARCHIVE = {
@@ -775,9 +803,7 @@ def with_siblings(calls: dict, monkeypatch: pytest.MonkeyPatch) -> CountingConne
 def test_a_near_copy_is_named_with_rows_and_differences(
     with_siblings: CountingConnector,
 ) -> None:
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     text = tool.retrieve(ctx, "how is revenue calculated")
 
     assert (
@@ -793,9 +819,7 @@ def test_a_near_copy_is_named_with_rows_and_differences(
 def test_a_near_copy_is_named_once_per_episode(
     with_siblings: CountingConnector,
 ) -> None:
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     tool.retrieve(ctx, "how is revenue calculated")
     ctx.seen_tables.clear()
     again = tool.retrieve(ctx, "how is revenue calculated")
@@ -808,9 +832,7 @@ def test_a_count_is_qualified_by_the_connector_and_capped_in_time(
     with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_SIBLING_COUNT_TIMEOUT_S", "3")
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     tool.retrieve(ctx, "how is revenue calculated")
 
     assert with_siblings.sql == [
@@ -827,9 +849,7 @@ def test_a_table_the_connector_cannot_qualify_is_named_without_a_count(
         raise ValueError(f"Trino requires a schema to qualify {table!r}")
 
     monkeypatch.setattr(with_siblings, "qualify", refuse)
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     text = tool.retrieve(ctx, "how is revenue calculated")
 
     assert "SIMILAR sales.orders ~ sales.orders_archive: 4 shared columns" in text
@@ -840,9 +860,7 @@ def test_counts_past_the_limit_are_left_off_and_not_cached(
     with_siblings: CountingConnector, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_SIBLING_COUNTS", "1")
-    ctx = ToolContext(
-        retriever=object(), connectors=[with_siblings], database_name="shop"
-    )
+    ctx = ToolContext(connectors=[with_siblings], database_name="shop")
     text = tool.retrieve(ctx, "how is revenue calculated")
 
     assert "SIMILAR sales.orders (120 rows) ~ sales.orders_archive: " in text
@@ -882,33 +900,22 @@ def test_a_lookup_copied_into_a_wide_table_is_not_a_sibling() -> None:
     assert siblings.find_siblings(lookup, [wide]) == []
 
 
-def test_a_concept_the_limit_dropped_is_shown_by_a_later_search(
-    calls: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    members = [
-        {"table_id": "t-orders", "schema_name": "sales", "table_name": "orders"},
-        {"table_id": "t-customers", "schema_name": "crm", "table_name": "customers"},
-    ]
-    concept = {
-        "concept_id": "concept-1",
-        "concept_name": "Customer",
-        "members": members,
-        "keys": [],
-    }
-    monkeypatch.setattr(
-        tool,
-        "fetch_concept_members",
-        lambda ids: {i: concept for i in ids if i in {"t-orders", "t-customers"}},
+def test_tables_of_unconnected_databases_are_not_offered() -> None:
+    connected = ToolContext(
+        connectors=[
+            SimpleNamespace(database_name="a"),
+            SimpleNamespace(database_name="b"),
+        ]
     )
-    limit = {"chars": 10}
-    monkeypatch.setattr(tool.config, "max_observation_chars", lambda: limit["chars"])
-    ctx = _ctx()
 
-    first = tool.retrieve(ctx, "how is revenue calculated")
-    assert "CONCEPT Customer" not in first
-    assert "concept-1" not in ctx.shown_concepts
+    assert tool._in_database(connected, {"database_name": "a"})
+    assert not tool._in_database(connected, {"database_name": "gone"})
+    assert tool._in_database(connected, {"name": "no_database_recorded"})
 
-    limit["chars"] = 100_000
-    second = tool.retrieve(ctx, "customer status")
-    assert "CONCEPT Customer: sales.orders + crm.customers" in second
-    assert "concept-1" in ctx.shown_concepts
+
+def test_a_single_connection_does_not_offer_another_databases_tables() -> None:
+    connected = ToolContext(connectors=[SimpleNamespace(database_name="a")])
+
+    assert tool._in_database(connected, {"database_name": "a"})
+    assert not tool._in_database(connected, {"database_name": "gone"})
+    assert tool._in_database(connected, {"name": "no_database_recorded"})

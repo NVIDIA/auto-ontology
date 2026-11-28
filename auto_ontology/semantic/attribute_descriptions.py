@@ -73,10 +73,9 @@ def describe_column_attributes(database_name: str) -> int:
         references[end["source_column_id"]].append(
             f"{end['target_table_name']}.{end['target_column_name']}"
         )
-        if end["target_attribute_id"]:
-            referrers[end["target_attribute_id"]].append(
-                f"{end['source_table_name']}.{end['source_column_name']}"
-            )
+        referrers[end["target_attribute_id"]].append(
+            f"{end['source_table_name']}.{end['source_column_name']}"
+        )
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:

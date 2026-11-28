@@ -73,7 +73,7 @@ class SQLUnconstructableAgent(BaseAgent):
             "response": response_text,
             "sql_code": "",
             "sql_columns": [],
-            "custom_analyses_used": [],
+            "custom_analyses_used": path_state.get("custom_analyses_used", []),
             "sql_response_from_db": None,
         }
 

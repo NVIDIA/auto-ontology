@@ -109,7 +109,7 @@ def ctx(monkeypatch: pytest.MonkeyPatch) -> ToolContext:
     )
     for search in ("_uncovered_physical_hits", "_name_hits"):
         setattr(search, lambda *_: [])
-    return ToolContext(retriever=None, connectors=[], database_name="shop")
+    return ToolContext(connectors=[], database_name="shop")
 
 
 def _found(monkeypatch: pytest.MonkeyPatch, hits: list[dict]) -> None:
@@ -268,3 +268,22 @@ def test_a_long_list_is_cut_and_counted(
 
     assert len(out) <= 200
     assert out.endswith("more tables not shown; search with words to narrow them.")
+
+
+def test_a_term_shows_saved_sql_that_fits_the_observation(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sql = "SELECT * FROM orders WHERE " + " AND ".join(
+        f"amount > {i}" for i in range(60)
+    )
+    _found(monkeypatch, [{"id": "t1", "label": "Term"}])
+    monkeypatch.setattr(
+        info_module,
+        "fetch_sql_attributes_by_term_id",
+        lambda _: [{"name": "Revenue", "sql": sql}],
+    )
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "4000")
+    assert sql in information(ctx, "order")
+
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_OBSERVATION_CHARS", "500")
+    assert len(information(ctx, "order")) <= 500

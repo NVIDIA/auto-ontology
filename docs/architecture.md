@@ -158,6 +158,7 @@ time. All LLM calls in compilation use the `REASONING` model, capped at
 | Write column descriptions | LLM (`semantic/deterministic.py`) | On | — |
 | Name terms, with descriptions, synonyms, and display names | LLM (`semantic/term_extractor.py`) | On | — |
 | Embed terms | `EMBED` (`semantic/embed.py`) | On | — |
+| Propose derived-metric SQL attributes from each term's columns | LLM + rules (`semantic/sql_attribute_extractor.py`) | Off | `ENABLE_TABLE_SQL_ATTRIBUTES` |
 
 ### Cross-table pass
 
@@ -332,6 +333,6 @@ user to clarify.
 | Environment (`.env`, Helm values) | `REASONING_*`, `NON_REASONING_*`, `EMBED_*`, `RERANK_*`, `DEFAULT_MODELS_*` | Every model call |
 | Environment | `KUMO_RFM_API_URL`, `KUMO_RFM_API_KEY`, `KUMO_MAX_*` | Predictions |
 | Environment | `TEXT_TO_SQL_REACT_*` | ReAct limits (see [Limits](#limits)) |
-| Environment | `SEMANTIC_LLM_MAX_INFLIGHT`, `PREVENT_SEMANTIC_FK_DB_QUERIES` | Compilation concurrency, and whether foreign key inference queries the source |
+| Environment | `SEMANTIC_LLM_MAX_INFLIGHT`, `PREVENT_SEMANTIC_FK_DB_QUERIES`, `ENABLE_TABLE_SQL_ATTRIBUTES` | Compilation concurrency, whether foreign key inference queries the source, and whether terms get table-derived SQL attributes |
 
 [`.env.example`](../.env.example) documents every environment variable.
