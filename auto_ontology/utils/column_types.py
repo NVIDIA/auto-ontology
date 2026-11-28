@@ -68,11 +68,25 @@ def sample_values_editable(data_type: str | None) -> bool:
     if not data_type:
         return False
     lowered = data_type.strip().lower()
+    # ClickHouse wraps types in Nullable(...) / LowCardinality(...) (and nests
+    # them); treat these as transparent wrappers, like the connector does.
+    changed = True
+    while changed:
+        changed = False
+        for prefix in ("nullable(", "lowcardinality("):
+            if lowered.startswith(prefix) and lowered.endswith(")"):
+                lowered = lowered[len(prefix) : -1].strip()
+                changed = True
     # An array or composite column holds no single string a text box could
     # stand for, whatever its element type is.
     if lowered.endswith("[]") or lowered.startswith("_"):
         return False
-    base, _, _params = lowered.partition("(")
+    # End the base type name at '(' (params) or '<' (composite spelling such as
+    # array<string>, map<k,v>, struct<...>).
+    base = lowered
+    for delim in ("(", "<"):
+        if delim in base:
+            base = base.split(delim, 1)[0]
     return bool(set(_TYPE_TOKEN.findall(base)) & _TEXT_TYPES)
 
 

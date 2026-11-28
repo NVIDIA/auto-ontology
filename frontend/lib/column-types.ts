@@ -54,11 +54,29 @@ const TYPE_TOKEN = /[a-z][a-z0-9_]*/g;
  */
 export const sampleValuesEditable = (dataType: string | null | undefined): boolean => {
 	if (!dataType) return false;
-	const lowered = dataType.trim().toLowerCase();
+	let lowered = dataType.trim().toLowerCase();
+	// ClickHouse wraps types in Nullable(...) / LowCardinality(...) (and nests
+	// them); treat these as transparent wrappers, like the connector does.
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const prefix of ['nullable(', 'lowcardinality(']) {
+			if (lowered.startsWith(prefix) && lowered.endsWith(')')) {
+				lowered = lowered.slice(prefix.length, -1).trim();
+				changed = true;
+			}
+		}
+	}
 	// An array or composite column holds no single string a text box could
 	// stand for, whatever its element type is.
 	if (lowered.endsWith('[]') || lowered.startsWith('_')) return false;
-	const base = lowered.split('(')[0];
+	// End the base type name at '(' (params) or '<' (composite spelling such as
+	// array<string>, map<k,v>, struct<...>).
+	let base = lowered;
+	for (const delim of ['(', '<']) {
+		const idx = base.indexOf(delim);
+		if (idx !== -1) base = base.slice(0, idx);
+	}
 	return (base.match(TYPE_TOKEN) ?? []).some((token) => TEXT_TYPES.has(token));
 };
 
