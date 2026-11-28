@@ -27,6 +27,7 @@ test would prove nothing.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 import psycopg
@@ -132,6 +133,30 @@ def test_a_table_that_predates_the_index_is_upgraded(collection: str) -> None:
     plan = _plan(collection)
     assert "Index Scan" in plan, f"the search fell back to a scan:\n{plan}"
     assert f"ix_hnsw_{collection}_embedding" in plan
+
+
+def test_a_read_side_store_without_a_dimension_leaves_the_table_alone(
+    collection: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``vector_size=None`` (read-side config) must not attempt the upgrade.
+
+    The ALTER needs a dimension: without one it renders ``halfvec(NULL)``,
+    which fails and logs a build warning on every read-path init. The
+    writer-side init, which has the dimension, owns the upgrade.
+    """
+    vdb = PostgresVDB(
+        connection_string=get_postgres_connection_string(),
+        collection_name=collection,
+        schema_name="vdb",
+        vector_size=None,
+    )
+    with caplog.at_level(logging.WARNING):
+        vdb.create_index()
+
+    assert _index_present(collection) is False, "read side must not build the index"
+    assert not [
+        r for r in caplog.records if "could not build the HNSW index" in r.getMessage()
+    ]
 
 
 def test_the_plain_vector_column_cannot_be_indexed(collection) -> None:

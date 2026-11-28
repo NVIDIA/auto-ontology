@@ -337,7 +337,9 @@ class PostgresVDB:
                     # PostgreSQL's defaults bound neither the lock wait nor
                     # the build. Cap both (transaction-local): on timeout the
                     # rollback and warning below keep the store available,
-                    # just unindexed until a later write retries.
+                    # just unindexed until a later store initialization
+                    # retries (``_get_store`` caches the store, so a later
+                    # write on the same instance does not).
                     cur.execute("SET LOCAL lock_timeout = '10s'")
                     cur.execute("SET LOCAL statement_timeout = '300s'")
                     cur.execute(
@@ -376,6 +378,19 @@ class PostgresVDB:
         query per store init; when the index is missing, the same best-effort
         upgrade that fresh creation gets runs here too.
         """
+        if self.vector_size is None:
+            # Read-side stores are configured without a dimension: they
+            # cannot ALTER the column (``halfvec(NULL)`` is invalid SQL)
+            # and the writer-side init, which has the dimension, owns the
+            # upgrade. Trying would fail and log a build warning on every
+            # read-path init.
+            logger.info(
+                "PostgresVDB: no vector_size configured for %s.%s; "
+                "leaving the index upgrade to the writer-side init",
+                self.schema_name,
+                self.collection_name,
+            )
+            return
         index_name = f"ix_hnsw_{self.collection_name}_embedding"
         try:
             with psycopg.connect(self.connection_string) as conn:
