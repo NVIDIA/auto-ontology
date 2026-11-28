@@ -10,6 +10,9 @@ already described.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import duckdb
 import pytest
 
@@ -28,7 +31,7 @@ COMMENT ON COLUMN shop.orders.total IS 'Order total in dollars.';
 
 
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path: Path) -> Iterator[DuckDBDatabase]:
     path = tmp_path / "store.duckdb"
     conn = duckdb.connect(str(path))
     conn.execute(_DDL)
@@ -38,14 +41,14 @@ def db(tmp_path):
     database.close()
 
 
-def test_table_and_view_comments_are_descriptions(db) -> None:
+def test_table_and_view_comments_are_descriptions(db: DuckDBDatabase) -> None:
     tables = db.get_tables().set_index("table_name")["description"]
     assert tables["customer"] == "People who buy from the shop."
     assert tables["big_orders"] == "Orders over 100."
     assert tables.isna()["orders"]
 
 
-def test_column_comment_is_description(db) -> None:
+def test_column_comment_is_description(db: DuckDBDatabase) -> None:
     cols = db.get_columns()
     orders = cols[cols.table_name == "orders"].set_index("column_name")
     assert orders.loc["total", "description"] == "Order total in dollars."
@@ -53,7 +56,7 @@ def test_column_comment_is_description(db) -> None:
     assert list(orders.index) == ["id", "customer_id", "total"]
 
 
-def test_undocumented_source_has_blank_descriptions(tmp_path) -> None:
+def test_undocumented_source_has_blank_descriptions(tmp_path: Path) -> None:
     path = tmp_path / "bare.duckdb"
     duckdb.connect(str(path)).execute("CREATE TABLE t (a INTEGER)").close()
     with DuckDBDatabase(str(path)) as bare:
@@ -61,7 +64,7 @@ def test_undocumented_source_has_blank_descriptions(tmp_path) -> None:
         assert bare.get_tables()["description"].isna().all()
 
 
-def test_descriptions_survive_catalog_normalisation(db) -> None:
+def test_descriptions_survive_catalog_normalisation(db: DuckDBDatabase) -> None:
     data = data_for_populate_tabular(db)
     cols = data["columns"]
     total = cols[(cols.table_name == "orders") & (cols.column_name == "total")]
