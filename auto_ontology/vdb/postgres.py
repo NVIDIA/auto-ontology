@@ -288,6 +288,8 @@ class PostgresVDB:
                 ],
             )
             self._create_vector_index()
+        else:
+            self._ensure_vector_index()
 
         self._store = PGVectorStore.create_sync(
             engine=engine,
@@ -330,6 +332,16 @@ class PostgresVDB:
         try:
             with psycopg.connect(self.connection_string) as conn:
                 with conn.cursor() as cur:
+                    # The ALTER below takes an ACCESS EXCLUSIVE lock on the
+                    # collection and holds it until the index is built, and
+                    # PostgreSQL's defaults bound neither the lock wait nor
+                    # the build. Cap both (transaction-local): on timeout the
+                    # rollback and warning below keep the store available,
+                    # just unindexed until a later store initialization
+                    # retries (``_get_store`` caches the store, so a later
+                    # write on the same instance does not).
+                    cur.execute("SET LOCAL lock_timeout = '10s'")
+                    cur.execute("SET LOCAL statement_timeout = '300s'")
                     cur.execute(
                         sql.SQL(
                             "ALTER TABLE {table} "
@@ -354,6 +366,54 @@ class PostgresVDB:
                 self.collection_name,
                 exc_info=True,
             )
+
+    def _ensure_vector_index(self) -> None:
+        """Upgrade a table that already exists but has no HNSW index.
+
+        ``_create_vector_index`` runs only when this store creates the table,
+        so a collection created before that ran — or by an older version,
+        since the vector tables have no Alembic migration path (see
+        ``c778a7d94c20``) — keeps its ``vector`` column and no index, and
+        every similarity search sequential-scans it silently. One catalog
+        query per store init; when the index is missing, the same best-effort
+        upgrade that fresh creation gets runs here too.
+        """
+        if self.vector_size is None:
+            # Read-side stores are configured without a dimension: they
+            # cannot ALTER the column (``halfvec(NULL)`` is invalid SQL)
+            # and the writer-side init, which has the dimension, owns the
+            # upgrade. Trying would fail and log a build warning on every
+            # read-path init.
+            logger.info(
+                "PostgresVDB: no vector_size configured for %s.%s; "
+                "leaving the index upgrade to the writer-side init",
+                self.schema_name,
+                self.collection_name,
+            )
+            return
+        index_name = f"ix_hnsw_{self.collection_name}_embedding"
+        try:
+            with psycopg.connect(self.connection_string) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM pg_indexes
+                        WHERE schemaname = %s AND indexname = %s
+                        """,
+                        (self.schema_name, index_name),
+                    )
+                    present = cur.fetchone() is not None
+        except Exception:
+            logger.warning(
+                "PostgresVDB: could not check for the HNSW index on %s.%s",
+                self.schema_name,
+                self.collection_name,
+                exc_info=True,
+            )
+            return
+
+        if not present:
+            self._create_vector_index()
 
     def create_index(self, **kwargs: Any) -> str:
         """Ensure the pgvector extension and underlying table exist."""

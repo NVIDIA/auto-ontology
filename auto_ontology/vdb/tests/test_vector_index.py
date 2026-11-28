@@ -27,14 +27,27 @@ test would prove nothing.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 import psycopg
 import pytest
 
 from auto_ontology.infra.postgres import get_postgres_connection_string
+from auto_ontology.vdb.postgres import PostgresVDB
 
 _DIMENSIONS = 2048
+
+
+def _index_present(name: str) -> bool:
+    """Whether the store's HNSW index exists for the collection *name*."""
+    with psycopg.connect(get_postgres_connection_string()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM pg_indexes WHERE schemaname = 'vdb' AND indexname = %s",
+                (f"ix_hnsw_{name}_embedding",),
+            )
+            return cur.fetchone() is not None
 
 
 @pytest.fixture
@@ -97,6 +110,53 @@ def _plan(name: str) -> str:
                 f"ORDER BY embedding <=> '{vector}'::vector({_DIMENSIONS}) LIMIT 5"
             )
             return "\n".join(row[0] for row in cur.fetchall())
+
+
+def test_a_table_that_predates_the_index_is_upgraded(collection: str) -> None:
+    """Store init is the only upgrade path an existing collection has.
+
+    The fixture table is exactly what an older version left behind: a plain
+    ``vector`` column and no index. Initializing a store against it must
+    upgrade the column and build the index, or every search on that
+    collection sequential-scans forever.
+    """
+    assert _index_present(collection) is False, "fixture must start unindexed"
+
+    vdb = PostgresVDB(
+        connection_string=get_postgres_connection_string(),
+        collection_name=collection,
+        schema_name="vdb",
+    )
+    vdb.create_index()
+
+    assert _index_present(collection) is True
+    plan = _plan(collection)
+    assert "Index Scan" in plan, f"the search fell back to a scan:\n{plan}"
+    assert f"ix_hnsw_{collection}_embedding" in plan
+
+
+def test_a_read_side_store_without_a_dimension_leaves_the_table_alone(
+    collection: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``vector_size=None`` (read-side config) must not attempt the upgrade.
+
+    The ALTER needs a dimension: without one it renders ``halfvec(NULL)``,
+    which fails and logs a build warning on every read-path init. The
+    writer-side init, which has the dimension, owns the upgrade.
+    """
+    vdb = PostgresVDB(
+        connection_string=get_postgres_connection_string(),
+        collection_name=collection,
+        schema_name="vdb",
+        vector_size=None,
+    )
+    with caplog.at_level(logging.WARNING):
+        vdb.create_index()
+
+    assert _index_present(collection) is False, "read side must not build the index"
+    assert not [
+        r for r in caplog.records if "could not build the HNSW index" in r.getMessage()
+    ]
 
 
 def test_the_plain_vector_column_cannot_be_indexed(collection) -> None:
