@@ -18,7 +18,34 @@ def test_redact_masks_the_password_slot_not_the_first_substring() -> None:
     redacted = _redact(
         "postgresql://auto_ontology:auto_ontology@localhost:5433/auto_ontology"
     )
-    assert redacted == ("postgresql://auto_ontology:***@localhost:5433/auto_ontology")
+    assert redacted == "postgresql://auto_ontology:***@localhost:5433/auto_ontology"
+
+    # Redaction is idempotent: an already-masked string round-trips.
+    assert _redact("postgresql://user:***@db.example.com/mydb") == (
+        "postgresql://user:***@db.example.com/mydb"
+    )
+
+
+def test_redact_masks_the_password_when_the_username_is_empty() -> None:
+    """A pattern anchored on a nonempty username would skip ":pass@host".
+
+    ``urlparse`` reads a password for an empty username too, and the
+    connector-failure log line must not carry it.
+    """
+    assert _redact("postgresql://:s3cr3t@db.example.com:5432/mydb") == (
+        "postgresql://:***@db.example.com:5432/mydb"
+    )
+
+
+def test_redact_masks_a_password_containing_at() -> None:
+    """``urlparse`` ends the password at the LAST '@' of the netloc.
+
+    A pattern stopping at the first '@' masked only the part of the
+    password before it and left the rest in clear text.
+    """
+    assert _redact("postgresql://user:p@ss@db.example.com/mydb") == (
+        "postgresql://user:***@db.example.com/mydb"
+    )
 
 
 def test_parse_connection_strings_accepts_commas_and_newlines() -> None:
