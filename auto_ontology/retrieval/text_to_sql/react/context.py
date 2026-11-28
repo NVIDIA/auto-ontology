@@ -97,7 +97,6 @@ class ToolContext:
     submitted_database: str | None = None
     joined_pairs: set[frozenset[str]] = field(default_factory=set)
     join_paths: list[dict[str, Any]] = field(default_factory=list)
-    anchor_column_ids: dict[str, str | None] = field(default_factory=dict)
     sibling_pairs: set[frozenset[str]] = field(default_factory=set)
     catalog_tables: list[dict[str, Any]] | None = None
     row_counts: dict[str, int | None] = field(default_factory=dict)

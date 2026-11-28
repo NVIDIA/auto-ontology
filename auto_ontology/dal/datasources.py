@@ -1099,7 +1099,7 @@ def _semantic_fk_target_expr() -> ColumnElement:
 
 
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
-    """Tables with a name/type/description/sample_values summary of each column.
+    """Tables with catalog column IDs, names, types, descriptions, and samples.
 
     Returns ``[]`` rather than raising if the query fails: this decorates
     retrieval results, and losing the decoration beats losing the results.
@@ -1131,6 +1131,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_column.c.id.label("column_id"),
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
@@ -1176,6 +1177,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         if row["column_name"]:
             table["columns"].append(
                 {
+                    "id": row["column_id"],
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],

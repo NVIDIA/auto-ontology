@@ -22,9 +22,12 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import select  # noqa: E402
 
 from auto_ontology.dal import attributes as a  # noqa: E402
+from auto_ontology.dal import datasources as d  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.tags import PII_TAG_NAME, get_or_create_tag  # noqa: E402
+from auto_ontology.retrieval.text_to_sql.react import catalog as react_catalog  # noqa: E402
+from auto_ontology.retrieval.text_to_sql.react.context import ToolContext  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
@@ -509,6 +512,45 @@ def test_path_can_enter_and_leave_an_intermediate_fk_table(world) -> None:
         ("suppliers", "city_id"),
         ("categories", "id"),
     ]
+
+
+def test_react_join_uses_the_selected_schema_for_same_named_tables(
+    world: World,
+) -> None:
+    world.table("locations", pk=["id"])
+    world.column("locations", "id")
+    world.attribute("location-id", owner="locations.id")
+    world.table("devices", pk=["id"])
+    world.column("devices", "id")
+    world.column("devices", "location_id", 2)
+    world.references("devices.location_id", "location-id")
+
+    archive_schema = _add(
+        s.catalog_schema, database_id=world.databases["shopdb"], name="archive"
+    )
+    archived_devices = _add(s.catalog_table, schema_id=archive_schema, name="devices")
+    _add(s.catalog_column, table_id=archived_devices, name="id", ordinal_position=1)
+
+    tables = {
+        row["id"]: row
+        for row in d.fetch_tables_by_ids(
+            [archived_devices, world.tables["devices"], world.tables["locations"]]
+        )
+    }
+    for device_id in (archived_devices, world.tables["devices"]):
+        ctx = ToolContext(
+            connectors=[],
+            database_name=f"{world.prefix}-shopdb",
+            seen_tables={world.tables["locations"]: tables[world.tables["locations"]]},
+        )
+        lines = react_catalog._join_lines(ctx, [tables[device_id]])
+        if device_id == archived_devices:
+            assert lines == []
+        else:
+            assert [line for line, _ in lines] == [
+                "JOIN public.devices ↔ public.locations: "
+                "public.devices.location_id = public.locations.id"
+            ]
 
 
 def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
