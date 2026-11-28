@@ -218,6 +218,27 @@ def test_rejects_invalid_urls(url: str) -> None:
         _parse_connection_string(url)
 
 
+def test_parser_errors_never_echo_the_url() -> None:
+    """The registry logs exception text verbatim, so it must hold no secret."""
+    for url in ("pinot:///default?token=SECRET", "pinotx://u:SECRET@broker/default"):
+        with pytest.raises(ValueError) as error:
+            _parse_connection_string(url)
+        assert "SECRET" not in str(error.value)
+
+
+def test_encoded_parameter_names_are_not_accepted() -> None:
+    """``%74oken`` would dodge the log redaction that looks for ``token=``."""
+    settings = _parse_connection_string("pinot://broker/default?%74oken=SECRET")
+    assert settings["token"] is None
+
+
+def test_ipv6_hosts_keep_their_brackets() -> None:
+    settings = _parse_connection_string("pinot://[::1]:8099/default")
+    assert settings["broker_url"] == "http://[::1]:8099"
+    assert settings["controller_url"] == "http://[::1]:9000"
+    httpx.URL(settings["broker_url"])  # parses
+
+
 def test_redact_masks_the_token() -> None:
     redacted = _redact("pinot://broker:8099/default?token=SECRET&http_scheme=https")
     assert "SECRET" not in redacted
@@ -517,6 +538,47 @@ def test_get_columns_reads_every_field_spec_in_order() -> None:
     ]
     assert frame["ordinal_position"].tolist() == [1, 2, 3, 4, 5]
     assert set(frame["table_schema"]) == {"default"}
+
+
+def test_legacy_time_field_spec_is_a_column() -> None:
+    db, cluster = _database()
+    cluster.tables = ["legacy"]
+    cluster.schemas["legacy"] = {
+        "schemaName": "legacy",
+        "dimensionFieldSpecs": [{"name": "city", "dataType": "STRING"}],
+        "metricFieldSpecs": [{"name": "fare", "dataType": "DOUBLE"}],
+        "timeFieldSpec": {
+            "incomingGranularitySpec": {
+                "name": "epoch_s",
+                "dataType": "LONG",
+                "timeType": "SECONDS",
+            },
+            "outgoingGranularitySpec": {
+                "name": "days",
+                "dataType": "INT",
+                "timeType": "DAYS",
+            },
+        },
+        "dateTimeFieldSpecs": [{"name": "ts", "dataType": "TIMESTAMP"}],
+    }
+    frame = db.get_columns()
+    assert frame["column_name"].tolist() == ["city", "fare", "days", "ts"]
+    assert frame["data_type"].tolist() == ["STRING", "DOUBLE", "INT", "TIMESTAMP"]
+    assert frame["ordinal_position"].tolist() == [1, 2, 3, 4]
+
+
+def test_legacy_time_field_falls_back_to_incoming_spec() -> None:
+    db, cluster = _database()
+    cluster.tables = ["legacy"]
+    cluster.schemas["legacy"] = {
+        "schemaName": "legacy",
+        "timeFieldSpec": {
+            "incomingGranularitySpec": {"name": "epoch_s", "dataType": "LONG"}
+        },
+    }
+    assert db.get_columns()[["column_name", "data_type"]].values.tolist() == [
+        ["epoch_s", "LONG"]
+    ]
 
 
 def test_nullability_is_unknown_without_null_handling() -> None:

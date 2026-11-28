@@ -116,6 +116,33 @@ _FIELD_SPEC_KEYS = (
     "complexFieldSpecs",
 )
 
+
+def _field_specs(schema: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every field spec in *schema*, in the order columns are reported.
+
+    Pinot still serializes the deprecated single ``timeFieldSpec`` alongside
+    the list-based specs. It carries no name or type of its own: both live on
+    its ``outgoingGranularitySpec``, or on ``incomingGranularitySpec`` when no
+    outgoing one is set -- the same choice Pinot's ``TimeFieldSpec`` makes. It
+    is placed after the metrics and before the ``dateTimeFieldSpecs``, where
+    Pinot lists it.
+    """
+    specs: list[dict[str, Any]] = []
+    for key in _FIELD_SPEC_KEYS:
+        if key == "dateTimeFieldSpecs":
+            legacy = schema.get("timeFieldSpec")
+            if isinstance(legacy, dict):
+                granularity = legacy.get("outgoingGranularitySpec") or legacy.get(
+                    "incomingGranularitySpec"
+                )
+                if isinstance(granularity, dict):
+                    specs.append({**legacy, **granularity})
+        specs.extend(
+            field for field in schema.get(key) or [] if isinstance(field, dict)
+        )
+    return specs
+
+
 _TABLE_COLUMNS = ["table_schema", "table_name", "table_type"]
 _COLUMN_COLUMNS = [
     "table_schema",
@@ -160,7 +187,10 @@ def _query_params(query: str) -> dict[str, str]:
         if not part:
             continue
         key, _, value = part.partition("=")
-        params.setdefault(unquote(key), unquote(value))
+        # Names are matched literally, not decoded: an encoded ``%74oken``
+        # must not be accepted as the token, because log redaction looks for
+        # the literal name.
+        params.setdefault(key, unquote(value))
     return params
 
 
@@ -184,6 +214,15 @@ def _http_scheme(value: str | None, port: int) -> str:
     return scheme or ("https" if port in _TLS_PORTS else "http")
 
 
+def _authority(host: str, port: int) -> str:
+    """``host:port``, bracketing an IPv6 literal the way a URL requires.
+
+    ``urlparse(...).hostname`` strips the brackets, so ``[::1]`` comes back as
+    ``::1``, and rejoining that with a port yields an unparseable ``::1:8099``.
+    """
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
 def _controller_url(raw: str | None, broker_host: str, http_scheme: str) -> str:
     """Resolve the controller's base URL.
 
@@ -195,7 +234,7 @@ def _controller_url(raw: str | None, broker_host: str, http_scheme: str) -> str:
     addressed.
     """
     if not raw:
-        return f"{http_scheme}://{broker_host}:{DEFAULT_CONTROLLER_PORT}"
+        return f"{http_scheme}://{_authority(broker_host, DEFAULT_CONTROLLER_PORT)}"
     value = raw.strip().rstrip("/")
     has_scheme = "://" in value
     if not has_scheme:
@@ -213,7 +252,7 @@ def _controller_url(raw: str | None, broker_host: str, http_scheme: str) -> str:
             port = 443 if parsed.scheme == "https" else 80
         else:
             port = DEFAULT_CONTROLLER_PORT
-    return f"{parsed.scheme}://{parsed.hostname}:{port}"
+    return f"{parsed.scheme}://{_authority(parsed.hostname, port)}"
 
 
 def _parse_connection_string(connection_string: str) -> dict[str, Any]:
@@ -229,11 +268,11 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
     parsed = urlparse(connection_string)
     scheme = parsed.scheme.split("+", 1)[0].lower()
     if scheme != "pinot":
-        raise ValueError(f"Not a Pinot URL: {connection_string}")
+        raise ValueError(f"Not a Pinot URL (scheme {scheme!r})")
     if not parsed.hostname:
-        raise ValueError(
-            f"Invalid Pinot connection string (missing broker host): {connection_string}"
-        )
+        # The URL itself is left out of both errors: it can carry a password or
+        # token, and the registry logs the exception text verbatim.
+        raise ValueError("Invalid Pinot connection string: missing broker host")
 
     query = _query_params(parsed.query)
     port = parsed.port or DEFAULT_BROKER_PORT
@@ -249,7 +288,7 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
         )
 
     return {
-        "broker_url": f"{http_scheme}://{parsed.hostname}:{port}",
+        "broker_url": f"{http_scheme}://{_authority(parsed.hostname, port)}",
         "controller_url": _controller_url(
             _param(query, "controller"), parsed.hostname, http_scheme
         ),
@@ -681,23 +720,20 @@ class PinotDatabase(SQLDatabase):
         for table, schema in self._introspect():
             null_handling = schema.get("enableColumnBasedNullHandling") is True
             position = 0
-            for key in _FIELD_SPEC_KEYS:
-                for field in schema.get(key) or []:
-                    if not isinstance(field, dict) or not field.get("name"):
-                        continue
-                    position += 1
-                    rows.append(
-                        (
-                            self._database_name,
-                            table,
-                            str(field["name"]),
-                            _column_type(field),
-                            (field.get("notNull") is not True)
-                            if null_handling
-                            else None,
-                            position,
-                        )
+            for field in _field_specs(schema):
+                if not field.get("name"):
+                    continue
+                position += 1
+                rows.append(
+                    (
+                        self._database_name,
+                        table,
+                        str(field["name"]),
+                        _column_type(field),
+                        (field.get("notNull") is not True) if null_handling else None,
+                        position,
                     )
+                )
         return pd.DataFrame(rows, columns=_COLUMN_COLUMNS)
 
     def get_pks(self) -> pd.DataFrame:
