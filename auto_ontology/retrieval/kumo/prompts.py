@@ -157,6 +157,8 @@ def build_pql_prompt(
     prev_error: str | None = None,
     dialect: str | None = None,
     organization: str = "",
+    forecast_origin: str | None = None,
+    context_origin: str | None = None,
 ) -> str:
     """Assemble the text-to-PQL prompt (pure Python; mirrors the old Jinja template).
 
@@ -200,6 +202,18 @@ def build_pql_prompt(
             "Previous PQL:\n```pql\n" + prev_pql + "\n```\n"
             "Error:\n" + (prev_error or "") + "\n\n" + _REPAIR_BODY
         )
+
+    if forecast_origin is not None:
+        origin_note = (
+            f"The prediction runner sets the forecast origin to {forecast_origin}. "
+            "Express the requested target window relative to that date. Do not put "
+            "the origin in a PQL or entity SQL filter."
+        )
+        if context_origin is not None:
+            origin_note += (
+                f" The runner separately sets the context cutoff to {context_origin}."
+            )
+        sections.append("## Prediction dates\n" + origin_note)
 
     if explain_entity:
         safe = explain_entity.replace("'", "''")

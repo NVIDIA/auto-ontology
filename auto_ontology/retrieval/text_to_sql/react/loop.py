@@ -279,7 +279,7 @@ def _dispatch(
         if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
             args = {k: v for k, v in args.items() if k == "sql"}
         if name == ToolName.PREDICT:
-            return predict(ctx)
+            return predict(ctx, **args)
         return handlers[name](**args), None
     except TypeError as error:
         return f"Wrong arguments for {name}: {error}", None

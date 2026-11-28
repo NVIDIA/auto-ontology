@@ -505,9 +505,30 @@ PREDICT_TOOL = {
         "name": ToolName.PREDICT,
         "description": (
             "Answer a question about the future with a KumoRFM prediction over "
-            "the tables retrieve has shown. Ends the episode once it runs."
+            "the tables retrieve has shown. Ends the episode once it runs. "
+            "Copy explicitly requested prediction and context dates from the question. "
+            "Do not use dates from filters or the forecast target window as origins."
         ),
-        "parameters": {"type": "object", "properties": {}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "forecast_origin": {
+                    "type": "string",
+                    "description": (
+                        "The requested prediction start or as-of date, verbatim. "
+                        "Pass the original text even if the format is unsupported. Omit when unspecified."
+                    ),
+                },
+                "context_origin": {
+                    "type": "string",
+                    "description": (
+                        "The separately requested cutoff for in-context examples, "
+                        "verbatim. Use with forecast_origin."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        },
     },
 }
 

@@ -34,9 +34,10 @@ from dataclasses import field
 from typing import Any
 from typing import Protocol
 
+import pandas as pd
 from langchain_core.language_models import BaseChatModel
-from auto_ontology.connectors.base import SQLDatabase
 
+from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.retrieval.kumo.budget import RefusedForCapacity
 from auto_ontology.retrieval.kumo.prompts import build_pql_prompt
 from auto_ontology.utils.llm_invoke import invoke_text
@@ -1331,6 +1332,84 @@ def _forecast_anchor(
     return min(now_ts, safe)
 
 
+class PqlOriginError(ValueError):
+    """The requested prediction origin cannot be used or verified."""
+
+
+def _anchor_options(
+    pql: str,
+    connector: SQLDatabase,
+    time_columns: dict[str, str | None] | None,
+    table_names: dict[str, str] | None,
+    validated_pql: Any,
+    anchor_time: pd.Timestamp | None,
+    context_anchor_time: pd.Timestamp | None,
+) -> dict[str, pd.Timestamp]:
+    if anchor_time is None:
+        if context_anchor_time is not None:
+            raise PqlOriginError(
+                "Specify a forecast origin alongside the context cutoff."
+            )
+        default = _forecast_anchor(
+            pql, connector, time_columns, table_names=table_names
+        )
+        return {"anchor_time": default} if default is not None else {}
+    if not time_columns or not any(time_columns.values()):
+        raise PqlOriginError(
+            "The requested forecast origin requires timestamped graph data."
+        )
+    options = {"anchor_time": anchor_time}
+    if context_anchor_time is None:
+        return options
+    if context_anchor_time > anchor_time:
+        raise PqlOriginError(
+            "The context cutoff cannot be later than the forecast origin."
+        )
+    # The SDK only warns if context labels would use data past the prediction origin.
+    # Use its parsed calendar offset, not the undated heuristic's approximate day count.
+    window = validated_pql.target_ast.date_offset_range
+    if (
+        window is not None
+        and context_anchor_time + window.end_date_offset > anchor_time
+    ):
+        raise PqlOriginError(
+            "The context cutoff plus the PQL target window ends after the forecast "
+            "origin. Choose an earlier context cutoff."
+        )
+    options["context_anchor_time"] = context_anchor_time
+    return options
+
+
+def _verify_origin(prediction: Any, requested: pd.Timestamp | None) -> None:
+    if requested is None:
+        return
+    if not isinstance(prediction, pd.DataFrame) or prediction.empty:
+        raise PqlOriginError(
+            "Kumo returned no rows to verify the requested forecast origin."
+        )
+    # The SDK correlates response rows with the anchor timestamps of the generated
+    # prediction instances. This checks that lineage, not a separate server echo.
+    column = next(
+        (
+            name
+            for name in prediction.columns
+            if str(name).casefold() == "anchor_timestamp"
+        ),
+        None,
+    )
+    if (
+        column is None
+        or not pd.to_datetime(
+            prediction[column], utc=True, errors="coerce", format="mixed"
+        )
+        .eq(pd.to_datetime(requested, utc=True))
+        .all()
+    ):
+        raise PqlOriginError(
+            "Kumo did not return the requested forecast origin on every row."
+        )
+
+
 _STALE_ANCHOR_DAYS = 31
 
 
@@ -1511,6 +1590,8 @@ def predict_all(
     max_entities: int = 2000,
     time_columns: dict[str, str | None] | None = None,
     table_names: dict[str, str] | None = None,
+    anchor_time: pd.Timestamp | None = None,
+    context_anchor_time: pd.Timestamp | None = None,
 ) -> Any:
     """Run a pre-built, known-good PQL over the full entity scope and return the COMPLETE prediction frame.
 
@@ -1527,15 +1608,24 @@ def predict_all(
         raise PqlPopulationTooLargeError(
             _population_refusal(pql, population, max_entities)
         )
-    anchor = _forecast_anchor(pql, connector, time_columns, table_names=table_names)
+    validated_pql = kumo_model.validate_pql(pql) if anchor_time is not None else None
+    anchors = _anchor_options(
+        pql,
+        connector,
+        time_columns,
+        table_names,
+        validated_pql,
+        anchor_time,
+        context_anchor_time,
+    )
 
     def _predict_call(idx: list[Any] | None, num_neighbors: list[int] | None) -> Any:
-        kw: dict[str, Any] = {}
+        kw: dict[str, Any] = dict(anchors)
         if num_neighbors is not None:
             kw["num_neighbors"] = num_neighbors
-        if anchor is not None:
-            kw["anchor_time"] = anchor
-        return kumo_model.predict(pql, indices=idx or None, **kw)
+        prediction = kumo_model.predict(pql, indices=idx or None, **kw)
+        _verify_origin(prediction, anchor_time)
+        return prediction
 
     raw = _predict_in_batches(
         indices, _predict_call, device_assert_terminal=_is_existence_count_pql(pql)
@@ -1572,6 +1662,8 @@ def generate_pql(
     available_entity_ids: dict[str, list[Any]] | None = None,
     examples: list[dict[str, str]] | None = None,
     organization: str = "",
+    anchor_time: pd.Timestamp | None = None,
+    context_anchor_time: pd.Timestamp | None = None,
 ) -> PqlGenerationResult:
     """Generate a PQL, validate it cheaply against the graph, scope entities, and predict (with repair).
 
@@ -1581,6 +1673,8 @@ def generate_pql(
     ``examples`` are verified ``{question, query}`` PQL few-shots (retrieved from the
     ``PqlAnalysis`` corpus); they populate the prompt's "Verified examples" section.
     ``organization`` is the deployment's instructions and glossary, for every attempt.
+    ``anchor_time`` pins prediction to a requested origin. ``context_anchor_time``
+    independently caps the context anchors for that dated prediction.
     """
     examples = examples or []
     docs: list[str] = []
@@ -1616,6 +1710,14 @@ def generate_pql(
             prev_error=prev_error,
             dialect=dialect,
             organization=organization,
+            forecast_origin=str(anchor_time.date())
+            if anchor_time is not None
+            else None,
+            context_origin=(
+                str(context_anchor_time.date())
+                if context_anchor_time is not None
+                else None
+            ),
         )
         result.attempts = attempt
         try:
@@ -1664,7 +1766,19 @@ def generate_pql(
                 logger.debug("on_pql callback failed", exc_info=True)
         try:
             validate_pql_static(pql, edges=graph_edges, col_stypes=graph_col_stypes)
-            kumo_model.validate_pql(pql)
+            validated_pql = kumo_model.validate_pql(pql)
+
+            def anchor_options() -> dict[str, pd.Timestamp]:
+                return _anchor_options(
+                    pql,
+                    connector,
+                    time_columns,
+                    table_names,
+                    validated_pql,
+                    anchor_time,
+                    context_anchor_time,
+                )
+
             if explain:
                 indices = _resolve_single_index(
                     pql,
@@ -1678,17 +1792,22 @@ def generate_pql(
                         f"Entity '{explain_entity}' not found in the dataset for this query."
                     )
 
-                _anchor = _forecast_anchor(
-                    pql, connector, time_columns, table_names=table_names
+                anchors = anchor_options()
+                default_anchor = (
+                    anchors.get("anchor_time") if anchor_time is None else None
                 )
-                result.note = _join_notes(result.note, _stale_anchor_note(_anchor))
+                result.note = _join_notes(
+                    result.note, _stale_anchor_note(default_anchor)
+                )
 
                 def _explain_call(num_neighbors: list[int] | None) -> Any:
-                    kw: dict[str, Any] = {"explain": True, "run_mode": "fast"}
+                    kw: dict[str, Any] = {
+                        "explain": True,
+                        "run_mode": "fast",
+                        **anchors,
+                    }
                     if num_neighbors is not None:
                         kw["num_neighbors"] = num_neighbors
-                    if _anchor is not None:
-                        kw["anchor_time"] = _anchor
                     return kumo_model.predict(pql, indices=indices, **kw)
 
                 expl = _explain_resilient(_explain_call)
@@ -1697,13 +1816,14 @@ def generate_pql(
                 result.explanation_warning = getattr(expl, "warning", None)
                 result.explanation_details = getattr(expl, "details", None)
                 prediction = getattr(expl, "prediction", None)
+                _verify_origin(prediction, anchor_time)
                 if prediction is not None and hasattr(prediction, "columns"):
-                    if _anchor is not None and not any(
+                    if default_anchor is not None and not any(
                         str(column).casefold() == "anchor_timestamp"
                         for column in prediction.columns
                     ):
                         prediction = prediction.copy()
-                        prediction["ANCHOR_TIMESTAMP"] = _anchor
+                        prediction["ANCHOR_TIMESTAMP"] = default_anchor
                     result.columns = list(prediction.columns)
                     result.rows = prediction.head(max_preview_rows).to_dict("records")
                     if persist_table and mirror_path and persist_lock is not None:
@@ -1762,20 +1882,23 @@ def generate_pql(
                         )
                     indices = indices[:1]
 
-                _anchor = _forecast_anchor(
-                    pql, connector, time_columns, table_names=table_names
+                anchors = anchor_options()
+                default_anchor = (
+                    anchors.get("anchor_time") if anchor_time is None else None
                 )
-                result.note = _join_notes(result.note, _stale_anchor_note(_anchor))
+                result.note = _join_notes(
+                    result.note, _stale_anchor_note(default_anchor)
+                )
 
                 def _predict_call(
                     idx: list[Any] | None, num_neighbors: list[int] | None
                 ) -> Any:
-                    kw: dict[str, Any] = {}
+                    kw: dict[str, Any] = dict(anchors)
                     if num_neighbors is not None:
                         kw["num_neighbors"] = num_neighbors
-                    if _anchor is not None:
-                        kw["anchor_time"] = _anchor
-                    return kumo_model.predict(pql, indices=idx or None, **kw)
+                    prediction = kumo_model.predict(pql, indices=idx or None, **kw)
+                    _verify_origin(prediction, anchor_time)
+                    return prediction
 
                 raw = _predict_in_batches(
                     indices,
@@ -1835,6 +1958,10 @@ def generate_pql(
             result.error = None
             # Success-cache omitted with the RAG port (no vector store to write back to).
             return result
+        except PqlOriginError as exc:
+            result.error = str(exc)
+            logger.info("Prediction origin rejected: %s", str(exc)[:160])
+            break
         except PqlPopulationTooLargeError as exc:
             result.error = str(exc)
             logger.info("Prediction refused, population too large: %s", str(exc)[:160])

@@ -7,6 +7,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import pandas as pd
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -15,6 +16,7 @@ from auto_ontology.retrieval.kumo import rag
 from auto_ontology.retrieval.text_to_sql import main, pipeline
 from auto_ontology.retrieval.text_to_sql.react import agent as agent_module
 from auto_ontology.retrieval.text_to_sql.react import loop
+from auto_ontology.retrieval.text_to_sql.react import predict as predict_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
 from auto_ontology.retrieval.text_to_sql.react.loop import EpisodeResult
 from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, episode_mode
@@ -44,14 +46,16 @@ def kumo_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["build"] = {"tables": tables, "join_paths": join_paths}
         return seen["result"]
 
-    def run(question, llm, context, *, organization=""):
+    def run(question, llm, context, *, organization="", **origins):
         seen["run"] = question
         seen["organization"] = organization
+        seen["origins"] = origins
         return PREDICTED
 
     monkeypatch.setattr(kumo, "PredictionContext", _Built)
     monkeypatch.setattr(kumo, "build_prediction_context", build)
     monkeypatch.setattr(kumo, "run_prediction", run)
+    monkeypatch.setattr(predict_module, "get_semantic_objects_retriever", lambda: None)
     monkeypatch.setattr(rag, "fetch_pql_examples", lambda _retriever, _q: [])
     return seen
 
@@ -59,7 +63,7 @@ def kumo_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _ctx(**kwargs: Any) -> ToolContext:
     return ToolContext(
         connectors=[SimpleNamespace(database_name="shop", dialect="sqlite")],
-        question="Which customers will churn next month?",
+        question=kwargs.pop("question", "Which customers will churn next month?"),
         **kwargs,
     )
 
@@ -111,6 +115,7 @@ def test_predict_builds_over_the_tables_in_view(kumo_calls: dict[str, Any]) -> N
     assert kumo_calls["build"]["tables"] == [CUSTOMERS]
     assert kumo_calls["build"]["join_paths"] == ctx.join_paths
     assert kumo_calls["run"] == "Which customers will churn next month?"
+    assert kumo_calls["origins"] == {}
 
 
 def test_predict_hands_kumo_the_organization_context(
@@ -319,3 +324,76 @@ def test_a_prediction_and_an_unanswered_episode_report_retrieved_analyses(
         {"messages": [], "path_state": unanswered["path_state"]}
     )["path_state"]["final_response"]
     assert [e["stage"] for e in final["custom_analyses_used"]] == ["retrieved"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Forecast from sales data for Q2 2025.",
+        "Forecast for customers who were active as of 2024-03-31.",
+        "Forecast for customers who signed up between 2024-01-01 and 2024-06-01.",
+    ],
+)
+def test_a_filter_or_source_is_not_a_forecast_origin(kumo_calls, question) -> None:
+    predict(_ctx(question=question, seen_tables={"t1": CUSTOMERS}))
+
+    assert kumo_calls["origins"] == {}
+
+
+def test_a_dated_prediction_keeps_the_two_dates_separate(kumo_calls) -> None:
+    ctx = _ctx(
+        question="Forecast churn as of 2024-03-31 with a context cutoff of 2024-02-29.",
+        seen_tables={"t1": CUSTOMERS},
+    )
+
+    _, prediction = predict(ctx)
+
+    assert prediction == Prediction(PREDICTED)
+    assert kumo_calls["origins"] == {
+        "anchor_time": pd.Timestamp("2024-03-31"),
+        "context_anchor_time": pd.Timestamp("2024-02-29"),
+    }
+
+
+def test_the_episode_passes_through_the_planner_origin(kumo_calls) -> None:
+    ctx = _ctx(
+        question="Set 2024-03-31 as the starting point for the churn prediction.",
+        seen_tables={"t1": CUSTOMERS},
+    )
+    model = ScriptedModel([_reply(call("predict", "1", forecast_origin="2024-03-31"))])
+
+    result = loop.run_episode(model, ctx, ctx.question, mode=EpisodeMode.PREDICT)
+
+    assert result.reason == "predicted"
+    assert kumo_calls["origins"] == {"anchor_time": pd.Timestamp("2024-03-31")}
+
+
+@pytest.mark.parametrize(
+    ("question", "args", "message"),
+    [
+        ("Forecast churn as of 2025-02-29", {}, "invalid"),
+        ("Forecast churn as of 2024-03-31T09:00:00Z", {}, "YYYY-MM-DD"),
+        ("Forecast churn as of March 31, 2024", {}, "YYYY-MM-DD"),
+        ("Forecast churn as of yesterday", {}, "YYYY-MM-DD"),
+        ("Forecast churn as of 2024-03-31 or 2024-04-01", {}, "just one"),
+        ("Forecast churn with context cutoff 2024-04-01", {}, "alongside"),
+        ("Forecast as of 2024-03-31, context cutoff 2024-04-01", {}, "later"),
+        ("Forecast churn", {"forecast_origin": "2024-04-01"}, "stated"),
+        (
+            "Forecast from the end of January",
+            {"forecast_origin": "the end of January"},
+            "YYYY-MM-DD",
+        ),
+    ],
+)
+def test_unsupported_origins_are_refused_before_graph_build(
+    kumo_calls, question, args, message
+) -> None:
+    ctx = _ctx(question=question, seen_tables={"t1": CUSTOMERS})
+
+    observation, prediction = predict(ctx, **args)
+
+    assert prediction is None
+    assert message in observation
+    assert kumo_calls["build"] is None
+    assert kumo_calls["run"] is None
