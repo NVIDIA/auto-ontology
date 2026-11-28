@@ -151,9 +151,16 @@ Call predict once the entity and its history tables are in view."""
 
 _PREDICT_WHEN = """
 
-If the question asks what will happen (a future value, a likelihood, churn, \
-the next purchase), do not write SQL: retrieve the entity and the tables that \
-record its history, then call predict."""
+Choose the route by what the question asks you to return:
+- For a forecast already computed and stored (a saved score or result from a \
+  named producer or run), retrieve its result table and use run_sql to verify \
+  the stored rows. Filter by the requested producer, entity, and forecast \
+  window, using the catalog's keys. Return the stored values without calling \
+  predict, even if the forecast window is in the future.
+- For a definition or metadata about a forecast, use retrieve with \
+  purpose=information and answer in words when catalog answers are enabled.
+- For a new forecast (what will happen, a new likelihood, or a new score), \
+  retrieve the entity and the tables that record its history, then call predict."""
 
 
 def custom_prompts_section(
