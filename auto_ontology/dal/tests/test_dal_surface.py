@@ -70,11 +70,18 @@ def _describe(obj: Any) -> str:
 #: containing one can never match itself, so the address is normalised away and
 #: the type name kept. ``sql_fragments`` defaults to a ``Table``, whose repr is
 #: full of these.
-_ADDRESS = re.compile(r" object at 0x[0-9a-f]+")
+_ADDRESS = re.compile(r" object at 0x[0-9a-fA-F]+")
 
 
 def _stable(signature: str) -> str:
     return _ADDRESS.sub(" object", signature)
+
+
+@pytest.mark.parametrize("address", ["0x7ff5abc01230", "0x000001ABcD012300"])
+def test_stable_removes_object_addresses(address: str) -> None:
+    assert _stable(f"(default=<example.Value object at {address}>)") == (
+        "(default=<example.Value object>)"
+    )
 
 
 def _public_surface(module: Any) -> dict[str, str]:

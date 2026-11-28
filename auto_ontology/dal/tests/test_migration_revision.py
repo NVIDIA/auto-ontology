@@ -28,7 +28,7 @@ def _head_revisions() -> list[str]:
     """Revisions nothing else lists as its ``down_revision``."""
     revisions: dict[str, str | None] = {}
     for path in VERSIONS.glob("*.py"):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         rev = re.search(r'^revision: str = ["\']([^"\']+)["\']', text, re.M)
         down = re.search(
             r'^down_revision: [^=]+= (?:["\']([^"\']+)["\']|None)', text, re.M
@@ -48,7 +48,9 @@ def test_there_is_exactly_one_head_migration() -> None:
 @pytest.mark.skipif(not VALUES.exists(), reason="helm chart not present")
 def test_the_chart_pins_the_head_revision() -> None:
     head = _head_revisions()[0]
-    match = re.search(r"^\s*alembicRevision:\s*(\S+)", VALUES.read_text(), re.M)
+    match = re.search(
+        r"^\s*alembicRevision:\s*(\S+)", VALUES.read_text(encoding="utf-8"), re.M
+    )
     assert match, "backend.alembicRevision is missing from values.yaml"
     assert match.group(1) == head, (
         f"values.yaml pins {match.group(1)} but the head migration is {head}. "
