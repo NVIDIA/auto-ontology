@@ -288,6 +288,8 @@ class PostgresVDB:
                 ],
             )
             self._create_vector_index()
+        else:
+            self._ensure_vector_index()
 
         self._store = PGVectorStore.create_sync(
             engine=engine,
@@ -354,6 +356,41 @@ class PostgresVDB:
                 self.collection_name,
                 exc_info=True,
             )
+
+    def _ensure_vector_index(self) -> None:
+        """Upgrade a table that already exists but has no HNSW index.
+
+        ``_create_vector_index`` runs only when this store creates the table,
+        so a collection created before that ran — or by an older version,
+        since the vector tables have no Alembic migration path (see
+        ``c778a7d94c20``) — keeps its ``vector`` column and no index, and
+        every similarity search sequential-scans it silently. One catalog
+        query per store init; when the index is missing, the same best-effort
+        upgrade that fresh creation gets runs here too.
+        """
+        index_name = f"ix_hnsw_{self.collection_name}_embedding"
+        try:
+            with psycopg.connect(self.connection_string) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM pg_indexes
+                        WHERE schemaname = %s AND indexname = %s
+                        """,
+                        (self.schema_name, index_name),
+                    )
+                    present = cur.fetchone() is not None
+        except Exception:
+            logger.warning(
+                "PostgresVDB: could not check for the HNSW index on %s.%s",
+                self.schema_name,
+                self.collection_name,
+                exc_info=True,
+            )
+            return
+
+        if not present:
+            self._create_vector_index()
 
     def create_index(self, **kwargs: Any) -> str:
         """Ensure the pgvector extension and underlying table exist."""
