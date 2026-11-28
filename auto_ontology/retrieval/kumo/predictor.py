@@ -884,6 +884,8 @@ def run_prediction(
     context: PredictionContext,
     *,
     organization: str = "",
+    anchor_time: pd.Timestamp | None = None,
+    context_anchor_time: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
     """Generate + repair the PQL, predict, and format — given a prepared context.
 
@@ -900,7 +902,14 @@ def run_prediction(
     )
     try:
         return _run_prediction(
-            question, llm, context, generate_pql, record, organization=organization
+            question,
+            llm,
+            context,
+            generate_pql,
+            record,
+            organization=organization,
+            anchor_time=anchor_time,
+            context_anchor_time=context_anchor_time,
         )
     except Exception as error:
         record.error = redact_error(f"{type(error).__name__}: {error}")
@@ -918,6 +927,8 @@ def _run_prediction(
     record: RunRecord,
     *,
     organization: str = "",
+    anchor_time: pd.Timestamp | None = None,
+    context_anchor_time: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
     result = generate_pql(
         question,
@@ -935,6 +946,8 @@ def _run_prediction(
         examples=context.examples,
         column_reference=context.column_reference,
         organization=organization,
+        anchor_time=anchor_time,
+        context_anchor_time=context_anchor_time,
     )
 
     record.pql = redact_literals(getattr(result, "pql", "") or "")

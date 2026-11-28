@@ -14,8 +14,11 @@ the answer, already in the shape the SQL response takes.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
+
+import pandas as pd
 
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal.datasources import fetch_table_by_name
@@ -84,11 +87,92 @@ def _refused(ctx: ToolContext, message: str) -> tuple[str, None]:
     )
 
 
-def predict(ctx: ToolContext) -> tuple[str, Prediction | None]:
+# Recognize explicit labels independently of the planner. For less specific
+# phrases, require a date-like continuation so "forecast from sales data" stays undated.
+_DATE_LIKE = (
+    r"(?:[0-9]|today\b|tomorrow\b|yesterday\b|now\b|(?:last|next|this)\s+"
+    r"(?:day|week|month|year|quarter)\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+[0-9])"
+)
+_ORIGIN_MARKER = re.compile(
+    r"\b(?:(?P<context>context\s+(?:origin|cutoff|as[- ]of)|data\s+(?:available|known)\s+as[- ]of)"
+    r"|(?:forecast|prediction)\s+origin"
+    rf"|(?:starting\s+from|(?:forecast|predict(?:ion)?)\s+from)(?=\s+{_DATE_LIKE})"
+    rf"|(?P<as_of>as[- ]of)(?=\s+{_DATE_LIKE}))\b"
+    r"\s*(?:(?:is|of|on)\b\s*|[:=]\s*)?",
+    re.IGNORECASE,
+)
+_ORIGIN_DATE = r"(?<![\w-])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\w/-]| +[0-9]{1,2}:)"
+_FILTER_CLAUSE = re.compile(r"\b(?:where|whose|who|which|that)\b", re.IGNORECASE)
+_SECOND_DATE = re.compile(
+    rf"\s*(?:,|/|to\s|or\s|and\s|through\s)\s*{_DATE_LIKE}", re.IGNORECASE
+)
+
+
+def _prediction_origins(
+    question: str, forecast_origin: str | None, context_origin: str | None
+) -> dict[str, pd.Timestamp]:
+    candidates: dict[str, set[str]] = {"forecast": set(), "context": set()}
+    for marker in _ORIGIN_MARKER.finditer(question):
+        if marker.group("as_of"):
+            clause = question[: marker.start()].rsplit(",", 1)[-1]
+            # A relative clause can describe the input population as of a date.
+            # Prefer an explicit origin label when a date could serve either role.
+            if _FILTER_CLAUSE.search(clause.lstrip(), 1):
+                continue
+        kind = "context" if marker.group("context") else "forecast"
+        tail = question[marker.end() :]
+        date = re.match(_ORIGIN_DATE, tail)
+        if date is None:
+            raise ValueError(f"Specify the {kind} origin as a YYYY-MM-DD date.")
+        if _SECOND_DATE.match(tail[date.end() :]):
+            raise ValueError(f"Specify just one {kind} origin for this prediction.")
+        candidates[kind].add(date[0])
+
+    origins = {}
+    for kind, value, key in (
+        ("forecast", forecast_origin, "anchor_time"),
+        ("context", context_origin, "context_anchor_time"),
+    ):
+        if value is not None:
+            if not isinstance(value, str) or not re.fullmatch(_ORIGIN_DATE, value):
+                raise ValueError(f"Specify the {kind} origin as a YYYY-MM-DD date.")
+            if value not in re.findall(_ORIGIN_DATE, question):
+                raise ValueError(f"The {kind} origin must be stated in the question.")
+            candidates[kind].add(value)
+        if len(candidates[kind]) > 1:
+            raise ValueError(f"Specify just one {kind} origin for this prediction.")
+        if candidates[kind]:
+            try:
+                origins[key] = pd.Timestamp(candidates[kind].pop()).as_unit("ns")
+            except (ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"The {kind} origin is invalid or outside the supported date range."
+                ) from exc
+    if "context_anchor_time" in origins:
+        if "anchor_time" not in origins:
+            raise ValueError("Specify a forecast origin alongside the context cutoff.")
+        if origins["context_anchor_time"] > origins["anchor_time"]:
+            raise ValueError(
+                "The context cutoff cannot be later than the forecast origin."
+            )
+    return origins
+
+
+def predict(
+    ctx: ToolContext,
+    *,
+    forecast_origin: str | None = None,
+    context_origin: str | None = None,
+) -> tuple[str, Prediction | None]:
     """Build the KumoRFM graph over the tables in view and predict."""
     if ctx.predict_calls >= config.max_predict_calls():
         return "No predict calls left in this episode.", None
     ctx.predict_calls += 1
+    try:
+        origins = _prediction_origins(ctx.question, forecast_origin, context_origin)
+    except ValueError as exc:
+        ctx.prediction_refusal = str(exc)
+        return f"Prediction not run: {exc}", None
     if not ctx.seen_tables:
         return (
             "Error: no tables to predict from. Retrieve the entity the question "
@@ -129,6 +213,7 @@ def predict(ctx: ToolContext) -> tuple[str, Prediction | None]:
             ctx.prediction_llm,
             context,
             organization=ctx.custom_prompts,
+            **origins,
         )
     except Exception as error:  # noqa: BLE001
         logger.exception("KumoRFM prediction failed")
