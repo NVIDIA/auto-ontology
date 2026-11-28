@@ -376,6 +376,74 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
     )
 
 
+# Longer than the emitter's line width and not ASCII. The export does not pass
+# `allow_unicode`, so this becomes an escaped double-quoted string that wraps --
+# the one place libyaml's emitter and the pure-Python one write different text.
+_LONG_NON_ASCII = (
+    "Montant total facturé au client, en euros, après remise et avant taxes "
+    "régionales. 顧客ごとの請求総額（割引後・税抜き）。"
+)
+_YAML_CLASSES = [
+    pytest.param(yaml.SafeLoader, yaml.SafeDumper, id="pure-python"),
+    pytest.param(yaml.CSafeLoader, yaml.CSafeDumper, id="libyaml"),
+]
+
+
+def _non_ascii_document() -> AutoOntologyModelDocument:
+    rows = _export_rows()
+    rows["catalog"][0]["table_description"] = _LONG_NON_ASCII
+    rows["catalog"][0]["column_description"] = _LONG_NON_ASCII
+    return assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+
+def test_model_yaml_uses_libyaml() -> None:
+    """The PyYAML wheels bundle libyaml; the fast classes must be the ones used."""
+    assert service._YAML_LOADER is yaml.CSafeLoader
+    assert service._YAML_DUMPER is yaml.CSafeDumper
+
+
+@pytest.mark.parametrize(("loader", "dumper"), _YAML_CLASSES)
+def test_export_yaml_with_long_non_ascii_text_reads_back_under_either_loader(
+    loader: type, dumper: type, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file either emitter writes must load identically with either loader."""
+    monkeypatch.setattr(service, "_YAML_LOADER", loader)
+    monkeypatch.setattr(service, "_YAML_DUMPER", dumper)
+    document = _non_ascii_document()
+
+    yaml_text = service._dump_yaml(document)
+
+    assert yaml_text.isascii()
+    for any_loader in (yaml.SafeLoader, yaml.CSafeLoader):
+        loaded = yaml.load(yaml_text, Loader=any_loader)
+        assert AutoOntologyModelDocument.model_validate(loaded) == document
+    table = document.data_layer.databases[0].schemas[0].tables[0]
+    assert table.description == _LONG_NON_ASCII
+
+
+@pytest.mark.parametrize(("loader", "dumper"), _YAML_CLASSES)
+@patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
+def test_import_model_with_long_non_ascii_text_reaches_the_dal_unchanged(
+    mock_apply: MagicMock,
+    loader: type,
+    dumper: type,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(service, "_YAML_LOADER", loader)
+    monkeypatch.setattr(service, "_YAML_DUMPER", dumper)
+    mock_apply.return_value = {}
+    document = _non_ascii_document()
+
+    service.import_model(service._dump_yaml(document), replace=True, embed=False)
+
+    mock_apply.assert_called_once()
+    assert mock_apply.call_args.args[0] == document
+
+
 @patch(
     "auto_ontology.server.model_interchange.service.dal.make_cached_sql_column_resolver",
     return_value=lambda *args, **kwargs: [],
