@@ -16,7 +16,7 @@ import logging
 
 from fastapi import APIRouter, Query
 
-from auto_ontology.connectors.registry import get_connectors
+from auto_ontology.connectors.registry import has_connector_for_database
 from auto_ontology.dal.datasources import database_catalog_status
 from auto_ontology.dal.terms import semantic_layer_calculated
 from auto_ontology.ingestion_service.history import (
@@ -108,9 +108,7 @@ def semantic_status(
     database = DatabaseSemanticStatus(
         name=database_name,
         ingested=ingested,
-        connected=any(
-            connector.database_name == database_name for connector in get_connectors()
-        ),
+        connected=has_connector_for_database(database_name),
         compiled=compiled,
         searchable=shared_vdb(SEMANTIC_VDB_COLLECTION).has_embeddings_for_database(
             database_name

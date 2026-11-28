@@ -259,6 +259,37 @@ def get_connectors_for_subject_token(
     return loaded
 
 
+def _connector_specs() -> list[tuple[str, list[str] | None, TableFilter]]:
+    from auto_ontology.dal.connections import list_connections
+
+    # Each spec is (connection_string, schema_allowlist, table_filter). The
+    # schema filter is honoured only during ingestion introspection
+    # (Databricks, Snowflake, Kyuubi, Trino, and BigQuery); it is inert for retrieval,
+    # which executes SQL rather than introspecting. The table filter is
+    # likewise ingestion-only, but applies to every connector.
+    try:
+        specs: list[tuple[str, list[str] | None, TableFilter]] = [
+            (
+                build_connection_string(conn),
+                _schema_filter(conn),
+                _table_filter(conn),
+            )
+            for conn in list_connections()
+        ]
+    except Exception:
+        logger.exception("Failed to load connection strings from the catalog")
+        specs = []
+    if not specs:
+        # CONNECTION_STRINGS carries no connection dict, so an env-configured
+        # connection cannot express a table filter.
+        raw = os.environ.get("CONNECTION_STRINGS", "")
+        specs = [
+            (connection_string, None, TableFilter())
+            for connection_string in parse_connection_strings(raw)
+        ]
+    return specs
+
+
 def get_connectors() -> list[SQLDatabase]:
     """Return cached connectors for all configured connections.
 
@@ -271,33 +302,7 @@ def get_connectors() -> list[SQLDatabase]:
     """
     global _connectors
     if _connectors is None:
-        from auto_ontology.dal.connections import list_connections
-
-        # Each spec is (connection_string, schema_allowlist, table_filter). The
-        # schema filter is honoured only during ingestion introspection
-        # (Databricks, Snowflake, Kyuubi, Trino, and BigQuery); it is inert for retrieval,
-        # which executes SQL rather than introspecting. The table filter is
-        # likewise ingestion-only, but applies to every connector.
-        try:
-            specs: list[tuple[str, list[str] | None, TableFilter]] = [
-                (
-                    build_connection_string(conn),
-                    _schema_filter(conn),
-                    _table_filter(conn),
-                )
-                for conn in list_connections()
-            ]
-        except Exception:
-            logger.exception("Failed to load connection strings from the catalog")
-            specs = []
-        if not specs:
-            # CONNECTION_STRINGS carries no connection dict, so an env-configured
-            # connection cannot express a table filter.
-            raw = os.environ.get("CONNECTION_STRINGS", "")
-            specs = [
-                (connection_string, None, TableFilter())
-                for connection_string in parse_connection_strings(raw)
-            ]
+        specs = _connector_specs()
         if not specs:
             logger.warning(
                 "No connections configured. Add CONNECTION_STRINGS to your .env "
@@ -321,3 +326,29 @@ def get_connectors() -> list[SQLDatabase]:
             loaded.append(connector)
         _connectors = loaded
     return list(_connectors)
+
+
+def has_connector_for_database(database_name: str) -> bool:
+    """Look for a usable connector by its exact catalog database name.
+
+    Use the live registry if it is already loaded. On a cold cache, check
+    sources independently and close the temporary connectors without filling
+    the shared registry. A failed source does not discard a successful match.
+    """
+    cached = _connectors
+    if cached is not None:
+        return any(connector.database_name == database_name for connector in cached)
+
+    for connection_string, schemas, table_filter in _connector_specs():
+        try:
+            with create_connector(
+                connection_string, schemas=schemas, table_filter=table_filter
+            ) as connector:
+                if connector.database_name == database_name:
+                    return True
+        except Exception as exc:
+            # Driver exceptions can include connection details or credentials.
+            logger.debug(
+                "Connector unavailable during readiness: %s", type(exc).__name__
+            )
+    return False
