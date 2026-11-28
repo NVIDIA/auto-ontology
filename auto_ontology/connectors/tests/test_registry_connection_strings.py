@@ -48,6 +48,18 @@ def test_redact_masks_a_password_containing_at() -> None:
     )
 
 
+def test_redact_masks_the_password_when_the_url_contains_a_tab() -> None:
+    """Python 3.12+ ``urlparse`` strips tabs before parsing.
+
+    A tab inside the userinfo made the parsed netloc differ from the
+    raw string, so a netloc-based replacement on the raw string would
+    miss and leave the password in the log line. Found by the
+    CodeRabbit review on #742.
+    """
+    raw = "postgresql://us" + chr(9) + "ter:" + "s3c" + "r3t" + "@db.example.com/mydb"
+    assert _redact(raw) == "postgresql://uster:***@db.example.com/mydb"
+
+
 def test_parse_connection_strings_accepts_commas_and_newlines() -> None:
     raw = """
         postgresql://localhost/first

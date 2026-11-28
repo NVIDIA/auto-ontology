@@ -80,6 +80,13 @@ def _redact(connection_string: str) -> str:
     on every connector failure. A BigQuery service-account key travels in the
     query string rather than the password slot, so it is masked separately.
     """
+    # Python 3.12+ WHATWG behavior: urlparse strips tab/newline/CR from the
+    # URL before parsing, so a raw tab makes the parsed netloc differ from
+    # the string itself and a netloc-based replacement would silently miss
+    # and log the password. Normalize first: everything below then operates
+    # on exactly the text urlparse will read (tabs are junk in a connection
+    # string anyway; a log line may safely drop them).
+    connection_string = re.sub(r"[\t\n\r]", "", connection_string)
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )
