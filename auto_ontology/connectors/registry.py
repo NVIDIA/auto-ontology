@@ -9,9 +9,25 @@ from __future__ import annotations
 import logging
 import os
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
+from psycopg import ProgrammingError
+from psycopg.conninfo import conninfo_to_dict
+from psycopg.pq import Conninfo
+
 from auto_ontology.catalog.table_filter import TableFilter, from_connection
+from auto_ontology.connectors import (
+    bigquery,
+    clickhouse,
+    databricks,
+    heavydb,
+    kyuubi,
+    mysql,
+    snowflake,
+    sqlite,
+    trino,
+)
 from auto_ontology.connectors.base import SQLDatabase
 
 from auto_ontology.connectors.connection_string_factory import build_connection_string
@@ -328,27 +344,74 @@ def get_connectors() -> list[SQLDatabase]:
     return list(_connectors)
 
 
-def has_connector_for_database(database_name: str) -> bool:
-    """Look for a usable connector by its exact catalog database name.
+def _postgres_database_name(connection_string: str) -> str | None:
+    options = conninfo_to_dict(connection_string)
+    if database := options.get("dbname"):
+        return database
+    # An explicitly selected libpq service can supply a database name that
+    # is not present in the URL. Only match it when dbname is also explicit.
+    if options.get("service"):
+        return None
+    defaults = {option.keyword: option.val for option in Conninfo.get_defaults()}
+    if database := defaults.get(b"dbname"):
+        return os.fsdecode(database)
+    if user := options.get("user"):
+        return user
+    if user := defaults.get(b"user"):
+        return os.fsdecode(user)
+    return None
 
-    Use the live registry if it is already loaded. On a cold cache, check
-    sources independently and close the temporary connectors without filling
-    the shared registry. A failed source does not discard a successful match.
-    """
-    cached = _connectors
-    if cached is not None:
-        return any(connector.database_name == database_name for connector in cached)
 
-    for connection_string, schemas, table_filter in _connector_specs():
-        try:
-            with create_connector(
-                connection_string, schemas=schemas, table_filter=table_filter
-            ) as connector:
-                if connector.database_name == database_name:
-                    return True
-        except Exception as exc:
-            # Driver exceptions can include connection details or credentials.
-            logger.debug(
-                "Connector unavailable during readiness: %s", type(exc).__name__
+def _configured_database_name(connection_string: str) -> str | None:
+    scheme = urlparse(connection_string).scheme.split("+", 1)[0].lower()
+    # Reuse the connectors' settings parsers so URL aliases, decoding, and
+    # engine-specific catalog defaults match the name used during ingestion.
+    match scheme:
+        case "postgres" | "postgresql":
+            return _postgres_database_name(connection_string)
+        case "mysql":
+            return str(mysql._parse_connection_string(connection_string)["database"])
+        case "snowflake":
+            return snowflake._parse_connection_string(connection_string)[2]
+        case "databricks":
+            return databricks._parse_connection_string(connection_string)[1]
+        case "duckdb":
+            db_path = connection_string.removeprefix("duckdb://")
+            if db_path in ("", ":memory:"):
+                return "memory"
+            # DuckDB takes the first nonempty dot-delimited basename segment.
+            parts = Path(db_path).name.split(".")
+            name = next((part for part in parts if part), "").split("?", 1)[0]
+            return f"{name}_db" if name in {"main", "system", "temp"} else name
+        case "sqlite":
+            return sqlite._sqlite_path_from_connection_string(connection_string).stem
+        case "clickhouse":
+            return str(
+                clickhouse._parse_connection_string(connection_string)["database"]
             )
+        case "heavydb":
+            return str(heavydb._parse_connection_string(connection_string)["dbname"])
+        case "kyuubi":
+            return str(kyuubi._parse_connection_string(connection_string)["catalog"])
+        case "trino":
+            return str(trino._parse_connection_string(connection_string)["catalog"])
+        case "bigquery":
+            return str(bigquery._parse_connection_string(connection_string)["database"])
+        case _:
+            return None
+
+
+def has_connector_for_database(database_name: str) -> bool:
+    """Whether a configured connector targets this exact catalog database name.
+
+    This is a configuration check, independent of the connector cache and of
+    whether the source can currently accept connections.
+    """
+    for connection_string, _, _ in _connector_specs():
+        try:
+            if _configured_database_name(connection_string) == database_name:
+                return True
+        except (ProgrammingError, ValueError) as exc:
+            # Driver/parser errors can include connection details or credentials.
+            logger.debug("Invalid connector configuration: %s", type(exc).__name__)
     return False

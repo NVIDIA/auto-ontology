@@ -131,10 +131,9 @@ def test_scoped_status_uses_only_the_requested_database(
             "archived": (True, True),
         }.get(name, (False, False)),
     )
-    monkeypatch.setattr(
-        registry,
-        "_connectors",
-        [SimpleNamespace(database_name=name) for name in ("sales", "stock")],
+    monkeypatch.setattr(connections, "list_connections", lambda: [])
+    monkeypatch.setenv(
+        "CONNECTION_STRINGS", "postgresql://host/sales,postgresql://host/stock"
     )
     monkeypatch.setattr(
         module,
@@ -161,15 +160,20 @@ def test_scoped_status_uses_only_the_requested_database(
     }
 
 
-def test_scoped_status_survives_an_unreachable_source_on_a_cold_cache(
+@pytest.mark.parametrize("cache_loaded", [False, True])
+def test_scoped_status_reports_configured_sources_without_connecting(
     client: TestClient,
     scheduler: dict[str, bool | str | None],
     monkeypatch: pytest.MonkeyPatch,
+    cache_loaded: bool,
 ) -> None:
-    monkeypatch.setattr(registry, "_connectors", None)
+    cached = [SimpleNamespace(database_name="previous")] if cache_loaded else None
+    monkeypatch.setattr(registry, "_connectors", cached)
     monkeypatch.setattr(connections, "list_connections", lambda: [])
     monkeypatch.setenv(
-        "CONNECTION_STRINGS", "sqlite:unreachable,sqlite:healthy,sqlite:unvisited"
+        "CONNECTION_STRINGS",
+        "postgresql://unreachable/analytics,snowflake://user:pass@account"
+        "?warehouse=wh&database=Sales%20Data",
     )
     monkeypatch.setattr(module, "database_catalog_status", lambda _: (True, True))
     monkeypatch.setattr(
@@ -178,51 +182,31 @@ def test_scoped_status_survives_an_unreachable_source_on_a_cold_cache(
         lambda _: SimpleNamespace(has_embeddings_for_database=lambda _: True),
     )
     attempted: list[str] = []
-    closed: list[str] = []
 
-    class HealthProbe:
-        def __init__(self, name: str) -> None:
-            self.database_name = name
-
-        def __enter__(self) -> HealthProbe:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            closed.append(self.database_name)
-
-    def create_connector(connection_string: str, **kwargs: object) -> HealthProbe:
-        name = connection_string.removeprefix("sqlite:")
-        attempted.append(name)
-        if name == "unreachable":
-            raise ConnectionError("source unavailable")
-        return HealthProbe(name)
+    def create_connector(connection_string: str, **kwargs: object) -> None:
+        attempted.append(connection_string)
+        raise ConnectionError("source unavailable")
 
     monkeypatch.setattr(registry, "create_connector", create_connector)
-    response = client.get(
-        "/api/semantic-compilation/status", params={"database_name": "healthy"}
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "calculated": True,
-        **scheduler,
-        "database": {
-            "name": "healthy",
-            "ingested": True,
-            "connected": True,
-            "compiled": True,
-            "searchable": True,
-        },
-    }
-    assert attempted == ["unreachable", "healthy"]
-    assert closed == ["healthy"]
-    assert registry._connectors is None
-
-    attempted.clear()
-    closed.clear()
-    response = client.get(
-        "/api/semantic-compilation/status", params={"database_name": "unreachable"}
-    )
-    assert response.status_code == 200
-    assert response.json()["database"]["connected"] is False
-    assert attempted == ["unreachable", "healthy", "unvisited"]
-    assert closed == ["healthy", "unvisited"]
+    for name, configured in [
+        ("analytics", True),
+        ("Sales Data", True),
+        ("previous", False),
+    ]:
+        response = client.get(
+            "/api/semantic-compilation/status", params={"database_name": name}
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "calculated": True,
+            **scheduler,
+            "database": {
+                "name": name,
+                "ingested": True,
+                "connected": configured,
+                "compiled": True,
+                "searchable": True,
+            },
+        }
+    assert attempted == []
+    assert registry._connectors is cached
