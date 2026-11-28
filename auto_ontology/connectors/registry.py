@@ -182,9 +182,13 @@ def create_connector(
         connector_class = CONNECTOR_REGISTRY.get(connector_type)
 
         if connector_class is None:
+            # Redact here, not just in the log message below: this
+            # exception travels through `raise` and logger.exception's
+            # traceback, so a raw connection string here reaches the logs
+            # regardless of any _redact() in the log call itself.
             raise ValueError(
                 f"Unsupported database type: {connector_type!r}. "
-                f"Connection string: {connection_string}"
+                f"Connection string: {_redact(connection_string)}"
             )
 
         if schemas and connector_class in (

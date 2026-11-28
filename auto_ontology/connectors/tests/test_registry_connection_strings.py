@@ -2,7 +2,15 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from auto_ontology.connectors.registry import _redact, parse_connection_strings
+import logging
+
+import pytest
+
+from auto_ontology.connectors.registry import (
+    _redact,
+    create_connector,
+    parse_connection_strings,
+)
 
 
 def test_redact_masks_the_password_slot_not_the_first_substring() -> None:
@@ -73,3 +81,20 @@ def test_parse_connection_strings_accepts_commas_and_newlines() -> None:
         "clickhouse://localhost/second",
         "snowflake://account?database=third",
     ]
+
+
+def test_an_unsupported_scheme_error_does_not_leak_the_password(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The unsupported-scheme ValueError is logged with its traceback.
+
+    The exception used to embed the raw connection string, so the redacted
+    log message was pointless: logger.exception printed the traceback right
+    below it, password included. The test checks the whole captured log.
+    """
+    pw = "s3c" + "r3t"
+    raw = "nota" + "db://user:" + pw + "@db.example.com/mydb"
+    with caplog.at_level(logging.ERROR, logger="auto_ontology.connectors.registry"):
+        with pytest.raises(ValueError, match="Unsupported database type"):
+            create_connector(raw)
+    assert pw not in caplog.text
