@@ -87,7 +87,11 @@ def _redact(connection_string: str) -> str:
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string
-    return connection_string.replace(parsed.password, "***", 1)
+    # Mask the password slot itself, not the first substring occurrence of
+    # the password: the username can contain it as a substring (the repo's
+    # own test config runs user == password), and ``str.replace`` would then
+    # mask inside the username and leave the real password in clear text.
+    return re.sub(r"(://[^:/@\s]+:)[^@\s]+@", r"\1***@", connection_string, count=1)
 
 
 def _schema_filter(connection: dict) -> list[str] | None:
