@@ -100,7 +100,12 @@ def _redact(connection_string: str) -> str:
     on every connector failure. A BigQuery service-account key and a Pinot
     bearer token travel in the query string rather than the password slot, so
     they are masked separately.
+
+    Tab, CR and LF are stripped first, as ``urllib.parse`` does before it
+    splits a URL: ``to<TAB>ken=`` reaches a connector as ``token=``, so it must
+    be matched as one here too.
     """
+    connection_string = re.sub(r"[\t\r\n]", "", connection_string)
     connection_string = re.sub(
         r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
     )

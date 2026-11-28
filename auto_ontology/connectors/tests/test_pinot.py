@@ -239,7 +239,9 @@ def test_ipv6_hosts_keep_their_brackets() -> None:
     httpx.URL(settings["broker_url"])  # parses
 
 
-@pytest.mark.parametrize("name", ["token", "%74oken", "TOKEN", "%54oken"])
+@pytest.mark.parametrize(
+    "name", ["token", "%74oken", "TOKEN", "%54oken", "to\tken", "tok\r\nen"]
+)
 def test_redact_masks_encoded_token_names(name: str) -> None:
     redacted = _redact(f"pinot://broker/default?{name}=SECRET&http_scheme=ftp")
     assert "SECRET" not in redacted
