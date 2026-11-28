@@ -20,7 +20,7 @@ ORDERS = {
     "description": "One row per order",
     "pk": ["order_id"],
     "columns": [
-        {"name": "order_id", "data_type": "INT"},
+        {"id": "c-order-id", "name": "order_id", "data_type": "INT"},
         {
             "name": "cust_ref",
             "data_type": "INT",
@@ -37,7 +37,7 @@ CUSTOMERS = {
     "schema_name": "crm",
     "database_name": "shop",
     "columns": [
-        {"name": "customer_id", "data_type": "INT"},
+        {"id": "c-customer-id", "name": "customer_id", "data_type": "INT"},
         {
             "name": "status",
             "data_type": "TEXT",
@@ -165,11 +165,6 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     monkeypatch.setattr(
         tool, "fetch_tables_by_ids", lambda ids: [TABLES[i] for i in ids if i in TABLES]
     )
-    monkeypatch.setattr(
-        tool,
-        "find_column_id_by_table_and_name",
-        lambda table, column, database: f"{table}.{column}",
-    )
     monkeypatch.setattr(tool, "find_join_path", join_path)
     monkeypatch.setattr(
         tool,
@@ -267,7 +262,7 @@ def test_second_search_joins_new_tables_to_ones_already_shown(calls: dict) -> No
         "JOIN crm.customers ↔ sales.orders: "
         "sales.orders.cust_ref = crm.customers.customer_id"
     ) in text
-    assert calls["join"] == [("customers.customer_id", "orders.order_id")]
+    assert calls["join"] == [("c-customer-id", "c-order-id")]
 
 
 def test_a_table_already_shown_is_not_repeated_in_full(calls: dict) -> None:

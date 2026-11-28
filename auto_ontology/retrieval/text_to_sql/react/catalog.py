@@ -59,7 +59,6 @@ from auto_ontology.dal.candidates import expand_info
 from auto_ontology.dal.datasources import (
     fetch_schema_ids_for_database,
     fetch_tables_by_ids,
-    find_column_id_by_table_and_name,
 )
 from auto_ontology.dal.search import fetch_global_search, search_tokens
 from auto_ontology.dal.terms import fetch_semantic_coverage, fetch_term_table_pairs
@@ -487,21 +486,10 @@ def _definition_block(hit: dict) -> str | None:
     return None
 
 
-def _anchor_column_id(ctx: ToolContext, table: dict) -> str | None:
-    """Any column id on *table*, which is all :func:`find_join_path` needs."""
-    table_id = str(table["id"])
-    if table_id not in ctx.anchor_column_ids:
-        columns = table.get("columns") or []
-        ctx.anchor_column_ids[table_id] = (
-            find_column_id_by_table_and_name(
-                str(table.get("name")),
-                str(columns[0].get("name")),
-                table.get("database_name") or ctx.database_name,
-            )
-            if columns
-            else None
-        )
-    return ctx.anchor_column_ids[table_id]
+def _anchor_column_id(table: dict) -> str | None:
+    """Use a catalog column ID from this exact table as its join anchor."""
+    columns = table.get("columns") or []
+    return columns[0].get("id") if columns else None
 
 
 def _hop_text(hop: dict) -> str:
@@ -569,8 +557,8 @@ def _join_lines(
                 return lines
             lookups += 1
             ctx.joined_pairs.add(pair)
-            anchor = _anchor_column_id(ctx, table)
-            dest = _anchor_column_id(ctx, other)
+            anchor = _anchor_column_id(table)
+            dest = _anchor_column_id(other)
             if not anchor or not dest:
                 continue
             hops = find_join_path(anchor, dest)
