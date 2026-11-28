@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Sachingouda Patil
+# SPDX-License-Identifier: Apache-2.0
+
+# Enforce LF line endings for shell scripts and Dockerfiles.
+# On Windows with Git's default core.autocrlf=true, CRLF breaks Linux container
+# scripts (such as frontend/prisma/migrate.sh) and inline heredoc entrypoints
+# embedded in Dockerfiles (such as /usr/local/bin/entrypoint.sh).
+*.sh text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.dockerfile text eol=lf
