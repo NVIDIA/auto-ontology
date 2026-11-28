@@ -51,6 +51,7 @@ The URL scheme selects the connector:
 | Trino         | `trino://`                  | yes           |
 | BigQuery      | `bigquery://`               | yes           |
 | Apache Kyuubi | `kyuubi://`                 | yes           |
+| Apache Pinot  | `pinot://`                  | yes           |
 | HeavyDB       | `heavydb://`                | yes           |
 | DuckDB        | `duckdb://`                 | no            |
 | SQLite        | `sqlite://`                 | no            |
@@ -101,6 +102,30 @@ downgrading:
 2. Remove any `bigquery://` entries from `CONNECTION_STRINGS`.
 
 After upgrading again, recreate the connections and re-ingest them.
+
+### Apache Pinot
+
+A Pinot connection points at the **broker**, which runs queries, and reads
+table schemas from the **controller**. The controller defaults to the broker's
+host on port 9000; set `controller=` when it lives elsewhere. The URL path is
+the Pinot database (`default` when omitted, and the only one on clusters
+before Pinot 1.1):
+
+```text
+pinot://broker.example.com:8099/default
+pinot://admin:SECRET@broker:8099/default?controller=http://controller:9000
+pinot://broker.example.com:443/analytics?token=SECRET
+```
+
+Credentials are HTTP basic auth, or a bearer token in `token=`. In the UI, a
+password entered with no user is sent as a bearer token. Queries run on the
+multi-stage engine, which supports joins; add `multistage=false` for a cluster
+that does not run it. Upsert and dedup tables report their
+`primaryKeyColumns` as primary keys. Pinot has no foreign keys, views or
+query history. Nullability is read only from schemas that enable column-based
+null handling, and is unknown otherwise. A query the broker answers with any
+exception, or with a partial result, fails rather than returning the rows it
+got.
 
 ## Vault
 

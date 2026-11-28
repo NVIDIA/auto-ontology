@@ -12,6 +12,7 @@ export enum ConnectionType {
 	KYUUBI = 'kyuubi',
 	TRINO = 'trino',
 	CLICKHOUSE = 'clickhouse',
+	PINOT = 'pinot',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
@@ -23,6 +24,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
 	[ConnectionType.TRINO]: 'Trino',
 	[ConnectionType.CLICKHOUSE]: 'ClickHouse',
+	[ConnectionType.PINOT]: 'Apache Pinot',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -46,6 +48,7 @@ export type ConnectionFieldKey =
 	| 'truststore_password'
 	| 'schema'
 	| 'http_scheme'
+	| 'controller'
 	| 'sso_federation'
 	| 'table_allow_regex'
 	| 'table_deny_regex';
@@ -263,12 +266,54 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			hint: 'Leave empty to infer from the port: https on 443 and 8443, http otherwise. Set https explicitly for a TLS listener on any other port — unlike Trino, a password alone does not imply TLS here.',
 		},
 	],
+	[ConnectionType.PINOT]: [
+		{
+			key: 'host',
+			label: 'Broker Host',
+			placeholder: 'pinot-broker.example.com',
+			hint: 'The broker runs queries. A pasted https:// is kept as the transport.',
+		},
+		{ key: 'port', label: 'Broker Port', placeholder: '8099', optional: true },
+		{
+			key: 'controller',
+			label: 'Controller URL',
+			placeholder: 'http://pinot-controller.example.com:9000',
+			optional: true,
+			hint: 'Table schemas are read from the controller. Leave empty to use the broker host on port 9000.',
+		},
+		{
+			key: 'user',
+			label: 'User',
+			optional: true,
+			hint: 'Leave empty for an unauthenticated cluster, or to send the password below as a bearer token.',
+		},
+		{
+			key: 'password',
+			label: 'Password or Token',
+			secret: true,
+			optional: true,
+			hint: 'With a user, sent as basic auth. Without one, sent as a bearer token, the shape of a managed Pinot API key.',
+		},
+		{
+			key: 'database',
+			label: 'Database',
+			placeholder: 'default',
+			hint: 'The Pinot database to ingest. Clusters without logical databases (before Pinot 1.1) keep every table in default.',
+		},
+		{
+			key: 'http_scheme',
+			label: 'Protocol',
+			placeholder: 'http',
+			optional: true,
+			hint: 'Leave empty to infer from the port: https on 443 and 8443, http otherwise.',
+		},
+	],
 };
 
 /**
  * Fields offered for every connector, appended after the type-specific ones.
  *
- * Kept separate rather than copied into all eight lists: they are enforced
+ * Kept separate rather than copied into every connector's list: they are enforced
  * centrally at catalog extraction (`auto_ontology/catalog/table_filter.py`), so
  * every connector honours them identically and none may drift.
  */

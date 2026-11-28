@@ -242,7 +242,7 @@ flowchart LR
     ing["Ingestion and semantic compilation (FastAPI, port 3002)"]
     pg[("Postgres + pgvector: app data, catalog, ontology, embeddings")]
   end
-  src[("Source databases: 10 connectors")]
+  src[("Source databases: 12 connectors")]
   models["Model endpoints: NVIDIA NIM or OpenAI-compatible (reasoning, non-reasoning, embed, rerank)"]
   vault["Vault (optional): connection credentials"]
   kumo["KumoRFM (optional): predictions"]
@@ -394,7 +394,7 @@ in the [OpenAPI spec](./docs/openapi/auto-ontology-api.json).
 
 ### Sources
 
-Auto Ontology connects to eleven engines:
+Auto Ontology connects to twelve engines:
 
 - PostgreSQL
 - MySQL
@@ -404,6 +404,7 @@ Auto Ontology connects to eleven engines:
 - Trino
 - Google BigQuery
 - Apache Kyuubi
+- Apache Pinot
 - HeavyDB
 - DuckDB
 - SQLite
