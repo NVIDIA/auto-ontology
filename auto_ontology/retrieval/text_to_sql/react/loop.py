@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from functools import partial
+from inspect import signature
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -266,26 +268,42 @@ def _dispatch(
             ToolOutcome.NOT_OFFERED,
         )
     try:
+        returns_answer = prompts.is_answer(name, args)
+        handler: Callable[..., Any]
+        fixed_args = {}
         if name == ToolName.SUBMIT:
-            observation, answer = submit(ctx, **args)
-        elif name == ToolName.RUN_SQL and prompts.is_answer(name, args):
-            final_args = {k: v for k, v in args.items() if k != "final"}
-            observation, answer = submit(
-                ctx, **final_args, resubmit="run this version with final=true"
-            )
+            handler = partial(submit, ctx)
+        elif name == ToolName.RUN_SQL and returns_answer:
+            handler = partial(submit, ctx)
+            args = {k: v for k, v in args.items() if k != "final"}
+            fixed_args = {"resubmit": "run this version with final=true"}
         elif name == ToolName.PREDICT:
-            observation, answer = predict(ctx)
+            handler = partial(predict, ctx)
+            args = {}
         else:
+            handler = handlers[name]
             if name == ToolName.RUN_SQL and not config.submit_tool_enabled():
                 args = {k: v for k, v in args.items() if k == "sql"}
-            return handlers[name](**args), None, ToolOutcome.RETURNED
+
+        bind = signature(handler).bind
+        try:
+            bind(**args, **fixed_args)
+        except TypeError as error:
+            return (
+                f"Wrong arguments for {name}: {error}",
+                None,
+                ToolOutcome.WRONG_ARGUMENTS,
+            )
+
+        result = handler(**args, **fixed_args)
+        if not returns_answer:
+            return result, None, ToolOutcome.RETURNED
+        observation, answer = result
         return (
             observation,
             answer,
             ToolOutcome.ANSWERED if answer is not None else ToolOutcome.DECLINED,
         )
-    except TypeError as error:
-        return f"Wrong arguments for {name}: {error}", None, ToolOutcome.WRONG_ARGUMENTS
     except Exception as error:  # noqa: BLE001 — a failing tool must not end the question
         logger.warning("ReAct tool %s raised", name, exc_info=True)
         return f"{name} failed: {error}", None, ToolOutcome.RAISED

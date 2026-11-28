@@ -308,6 +308,36 @@ def test_receipt_records_dispatch_without_model_or_tool_text(ctx: ToolContext) -
     }
 
 
+def test_receipt_distinguishes_handler_type_error_from_bad_arguments(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def fail_run_sql(_ctx: ToolContext, _sql: str) -> str:
+        raise TypeError("internal tool error")
+
+    monkeypatch.setattr(loop, "run_sql", fail_run_sql)
+    result = loop.run_episode(
+        ScriptedModel(
+            [
+                _reply(call("run_sql", "1", query=FINAL_SQL)),
+                _reply(call("run_sql", "2", sql=FINAL_SQL)),
+                _reply(call("submit", "3", sql=FINAL_SQL, response="x")),
+            ]
+        ),
+        ctx,
+        "q",
+    )
+
+    assert result.receipt is not None
+    assert result.receipt.decisions[:2] == (
+        ToolDecision(1, ToolName.RUN_SQL, ToolOutcome.WRONG_ARGUMENTS),
+        ToolDecision(2, ToolName.RUN_SQL, ToolOutcome.RAISED),
+    )
+    assert any(
+        record.getMessage() == "ReAct tool run_sql raised" and record.exc_info
+        for record in caplog.records
+    )
+
+
 def test_receipt_retains_retrieval_and_prediction_failure_after_model_error(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
