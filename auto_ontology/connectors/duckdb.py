@@ -154,30 +154,54 @@ class DuckDBDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def get_tables(self) -> pd.DataFrame:
-        """Return all tables from information_schema as a DataFrame."""
+        """Return all tables from information_schema as a DataFrame.
+
+        ``description`` is the table's ``COMMENT ON TABLE`` text, or NULL.
+        Views carry their ``COMMENT ON VIEW`` text the same way.
+        """
         return self.execute(
             """
             SELECT
-                table_schema,
-                table_name
-            FROM information_schema.tables
-            ORDER BY table_schema, table_name
+                t.table_schema,
+                t.table_name,
+                COALESCE(dt.comment, dv.comment) AS description
+            FROM information_schema.tables t
+            LEFT JOIN duckdb_tables() dt
+              ON dt.database_name = t.table_catalog
+             AND dt.schema_name = t.table_schema
+             AND dt.table_name = t.table_name
+            LEFT JOIN duckdb_views() dv
+              ON dv.database_name = t.table_catalog
+             AND dv.schema_name = t.table_schema
+             AND dv.view_name = t.table_name
+            ORDER BY t.table_schema, t.table_name
         """
         )
 
     def get_columns(self) -> pd.DataFrame:
-        """Return all columns from information_schema as a DataFrame."""
+        """Return all columns from information_schema as a DataFrame.
+
+        ``description`` is the column's ``COMMENT ON COLUMN`` text, or NULL.
+        Semantic compilation asks a model to describe only the columns whose
+        description is blank, so a documented source skips that step.
+        """
         return self.execute(
             """
             SELECT
-                table_schema,
-                table_name,
-                column_name,
-                data_type,
-                is_nullable = 'YES' AS is_nullable,
-                ordinal_position
-            FROM information_schema.columns
-            ORDER BY table_schema, table_name, ordinal_position
+                c.table_schema,
+                c.table_name,
+                c.column_name,
+                c.data_type,
+                c.is_nullable = 'YES' AS is_nullable,
+                c.ordinal_position,
+                dc.comment AS description
+            FROM information_schema.columns c
+            LEFT JOIN duckdb_columns() dc
+              ON dc.database_name = c.table_catalog
+             AND dc.schema_name = c.table_schema
+             AND dc.table_name = c.table_name
+             AND dc.column_name = c.column_name
+            ORDER BY c.table_schema, c.table_name, c.ordinal_position
         """
         )
 
