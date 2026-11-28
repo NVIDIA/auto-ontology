@@ -11,6 +11,7 @@ the run itself with a KumoRFM prediction's response, or hands off to
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Dict
 
 from langchain_core.messages import AIMessage
@@ -127,6 +128,8 @@ class ReactSQLAgent(BaseAgent):
                 record_thought(path_state, STEP_NAME, _tool_thought(call))
         path_state["react_trajectory"] = result.trajectory
         path_state["react_end_reason"] = result.reason
+        if result.receipt is not None:
+            path_state["react_receipt"] = asdict(result.receipt)
         path_state["relevant_tables"] = list(ctx.seen_tables.values())
 
         if result.prediction is not None:

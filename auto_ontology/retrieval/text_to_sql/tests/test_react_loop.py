@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from dataclasses import asdict
+from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -11,7 +13,8 @@ from auto_ontology.retrieval.text_to_sql.prompts import format_dialect_rules
 from auto_ontology.retrieval.text_to_sql.react import config, loop, prompts
 from auto_ontology.retrieval.text_to_sql.react import run_sql as run_sql_module
 from auto_ontology.retrieval.text_to_sql.react.context import ToolContext
-from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode
+from auto_ontology.retrieval.text_to_sql.react.mode import EpisodeMode, ToolName
+from auto_ontology.retrieval.text_to_sql.react.receipts import ToolDecision, ToolOutcome
 from auto_ontology.retrieval.text_to_sql.tests.react_fakes import (
     SHOP_CATALOG,
     SHOP_SCRIPT,
@@ -229,6 +232,14 @@ def test_one_answer_attempt_per_reply_after_the_budget(
     assert (
         observations[2] == observations[3] == prompts.out_of_calls_for(EpisodeMode.SQL)
     )
+    assert result.receipt is not None
+    assert result.receipt.end_reason == "budget_exhausted"
+    assert [step.outcome for step in result.receipt.decisions] == [
+        ToolOutcome.RETURNED,
+        ToolOutcome.DECLINED,
+        ToolOutcome.BUDGET_EXHAUSTED,
+        ToolOutcome.BUDGET_EXHAUSTED,
+    ]
 
 
 def test_model_that_never_calls_a_tool_gives_up(ctx: ToolContext) -> None:
@@ -255,6 +266,79 @@ def test_unknown_tool_and_bad_arguments_are_observations(ctx: ToolContext) -> No
     assert observations[0].startswith("Unknown tool")
     assert observations[1].startswith("Wrong arguments for run_sql")
     assert result.reason == "submitted"
+
+
+def test_receipt_records_dispatch_without_model_or_tool_text(ctx: ToolContext) -> None:
+    private = "private-token-and-endpoint"
+    model = ScriptedModel(
+        [
+            _reply(call("retrieve", private, query=private)),
+            _reply(call("retrieve", private, query=private)),
+            _reply(call(private, private, argument=private)),
+            _reply(call("run_sql", private, query=private)),
+            _reply(call("predict", private)),
+            _reply(call("submit", private, sql=FINAL_SQL, response=private)),
+        ]
+    )
+
+    result = loop.run_episode(model, ctx, private, evidence=private)
+
+    receipt = result.receipt
+    assert receipt is not None
+    assert UUID(receipt.run_id).version == 4
+    assert receipt.mode is EpisodeMode.SQL
+    assert receipt.end_reason == "submitted"
+    assert receipt.decisions == (
+        ToolDecision(1, ToolName.RETRIEVE, ToolOutcome.RETURNED),
+        ToolDecision(2, ToolName.RETRIEVE, ToolOutcome.DUPLICATE),
+        ToolDecision(3, None, ToolOutcome.NOT_OFFERED),
+        ToolDecision(4, ToolName.RUN_SQL, ToolOutcome.WRONG_ARGUMENTS),
+        ToolDecision(5, ToolName.PREDICT, ToolOutcome.NOT_OFFERED),
+        ToolDecision(6, ToolName.SUBMIT, ToolOutcome.ANSWERED),
+    )
+    serialized = json.dumps(asdict(receipt))
+    assert private in json.dumps(result.trajectory)
+    assert private not in serialized
+    assert FINAL_SQL not in serialized
+    assert json.loads(serialized)["decisions"][0] == {
+        "call_id": 1,
+        "tool": "retrieve",
+        "outcome": "returned",
+        "source": "model",
+    }
+
+
+def test_receipt_retains_retrieval_and_prediction_failure_after_model_error(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_prediction(_ctx: ToolContext) -> None:
+        raise RuntimeError("private-prediction-error")
+
+    monkeypatch.setattr(loop, "predict", fail_prediction)
+    result = loop.run_episode(
+        ScriptedModel(
+            [
+                _reply(call("retrieve", "same-id", query="customers")),
+                _reply(call("predict", "same-id")),
+                ValueError("private-model-error"),
+            ]
+        ),
+        ctx,
+        "q",
+        mode=EpisodeMode.AUTO,
+    )
+
+    receipt = result.receipt
+    assert receipt is not None
+    assert receipt.mode is EpisodeMode.AUTO
+    assert receipt.end_reason == "model_error"
+    assert receipt.decisions == (
+        ToolDecision(1, ToolName.RETRIEVE, ToolOutcome.RETURNED),
+        ToolDecision(2, ToolName.PREDICT, ToolOutcome.RAISED),
+    )
+    serialized = json.dumps(asdict(receipt))
+    assert "private-" not in serialized
+    assert "same-id" not in serialized
 
 
 def test_evidence_reaches_the_model(ctx: ToolContext) -> None:
@@ -874,6 +958,11 @@ def test_out_of_budget_episode_without_a_submission_submits_the_latest_draft(
 
     assert result.reason == "submitted_draft"
     assert result.submission.sql == FINAL_SQL
+    assert result.receipt is not None
+    assert result.receipt.decisions == (
+        ToolDecision(1, ToolName.RUN_SQL, ToolOutcome.RETURNED),
+        ToolDecision(2, ToolName.SUBMIT, ToolOutcome.ANSWERED, "budget_fallback"),
+    )
 
 
 def test_free_queries_keep_an_unsubmitted_episode_unanswered(ctx: ToolContext) -> None:
