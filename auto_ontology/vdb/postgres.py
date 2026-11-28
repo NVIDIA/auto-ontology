@@ -22,6 +22,7 @@ from typing import Any, Iterable, Optional
 
 import psycopg
 from psycopg import sql
+from psycopg.errors import UndefinedTable
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
@@ -427,6 +428,29 @@ class PostgresVDB:
             skipped,
         )
         return inserted
+
+    def has_embeddings_for_database(self, database_name: str) -> bool:
+        """Check for a stored vector without creating the collection or embedding a query."""
+        try:
+            with psycopg.connect(self.connection_string) as conn:
+                return (
+                    conn.execute(
+                        sql.SQL(
+                            "SELECT 1 FROM {table} WHERE {database} = %s "
+                            "AND embedding IS NOT NULL LIMIT 1"
+                        ).format(
+                            table=sql.Identifier(
+                                self.schema_name, self.collection_name
+                            ),
+                            database=sql.Identifier(_DATABASE_METADATA_COLUMN),
+                        ),
+                        (database_name,),
+                    ).fetchone()
+                    is not None
+                )
+        except UndefinedTable:
+            # The first vector write creates the collection.
+            return False
 
     def delete_by_database(self, database_name: str) -> list[str]:
         """Delete all rows whose ``database_name`` column matches ``database_name``.

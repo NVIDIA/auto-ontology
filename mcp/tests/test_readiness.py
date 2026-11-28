@@ -66,7 +66,11 @@ def _routed(**bodies: Any) -> Callable[[httpx.Request], httpx.Response]:
     return handler
 
 
-def _check(handler: Callable[[httpx.Request], httpx.Response]) -> Readiness:
+def _check(
+    handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    database_name: str | None = None,
+) -> Readiness:
     settings = _settings()
     client = httpx.AsyncClient(
         base_url=settings.api_url, transport=httpx.MockTransport(handler)
@@ -77,7 +81,10 @@ def _check(handler: Callable[[httpx.Request], httpx.Response]) -> Readiness:
     async def run() -> Readiness:
         try:
             async with Client(mcp) as session:
-                return (await session.call_tool("check_readiness", {})).data
+                arguments = (
+                    {} if database_name is None else {"database_name": database_name}
+                )
+                return (await session.call_tool("check_readiness", arguments)).data
         finally:
             await client.aclose()
 
@@ -93,6 +100,7 @@ def test_a_configured_deployment_is_ready() -> None:
     assert result.catalog_present is True
     assert result.databases == ["dw"]
     assert result.blockers == []
+    assert not hasattr(result, "semantic_searchable")
 
 
 def test_a_compiled_layer_with_no_connection_is_not_ready() -> None:
@@ -198,3 +206,46 @@ def test_a_caller_without_chat_access_is_not_ready() -> None:
     assert result.ready is False
     assert result.semantic_layer_built is None
     assert any("not permitted to use chat" in b for b in result.blockers)
+
+
+@pytest.mark.parametrize("compiled", [True, False])
+def test_readiness_reports_search_and_compilation_for_one_database(
+    compiled: bool,
+) -> None:
+    name = "Sales & Stock"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == STATUS_PATH
+        assert dict(request.url.params) == {"database_name": name}
+        return httpx.Response(
+            200,
+            json={
+                "calculated": compiled,
+                "database": {
+                    "name": name,
+                    "ingested": True,
+                    "connected": True,
+                    "compiled": compiled,
+                    "searchable": compiled,
+                },
+            },
+        )
+
+    result = _check(handler, database_name=name)
+    assert result.database_name == name
+    assert result.ready is compiled
+    assert result.databases == [name]
+    assert result.catalog_present is True
+    assert result.can_execute_sql is True
+    assert result.semantic_layer_built is compiled
+    assert result.semantic_searchable is compiled
+    assert ("Compile its semantic layer." in result.blockers) is not compiled
+    assert bool(result.blockers) is not compiled
+
+
+@pytest.mark.parametrize("status", [_COMPILED, 403, 503])
+def test_scoped_readiness_does_not_fall_back_to_a_global_verdict(status: Any) -> None:
+    result = _check(_routed(status=status), database_name="stock")
+    assert result.ready is False
+    assert result.semantic_searchable is None
+    assert result.blockers == ["Could not verify readiness for database 'stock'."]

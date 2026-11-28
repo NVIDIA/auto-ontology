@@ -1572,6 +1572,41 @@
         "title": "DataResponse[dict[str, list[ZoneChip]]]",
         "type": "object"
       },
+      "DatabaseSemanticStatus": {
+        "additionalProperties": true,
+        "description": "Readiness of the exact database named by the caller.",
+        "properties": {
+          "compiled": {
+            "title": "Compiled",
+            "type": "boolean"
+          },
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "ingested": {
+            "title": "Ingested",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "searchable": {
+            "title": "Searchable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "ingested",
+          "connected",
+          "compiled",
+          "searchable"
+        ],
+        "title": "DatabaseSemanticStatus",
+        "type": "object"
+      },
       "DatabaseSummary": {
         "additionalProperties": true,
         "description": "One catalog database. ``schemas`` is always empty \u2014 the tree is lazy.",
@@ -3700,6 +3735,16 @@
           "calculated": {
             "title": "Calculated",
             "type": "boolean"
+          },
+          "database": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseSemanticStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_failure_at": {
             "anyOf": [
@@ -8804,8 +8849,29 @@
     },
     "/api/semantic-compilation/status": {
       "get": {
-        "description": "Report whether the semantic layer has been calculated (any Term exists),\nwhether the ingestion service is compiling it right now, when the last\npass completed successfully, and when it last failed.\n\n``running`` needs the live ingestion process, so it goes through the HTTP\nproxy and degrades to ``False`` if that's unreachable. ``last_success_at``\nand ``last_failure_at`` are read straight from the ``semantic_compilation_history``\ntable instead \u2014 a temporarily unreachable ingestion service has no bearing\non Postgres, so history stays visible even while it's down (see\n``auto_ontology/server/ingestion/proxy.py``).",
+        "description": "Report semantic compilation status, optionally for one database.\n\nWith a database name, report whether it has catalog tables, a configured\nconnector, any table representing a semantic term, and stored semantic\nvectors. ``calculated`` then reflects that database's compilation state.\nOtherwise, ``calculated`` reports whether any semantic term exists.\n\n``running`` and the last success and failure times describe the deployment's\ncompilation scheduler in both cases. History remains available from Postgres\nwhen the ingestion process is unreachable.",
         "operationId": "semantic_status_api_semantic_compilation_status_get",
+        "parameters": [
+          {
+            "description": "Report readiness for this database's exact connector name.",
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Report readiness for this database's exact connector name.",
+              "title": "Database Name"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8816,6 +8882,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Semantic Status",

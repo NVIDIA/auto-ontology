@@ -50,6 +50,7 @@
     "list_custom_analyses": "(zone_ids: 'list[str] | None' = None, *, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'"
   },
   "datasources": {
+    "database_catalog_status": "(database_name: 'str') -> 'tuple[bool, bool]'",
     "apply_metadata_batch": "(database_name: 'str', table_rows: 'list[dict]', column_rows: 'list[dict]') -> 'None'",
     "clear_column_values": "(table_id: 'str', column_names: 'Sequence[str]') -> 'None'",
     "count_columns_for_table": "(table_id: 'str') -> 'int'",
