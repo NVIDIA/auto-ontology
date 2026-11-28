@@ -30,6 +30,21 @@ _PROGRESS_INTERVAL = 10_000
 _ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
+#: SQLite storage classes, as the catalog type of a column declared without one.
+_STORAGE_CLASS_TYPES = {
+    "integer": "INTEGER",
+    "real": "REAL",
+    "text": "TEXT",
+    "blob": "BLOB",
+}
+#: Non-null values sampled to infer the type of a column declared without one.
+_TYPE_SAMPLE_ROWS = 1000
+
+
+def _quote(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def _fold_identifier(name: str) -> str:
     return name.translate(_ASCII_LOWER)
 
@@ -177,7 +192,8 @@ class SQLiteDatabase(SQLDatabase):
                             "table_schema": "main",
                             "table_name": table_name,
                             "column_name": name,
-                            "data_type": data_type or "TEXT",
+                            "data_type": data_type
+                            or self._stored_type(table_name, name),
                             "is_nullable": not notnull,
                             "ordinal_position": cid + 1,
                         }
@@ -193,13 +209,35 @@ class SQLiteDatabase(SQLDatabase):
                         "table_schema": "main",
                         "table_name": table_name,
                         "column_name": name,
-                        "data_type": data_type or "TEXT",
+                        "data_type": data_type or self._stored_type(table_name, name),
                         "is_nullable": not notnull,
                         "ordinal_position": position,
                     }
                 )
                 position += 1
         return pd.DataFrame(rows)
+
+    def _stored_type(self, table_name: str, column_name: str) -> str:
+        """The storage class most of an undeclared column's values have.
+
+        SQLite gives a column declared without a type no type affinity, so each
+        value keeps the type it was written with, and ``'1'`` never equals
+        ``1``. Calling such a column TEXT tells a query writer to quote its
+        integer keys, which then match no rows. A sample of the stored values
+        gives the type comparisons against the column need. An empty column, or
+        one that can't be read, stays TEXT.
+        """
+        column = _quote(column_name)
+        try:
+            row = self._conn.execute(
+                f"SELECT typeof({column}) FROM "
+                f"(SELECT {column} FROM {_quote(table_name)} "
+                f"WHERE {column} IS NOT NULL LIMIT {_TYPE_SAMPLE_ROWS}) "
+                f"GROUP BY typeof({column}) ORDER BY COUNT(*) DESC LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error:
+            return "TEXT"
+        return _STORAGE_CLASS_TYPES.get(row[0], "TEXT") if row else "TEXT"
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         return pd.DataFrame(columns=["end_time", "query_text"])
