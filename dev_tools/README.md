@@ -145,3 +145,32 @@ Kubernetes:
 - `frontend/Dockerfile` — frontend (Next.js standalone)
 - `helm/auto-ontology/` — Helm chart with deployments, services, optional Ingress,
   HPA, PDB and a sample Postgres manifest
+
+## Paired Q&A benchmark scoring
+
+`qa_benchmark.py` defines ten synthetic SQLite questions across five slices.
+Give both answering arms the same `Case.question` and `fixture_evidence()`.
+The evaluator uses `Case.expected` and `Case.reference_sql` as grading data.
+For SQL-backed answers, normalize the executed scalar result to `Outcome`.
+For responses without a result, use `ANSWER_FORMAT` to distinguish a request
+for clarification from insufficient data. A missing, failed, or invalid
+response earns no credit.
+
+Capture one `Sample` per case, repetition, and arm. Both arms use the same
+model, provider, thinking setting, and concurrency for the report. Use a
+separate report for each configuration. To score the captures, pass a UTF-8
+JSON manifest containing a `config` object with the `RunConfig` fields and a
+`samples` array with the `Sample` fields. In this manifest, `outcome` is a
+response string in `ANSWER_FORMAT`, or `null` if the arm produced no outcome.
+Repetitions start at 1. Count model invocation attempts including retries,
+and leave provider tokens `null` when the total for the sample is unknown.
+
+```bash
+uv run python -m dev_tools.qa_benchmark captures.json > report.json
+```
+
+The scorer requires a complete set of pairs and emits the fixture hash,
+configuration, per-question grades, and per-slice metrics for each arm.
+Latency uses the median for p50 and nearest rank for p95. Token summaries
+include the number of samples that reported usage. Collect live provider
+captures before drawing latency, cost, or quality conclusions.
